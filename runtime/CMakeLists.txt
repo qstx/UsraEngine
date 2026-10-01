@@ -5,6 +5,7 @@ add_library(UrsaRuntime STATIC
 add_library(Ursa::Runtime ALIAS UrsaRuntime)
 
 target_include_directories(UrsaRuntime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(UrsaRuntime PUBLIC cxx_std_17)
 target_link_libraries(UrsaRuntime PRIVATE glfw Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
 target_compile_definitions(UrsaRuntime PRIVATE GLFW_INCLUDE_NONE)
 

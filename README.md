@@ -1,6 +1,6 @@
 # UrsaEngine
 
-UrsaEngine is a C++17 graphics engine foundation with an API independent RHI and a Vulkan 1.2 backend. The Windows example draws a colored triangle. GPU tests exercise compute, texture sampling, storage images, depth attachments, offscreen rendering, transfers, and readback.
+UrsaEngine is a C++17 graphics engine foundation with an API independent RHI and a Vulkan 1.2 backend. GPU tests exercise compute, texture sampling, storage images, depth attachments, offscreen rendering, transfers, and readback. The triangle application lives in the independent sibling `Demo` repository.
 
 ## Requirements
 
@@ -10,22 +10,20 @@ UrsaEngine is a C++17 graphics engine foundation with an API independent RHI and
 
 `UrsaRuntime` owns the window, RHI interface, and Vulkan backend. `UrsaEngine` provides the application loop and links to `UrsaRuntime`. CMake aliases `Ursa::Runtime` and `Ursa::Engine` are available to other targets.
 
-## Build and run
+## Build and test
 
 ```powershell
 git submodule update --init --recursive
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
-& .\build\Debug\UrsaTriangle.exe
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
 For a new clone, use `git clone --recurse-submodules <repository-url>` or run the submodule update command above before configuring CMake. CMake reads dependency sources from `third_party/` and does not download them during configuration.
 
-Debug builds require `VK_LAYER_KHRONOS_validation`. The test program uses a headless Vulkan device, while the triangle example creates a GLFW window. Press Escape or close the window to quit. The example rebuilds its swapchain after resizing and waits for events while minimized.
-The automated window smoke test renders 20 frames and exercises resize, minimize, and restore using a hidden window.
+Debug builds require `VK_LAYER_KHRONOS_validation`. The engine tests use a headless Vulkan device. When UrsaEngine is included from another CMake project, `URSA_BUILD_TESTS` defaults to `OFF`; when built directly, it defaults to `ON`.
 
 ## RHI use
 
