@@ -4,3 +4,21 @@
 [submodule "third_party/vma"]
 	path = third_party/vma
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "third_party/json"]
+	path = third_party/json
+	url = https://github.com/nlohmann/json.git
+[submodule "third_party/eastl"]
+	path = third_party/eastl
+	url = https://github.com/electronicarts/EASTL.git
+[submodule "third_party/eabase"]
+	path = third_party/eabase
+	url = https://github.com/electronicarts/EABase.git
+[submodule "third_party/imgui"]
+	path = third_party/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "third_party/imguizmo"]
+	path = third_party/imguizmo
+	url = https://github.com/CedricGuillemet/ImGuizmo.git
+[submodule "third_party/spdlog"]
+	path = third_party/spdlog
+	url = https://github.com/gabime/spdlog.git
