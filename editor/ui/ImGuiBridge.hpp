@@ -5,70 +5,72 @@
 #include <memory>
 #include <unordered_map>
 
-namespace ursa::editor {
+namespace Ursa::Editor
+{
 // Owns an ImGui context. The caller must finish the GPU submission before starting another frame.
-class ImGuiBridge final {
+class ImGuiBridge final
+{
 public:
-    static Result<std::unique_ptr<ImGuiBridge>> create(rhi::DevicePtr device,
-                                                       std::shared_ptr<Window> window = {});
+	static Result<std::unique_ptr<ImGuiBridge>> Create(Rhi::DevicePtr device, std::shared_ptr<Window> window = {});
 
-    ~ImGuiBridge();
+	~ImGuiBridge();
 
-    ImGuiBridge(const ImGuiBridge &) = delete;
+	ImGuiBridge(const ImGuiBridge&) = delete;
 
-    ImGuiBridge &operator=(const ImGuiBridge &) = delete;
+	ImGuiBridge& operator=(const ImGuiBridge&) = delete;
 
-    Result<void> beginFrame(float deltaSeconds, uint32_t width, uint32_t height);
+	Result<void> BeginFrame(float deltaSeconds, uint32_t width, uint32_t height);
 
-    Result<void> endFrame();
+	Result<void> EndFrame();
 
-    // Called within an existing color rendering pass. The pass target must match colorFormat.
-    Result<void> record(const rhi::CommandListPtr &command, rhi::Format colorFormat,
-                        uint32_t framebufferWidth, uint32_t framebufferHeight);
+	// Called within an existing color rendering pass. The pass target must match colorFormat.
+	Result<void> Record(const Rhi::CommandListPtr& command, Rhi::Format colorFormat, uint32_t framebufferWidth,
+	                    uint32_t framebufferHeight);
 
-    Result<ImTextureID> registerTexture(rhi::TexturePtr texture, rhi::SamplerPtr sampler);
+	Result<ImTextureID> RegisterTexture(Rhi::TexturePtr texture, Rhi::SamplerPtr sampler);
 
-    void unregisterTexture(ImTextureID id);
+	void UnregisterTexture(ImTextureID id);
 
-    ImGuiContext *context() const {
-        return context_;
-    }
+	ImGuiContext* Context() const
+	{
+		return context;
+	}
 
 private:
-    explicit ImGuiBridge(rhi::DevicePtr device, std::shared_ptr<Window> window);
+	explicit ImGuiBridge(Rhi::DevicePtr device, std::shared_ptr<Window> window);
 
-    Result<void> initialize();
+	Result<void> Initialize();
 
-    Result<void> updateAtlas();
+	Result<void> UpdateAtlas();
 
-    Result<void> uploadAtlas(ImTextureData *data);
+	Result<void> UploadAtlas(ImTextureData* data);
 
-    static const char *getClipboardText(ImGuiContext *context);
+	static const char* GetClipboardText(ImGuiContext* context);
 
-    static void setClipboardText(ImGuiContext *context, const char *text);
+	static void SetClipboardText(ImGuiContext* context, const char* text);
 
-    rhi::DevicePtr device_;
-    std::shared_ptr<Window> window_;
-    uint64_t subscription_ = 0;
-    ImGuiContext *context_ = nullptr;
-    String clipboardText_;
-    bool leftControl_ = false;
-    bool rightControl_ = false;
-    bool leftShift_ = false;
-    bool rightShift_ = false;
-    bool leftAlt_ = false;
-    bool rightAlt_ = false;
-    bool leftSuper_ = false;
-    bool rightSuper_ = false;
-    rhi::LayoutPtr layout_;
-    rhi::ShaderPtr vertexShader_;
-    rhi::ShaderPtr fragmentShader_;
-    rhi::SamplerPtr atlasSampler_;
-    rhi::BufferPtr vertexBuffer_;
-    rhi::BufferPtr indexBuffer_;
-    std::unordered_map<int, rhi::PipelinePtr> pipelines_;
-    std::unordered_map<ImTextureID, rhi::BindGroupPtr> groups_;
-    std::unordered_map<ImTextureData *, ImTextureID> atlasIds_;
-    ImTextureID nextTextureId_ = 1;
+	Rhi::DevicePtr device;
+	std::shared_ptr<Window> window;
+	uint64_t subscription = 0;
+	ImGuiContext* context = nullptr;
+	String clipboardText;
+	bool leftControl = false;
+	bool rightControl = false;
+	bool leftShift = false;
+	bool rightShift = false;
+	bool leftAlt = false;
+	bool rightAlt = false;
+	bool leftSuper = false;
+	bool rightSuper = false;
+	Rhi::LayoutPtr layout;
+	Rhi::ShaderPtr vertexShader;
+	Rhi::ShaderPtr fragmentShader;
+	Rhi::SamplerPtr atlasSampler;
+	Rhi::BufferPtr vertexBuffer;
+	Rhi::BufferPtr indexBuffer;
+	std::unordered_map<int, Rhi::PipelinePtr> pipelines;
+	std::unordered_map<ImTextureID, Rhi::BindGroupPtr> groups;
+	std::unordered_map<ImTextureData*, ImTextureID> atlasIds;
+	ImTextureID nextTextureId = 1;
 };
-} // namespace ursa::editor
+} // namespace Ursa::Editor

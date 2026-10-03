@@ -3,30 +3,35 @@
 #include <renderer3d/Renderer3D.hpp>
 #include <scene/Scene.hpp>
 
-namespace ursa::editor {
-class EditorScenePreview final {
+namespace Ursa::Editor
+{
+class EditorScenePreview final
+{
 public:
-    static Result<std::unique_ptr<EditorScenePreview>> create(rhi::DevicePtr device);
+	static Result<std::unique_ptr<EditorScenePreview>> Create(Rhi::DevicePtr device);
 
-    Camera &camera() {
-        return camera_;
-    }
+	Camera& GetCamera()
+	{
+		return camera;
+	}
 
-    const Camera &camera() const {
-        return camera_;
-    }
+	const Camera& GetCamera() const
+	{
+		return camera;
+	}
 
-    Result<void> record(const Scene &scene, const rhi::CommandListPtr &command, const rhi::TexturePtr &color,
-                        rhi::ResourceState initialState, rhi::ResourceState finalState);
+	Result<void> Record(const Scene& scene, const Rhi::CommandListPtr& command, const Rhi::TexturePtr& color,
+	                    Rhi::ResourceState initialState, Rhi::ResourceState finalState);
 
-    Result<void> recordGame(const Scene &scene, const rhi::CommandListPtr &command, const rhi::TexturePtr &color,
-                            rhi::ResourceState initialState, rhi::ResourceState finalState);
+	Result<void> RecordGame(const Scene& scene, const Rhi::CommandListPtr& command, const Rhi::TexturePtr& color,
+	                        Rhi::ResourceState initialState, Rhi::ResourceState finalState);
 
 private:
-    explicit EditorScenePreview(std::unique_ptr<Renderer3D> renderer) : renderer_(std::move(renderer)) {
-    }
+	explicit EditorScenePreview(std::unique_ptr<Renderer3D> renderer) : renderer(std::move(renderer))
+	{
+	}
 
-    std::unique_ptr<Renderer3D> renderer_;
-    Camera camera_;
+	std::unique_ptr<Renderer3D> renderer;
+	Camera camera;
 };
-} // namespace ursa::editor
+} // namespace Ursa::Editor

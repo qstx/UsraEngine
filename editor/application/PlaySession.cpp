@@ -1,71 +1,94 @@
 #include <application/PlaySession.hpp>
 #include <serialization/SceneResource.hpp>
 
-namespace ursa::editor {
-FrameInput selectPlayInput(FrameInput polled, bool viewportFocused, bool editorTextActive) {
-    return viewportFocused && !editorTextActive ? polled : FrameInput{};
+namespace Ursa::Editor
+{
+FrameInput SelectPlayInput(FrameInput polled, bool viewportFocused, bool editorTextActive)
+{
+	return viewportFocused && !editorTextActive ? polled : FrameInput{};
 }
 
-Result<void> PlaySession::start(const SceneDraft &draft, ResourceId documentId, const ComponentRegistry &registry,
-                                ResourceSession &resources, const PlayContextSetup &setup) {
-    if (active())
-        return Result<void>::failure("Play mode is already active");
-    if (draft.kind() != ResourceKind::Scene)
-        return Result<void>::failure("Play mode requires a scene document");
-    const MaterialIdResolver resolveMaterial = [&draft](const std::shared_ptr<MaterialInstance> &material) {
-        return draft.materialId(material);
-    };
-    const std::filesystem::path virtualPath = "play-clone.ursascene";
-    auto encoded = encodeSceneDocument(virtualPath, documentId, draft.scene(), registry, resolveMaterial);
-    if (!encoded)
-        return Result<void>::failure("Cannot clone edit scene: " + encoded.error);
-    ComponentLoadContext context(resources);
-    std::shared_ptr<void> services;
-    if (setup) {
-        auto prepared = setup(context);
-        if (!prepared)
-            return Result<void>::failure("Cannot create play services: " + prepared.error);
-        services = std::move(prepared.value);
-    }
-    auto decoded = decodeSceneDocument(virtualPath, encoded.value, registry, context);
-    if (!decoded)
-        return Result<void>::failure("Cannot clone edit scene: " + decoded.error);
-    services_ = std::move(services);
-    scene_ = std::move(decoded.value.scene);
-    scheduler_.reset();
-    frameIndex_ = 0;
-    elapsedSeconds_ = 0.0;
-    return {};
+Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, const ComponentRegistry& registry,
+                                ResourceSession& resources, const PlayContextSetup& setup)
+{
+	if (Active())
+	{
+		return Result<void>::Failure("Play mode is already active");
+	}
+	if (draft.Kind() != ResourceKind::scene)
+	{
+		return Result<void>::Failure("Play mode requires a scene document");
+	}
+	const MaterialIdResolver resolveMaterial = [&draft](const std::shared_ptr<MaterialInstance>& material)
+	{ return draft.MaterialId(material); };
+	const std::filesystem::path virtualPath = "play-clone.ursascene";
+	auto encoded = EncodeSceneDocument(virtualPath, documentId, draft.GetScene(), registry, resolveMaterial);
+	if (!encoded)
+	{
+		return Result<void>::Failure("Cannot clone edit scene: " + encoded.error);
+	}
+	ComponentLoadContext context(resources);
+	std::shared_ptr<void> services;
+	if (setup)
+	{
+		auto prepared = setup(context);
+		if (!prepared)
+		{
+			return Result<void>::Failure("Cannot create play services: " + prepared.error);
+		}
+		services = std::move(prepared.value);
+	}
+	auto decoded = DecodeSceneDocument(virtualPath, encoded.value, registry, context);
+	if (!decoded)
+	{
+		return Result<void>::Failure("Cannot clone edit scene: " + decoded.error);
+	}
+	services = std::move(services);
+	scene = std::move(decoded.value.scene);
+	scheduler.Reset();
+	frameIndex = 0;
+	elapsedSeconds = 0.0;
+	return {};
 }
 
-Result<void> PlaySession::tick(float deltaSeconds, Window *window, FrameInput input) {
-    if (!scene_)
-        return Result<void>::failure("Play mode is not active");
-    const auto schedule = scheduler_.advance(deltaSeconds);
-    elapsedSeconds_ += schedule.deltaSeconds;
-    FrameContext context;
-    context.deltaSeconds = schedule.deltaSeconds;
-    context.fixedDeltaSeconds = scheduler_.fixedSeconds();
-    context.elapsedSeconds = elapsedSeconds_;
-    context.frameIndex = ++frameIndex_;
-    context.window = window;
-    context.input = input;
-    scene_->beginFrame();
-    auto result = scene_->update(context);
-    for (uint32_t step = 0; result && step < schedule.fixedSteps; ++step)
-        result = scene_->fixedUpdate(context);
-    if (result)
-        result = scene_->lateUpdate(context);
-    return result;
+Result<void> PlaySession::Tick(float deltaSeconds, Window* window, FrameInput input)
+{
+	if (!scene)
+	{
+		return Result<void>::Failure("Play mode is not active");
+	}
+	const auto schedule = scheduler.Advance(deltaSeconds);
+	elapsedSeconds += schedule.deltaSeconds;
+	FrameContext context;
+	context.deltaSeconds = schedule.deltaSeconds;
+	context.fixedDeltaSeconds = scheduler.FixedSeconds();
+	context.elapsedSeconds = elapsedSeconds;
+	context.frameIndex = ++frameIndex;
+	context.window = window;
+	context.input = input;
+	scene->BeginFrame();
+	auto result = scene->Update(context);
+	for (uint32_t step = 0; result && step < schedule.fixedSteps; ++step)
+	{
+		result = scene->FixedUpdate(context);
+	}
+	if (result)
+	{
+		result = scene->LateUpdate(context);
+	}
+	return result;
 }
 
-void PlaySession::stop() {
-    if (scene_)
-        scene_->clear();
-    scene_.reset();
-    services_.reset();
-    scheduler_.reset();
-    frameIndex_ = 0;
-    elapsedSeconds_ = 0.0;
+void PlaySession::Stop()
+{
+	if (scene)
+	{
+		scene->Clear();
+	}
+	scene.reset();
+	services.reset();
+	scheduler.Reset();
+	frameIndex = 0;
+	elapsedSeconds = 0.0;
 }
-} // namespace ursa::editor
+} // namespace Ursa::Editor

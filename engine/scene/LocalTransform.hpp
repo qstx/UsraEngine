@@ -4,12 +4,14 @@
 #include <math/Quat.hpp>
 #include <math/Vec3.hpp>
 
-namespace ursa {
-struct LocalTransform {
-    Vec3 position{};
-    Quat rotation{};
-    Vec3 scale{1.0f, 1.0f, 1.0f};
+namespace Ursa
+{
+struct LocalTransform
+{
+	Vec3 position{};
+	Quat rotation{};
+	Vec3 scale{1.0f, 1.0f, 1.0f};
 
-    Mat4 matrix() const;
+	Mat4 Matrix() const;
 };
-} // namespace ursa
+} // namespace Ursa

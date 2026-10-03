@@ -7,18 +7,20 @@
 #include <functional>
 #include <memory>
 
-namespace ursa {
+namespace Ursa
+{
 using TextureIdResolver = std::function<Result<ResourceId>(MaterialTexturePtr)>;
 using TextureResourceLoader = std::function<Result<MaterialTexturePtr>(ResourceId)>;
 
-struct LoadedMaterialResource {
-    ResourceId id;
-    std::shared_ptr<MaterialInstance> material;
+struct LoadedMaterialResource
+{
+	ResourceId id;
+	std::shared_ptr<MaterialInstance> material;
 };
 
-Result<void> saveMaterialResource(const std::filesystem::path &path, ResourceId id, const MaterialInstance &material,
-                                  const TextureIdResolver &resolveTexture);
+Result<void> SaveMaterialResource(const std::filesystem::path& path, ResourceId id, const MaterialInstance& material,
+                                  const TextureIdResolver& resolveTexture);
 
-Result<LoadedMaterialResource> loadMaterialResource(const std::filesystem::path &path,
-                                                    const TextureResourceLoader &loadTexture);
-} // namespace ursa
+Result<LoadedMaterialResource> LoadMaterialResource(const std::filesystem::path& path,
+                                                    const TextureResourceLoader& loadTexture);
+} // namespace Ursa

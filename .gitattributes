@@ -1,0 +1,7 @@
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.h text eol=lf
+*.c text eol=lf
+.clang-format text eol=lf
+.editorconfig text eol=lf
+tools/*.ps1 text eol=lf

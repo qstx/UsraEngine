@@ -4,118 +4,154 @@
 #include <stdexcept>
 #include <string>
 
-namespace {
-class Probe final : public ursa::Component {
+namespace
+{
+class Probe final : public Ursa::Component
+{
 public:
-    Probe(int &updates, int &removals, bool fail) : updates_(updates), removals_(removals), fail_(fail) {
-    }
+	Probe(int& updates, int& removals, bool fail) : updates(updates), removals(removals), fail(fail)
+	{
+	}
 
-    ursa::Result<void> onUpdate(const ursa::FrameContext &context) override {
-        ++updates_;
-        if (!context.window || context.frameIndex != static_cast<uint64_t>(updates_))
-            return ursa::Result<void>::failure("Frame context was not populated");
-        if (updates_ == 2 && !fail_) {
-            context.window->minimize();
-            context.window->restore();
-        }
-        if (fail_)
-            return ursa::Result<void>::failure("Intentional component failure");
-        return {};
-    }
+	Ursa::Result<void> OnUpdate(const Ursa::FrameContext& context) override
+	{
+		++updates;
+		if (!context.window || context.frameIndex != static_cast<uint64_t>(updates))
+		{
+			return Ursa::Result<void>::Failure("Frame context was not populated");
+		}
+		if (updates == 2 && !fail)
+		{
+			context.window->Minimize();
+			context.window->Restore();
+		}
+		if (fail)
+		{
+			return Ursa::Result<void>::Failure("Intentional component failure");
+		}
+		return {};
+	}
 
-    void onRemove() override {
-        ++removals_;
-    }
+	void OnRemove() override
+	{
+		++removals;
+	}
 
 private:
-    int &updates_;
-    int &removals_;
-    bool fail_;
+	int& updates;
+	int& removals;
+	bool fail;
 };
 
-class SceneApp final : public ursa::Application {
+class SceneApp final : public Ursa::Application
+{
 public:
-    explicit SceneApp(bool fail) : fail_(fail) {
-    }
+	explicit SceneApp(bool fail) : fail(fail)
+	{
+	}
 
-    int updates = 0;
-    int removals = 0;
-    int legacyFrames = 0;
+	int updates = 0;
+	int removals = 0;
+	int legacyFrames = 0;
 
 private:
-    ursa::Result<void> onStart() override {
-        scene_ = std::make_shared<ursa::Scene>();
-        auto node = scene_->createNode();
-        if (!node)
-            return ursa::Result<void>::failure(node.error);
-        auto component = scene_->addComponent<Probe>(node.value, updates, removals, fail_);
-        if (!component)
-            return ursa::Result<void>::failure(component.error);
-        auto cameraNode = scene_->createNode();
-        if (!cameraNode)
-            return ursa::Result<void>::failure(cameraNode.error);
-        ursa::LocalTransform cameraTransform;
-        cameraTransform.position = {0, 0, 4};
-        auto transformed = scene_->setLocalTransform(cameraNode.value, cameraTransform);
-        if (!transformed)
-            return transformed;
-        auto camera = scene_->addComponent<ursa::CameraComponent>(cameraNode.value);
-        if (!camera)
-            return ursa::Result<void>::failure(camera.error);
-        auto selected = scene_->setActiveCamera(camera.value);
-        if (!selected)
-            return selected;
-        return {};
-    }
+	Ursa::Result<void> OnStart() override
+	{
+		scene = std::make_shared<Ursa::Scene>();
+		auto node = scene->CreateNode();
+		if (!node)
+		{
+			return Ursa::Result<void>::Failure(node.error);
+		}
+		auto component = scene->AddComponent<Probe>(node.value, updates, removals, fail);
+		if (!component)
+		{
+			return Ursa::Result<void>::Failure(component.error);
+		}
+		auto cameraNode = scene->CreateNode();
+		if (!cameraNode)
+		{
+			return Ursa::Result<void>::Failure(cameraNode.error);
+		}
+		Ursa::LocalTransform cameraTransform;
+		cameraTransform.position = {0, 0, 4};
+		auto transformed = scene->SetLocalTransform(cameraNode.value, cameraTransform);
+		if (!transformed)
+		{
+			return transformed;
+		}
+		auto camera = scene->AddComponent<Ursa::CameraComponent>(cameraNode.value);
+		if (!camera)
+		{
+			return Ursa::Result<void>::Failure(camera.error);
+		}
+		auto selected = scene->SetActiveCamera(camera.value);
+		if (!selected)
+		{
+			return selected;
+		}
+		return {};
+	}
 
-    ursa::Result<void> onFrame(float) override {
-        ++legacyFrames;
-        return {};
-    }
+	Ursa::Result<void> OnFrame(float) override
+	{
+		++legacyFrames;
+		return {};
+	}
 
-    bool fail_;
+	bool fail;
 };
 
-class LegacyApp final : public ursa::Application {
+class LegacyApp final : public Ursa::Application
+{
 public:
-    int frames = 0;
+	int frames = 0;
 
 private:
-    ursa::Result<void> onStart() override {
-        return {};
-    }
+	Ursa::Result<void> OnStart() override
+	{
+		return {};
+	}
 
-    ursa::Result<void> onFrame(float) override {
-        ++frames;
-        return {};
-    }
+	Ursa::Result<void> OnFrame(float) override
+	{
+		++frames;
+		return {};
+	}
 };
 
-void expect(bool condition, const char *message) {
-    if (!condition)
-        throw std::runtime_error(message);
+void Expect(bool condition, const char* message)
+{
+	if (!condition)
+	{
+		throw std::runtime_error(message);
+	}
 }
 } // namespace
 
-int main() {
-    try {
-        SceneApp normal(false);
-        const auto normalResult = normal.run(640, 480, "Scene application test", false, 4);
-        expect(static_cast<bool>(normalResult), "Scene application failed");
-        expect(normal.updates == 4 && normal.removals == 1 && normal.legacyFrames == 0,
-               "Normal scene lifecycle or legacy callback path was wrong");
-        SceneApp failing(true);
-        const auto failed = failing.run(640, 480, "Scene failure test", false, 4);
-        expect(!failed && failed.error.find("Intentional component failure") != ursa::String::npos,
-               "Component failure was not returned by Application");
-        expect(failing.updates == 1 && failing.removals == 1, "Failure cleanup did not run once");
-        LegacyApp legacy;
-        const auto legacyResult = legacy.run(640, 480, "Legacy application test", false, 3);
-        expect(static_cast<bool>(legacyResult) && legacy.frames == 3,
-               "Application without a scene did not use the legacy frame callback");
-        return 0;
-    } catch (const std::exception &error) {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
+int main()
+{
+	try
+	{
+		SceneApp normal(false);
+		const auto normalResult = normal.Run(640, 480, "Scene application test", false, 4);
+		Expect(static_cast<bool>(normalResult), "Scene application failed");
+		Expect(normal.updates == 4 && normal.removals == 1 && normal.legacyFrames == 0,
+		       "Normal scene lifecycle or legacy callback path was wrong");
+		SceneApp failing(true);
+		const auto failed = failing.Run(640, 480, "Scene failure test", false, 4);
+		Expect(!failed && failed.error.find("Intentional component failure") != Ursa::String::npos,
+		       "Component failure was not returned by Application");
+		Expect(failing.updates == 1 && failing.removals == 1, "Failure cleanup did not run once");
+		LegacyApp legacy;
+		const auto legacyResult = legacy.Run(640, 480, "Legacy application test", false, 3);
+		Expect(static_cast<bool>(legacyResult) && legacy.frames == 3,
+		       "Application without a scene did not use the legacy frame callback");
+		return 0;
+	}
+	catch (const std::exception& error)
+	{
+		std::cerr << error.what() << '\n';
+		return 1;
+	}
 }

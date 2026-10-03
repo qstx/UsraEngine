@@ -5,32 +5,35 @@
 #include <serialization/ResourceIndex.hpp>
 #include <memory>
 
-namespace ursa {
+namespace Ursa
+{
 // Loads and caches resources by ID through the index's virtual file system.
-class ResourceSession final {
+class ResourceSession final
+{
 public:
-    static Result<std::unique_ptr<ResourceSession>> open(const Vector<ResourceMount> &mounts);
+	static Result<std::unique_ptr<ResourceSession>> Open(const Vector<ResourceMount>& mounts);
 
-    // Convenience for a caller that owns a single directory of resources; the
-    // directory is mounted under the conventional project scheme.
-    static Result<std::unique_ptr<ResourceSession>> open(const std::filesystem::path &root,
-                                                         MountAccess access = MountAccess::ReadWrite);
+	// Convenience for a caller that owns a single directory of resources; the
+	// directory is mounted under the conventional project scheme.
+	static Result<std::unique_ptr<ResourceSession>> Open(const std::filesystem::path& root,
+	                                                     MountAccess access = MountAccess::readWrite);
 
-    Result<std::unique_ptr<ResourceSession>> refreshed() const;
+	Result<std::unique_ptr<ResourceSession>> Refreshed() const;
 
-    Result<MaterialTexturePtr> loadTexture(ResourceId id);
+	Result<MaterialTexturePtr> LoadTexture(ResourceId id);
 
-    Result<std::shared_ptr<MaterialInstance>> loadMaterial(ResourceId id);
+	Result<std::shared_ptr<MaterialInstance>> LoadMaterial(ResourceId id);
 
-    Result<ResourceId> identifyMaterial(const std::shared_ptr<MaterialInstance> &material) const;
+	Result<ResourceId> IdentifyMaterial(const std::shared_ptr<MaterialInstance>& material) const;
 
-    const ResourceIndex &index() const {
-        return index_;
-    }
+	const ResourceIndex& Index() const
+	{
+		return index;
+	}
 
 private:
-    ResourceIndex index_;
-    Map<String, MaterialTexturePtr> textures_;
-    Map<String, std::shared_ptr<MaterialInstance>> materials_;
+	ResourceIndex index;
+	Map<String, MaterialTexturePtr> textures;
+	Map<String, std::shared_ptr<MaterialInstance>> materials;
 };
-} // namespace ursa
+} // namespace Ursa

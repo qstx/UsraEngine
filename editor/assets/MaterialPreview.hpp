@@ -3,37 +3,42 @@
 #include <renderer3d/Renderer3D.hpp>
 #include <ui/ImGuiBridge.hpp>
 
-namespace ursa::editor {
-class MaterialPreview final {
+namespace Ursa::Editor
+{
+class MaterialPreview final
+{
 public:
-    static Result<std::unique_ptr<MaterialPreview>> create(rhi::DevicePtr device, ImGuiBridge &gui,
-                                                            uint32_t size = 256);
+	static Result<std::unique_ptr<MaterialPreview>> Create(Rhi::DevicePtr device, ImGuiBridge& gui,
+	                                                       uint32_t size = 256);
 
-    ~MaterialPreview();
+	~MaterialPreview();
 
-    Result<void> render(const std::shared_ptr<MaterialInstance> &material);
+	Result<void> Render(const std::shared_ptr<MaterialInstance>& material);
 
-    ImTextureID imageId() const {
-        return imageId_;
-    }
+	ImTextureID ImageId() const
+	{
+		return imageId;
+	}
 
-    const rhi::TexturePtr &colorTexture() const {
-        return color_;
-    }
+	const Rhi::TexturePtr& ColorTexture() const
+	{
+		return color;
+	}
 
 private:
-    MaterialPreview(rhi::DevicePtr device, ImGuiBridge &gui, std::unique_ptr<Renderer3D> renderer,
-                    rhi::TexturePtr color, rhi::SamplerPtr sampler, ImTextureID imageId)
-        : device_(std::move(device)), gui_(gui), renderer_(std::move(renderer)), color_(std::move(color)),
-          sampler_(std::move(sampler)), imageId_(imageId) {
-    }
+	MaterialPreview(Rhi::DevicePtr device, ImGuiBridge& gui, std::unique_ptr<Renderer3D> renderer,
+	                Rhi::TexturePtr color, Rhi::SamplerPtr sampler, ImTextureID imageId)
+	    : device(std::move(device)), gui(gui), renderer(std::move(renderer)), color(std::move(color)),
+	      sampler(std::move(sampler)), imageId(imageId)
+	{
+	}
 
-    rhi::DevicePtr device_;
-    ImGuiBridge &gui_;
-    std::unique_ptr<Renderer3D> renderer_;
-    rhi::TexturePtr color_;
-    rhi::SamplerPtr sampler_;
-    ImTextureID imageId_ = ImTextureID_Invalid;
-    bool rendered_ = false;
+	Rhi::DevicePtr device;
+	ImGuiBridge& gui;
+	std::unique_ptr<Renderer3D> renderer;
+	Rhi::TexturePtr color;
+	Rhi::SamplerPtr sampler;
+	ImTextureID imageId = ImTextureID_Invalid;
+	bool rendered = false;
 };
-} // namespace ursa::editor
+} // namespace Ursa::Editor

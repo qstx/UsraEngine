@@ -1,9 +1,12 @@
 #include <core/Log.hpp>
 
-int main() {
-    ursa::LogSession log;
-    if (!log.status())
-        return 1;
-    URSA_LOG_INFO("Example", "Logging ready");
-    return 0;
+int main()
+{
+	Ursa::LogSession log;
+	if (!log.GetStatus())
+	{
+		return 1;
+	}
+	URSA_LOG_INFO("Example", "Logging ready");
+	return 0;
 }

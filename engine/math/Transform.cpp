@@ -1,7 +1,9 @@
 #include <math/Transform.hpp>
 
-namespace ursa {
-Mat4 Transform::matrix() const {
-    return Mat4::translation(position) * Mat4::scale(size);
+namespace Ursa
+{
+Mat4 Transform::Matrix() const
+{
+	return Mat4::Translation(position) * Mat4::Scale(size);
 }
-} // namespace ursa
+} // namespace Ursa

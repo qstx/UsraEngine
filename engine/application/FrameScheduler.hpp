@@ -3,31 +3,36 @@
 #include <core/Result.hpp>
 #include <cstdint>
 
-namespace ursa {
-struct FrameSchedule {
-    float deltaSeconds = 0.0f;
-    uint32_t fixedSteps = 0;
+namespace Ursa
+{
+struct FrameSchedule
+{
+	float deltaSeconds = 0.0f;
+	uint32_t fixedSteps = 0;
 };
 
-class FrameScheduler final {
+class FrameScheduler final
+{
 public:
-    Result<void> configure(float fixedSeconds, uint32_t maxSteps);
+	Result<void> Configure(float fixedSeconds, uint32_t maxSteps);
 
-    FrameSchedule advance(float elapsedSeconds);
+	FrameSchedule Advance(float elapsedSeconds);
 
-    void reset();
+	void Reset();
 
-    float fixedSeconds() const {
-        return fixedSeconds_;
-    }
+	float FixedSeconds() const
+	{
+		return fixedSeconds;
+	}
 
-    uint32_t maxSteps() const {
-        return maxSteps_;
-    }
+	uint32_t MaxSteps() const
+	{
+		return maxSteps;
+	}
 
 private:
-    double accumulator_ = 0.0;
-    float fixedSeconds_ = 1.0f / 60.0f;
-    uint32_t maxSteps_ = 5;
+	double accumulator = 0.0;
+	float fixedSeconds = 1.0f / 60.0f;
+	uint32_t maxSteps = 5;
 };
-} // namespace ursa
+} // namespace Ursa

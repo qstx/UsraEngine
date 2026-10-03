@@ -14,224 +14,259 @@
 #include <utility>
 #include <vector>
 
-namespace ursa {
-struct NodeId {
-    uint32_t index = std::numeric_limits<uint32_t>::max();
-    uint32_t generation = 0;
+namespace Ursa
+{
+struct NodeId
+{
+	uint32_t index = std::numeric_limits<uint32_t>::max();
+	uint32_t generation = 0;
 
-    explicit operator bool() const {
-        return index != std::numeric_limits<uint32_t>::max();
-    }
+	explicit operator bool() const
+	{
+		return index != std::numeric_limits<uint32_t>::max();
+	}
 };
 
-inline bool operator==(NodeId a, NodeId b) {
-    return a.index == b.index && a.generation == b.generation;
+inline bool operator==(NodeId a, NodeId b)
+{
+	return a.index == b.index && a.generation == b.generation;
 }
 
-inline bool operator!=(NodeId a, NodeId b) {
-    return !(a == b);
+inline bool operator!=(NodeId a, NodeId b)
+{
+	return !(a == b);
 }
 
-class Scene final {
+class Scene final
+{
 public:
-    Scene() = default;
+	Scene() = default;
 
-    ~Scene();
+	~Scene();
 
-    Scene(const Scene &) = delete;
+	Scene(const Scene&) = delete;
 
-    Scene &operator=(const Scene &) = delete;
+	Scene& operator=(const Scene&) = delete;
 
-    Result<NodeId> createNode(NodeId parent = {});
+	Result<NodeId> CreateNode(NodeId parent = {});
 
-    Result<void> destroyNode(NodeId node);
+	Result<void> DestroyNode(NodeId node);
 
-    Result<void> setParent(NodeId node, NodeId parent = {});
+	Result<void> SetParent(NodeId node, NodeId parent = {});
 
-    bool contains(NodeId node) const;
+	bool Contains(NodeId node) const;
 
-    Result<NodeId> parentOf(NodeId node) const;
+	Result<NodeId> ParentOf(NodeId node) const;
 
-    Result<Vector<NodeId>> childrenOf(NodeId node) const;
+	Result<Vector<NodeId>> ChildrenOf(NodeId node) const;
 
-    Vector<NodeId> rootNodes() const;
+	Vector<NodeId> RootNodes() const;
 
-    Result<ResourceId> nodePersistentId(NodeId node) const;
+	Result<ResourceId> NodePersistentId(NodeId node) const;
 
-    Result<String> nodeLabel(NodeId node) const;
+	Result<String> NodeLabel(NodeId node) const;
 
-    Result<void> setNodeLabel(NodeId node, String label);
+	Result<void> SetNodeLabel(NodeId node, String label);
 
-    Result<void> assignNodePersistentId(NodeId node, ResourceId id);
+	Result<void> AssignNodePersistentId(NodeId node, ResourceId id);
 
-    Result<NodeId> nodeByPersistentId(ResourceId id) const;
+	Result<NodeId> NodeByPersistentId(ResourceId id) const;
 
-    Result<void> reorderNode(NodeId node, size_t index);
+	Result<void> ReorderNode(NodeId node, size_t index);
 
-    Result<void> setLocalTransform(NodeId node, LocalTransform transform);
+	Result<void> SetLocalTransform(NodeId node, LocalTransform transform);
 
-    Result<LocalTransform> localTransform(NodeId node) const;
+	Result<LocalTransform> GetLocalTransform(NodeId node) const;
 
-    Result<Mat4> worldTransform(NodeId node) const;
+	Result<Mat4> WorldTransform(NodeId node) const;
 
-    Result<void> setEnabled(NodeId node, bool enabled);
+	Result<void> SetEnabled(NodeId node, bool enabled);
 
-    Result<bool> isEnabled(NodeId node) const;
+	Result<bool> IsEnabled(NodeId node) const;
 
-    Result<bool> isActive(NodeId node) const;
+	Result<bool> IsActive(NodeId node) const;
 
-    template <class T, class... Args> Result<ComponentId> addComponent(NodeId node, Args &&...args) {
-        static_assert(std::is_base_of<Component, T>::value, "Scene components must derive from Component");
-        return addComponentOwned(node, std::make_unique<T>(std::forward<Args>(args)...));
-    }
+	template <class T, class... Args> Result<ComponentId> AddComponent(NodeId node, Args&&... args)
+	{
+		static_assert(std::is_base_of<Component, T>::value, "Scene components must derive from Component");
+		return AddComponentOwned(node, std::make_unique<T>(std::forward<Args>(args)...));
+	}
 
-    template <class T> T *findComponent(NodeId node) const {
-        if (!contains(node))
-            return nullptr;
-        for (ComponentId id : nodes_[node.index].components)
-            if (containsComponent(id))
-                if (auto *component = dynamic_cast<T *>(components_[id.index].object.get()))
-                    return component;
-        return nullptr;
-    }
+	template <class T> T* FindComponent(NodeId node) const
+	{
+		if (!Contains(node))
+		{
+			return nullptr;
+		}
+		for (ComponentId id : nodes[node.index].components)
+		{
+			if (ContainsComponent(id))
+			{
+				if (auto* component = dynamic_cast<T*>(components[id.index].object.get()))
+				{
+					return component;
+				}
+			}
+		}
+		return nullptr;
+	}
 
-    template <class T> Vector<T *> findComponents(NodeId node) const {
-        Vector<T *> found;
-        if (!contains(node))
-            return found;
-        for (ComponentId id : nodes_[node.index].components)
-            if (containsComponent(id))
-                if (auto *component = dynamic_cast<T *>(components_[id.index].object.get()))
-                    found.push_back(component);
-        return found;
-    }
+	template <class T> Vector<T*> FindComponents(NodeId node) const
+	{
+		Vector<T*> found;
+		if (!Contains(node))
+		{
+			return found;
+		}
+		for (ComponentId id : nodes[node.index].components)
+		{
+			if (ContainsComponent(id))
+			{
+				if (auto* component = dynamic_cast<T*>(components[id.index].object.get()))
+				{
+					found.push_back(component);
+				}
+			}
+		}
+		return found;
+	}
 
-    bool containsComponent(ComponentId id) const;
+	bool ContainsComponent(ComponentId id) const;
 
-    Result<void> removeComponent(ComponentId id);
+	Result<void> RemoveComponent(ComponentId id);
 
-    Result<void> setComponentEnabled(ComponentId id, bool enabled);
+	Result<void> SetComponentEnabled(ComponentId id, bool enabled);
 
-    Result<bool> isComponentActive(ComponentId id) const;
+	Result<bool> IsComponentActive(ComponentId id) const;
 
-    Result<bool> isComponentEnabled(ComponentId id) const;
+	Result<bool> IsComponentEnabled(ComponentId id) const;
 
-    Result<NodeId> componentNode(ComponentId id) const;
+	Result<NodeId> ComponentNode(ComponentId id) const;
 
-    Result<Vector<ComponentId>> componentsOf(NodeId node) const;
+	Result<Vector<ComponentId>> ComponentsOf(NodeId node) const;
 
-    Component *component(ComponentId id) const;
+	Component* GetComponent(ComponentId id) const;
 
-    Result<ResourceId> componentPersistentId(ComponentId id) const;
+	Result<ResourceId> ComponentPersistentId(ComponentId id) const;
 
-    Result<void> assignComponentPersistentId(ComponentId component, ResourceId id);
+	Result<void> AssignComponentPersistentId(ComponentId component, ResourceId id);
 
-    Result<ComponentId> componentByPersistentId(ResourceId id) const;
+	Result<ComponentId> ComponentByPersistentId(ResourceId id) const;
 
-    Result<void> setComponentNode(ComponentId component, NodeId node);
+	Result<void> SetComponentNode(ComponentId component, NodeId node);
 
-    Result<void> reorderComponent(ComponentId component, size_t index);
+	Result<void> ReorderComponent(ComponentId component, size_t index);
 
-    Result<void> setActiveCamera(ComponentId id);
+	Result<void> SetActiveCamera(ComponentId id);
 
-    ComponentId activeCamera() const {
-        return activeCamera_;
-    }
+	ComponentId ActiveCamera() const
+	{
+		return activeCamera;
+	}
 
-    Result<void> setAmbientLight(Color color, float intensity);
+	Result<void> SetAmbientLight(Color color, float intensity);
 
-    Color ambientLightColor() const {
-        return ambientColor_;
-    }
+	Color AmbientLightColor() const
+	{
+		return ambientColor;
+	}
 
-    float ambientLightIntensity() const {
-        return ambientIntensity_;
-    }
+	float AmbientLightIntensity() const
+	{
+		return ambientIntensity;
+	}
 
-    Result<SceneRenderData> collectRenderData(float aspect) const;
+	Result<SceneRenderData> CollectRenderData(float aspect) const;
 
-    // Uses a caller-owned camera without invoking component lifecycle callbacks.
-    Result<SceneRenderData> collectPreviewRenderData(const Camera &camera, float aspect) const;
+	// Uses a caller-owned camera without invoking component lifecycle callbacks.
+	Result<SceneRenderData> CollectPreviewRenderData(const Camera& camera, float aspect) const;
 
-    void beginFrame();
+	void BeginFrame();
 
-    Result<void> update(const FrameContext &context);
+	Result<void> Update(const FrameContext& context);
 
-    Result<void> fixedUpdate(const FrameContext &context);
+	Result<void> FixedUpdate(const FrameContext& context);
 
-    Result<void> lateUpdate(const FrameContext &context);
+	Result<void> LateUpdate(const FrameContext& context);
 
-    Result<void> commitChanges();
+	Result<void> CommitChanges();
 
-    void clear();
+	void Clear();
 
 private:
-    struct NodeSlot {
-        uint32_t generation = 1;
-        ResourceId persistentId;
-        String label;
-        bool alive = false;
-        bool pendingCreate = false;
-        bool pendingDestroy = false;
-        NodeId parent;
-        NodeId pendingParent;
-        bool hasPendingParent = false;
-        Vector<NodeId> children;
-        Vector<ComponentId> components;
-        LocalTransform local;
-        bool enabled = true;
-        mutable Mat4 world = Mat4::identity();
-        mutable bool worldDirty = true;
-    };
+	struct NodeSlot
+	{
+		uint32_t generation = 1;
+		ResourceId persistentId;
+		String label;
+		bool alive = false;
+		bool pendingCreate = false;
+		bool pendingDestroy = false;
+		NodeId parent;
+		NodeId pendingParent;
+		bool hasPendingParent = false;
+		Vector<NodeId> children;
+		Vector<ComponentId> components;
+		LocalTransform local;
+		bool enabled = true;
+		mutable Mat4 world = Mat4::Identity();
+		mutable bool worldDirty = true;
+	};
 
-    struct ComponentSlot {
-        uint32_t generation = 1;
-        ResourceId persistentId;
-        NodeId node;
-        std::unique_ptr<Component> object;
-        bool enabled = true;
-        bool started = false;
-        bool pendingAdd = false;
-        bool pendingRemoval = false;
-        uint64_t availableFrame = 0;
-    };
+	struct ComponentSlot
+	{
+		uint32_t generation = 1;
+		ResourceId persistentId;
+		NodeId node;
+		std::unique_ptr<Component> object;
+		bool enabled = true;
+		bool started = false;
+		bool pendingAdd = false;
+		bool pendingRemoval = false;
+		uint64_t availableFrame = 0;
+	};
 
-    enum class Phase { Update, Fixed, Late };
+	enum class Phase
+	{
+		update,
+		fixed,
+		late
+	};
 
-    Result<ComponentId> addComponentOwned(NodeId node, std::unique_ptr<Component> object);
+	Result<ComponentId> AddComponentOwned(NodeId node, std::unique_ptr<Component> object);
 
-    void removeComponentNow(ComponentId id);
+	void RemoveComponentNow(ComponentId id);
 
-    void destroyNodeNow(NodeId node);
+	void DestroyNodeNow(NodeId node);
 
-    Result<void> setParentNow(NodeId node, NodeId parent);
+	Result<void> SetParentNow(NodeId node, NodeId parent);
 
-    void markPendingDestroy(NodeId node);
+	void MarkPendingDestroy(NodeId node);
 
-    Result<void> runPhase(Phase phase, const FrameContext &context);
+	Result<void> RunPhase(Phase phase, const FrameContext& context);
 
-    void collectComponents(NodeId node, Vector<ComponentId> &out) const;
+	void CollectComponents(NodeId node, Vector<ComponentId>& out) const;
 
-    void collectRendering(NodeId node, SceneRenderData &out) const;
+	void CollectRendering(NodeId node, SceneRenderData& out) const;
 
-    Result<SceneRenderData> collectWithCamera(const Mat4 &viewProjection, Vec3 cameraPosition) const;
+	Result<SceneRenderData> CollectWithCamera(const Mat4& viewProjection, Vec3 cameraPosition) const;
 
-    void destroySubtree(NodeId node);
+	void DestroySubtree(NodeId node);
 
-    void markWorldDirty(NodeId node);
+	void MarkWorldDirty(NodeId node);
 
-    Mat4 computeWorld(NodeId node) const;
+	Mat4 ComputeWorld(NodeId node) const;
 
-    Vector<NodeSlot> nodes_;
-    Vector<NodeId> rootOrder_;
-    Vector<uint32_t> freeIndices_;
-    Vector<ComponentSlot> components_;
-    Vector<uint32_t> freeComponentIndices_;
-    uint64_t frameSerial_ = 0;
-    bool inPhase_ = false;
-    Vector<std::function<Result<void>()>> commands_;
-    ComponentId activeCamera_;
-    Color ambientColor_{1.0f, 1.0f, 1.0f, 1.0f};
-    float ambientIntensity_ = 0.1f;
+	Vector<NodeSlot> nodes;
+	Vector<NodeId> rootOrder;
+	Vector<uint32_t> freeIndices;
+	Vector<ComponentSlot> components;
+	Vector<uint32_t> freeComponentIndices;
+	uint64_t frameSerial = 0;
+	bool inPhase = false;
+	Vector<std::function<Result<void>()>> commands;
+	ComponentId activeCamera;
+	Color ambientColor{1.0f, 1.0f, 1.0f, 1.0f};
+	float ambientIntensity = 0.1f;
 };
-} // namespace ursa
+} // namespace Ursa

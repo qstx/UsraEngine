@@ -10,12 +10,13 @@
 
 #include <cstddef>
 
-namespace ursa {
+namespace Ursa
+{
 using String = eastl::string;
 
 template <class T> using Vector = eastl::vector<T>;
 
-template <class T, size_t Size> using Array = eastl::array<T, Size>;
+template <class T, size_t size> using Array = eastl::array<T, size>;
 
 template <class Key, class Value> using Map = eastl::map<Key, Value>;
 
@@ -24,4 +25,4 @@ template <class Key, class Value> using UnorderedMap = eastl::unordered_map<Key,
 template <class Key> using Set = eastl::set<Key>;
 
 template <class T> using Deque = eastl::deque<T>;
-} // namespace ursa
+} // namespace Ursa

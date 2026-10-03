@@ -5,66 +5,81 @@
 #include <cstdint>
 #include <filesystem>
 
-namespace ursa {
-enum class LogLevel : uint8_t { Trace, Debug, Info, Warn, Error, Critical, Off };
-
-struct LogConfig {
-    std::filesystem::path filePath;
-    LogLevel level;
-    size_t maxFileBytes = 5 * 1024 * 1024;
-    size_t maxFiles = 3;
-
-    LogConfig();
+namespace Ursa
+{
+enum class LogLevel : uint8_t
+{
+	trace,
+	debug,
+	info,
+	warn,
+	error,
+	critical,
+	off
 };
 
-class Log final {
-public:
-    static LogLevel defaultLevel() noexcept;
+struct LogConfig
+{
+	std::filesystem::path filePath;
+	LogLevel level;
+	size_t maxFileBytes = 5 * 1024 * 1024;
+	size_t maxFiles = 3;
 
-    static Result<void> initialize(const std::filesystem::path &executable, const LogConfig &config = {});
-
-    static Result<void> initializeForCurrentProcess(const LogConfig &config = {});
-
-    static void shutdown() noexcept;
-
-    static bool initialized() noexcept;
-
-    static LogLevel level() noexcept;
-
-    static void setLevel(LogLevel level) noexcept;
-
-    static bool enabled(LogLevel level) noexcept;
-
-    static void write(LogLevel level, const char *module, const String &message) noexcept;
+	LogConfig();
 };
 
-class LogSession final {
+class Log final
+{
 public:
-    explicit LogSession(const LogConfig &config = {});
+	static LogLevel DefaultLevel() noexcept;
 
-    ~LogSession();
+	static Result<void> Initialize(const std::filesystem::path& executable, const LogConfig& config = {});
 
-    LogSession(const LogSession &) = delete;
-    LogSession &operator=(const LogSession &) = delete;
+	static Result<void> InitializeForCurrentProcess(const LogConfig& config = {});
 
-    const Result<void> &status() const {
-        return status_;
-    }
+	static void Shutdown() noexcept;
+
+	static bool Initialized() noexcept;
+
+	static LogLevel Level() noexcept;
+
+	static void SetLevel(LogLevel level) noexcept;
+
+	static bool Enabled(LogLevel level) noexcept;
+
+	static void Write(LogLevel level, const char* module, const String& message) noexcept;
+};
+
+class LogSession final
+{
+public:
+	explicit LogSession(const LogConfig& config = {});
+
+	~LogSession();
+
+	LogSession(const LogSession&) = delete;
+	LogSession& operator=(const LogSession&) = delete;
+
+	const Result<void>& GetStatus() const
+	{
+		return status;
+	}
 
 private:
-    Result<void> status_;
+	Result<void> status;
 };
-} // namespace ursa
+} // namespace Ursa
 
-#define URSA_LOG_AT(level, module, message)                                                        \
-    do {                                                                                           \
-        if (::ursa::Log::enabled(level))                                                           \
-            ::ursa::Log::write(level, module, message);                                            \
-    } while (false)
+#define URSA_LOG_AT(level, module, message)                                                                            \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		if (::Ursa::Log::Enabled(level))                                                                               \
+			::Ursa::Log::Write(level, module, message);                                                                \
+	} while (false)
 
-#define URSA_LOG_TRACE(module, message) URSA_LOG_AT(::ursa::LogLevel::Trace, module, message)
-#define URSA_LOG_DEBUG(module, message) URSA_LOG_AT(::ursa::LogLevel::Debug, module, message)
-#define URSA_LOG_INFO(module, message) URSA_LOG_AT(::ursa::LogLevel::Info, module, message)
-#define URSA_LOG_WARN(module, message) URSA_LOG_AT(::ursa::LogLevel::Warn, module, message)
-#define URSA_LOG_ERROR(module, message) URSA_LOG_AT(::ursa::LogLevel::Error, module, message)
-#define URSA_LOG_CRITICAL(module, message) URSA_LOG_AT(::ursa::LogLevel::Critical, module, message)
+#define URSA_LOG_TRACE(module, message) URSA_LOG_AT(::Ursa::LogLevel::trace, module, message)
+#define URSA_LOG_DEBUG(module, message) URSA_LOG_AT(::Ursa::LogLevel::debug, module, message)
+#define URSA_LOG_INFO(module, message) URSA_LOG_AT(::Ursa::LogLevel::info, module, message)
+#define URSA_LOG_WARN(module, message) URSA_LOG_AT(::Ursa::LogLevel::warn, module, message)
+#define URSA_LOG_ERROR(module, message) URSA_LOG_AT(::Ursa::LogLevel::error, module, message)
+#define URSA_LOG_CRITICAL(module, message) URSA_LOG_AT(::Ursa::LogLevel::critical, module, message)

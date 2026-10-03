@@ -5,25 +5,27 @@
 #include <filesystem>
 #include <memory>
 
-namespace ursa {
-struct LoadedSceneResource {
-    ResourceId id;
-    std::unique_ptr<Scene> scene;
+namespace Ursa
+{
+struct LoadedSceneResource
+{
+	ResourceId id;
+	std::unique_ptr<Scene> scene;
 };
 
-Result<nlohmann::json> encodeSceneDocument(const std::filesystem::path &path, ResourceId id, const Scene &scene,
-                                           const ComponentRegistry &registry, const MaterialIdResolver &materialId = {},
+Result<nlohmann::json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId id, const Scene& scene,
+                                           const ComponentRegistry& registry, const MaterialIdResolver& materialId = {},
                                            NodeId subtree = {});
 
-Result<LoadedSceneResource> decodeSceneDocument(const std::filesystem::path &path, const nlohmann::json &document,
-                                                const ComponentRegistry &registry, ComponentLoadContext &context);
+Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& path, const nlohmann::json& document,
+                                                const ComponentRegistry& registry, ComponentLoadContext& context);
 
-Result<void> saveSceneResource(const std::filesystem::path &path, ResourceId id, const Scene &scene,
-                               const ComponentRegistry &registry, const MaterialIdResolver &materialId = {});
+Result<void> SaveSceneResource(const std::filesystem::path& path, ResourceId id, const Scene& scene,
+                               const ComponentRegistry& registry, const MaterialIdResolver& materialId = {});
 
-Result<LoadedSceneResource> loadSceneResource(const std::filesystem::path &path, const ComponentRegistry &registry,
-                                              ComponentLoadContext &context);
+Result<LoadedSceneResource> LoadSceneResource(const std::filesystem::path& path, const ComponentRegistry& registry,
+                                              ComponentLoadContext& context);
 
-Result<void> reloadSceneResource(const std::filesystem::path &path, const ComponentRegistry &registry,
-                                 ComponentLoadContext &context, std::unique_ptr<Scene> &activeScene);
-} // namespace ursa
+Result<void> ReloadSceneResource(const std::filesystem::path& path, const ComponentRegistry& registry,
+                                 ComponentLoadContext& context, std::unique_ptr<Scene>& activeScene);
+} // namespace Ursa

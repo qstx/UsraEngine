@@ -15,84 +15,95 @@
 #include <array>
 #include <functional>
 
-namespace ursa::editor {
-struct EditorProject {
-    ComponentRegistry components;
-    ComponentEditors componentEditors;
-    std::function<Result<void>(ComponentLoadContext &)> editContextSetup;
-    PlayContextSetup playContextSetup;
+namespace Ursa::Editor
+{
+struct EditorProject
+{
+	ComponentRegistry components;
+	ComponentEditors componentEditors;
+	std::function<Result<void>(ComponentLoadContext&)> editContextSetup;
+	PlayContextSetup playContextSetup;
 };
 
-using EditorProjectSetup = std::function<Result<void>(EditorProject &)>;
+using EditorProjectSetup = std::function<Result<void>(EditorProject&)>;
 
-class EditorApplication {
+class EditorApplication
+{
 public:
-    explicit EditorApplication(EditorProjectSetup setup = {}) : projectSetup_(std::move(setup)) {
-    }
+	explicit EditorApplication(EditorProjectSetup setup = {}) : projectSetup(std::move(setup))
+	{
+	}
 
-    virtual ~EditorApplication() = default;
+	virtual ~EditorApplication() = default;
 
-    Result<void> run(uint32_t width = 1280, uint32_t height = 720, const String &title = "Ursa Editor",
-                     bool visible = true, uint32_t frameLimit = 0);
+	Result<void> Run(uint32_t width = 1280, uint32_t height = 720, const String& title = "Ursa Editor",
+	                 bool visible = true, uint32_t frameLimit = 0);
 
-    Result<void> openProject(const std::filesystem::path &root);
+	Result<void> OpenProject(const std::filesystem::path& root);
 
 protected:
-    virtual Result<void> onStart() {
-        return {};
-    }
+	virtual Result<void> OnStart()
+	{
+		return {};
+	}
 
-    virtual Result<void> onFrame(float deltaSeconds) {
-        (void)deltaSeconds;
-        return {};
-    }
+	virtual Result<void> OnFrame(float deltaSeconds)
+	{
+		(void)deltaSeconds;
+		return {};
+	}
 
-    virtual Result<void> onGui();
+	virtual Result<void> OnGui();
 
-    virtual void onStop() {
-    }
+	virtual void OnStop()
+	{
+	}
 
-    std::shared_ptr<Window> window_;
-    rhi::DevicePtr device_;
-    rhi::SwapchainPtr swapchain_;
+	std::shared_ptr<Window> window;
+	Rhi::DevicePtr device;
+	Rhi::SwapchainPtr swapchain;
 
-    ImGuiBridge &gui() {
-        return *gui_;
-    }
+	ImGuiBridge& Gui()
+	{
+		return *gui;
+	}
 
-    EditorProject &project() {
-        return *project_;
-    }
+	EditorProject& Project()
+	{
+		return *project;
+	}
 
-    ProjectWorkspace *workspace() const {
-        return workspace_.get();
-    }
+	ProjectWorkspace* Workspace() const
+	{
+		return workspace.get();
+	}
 
-    EditorDocuments *documents() const {
-        return documents_.get();
-    }
+	EditorDocuments* Documents() const
+	{
+		return documents.get();
+	}
 
 private:
-    EditorProjectSetup projectSetup_;
-    std::unique_ptr<EditorProject> project_;
-    std::unique_ptr<ImGuiBridge> gui_;
-    std::unique_ptr<MaterialPreview> materialPreview_;
-    std::unique_ptr<EditorScenePreview> scenePreview_;
-    EditorHierarchy hierarchy_;
-    rhi::TexturePtr scenePreviewColor_;
-    rhi::SamplerPtr scenePreviewSampler_;
-    ImTextureID scenePreviewId_ = ImTextureID_Invalid;
-    bool scenePreviewRendered_ = false;
-    ResourceId displayedSceneId_;
-    GizmoOperation gizmoOperation_ = GizmoOperation::Translate;
-    PlaySession play_;
-    bool viewportFocused_ = false;
-    std::unique_ptr<ProjectWorkspace> workspace_;
-    std::unique_ptr<EditorDocuments> documents_;
-    std::array<char, 256> assetNameInput_{};
-    String workspaceError_;
-    String inspectorError_;
-    bool exitRequested_ = false;
-    bool dockLayoutInitialized_ = false;
+	EditorProjectSetup projectSetup;
+	std::unique_ptr<EditorProject> project;
+	std::unique_ptr<ImGuiBridge> gui;
+	std::unique_ptr<MaterialPreview> materialPreview;
+	std::unique_ptr<EditorScenePreview> scenePreview;
+	EditorHierarchy hierarchy;
+	Rhi::TexturePtr scenePreviewColor;
+	Rhi::SamplerPtr scenePreviewSampler;
+	ImTextureID scenePreviewId = ImTextureID_Invalid;
+	bool scenePreviewRendered = false;
+	ResourceId displayedSceneId;
+	GizmoOperation gizmoOperation = GizmoOperation::translate;
+	PlaySession play;
+	bool viewportFocused = false;
+	std::unique_ptr<ProjectWorkspace> workspace;
+	std::unique_ptr<EditorDocuments> documents;
+	std::array<char, 256> assetNameInput{};
+	String workspaceError;
+	String inspectorError;
+	bool exitRequested = false;
+	bool dockLayoutInitialized = false;
 };
-} // namespace ursa::editor
+} // namespace Ursa::Editor

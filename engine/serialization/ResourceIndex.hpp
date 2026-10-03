@@ -5,51 +5,58 @@
 #include <vfs/VirtualFileSystem.hpp>
 #include <filesystem>
 
-namespace ursa {
+namespace Ursa
+{
 // One configured resource root. A scheme may be mounted several times; lookup
 // orders the roots the way they were mounted.
-struct ResourceMount {
-    String scheme;
-    std::filesystem::path root;
-    MountAccess access = MountAccess::ReadOnly;
+struct ResourceMount
+{
+	String scheme;
+	std::filesystem::path root;
+	MountAccess access = MountAccess::readOnly;
 };
 
-struct ResourceLocation {
-    ResourceKind kind = ResourceKind::Texture;
-    VirtualPath path;
+struct ResourceLocation
+{
+	ResourceKind kind = ResourceKind::texture;
+	VirtualPath path;
 };
 
-struct ResourceEntry {
-    ResourceId id;
-    ResourceLocation location;
+struct ResourceEntry
+{
+	ResourceId id;
+	ResourceLocation location;
 };
 
 // Maps stable resource IDs to virtual paths across the mounted resource roots.
-class ResourceIndex final {
+class ResourceIndex final
+{
 public:
-    Result<void> mount(const ResourceMount &mount);
+	Result<void> Mount(const ResourceMount& mount);
 
-    Result<void> rebuild();
+	Result<void> Rebuild();
 
-    Result<ResourceLocation> resolve(ResourceId id, const String &referencedBy = {}) const;
+	Result<ResourceLocation> Resolve(ResourceId id, const String& referencedBy = {}) const;
 
-    Result<std::filesystem::path> locate(const ResourceLocation &location) const;
+	Result<std::filesystem::path> Locate(const ResourceLocation& location) const;
 
-    Result<std::filesystem::path> writablePath(const VirtualPath &path) const;
+	Result<std::filesystem::path> WritablePath(const VirtualPath& path) const;
 
-    Vector<ResourceEntry> entries() const;
+	Vector<ResourceEntry> Entries() const;
 
-    const VirtualFileSystem &filesystem() const {
-        return filesystem_;
-    }
+	const VirtualFileSystem& Filesystem() const
+	{
+		return filesystem;
+	}
 
-    const Vector<ResourceMount> &mounts() const {
-        return mounts_;
-    }
+	const Vector<ResourceMount>& Mounts() const
+	{
+		return mounts;
+	}
 
 private:
-    VirtualFileSystem filesystem_;
-    Vector<ResourceMount> mounts_;
-    Map<String, ResourceLocation> locations_;
+	VirtualFileSystem filesystem;
+	Vector<ResourceMount> mounts;
+	Map<String, ResourceLocation> locations;
 };
-} // namespace ursa
+} // namespace Ursa

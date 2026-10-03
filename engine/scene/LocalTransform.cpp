@@ -1,7 +1,9 @@
 #include <scene/LocalTransform.hpp>
 
-namespace ursa {
-Mat4 LocalTransform::matrix() const {
-    return Mat4::translation(position) * Mat4::rotation(rotation) * Mat4::scale(scale);
+namespace Ursa
+{
+Mat4 LocalTransform::Matrix() const
+{
+	return Mat4::Translation(position) * Mat4::Rotation(rotation) * Mat4::Scale(scale);
 }
-} // namespace ursa
+} // namespace Ursa

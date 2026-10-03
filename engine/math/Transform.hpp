@@ -2,11 +2,13 @@
 #include <math/Mat4.hpp>
 #include <math/Vec3.hpp>
 
-namespace ursa {
-struct Transform {
-    Vec3 position{};
-    Vec3 size{1.0f, 1.0f, 1.0f};
+namespace Ursa
+{
+struct Transform
+{
+	Vec3 position{};
+	Vec3 size{1.0f, 1.0f, 1.0f};
 
-    Mat4 matrix() const;
+	Mat4 Matrix() const;
 };
-} // namespace ursa
+} // namespace Ursa

@@ -5,16 +5,18 @@
 #include <scene/Scene.hpp>
 #include <functional>
 
-namespace ursa::editor {
-using ComponentEditor = std::function<Result<bool>(Component &, Scene &, NodeId)>;
+namespace Ursa::Editor
+{
+using ComponentEditor = std::function<Result<bool>(Component&, Scene&, NodeId)>;
 
-class ComponentEditors final {
+class ComponentEditors final
+{
 public:
-    Result<void> registerEditor(String type, ComponentEditor editor);
+	Result<void> RegisterEditor(String type, ComponentEditor editor);
 
-    const ComponentEditor *find(const String &type) const;
+	const ComponentEditor* Find(const String& type) const;
 
 private:
-    Map<String, ComponentEditor> editors_;
+	Map<String, ComponentEditor> editors;
 };
-} // namespace ursa::editor
+} // namespace Ursa::Editor

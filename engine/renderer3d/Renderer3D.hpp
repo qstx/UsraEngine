@@ -9,56 +9,60 @@
 #include <memory>
 #include <vector>
 
-namespace ursa {
-struct BoxInstance {
-    Transform transform;
-    Color color;
-    std::shared_ptr<MaterialInstance> material;
+namespace Ursa
+{
+struct BoxInstance
+{
+	Transform transform;
+	Color color;
+	std::shared_ptr<MaterialInstance> material;
 };
 
-struct ModelBoxInstance {
-    Mat4 model;
-    Color color;
-    std::shared_ptr<MaterialInstance> material;
+struct ModelBoxInstance
+{
+	Mat4 model;
+	Color color;
+	std::shared_ptr<MaterialInstance> material;
 };
 
-class Renderer3D final {
+class Renderer3D final
+{
 public:
-    static Result<std::unique_ptr<Renderer3D>> create(rhi::DevicePtr device);
+	static Result<std::unique_ptr<Renderer3D>> Create(Rhi::DevicePtr device);
 
-    ~Renderer3D();
+	~Renderer3D();
 
-    Renderer3D(const Renderer3D &) = delete;
+	Renderer3D(const Renderer3D&) = delete;
 
-    Renderer3D &operator=(const Renderer3D &) = delete;
+	Renderer3D& operator=(const Renderer3D&) = delete;
 
-    // Acquires, renders, submits, and presents one swapchain frame.
-    Result<void> render(const rhi::SwapchainPtr &swapchain, const Camera &camera, const Vector<BoxInstance> &boxes);
+	// Acquires, renders, submits, and presents one swapchain frame.
+	Result<void> Render(const Rhi::SwapchainPtr& swapchain, const Camera& camera, const Vector<BoxInstance>& boxes);
 
-    Result<void> renderModels(const rhi::SwapchainPtr &swapchain, const Mat4 &viewProjection,
-                              const Vector<ModelBoxInstance> &boxes, const SceneLighting &lighting = {},
-                              Vec3 cameraPosition = {});
+	Result<void> RenderModels(const Rhi::SwapchainPtr& swapchain, const Mat4& viewProjection,
+	                          const Vector<ModelBoxInstance>& boxes, const SceneLighting& lighting = {},
+	                          Vec3 cameraPosition = {});
 
-    // Leaves an offscreen color target in TransferSource state for readback.
-    Result<rhi::FencePtr> renderOffscreen(const rhi::TexturePtr &color, const Camera &camera,
-                                          const Vector<BoxInstance> &boxes);
+	// Leaves an offscreen color target in TransferSource state for readback.
+	Result<Rhi::FencePtr> RenderOffscreen(const Rhi::TexturePtr& color, const Camera& camera,
+	                                      const Vector<BoxInstance>& boxes);
 
-    Result<rhi::FencePtr> renderOffscreenModels(const rhi::TexturePtr &color, const Mat4 &viewProjection,
-                                                const Vector<ModelBoxInstance> &boxes,
-                                                const SceneLighting &lighting = {}, Vec3 cameraPosition = {});
+	Result<Rhi::FencePtr> RenderOffscreenModels(const Rhi::TexturePtr& color, const Mat4& viewProjection,
+	                                            const Vector<ModelBoxInstance>& boxes,
+	                                            const SceneLighting& lighting = {}, Vec3 cameraPosition = {});
 
-    // Record a scene pass in an existing command list. The caller submits and waits for its fence
-    // before recording another frame or releasing this renderer.
-    Result<void> recordOffscreenModels(const rhi::CommandListPtr &command, const rhi::TexturePtr &color,
-                                       rhi::ResourceState initialState, rhi::ResourceState finalState,
-                                       const Mat4 &viewProjection, const Vector<ModelBoxInstance> &boxes,
-                                       const SceneLighting &lighting = {}, Vec3 cameraPosition = {});
+	// Record a scene pass in an existing command list. The caller submits and waits for its fence
+	// before recording another frame or releasing this renderer.
+	Result<void> RecordOffscreenModels(const Rhi::CommandListPtr& command, const Rhi::TexturePtr& color,
+	                                   Rhi::ResourceState initialState, Rhi::ResourceState finalState,
+	                                   const Mat4& viewProjection, const Vector<ModelBoxInstance>& boxes,
+	                                   const SceneLighting& lighting = {}, Vec3 cameraPosition = {});
 
 private:
-    struct Impl;
+	struct Impl;
 
-    explicit Renderer3D(std::unique_ptr<Impl> impl);
+	explicit Renderer3D(std::unique_ptr<Impl> impl);
 
-    std::unique_ptr<Impl> impl_;
+	std::unique_ptr<Impl> impl;
 };
-} // namespace ursa
+} // namespace Ursa

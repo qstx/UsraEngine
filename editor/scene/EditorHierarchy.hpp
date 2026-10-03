@@ -3,25 +3,28 @@
 #include <serialization/ComponentRegistry.hpp>
 #include <imgui.h>
 
-namespace ursa::editor {
-class EditorHierarchy final {
+namespace Ursa::Editor
+{
+class EditorHierarchy final
+{
 public:
-    Result<void> select(const Scene &scene, NodeId node);
+	Result<void> Select(const Scene& scene, NodeId node);
 
-    void clearSelection();
+	void ClearSelection();
 
-    Result<NodeId> selectedNode(const Scene &scene) const;
+	Result<NodeId> SelectedNode(const Scene& scene) const;
 
-    ResourceId selectedId() const {
-        return selected_;
-    }
+	ResourceId SelectedId() const
+	{
+		return selected;
+	}
 
-    // Returns true if a persistent scene property changed.
-    Result<bool> draw(Scene &scene, const ComponentRegistry &registry);
+	// Returns true if a persistent scene property changed.
+	Result<bool> Draw(Scene& scene, const ComponentRegistry& registry);
 
 private:
-    Result<bool> drawNode(Scene &scene, NodeId node, const ComponentRegistry &registry);
+	Result<bool> DrawNode(Scene& scene, NodeId node, const ComponentRegistry& registry);
 
-    ResourceId selected_;
+	ResourceId selected;
 };
-} // namespace ursa::editor
+} // namespace Ursa::Editor

@@ -6,105 +6,186 @@
 #include <memory>
 #include <utility>
 
-namespace ursa {
-namespace detail {
+namespace Ursa
+{
+namespace Detail
+{
 struct WindowAccess;
 }
-enum class Key {
-    Escape, Space, Left, Right, Up, Down, W, A, S, D, Unknown, Tab, Enter, Backspace, Delete, Home, End,
-    PageUp, PageDown, Insert, LeftShift, RightShift, LeftControl, RightControl, LeftAlt, RightAlt, LeftSuper,
-    RightSuper, B, C, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, T, U, V, X, Y, Z,
-    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9
+enum class Key
+{
+	escape,
+	space,
+	left,
+	right,
+	up,
+	down,
+	w,
+	a,
+	s,
+	d,
+	unknown,
+	tab,
+	enter,
+	backspace,
+	Delete,
+	home,
+	end,
+	pageUp,
+	pageDown,
+	insert,
+	leftShift,
+	rightShift,
+	leftControl,
+	rightControl,
+	leftAlt,
+	rightAlt,
+	leftSuper,
+	rightSuper,
+	b,
+	c,
+	e,
+	f,
+	g,
+	h,
+	i,
+	j,
+	k,
+	l,
+	m,
+	n,
+	o,
+	p,
+	q,
+	r,
+	t,
+	u,
+	v,
+	x,
+	y,
+	z,
+	digit0,
+	digit1,
+	digit2,
+	digit3,
+	digit4,
+	digit5,
+	digit6,
+	digit7,
+	digit8,
+	digit9
 };
 
-enum class MouseButton { Left, Right, Middle, Other };
-
-enum class WindowEventType {
-    KeyPressed, KeyReleased, KeyRepeated, Character, CursorMoved, MousePressed, MouseReleased, Scrolled, Focused
+enum class MouseButton
+{
+	left,
+	right,
+	middle,
+	other
 };
 
-struct WindowEvent {
-    WindowEventType type = WindowEventType::CursorMoved;
-    Key key = Key::Unknown;
-    MouseButton button = MouseButton::Other;
-    uint32_t codepoint = 0;
-    double x = 0.0;
-    double y = 0.0;
-    bool focused = false;
+enum class WindowEventType
+{
+	keyPressed,
+	keyReleased,
+	keyRepeated,
+	character,
+	cursorMoved,
+	mousePressed,
+	mouseReleased,
+	scrolled,
+	focused
 };
 
-using WindowEventCallback = std::function<void(const WindowEvent &)>;
+struct WindowEvent
+{
+	WindowEventType type = WindowEventType::cursorMoved;
+	Key key = Key::unknown;
+	MouseButton button = MouseButton::other;
+	uint32_t codepoint = 0;
+	double x = 0.0;
+	double y = 0.0;
+	bool focused = false;
+};
 
-class Window final {
+using WindowEventCallback = std::function<void(const WindowEvent&)>;
+
+class Window final
+{
 public:
-    static Result<std::shared_ptr<Window>> create(uint32_t width, uint32_t height, const String &title,
-                                                  bool visible = true);
+	static Result<std::shared_ptr<Window>> Create(uint32_t width, uint32_t height, const String& title,
+	                                              bool visible = true);
 
-    ~Window();
+	~Window();
 
-    Window(const Window &) = delete;
+	Window(const Window&) = delete;
 
-    Window &operator=(const Window &) = delete;
+	Window& operator=(const Window&) = delete;
 
-    void pollEvents() const;
+	void PollEvents() const;
 
-    void waitEvents() const;
+	void WaitEvents() const;
 
-    bool shouldClose() const;
+	bool ShouldClose() const;
 
-    void requestClose();
+	void RequestClose();
 
-    void cancelClose();
+	void CancelClose();
 
-    void setTitle(const String &title);
+	void SetTitle(const String& title);
 
-    String title() const;
+	String Title() const;
 
-    String clipboardText() const;
+	String ClipboardText() const;
 
-    void setClipboardText(const String &text);
+	void SetClipboardText(const String& text);
 
-    bool keyDown(Key key) const;
+	bool KeyDown(Key key) const;
 
-    bool mouseDown(MouseButton button) const;
+	bool MouseDown(MouseButton button) const;
 
-    std::pair<double, double> cursorPosition() const;
+	std::pair<double, double> CursorPosition() const;
 
-    Result<uint64_t> subscribe(WindowEventCallback callback);
+	Result<uint64_t> Subscribe(WindowEventCallback callback);
 
-    void unsubscribe(uint64_t subscription);
+	void Unsubscribe(uint64_t subscription);
 
-    void resize(uint32_t width, uint32_t height);
+	void Resize(uint32_t width, uint32_t height);
 
-    void minimize();
+	void Minimize();
 
-    void restore();
+	void Restore();
 
-    uint32_t framebufferWidth() const;
+	uint32_t FramebufferWidth() const;
 
-    uint32_t framebufferHeight() const;
+	uint32_t FramebufferHeight() const;
 
 private:
-    explicit Window(void *handle) : handle_(handle) {
-    }
-    friend struct detail::WindowAccess;
+	explicit Window(void* handle) : handle(handle)
+	{
+	}
+	friend struct Detail::WindowAccess;
 
-    void dispatchEvent(const WindowEvent &event);
+	void DispatchEvent(const WindowEvent& event);
 
-    void *handle_{};
-    uint64_t nextSubscription_ = 1;
-    Vector<std::pair<uint64_t, WindowEventCallback>> subscriptions_;
+	void* handle{};
+	uint64_t nextSubscription = 1;
+	Vector<std::pair<uint64_t, WindowEventCallback>> subscriptions;
 };
 
-namespace detail {
-struct WindowAccess {
-    static void *native(const Window &window) {
-        return window.handle_;
-    }
+namespace Detail
+{
+struct WindowAccess
+{
+	static void* Native(const Window& window)
+	{
+		return window.handle;
+	}
 
-    static void dispatch(Window &window, const WindowEvent &event) {
-        window.dispatchEvent(event);
-    }
+	static void Dispatch(Window& window, const WindowEvent& event)
+	{
+		window.DispatchEvent(event);
+	}
 };
-} // namespace detail
-} // namespace ursa
+} // namespace Detail
+} // namespace Ursa

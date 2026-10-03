@@ -4,86 +4,124 @@
 #include <serialization/MaterialResource.hpp>
 #include <serialization/TextureResource.hpp>
 
-namespace ursa {
-Result<std::unique_ptr<ResourceSession>> ResourceSession::open(const Vector<ResourceMount> &mounts) {
-    auto session = std::unique_ptr<ResourceSession>(new ResourceSession);
-    for (const ResourceMount &mount : mounts) {
-        auto added = session->index_.mount(mount);
-        if (!added)
-            return Result<std::unique_ptr<ResourceSession>>::failure(added.error);
-    }
-    auto scanned = session->index_.rebuild();
-    if (!scanned)
-        return Result<std::unique_ptr<ResourceSession>>::failure(scanned.error);
-    return Result<std::unique_ptr<ResourceSession>>::success(std::move(session));
+namespace Ursa
+{
+Result<std::unique_ptr<ResourceSession>> ResourceSession::Open(const Vector<ResourceMount>& mounts)
+{
+	auto session = std::unique_ptr<ResourceSession>(new ResourceSession);
+	for (const ResourceMount& mount : mounts)
+	{
+		auto added = session->index.Mount(mount);
+		if (!added)
+		{
+			return Result<std::unique_ptr<ResourceSession>>::Failure(added.error);
+		}
+	}
+	auto scanned = session->index.Rebuild();
+	if (!scanned)
+	{
+		return Result<std::unique_ptr<ResourceSession>>::Failure(scanned.error);
+	}
+	return Result<std::unique_ptr<ResourceSession>>::Success(std::move(session));
 }
 
-Result<std::unique_ptr<ResourceSession>> ResourceSession::open(const std::filesystem::path &root, MountAccess access) {
-    Vector<ResourceMount> mounts;
-    mounts.push_back(ResourceMount{projectScheme, root, access});
-    return open(mounts);
+Result<std::unique_ptr<ResourceSession>> ResourceSession::Open(const std::filesystem::path& root, MountAccess access)
+{
+	Vector<ResourceMount> mounts;
+	mounts.push_back(ResourceMount{projectScheme, root, access});
+	return Open(mounts);
 }
 
-Result<std::unique_ptr<ResourceSession>> ResourceSession::refreshed() const {
-    return open(index_.mounts());
+Result<std::unique_ptr<ResourceSession>> ResourceSession::Refreshed() const
+{
+	return Open(index.Mounts());
 }
 
-Result<MaterialTexturePtr> ResourceSession::loadTexture(ResourceId id) {
-    const auto key = id.toString();
-    auto cached = textures_.find(key);
-    if (cached != textures_.end())
-        return Result<MaterialTexturePtr>::success(cached->second);
-    auto location = index_.resolve(id);
-    if (!location)
-        return Result<MaterialTexturePtr>::failure(location.error);
-    if (location.value.kind != ResourceKind::Texture)
-        return Result<MaterialTexturePtr>::failure("Resource " + key +
-                                                   " is not a texture: " + location.value.path.toString());
-    auto resolved = index_.locate(location.value);
-    if (!resolved)
-        return Result<MaterialTexturePtr>::failure(resolved.error);
-    auto loaded = loadTextureResource(resolved.value);
-    if (!loaded)
-        return Result<MaterialTexturePtr>::failure(loaded.error);
-    if (loaded.value.id != id)
-        return Result<MaterialTexturePtr>::failure("Texture ID changed after indexing: " +
-                                                   location.value.path.toString());
-    textures_.emplace(key, loaded.value.texture);
-    URSA_LOG_DEBUG("Engine", "Loaded texture " + key + " from " + location.value.path.toString());
-    return Result<MaterialTexturePtr>::success(std::move(loaded.value.texture));
+Result<MaterialTexturePtr> ResourceSession::LoadTexture(ResourceId id)
+{
+	const auto key = id.ToString();
+	auto cached = textures.find(key);
+	if (cached != textures.end())
+	{
+		return Result<MaterialTexturePtr>::Success(cached->second);
+	}
+	auto location = index.Resolve(id);
+	if (!location)
+	{
+		return Result<MaterialTexturePtr>::Failure(location.error);
+	}
+	if (location.value.kind != ResourceKind::texture)
+	{
+		return Result<MaterialTexturePtr>::Failure("Resource " + key +
+		                                           " is not a texture: " + location.value.path.ToString());
+	}
+	auto resolved = index.Locate(location.value);
+	if (!resolved)
+	{
+		return Result<MaterialTexturePtr>::Failure(resolved.error);
+	}
+	auto loaded = LoadTextureResource(resolved.value);
+	if (!loaded)
+	{
+		return Result<MaterialTexturePtr>::Failure(loaded.error);
+	}
+	if (loaded.value.id != id)
+	{
+		return Result<MaterialTexturePtr>::Failure("Texture ID changed after indexing: " +
+		                                           location.value.path.ToString());
+	}
+	textures.emplace(key, loaded.value.texture);
+	URSA_LOG_DEBUG("Engine", "Loaded texture " + key + " from " + location.value.path.ToString());
+	return Result<MaterialTexturePtr>::Success(std::move(loaded.value.texture));
 }
 
-Result<std::shared_ptr<MaterialInstance>> ResourceSession::loadMaterial(ResourceId id) {
-    const auto key = id.toString();
-    auto cached = materials_.find(key);
-    if (cached != materials_.end())
-        return Result<std::shared_ptr<MaterialInstance>>::success(cached->second);
-    auto location = index_.resolve(id);
-    if (!location)
-        return Result<std::shared_ptr<MaterialInstance>>::failure(location.error);
-    if (location.value.kind != ResourceKind::Material)
-        return Result<std::shared_ptr<MaterialInstance>>::failure("Resource " + key +
-                                                                  " is not a material: " +
-                                                                  location.value.path.toString());
-    auto resolved = index_.locate(location.value);
-    if (!resolved)
-        return Result<std::shared_ptr<MaterialInstance>>::failure(resolved.error);
-    auto loaded =
-        loadMaterialResource(resolved.value, [this](ResourceId textureId) { return loadTexture(textureId); });
-    if (!loaded)
-        return Result<std::shared_ptr<MaterialInstance>>::failure(loaded.error);
-    if (loaded.value.id != id)
-        return Result<std::shared_ptr<MaterialInstance>>::failure("Material ID changed after indexing: " +
-                                                                  location.value.path.toString());
-    materials_.emplace(key, loaded.value.material);
-    URSA_LOG_DEBUG("Engine", "Loaded material " + key + " from " + location.value.path.toString());
-    return Result<std::shared_ptr<MaterialInstance>>::success(std::move(loaded.value.material));
+Result<std::shared_ptr<MaterialInstance>> ResourceSession::LoadMaterial(ResourceId id)
+{
+	const auto key = id.ToString();
+	auto cached = materials.find(key);
+	if (cached != materials.end())
+	{
+		return Result<std::shared_ptr<MaterialInstance>>::Success(cached->second);
+	}
+	auto location = index.Resolve(id);
+	if (!location)
+	{
+		return Result<std::shared_ptr<MaterialInstance>>::Failure(location.error);
+	}
+	if (location.value.kind != ResourceKind::material)
+	{
+		return Result<std::shared_ptr<MaterialInstance>>::Failure(
+		    "Resource " + key + " is not a material: " + location.value.path.ToString());
+	}
+	auto resolved = index.Locate(location.value);
+	if (!resolved)
+	{
+		return Result<std::shared_ptr<MaterialInstance>>::Failure(resolved.error);
+	}
+	auto loaded = LoadMaterialResource(resolved.value, [this](ResourceId textureId) { return LoadTexture(textureId); });
+	if (!loaded)
+	{
+		return Result<std::shared_ptr<MaterialInstance>>::Failure(loaded.error);
+	}
+	if (loaded.value.id != id)
+	{
+		return Result<std::shared_ptr<MaterialInstance>>::Failure("Material ID changed after indexing: " +
+		                                                          location.value.path.ToString());
+	}
+	materials.emplace(key, loaded.value.material);
+	URSA_LOG_DEBUG("Engine", "Loaded material " + key + " from " + location.value.path.ToString());
+	return Result<std::shared_ptr<MaterialInstance>>::Success(std::move(loaded.value.material));
 }
 
-Result<ResourceId> ResourceSession::identifyMaterial(const std::shared_ptr<MaterialInstance> &material) const {
-    for (const auto &entry : materials_)
-        if (entry.second == material)
-            return ResourceId::parse(entry.first);
-    return Result<ResourceId>::failure("Material object is not in this resource session");
+Result<ResourceId> ResourceSession::IdentifyMaterial(const std::shared_ptr<MaterialInstance>& material) const
+{
+	for (const auto& entry : materials)
+	{
+		if (entry.second == material)
+		{
+			return ResourceId::Parse(entry.first);
+		}
+	}
+	return Result<ResourceId>::Failure("Material object is not in this resource session");
 }
-} // namespace ursa
+} // namespace Ursa

@@ -6,62 +6,70 @@
 #include <cstdint>
 #include <filesystem>
 
-namespace ursa {
-enum class MountAccess { ReadOnly, ReadWrite };
+namespace Ursa
+{
+enum class MountAccess
+{
+	readOnly,
+	readWrite
+};
 
 // One file reported by VirtualFileSystem::list(). The path resolves to the
 // first root that contains it; shadowedHostPaths names host locations in later
 // roots that the winning entry masks.
-struct VirtualFileEntry {
-    VirtualPath path;
-    Vector<std::filesystem::path> shadowedHostPaths;
+struct VirtualFileEntry
+{
+	VirtualPath path;
+	Vector<std::filesystem::path> shadowedHostPaths;
 };
 
 // Addresses resources as "<scheme>:<relative-path>" over an ordered list of
 // host directories. It owns path validation and access policy only; it does not
 // know about resource kinds or identities.
-class VirtualFileSystem final {
+class VirtualFileSystem final
+{
 public:
-    Result<void> mount(const String &scheme, const std::filesystem::path &root, MountAccess access);
+	Result<void> Mount(const String& scheme, const std::filesystem::path& root, MountAccess access);
 
-    bool isMounted(const String &scheme) const;
+	bool IsMounted(const String& scheme) const;
 
-    Vector<String> schemes() const;
+	Vector<String> Schemes() const;
 
-    Result<Vector<std::filesystem::path>> roots(const String &scheme) const;
+	Result<Vector<std::filesystem::path>> Roots(const String& scheme) const;
 
-    Result<Vector<uint8_t>> read(const VirtualPath &path) const;
+	Result<Vector<uint8_t>> Read(const VirtualPath& path) const;
 
-    Result<Vector<uint8_t>> readPrefix(const VirtualPath &path, uint64_t maxBytes) const;
+	Result<Vector<uint8_t>> ReadPrefix(const VirtualPath& path, uint64_t maxBytes) const;
 
-    Result<String> readText(const VirtualPath &path) const;
+	Result<String> ReadText(const VirtualPath& path) const;
 
-    Result<bool> exists(const VirtualPath &path) const;
+	Result<bool> Exists(const VirtualPath& path) const;
 
-    Result<uint64_t> size(const VirtualPath &path) const;
+	Result<uint64_t> Size(const VirtualPath& path) const;
 
-    Result<std::filesystem::path> resolveToDisk(const VirtualPath &path) const;
+	Result<std::filesystem::path> ResolveToDisk(const VirtualPath& path) const;
 
-    // The host path a write would target. The first root of the scheme must be
-    // writable; the file itself does not have to exist yet.
-    Result<std::filesystem::path> resolveForWrite(const VirtualPath &path) const;
+	// The host path a write would target. The first root of the scheme must be
+	// writable; the file itself does not have to exist yet.
+	Result<std::filesystem::path> ResolveForWrite(const VirtualPath& path) const;
 
-    Result<void> write(const VirtualPath &path, const Vector<uint8_t> &bytes, bool createDirectories = true);
+	Result<void> Write(const VirtualPath& path, const Vector<uint8_t>& bytes, bool createDirectories = true);
 
-    Result<Vector<VirtualFileEntry>> list(const String &scheme) const;
+	Result<Vector<VirtualFileEntry>> List(const String& scheme) const;
 
 private:
-    struct Root {
-        std::filesystem::path path;
-        MountAccess access;
-    };
+	struct Root
+	{
+		std::filesystem::path path;
+		MountAccess access;
+	};
 
-    const Vector<Root> *findMount(const String &scheme) const;
+	const Vector<Root>* FindMount(const String& scheme) const;
 
-    Result<std::filesystem::path> resolveIn(const Root &root, const VirtualPath &path) const;
+	Result<std::filesystem::path> ResolveIn(const Root& root, const VirtualPath& path) const;
 
-    Result<std::filesystem::path> resolveExisting(const VirtualPath &path) const;
+	Result<std::filesystem::path> ResolveExisting(const VirtualPath& path) const;
 
-    Map<String, Vector<Root>> mounts_;
+	Map<String, Vector<Root>> mounts;
 };
-} // namespace ursa
+} // namespace Ursa

@@ -26,7 +26,7 @@ Include `<core/Log.hpp>` to record messages from Runtime, Engine, Editor, or a g
 #include <core/Log.hpp>
 
 int main() {
-    ursa::LogSession log;
+    Ursa::LogSession log;
     if (!log.status())
         return 1;
     URSA_LOG_INFO("Example", "Logging ready");
@@ -40,17 +40,17 @@ Each accepted message includes a timestamp, level, module name, and UTF-8 body. 
 
 ## Public container types
 
-Include `<core/Containers.hpp>` and use `ursa::String`, `ursa::Vector<T>`, `ursa::Array<T, N>`, `ursa::Map<K, V>`, `ursa::UnorderedMap<K, V>`, `ursa::Set<K>`, and `ursa::Deque<T>` for engine-owned strings and collections. These names currently map to EASTL and keep vendor types out of consumer source. Existing code that passed `std::string` or `std::vector` to Runtime APIs must switch to these aliases or convert explicitly. Smart pointers, `std::function`, and filesystem paths retain their standard-library types.
+Include `<core/Containers.hpp>` and use `Ursa::String`, `Ursa::Vector<T>`, `Ursa::Array<T, N>`, `Ursa::Map<K, V>`, `Ursa::UnorderedMap<K, V>`, `Ursa::Set<K>`, and `Ursa::Deque<T>` for engine-owned strings and collections. These names currently map to EASTL and keep vendor types out of consumer source. Existing code that passed `std::string` or `std::vector` to Runtime APIs must switch to these aliases or convert explicitly. Smart pointers, `std::function`, and filesystem paths retain their standard-library types.
 
 ```cpp
 #include <core/Containers.hpp>
 #include <rhi/RHI.hpp>
 
 int main() {
-    ursa::Vector<uint8_t> code{1, 2, 3, 4};
-    ursa::rhi::ShaderDesc shader;
+    Ursa::Vector<uint8_t> code{1, 2, 3, 4};
+    Ursa::Rhi::ShaderDesc shader;
     shader.code = code;
-    shader.entry = ursa::String("main");
+    shader.entry = Ursa::String("main");
     return shader.code.size() == 4 && shader.entry == "main" ? 0 : 1;
 }
 ```
@@ -62,14 +62,14 @@ The same migration applies to Engine scene, material, renderer, and resource API
 #include <serialization/ResourceId.hpp>
 #include <nlohmann/json.hpp>
 
-void inspectId(ursa::ResourceId id) {
-    nlohmann::json record{{"id", ursa::toStdString(id.toString())}};
-    auto restored = ursa::ResourceId::parse(
-        ursa::toUrsaString(record.at("id").get<std::string>()));
+void inspectId(Ursa::ResourceId id) {
+    nlohmann::json record{{"id", Ursa::toStdString(id.toString())}};
+    auto restored = Ursa::ResourceId::parse(
+        Ursa::toUrsaString(record.at("id").get<std::string>()));
     if (!restored)
         return;
-    auto file = ursa::pathFromUrsaString(ursa::String("assets/sample.ursamat"));
-    auto displayPath = ursa::pathToUrsaString(file);
+    auto file = Ursa::pathFromUrsaString(Ursa::String("assets/sample.ursamat"));
+    auto displayPath = Ursa::pathToUrsaString(file);
 }
 ```
 
@@ -113,7 +113,7 @@ Debug builds require `VK_LAYER_KHRONOS_validation`. The engine tests use a headl
 
 ## RHI use
 
-Include `<rhi/RHI.hpp>`. `rhi::createDevice` chooses the backend; currently `Backend::Vulkan` is implemented. A device exposes adapter details and capabilities and creates buffers, textures, samplers, SPIR-V shaders, descriptor layouts/groups, graphics and compute pipelines, command lists, and a swapchain. Commands require explicit resource barriers and return diagnostic `Result` values. The caller waits on a returned fence before reading GPU output. All RHI handles retain the device context required for their destruction; command lists retain referenced resources until completion.
+Include `<rhi/RHI.hpp>`. `Ursa::Rhi::CreateDevice` chooses the backend; currently `Backend::Vulkan` is implemented. A device exposes adapter details and capabilities and creates buffers, textures, samplers, SPIR-V shaders, descriptor layouts/groups, graphics and compute pipelines, command lists, and a swapchain. Commands require explicit resource barriers and return diagnostic `Result` values. The caller waits on a returned fence before reading GPU output. All RHI handles retain the device context required for their destruction; command lists retain referenced resources until completion.
 
 The first version supports 2D textures with one mip and one layer, one color target and an optional depth target, one descriptor set per pipeline, one graphics/compute queue, and 32-bit indices. These are the implemented limits of the current public API. Vulkan types remain inside the backend source. The shader description tags its bytecode format so future OpenGL and D3D12 implementations can accept their own shader representations.
 
@@ -139,20 +139,20 @@ prj:snake/snake.ursascene              -> <project>/assets/snake/snake.ursascene
 #include <vfs/AssetRoots.hpp>
 #include <vfs/VirtualFileSystem.hpp>
 
-ursa::Result<void> openResources(const std::filesystem::path &engineRoot,
+Ursa::Result<void> openResources(const std::filesystem::path &engineRoot,
                                  const std::filesystem::path &engineMirror,
                                  const std::filesystem::path &projectAssets) {
-    ursa::VirtualFileSystem vfs;
-    if (!vfs.mount("ursa", engineRoot, ursa::MountAccess::ReadOnly) ||
-        !vfs.mount("ursa", engineMirror, ursa::MountAccess::ReadOnly) ||
-        !vfs.mount("prj", projectAssets, ursa::MountAccess::ReadWrite))
-        return ursa::Result<void>::failure("Cannot mount resource roots");
-    auto shader = ursa::VirtualPath::parse("ursa:shaders/renderer3d/cube.vert.spv");
+    Ursa::VirtualFileSystem vfs;
+    if (!vfs.mount("ursa", engineRoot, Ursa::MountAccess::ReadOnly) ||
+        !vfs.mount("ursa", engineMirror, Ursa::MountAccess::ReadOnly) ||
+        !vfs.mount("prj", projectAssets, Ursa::MountAccess::ReadWrite))
+        return Ursa::Result<void>::failure("Cannot mount resource roots");
+    auto shader = Ursa::VirtualPath::parse("ursa:shaders/renderer3d/cube.vert.spv");
     if (!shader)
-        return ursa::Result<void>::failure(shader.error);
+        return Ursa::Result<void>::failure(shader.error);
     auto bytes = vfs.read(shader.value);
     if (!bytes)
-        return ursa::Result<void>::failure(bytes.error);
+        return Ursa::Result<void>::failure(bytes.error);
     return {};
 }
 ```
@@ -167,14 +167,14 @@ Resources can be stored under multiple registered roots, such as `Engine/assets`
 #include <serialization/ResourceIndex.hpp>
 
 void inspectResources() {
-ursa::ResourceIndex resources;
+Ursa::ResourceIndex resources;
 auto added = resources.addRoot("assets");
 if (!added)
     return;
 auto scanned = resources.rebuild();
 if (!scanned)
     return;
-auto id = ursa::ResourceId::parse("de305d54-75b4-431b-adb2-eb6b9e546014");
+auto id = Ursa::ResourceId::parse("de305d54-75b4-431b-adb2-eb6b9e546014");
 if (!id)
     return;
 auto location = resources.resolve(id.value, "example scene");
@@ -193,25 +193,25 @@ Procedural RGBA8 pixels can be saved directly as a `.ursatex` file. A `.ursamat`
 #include <serialization/TextureResource.hpp>
 
 void saveAndLoadMaterial(const std::filesystem::path &assetRoot) {
-    auto pixels = ursa::MaterialTexture::create(1, 1, ursa::TextureColorSpace::Srgb,
+    auto pixels = Ursa::MaterialTexture::create(1, 1, Ursa::TextureColorSpace::Srgb,
                                                 {220, 80, 40, 255});
     if (!pixels)
         return;
-    const auto textureId = ursa::ResourceId::generate();
-    if (!ursa::saveTextureResource(assetRoot / "swatch.ursatex", textureId, *pixels.value))
+    const auto textureId = Ursa::ResourceId::generate();
+    if (!Ursa::saveTextureResource(assetRoot / "swatch.ursatex", textureId, *pixels.value))
         return;
 
-    ursa::MaterialInstance material(ursa::MaterialType::Unlit);
-    if (!material.setTexture(ursa::MaterialTextureSlot::BaseColor, pixels.value))
+    Ursa::MaterialInstance material(Ursa::MaterialType::Unlit);
+    if (!material.setTexture(Ursa::MaterialTextureSlot::BaseColor, pixels.value))
         return;
-    const auto materialId = ursa::ResourceId::generate();
-    if (!ursa::saveMaterialResource(assetRoot / "swatch.ursamat", materialId, material,
-                                    [textureId](ursa::MaterialTexturePtr) {
-                                        return ursa::Result<ursa::ResourceId>::success(textureId);
+    const auto materialId = Ursa::ResourceId::generate();
+    if (!Ursa::saveMaterialResource(assetRoot / "swatch.ursamat", materialId, material,
+                                    [textureId](Ursa::MaterialTexturePtr) {
+                                        return Ursa::Result<Ursa::ResourceId>::success(textureId);
                                     }))
         return;
 
-    auto session = ursa::ResourceSession::open({assetRoot});
+    auto session = Ursa::ResourceSession::open({assetRoot});
     if (!session)
         return;
     auto loaded = session.value->loadMaterial(materialId);
@@ -230,22 +230,22 @@ Register the component codecs used by the scene before saving or loading. A scen
 #include <serialization/SceneResource.hpp>
 
 void roundTripScene(const std::filesystem::path &path,
-                    ursa::ResourceSession &resources) {
-    ursa::ComponentRegistry registry;
-    if (!ursa::registerBuiltinComponents(registry))
+                    Ursa::ResourceSession &resources) {
+    Ursa::ComponentRegistry registry;
+    if (!Ursa::registerBuiltinComponents(registry))
         return;
-    ursa::Scene source;
+    Ursa::Scene source;
     auto node = source.createNode();
-    if (!node || !source.addComponent<ursa::CameraComponent>(node.value))
+    if (!node || !source.addComponent<Ursa::CameraComponent>(node.value))
         return;
-    if (!ursa::saveSceneResource(path, ursa::ResourceId::generate(), source, registry))
+    if (!Ursa::saveSceneResource(path, Ursa::ResourceId::generate(), source, registry))
         return;
-    ursa::ComponentLoadContext context(resources);
-    auto loaded = ursa::loadSceneResource(path, registry, context);
+    Ursa::ComponentLoadContext context(resources);
+    auto loaded = Ursa::loadSceneResource(path, registry, context);
     if (!loaded)
         return;
-    std::unique_ptr<ursa::Scene> active = std::move(loaded.value.scene);
-    auto reloaded = ursa::reloadSceneResource(path, registry, context, active);
+    std::unique_ptr<Ursa::Scene> active = std::move(loaded.value.scene);
+    auto reloaded = Ursa::reloadSceneResource(path, registry, context, active);
 }
 ```
 
@@ -256,30 +256,30 @@ For project components, register a stable type name and data version before eith
 ```cpp
 #include <serialization/ComponentRegistry.hpp>
 
-struct CounterComponent : ursa::Component {
+struct CounterComponent : Ursa::Component {
     CounterComponent(int &total, int step) : total(total), step(step) {}
     int &total;
     int step;
 };
 
-ursa::Result<void> registerCounter(ursa::ComponentRegistry &registry) {
-    ursa::ComponentCodec codec;
+Ursa::Result<void> registerCounter(Ursa::ComponentRegistry &registry) {
+    Ursa::ComponentCodec codec;
     codec.type = "game.Counter";
     codec.version = 1;
-    codec.matches = [](const ursa::Component &value) {
+    codec.matches = [](const Ursa::Component &value) {
         return dynamic_cast<const CounterComponent *>(&value) != nullptr;
     };
-    codec.save = [](const ursa::Component &value, const ursa::ComponentSaveContext &) {
-        return ursa::Result<nlohmann::json>::success(
+    codec.save = [](const Ursa::Component &value, const Ursa::ComponentSaveContext &) {
+        return Ursa::Result<nlohmann::json>::success(
             {{"step", static_cast<const CounterComponent &>(value).step}});
     };
-    codec.create = [](ursa::Scene &scene, ursa::NodeId node, const nlohmann::json &data,
-                      ursa::ComponentLoadContext &context) {
+    codec.create = [](Ursa::Scene &scene, Ursa::NodeId node, const nlohmann::json &data,
+                      Ursa::ComponentLoadContext &context) {
         if (!data.is_object() || !data.contains("step") || !data["step"].is_number_integer())
-            return ursa::Result<ursa::ComponentId>::failure("Invalid Counter step");
+            return Ursa::Result<Ursa::ComponentId>::failure("Invalid Counter step");
         auto total = context.service<int>();
         if (!total)
-            return ursa::Result<ursa::ComponentId>::failure(total.error);
+            return Ursa::Result<Ursa::ComponentId>::failure(total.error);
         return scene.addComponent<CounterComponent>(node, *total.value, data["step"].get<int>());
     };
     return registry.registerCodec(std::move(codec));
@@ -298,46 +298,46 @@ Use `loadLinkedSceneResource` for a scene containing Prefab instances. The plain
 #include <serialization/PrefabResource.hpp>
 #include <serialization/JsonResource.hpp>
 
-void placePrefab(const std::filesystem::path &root, ursa::Scene &source,
-                 ursa::NodeId subtree) {
-    ursa::ComponentRegistry registry;
-    if (!ursa::registerBuiltinComponents(registry))
+void placePrefab(const std::filesystem::path &root, Ursa::Scene &source,
+                 Ursa::NodeId subtree) {
+    Ursa::ComponentRegistry registry;
+    if (!Ursa::registerBuiltinComponents(registry))
         return;
-    const auto prefabId = ursa::ResourceId::generate();
-    if (!ursa::savePrefabResource(root / "tile.ursaprefab", prefabId, source, subtree, registry))
+    const auto prefabId = Ursa::ResourceId::generate();
+    if (!Ursa::savePrefabResource(root / "tile.ursaprefab", prefabId, source, subtree, registry))
         return;
-    ursa::Scene empty;
+    Ursa::Scene empty;
     const auto scenePath = root / "level.ursascene";
-    auto document = ursa::encodeSceneDocument(scenePath, ursa::ResourceId::generate(), empty, registry);
+    auto document = Ursa::encodeSceneDocument(scenePath, Ursa::ResourceId::generate(), empty, registry);
     if (!document)
         return;
-    const auto instanceId = ursa::ResourceId::generate();
-    if (!ursa::addPrefabInstance(document.value, prefabId, instanceId) ||
-        !ursa::writeJsonResource(scenePath, document.value))
+    const auto instanceId = Ursa::ResourceId::generate();
+    if (!Ursa::addPrefabInstance(document.value, prefabId, instanceId) ||
+        !Ursa::writeJsonResource(scenePath, document.value))
         return;
-    auto resources = ursa::ResourceSession::open({root});
+    auto resources = Ursa::ResourceSession::open({root});
     if (!resources)
         return;
-    ursa::ComponentLoadContext context(*resources.value);
-    auto linked = ursa::loadLinkedSceneResource(scenePath, registry, context);
+    Ursa::ComponentLoadContext context(*resources.value);
+    auto linked = Ursa::loadLinkedSceneResource(scenePath, registry, context);
     if (!linked)
         return;
     auto sourceId = source.nodePersistentId(subtree);
-    if (!sourceId || !ursa::setPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
+    if (!sourceId || !Ursa::setPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
                                                        "/transform/position/0", 2.0f) ||
-        !ursa::saveLinkedSceneResource(scenePath, linked.value, registry))
+        !Ursa::saveLinkedSceneResource(scenePath, linked.value, registry))
         return;
     auto refreshed = resources.value->refreshed();
     if (!refreshed)
         return;
-    ursa::ComponentLoadContext reloadContext(*refreshed.value);
-    if (!ursa::reloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value))
+    Ursa::ComponentLoadContext reloadContext(*refreshed.value);
+    if (!Ursa::reloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value))
         return;
-    if (!ursa::clearPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
+    if (!Ursa::clearPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
                                             "/transform/position/0") ||
-        !ursa::saveLinkedSceneResource(scenePath, linked.value, registry))
+        !Ursa::saveLinkedSceneResource(scenePath, linked.value, registry))
         return;
-    ursa::reloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value);
+    Ursa::reloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value);
 }
 ```
 
@@ -351,10 +351,10 @@ Include `<material/Material.hpp>`. `MaterialInstance` owns editable CPU paramete
 #include <material/Material.hpp>
 #include <memory>
 
-auto material = std::make_shared<ursa::MaterialInstance>(ursa::MaterialType::PbrMetallicRoughness);
-auto pixels = ursa::MaterialTexture::create(1, 1, ursa::TextureColorSpace::Srgb,
+auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::PbrMetallicRoughness);
+auto pixels = Ursa::MaterialTexture::create(1, 1, Ursa::TextureColorSpace::Srgb,
                                             {220, 80, 40, 255});
-if (!pixels || !material->setTexture(ursa::MaterialTextureSlot::BaseColor, pixels.value) ||
+if (!pixels || !material->setTexture(Ursa::MaterialTextureSlot::BaseColor, pixels.value) ||
     !material->setMetallic(0.2f) || !material->setRoughness(0.6f))
     return 1;
 auto independent = material->clone();
@@ -371,12 +371,12 @@ Include `<math/Math.hpp>` for `Vec3`, `Mat4`, `Transform`, and `Camera`, or incl
 ```cpp
 #include <math/Math.hpp>
 
-ursa::Camera camera;
+Ursa::Camera camera;
 camera.position = {0.0f, 12.0f, 18.0f};
 camera.target = {0.0f, 0.0f, 0.0f};
-const ursa::Mat4 viewProjection = camera.viewProjection(16.0f / 9.0f);
-const ursa::Mat4 model = ursa::Transform{{2.0f, 0.5f, 3.0f}, {1.0f, 1.0f, 1.0f}}.matrix();
-const ursa::Mat4 clipFromModel = viewProjection * model;
+const Ursa::Mat4 viewProjection = camera.viewProjection(16.0f / 9.0f);
+const Ursa::Mat4 model = Ursa::Transform{{2.0f, 0.5f, 3.0f}, {1.0f, 1.0f, 1.0f}}.matrix();
+const Ursa::Mat4 clipFromModel = viewProjection * model;
 ```
 
 This example is compiled in the sibling Demo repository's public-header smoke test.
@@ -388,13 +388,13 @@ Include `<scene/Scene.hpp>` to create a runtime hierarchy. `Scene` owns its node
 ```cpp
 #include <scene/Scene.hpp>
 
-ursa::Scene scene;
+Ursa::Scene scene;
 const auto root = scene.createNode().value;
 const auto child = scene.createNode(root).value;
-ursa::LocalTransform local;
+Ursa::LocalTransform local;
 local.position = {1.0f, 0.0f, 0.0f};
 scene.setLocalTransform(child, local);
-const ursa::Mat4 world = scene.worldTransform(child).value;
+const Ursa::Mat4 world = scene.worldTransform(child).value;
 ```
 
 Each node has local position, quaternion rotation, scale, and an enabled flag. World transforms combine ancestor and local transforms; disabling a parent also makes its descendants inactive. The public-header-only `UrsaSceneTests` target exercises the hierarchy, handles, transforms, and activation.
@@ -416,11 +416,11 @@ The fixed step defaults to 1/60 second and at most five steps per frame. `config
 Include `<renderer3d/Renderer3D.hpp>` to draw boxes with a camera. The renderer generates one cube mesh, uploads a frame's transforms and colors, records RHI commands, manages a depth target, and rebuilds size-dependent resources after a resize. It waits for its previous GPU submission before reusing upload resources.
 
 ```cpp
-auto created = ursa::Renderer3D::create(device);
+auto created = Ursa::Renderer3D::create(device);
 if (!created)
-    return ursa::Result<void>::failure(created.error);
+    return Ursa::Result<void>::failure(created.error);
 auto renderer = std::move(created.value);
-ursa::Vector<ursa::BoxInstance> boxes{
+Ursa::Vector<Ursa::BoxInstance> boxes{
     {{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}, {0.2f, 0.8f, 0.3f, 1.0f}},
 };
 auto frame = renderer->render(swapchain, camera, boxes);
@@ -435,14 +435,14 @@ Attach `CameraComponent` to a node and pass its component handle to `scene.setAc
 ```cpp
 #include <scene/Scene.hpp>
 
-ursa::Scene scene;
+Ursa::Scene scene;
 const auto cameraNode = scene.createNode().value;
-ursa::LocalTransform cameraPose;
+Ursa::LocalTransform cameraPose;
 cameraPose.position = {0.0f, 0.0f, 4.0f};
 scene.setLocalTransform(cameraNode, cameraPose);
-scene.setActiveCamera(scene.addComponent<ursa::CameraComponent>(cameraNode).value);
+scene.setActiveCamera(scene.addComponent<Ursa::CameraComponent>(cameraNode).value);
 const auto boxNode = scene.createNode().value;
-scene.addComponent<ursa::BoxRenderComponent>(boxNode, ursa::Color{0.2f, 0.8f, 0.3f, 1.0f});
+scene.addComponent<Ursa::BoxRenderComponent>(boxNode, Ursa::Color{0.2f, 0.8f, 0.3f, 1.0f});
 ```
 
 An application assigns its scene to `scene_` during `onStart`; `Application` owns the renderer for that path. Direct rendering code can call `collectRenderData(aspect)` and pass the returned view-projection matrix, boxes, lighting and camera position to `Renderer3D::renderModels` or `renderOffscreenModels`. The current path supports one explicitly selected camera and colored or material-bound cubes; arbitrary meshes and multiple active cameras are outside this phase. `UrsaRendererTests` exercises the example's collection path, inherited transforms, color, visibility, and missing-camera error.
@@ -452,13 +452,13 @@ An application assigns its scene to `scene_` during `onStart`; `Application` own
 Attach `DirectionalLightComponent` or `PointLightComponent` to scene nodes. A directional light shines along its node's local negative Z axis, transformed to world space. A point light uses its node's world position, intensity, color, and positive finite range. Disabling a light component, its node, or an ancestor removes it from the collected frame. `Scene::setAmbientLight(color, intensity)` sets nonnegative ambient fill. Invalid values return a diagnostic `Result` and preserve the previous value.
 
 ```cpp
-ursa::Scene litScene;
+Ursa::Scene litScene;
 auto cameraNode = litScene.createNode().value;
-litScene.setActiveCamera(litScene.addComponent<ursa::CameraComponent>(cameraNode).value);
+litScene.setActiveCamera(litScene.addComponent<Ursa::CameraComponent>(cameraNode).value);
 auto sunNode = litScene.createNode().value;
-litScene.addComponent<ursa::DirectionalLightComponent>(sunNode);
+litScene.addComponent<Ursa::DirectionalLightComponent>(sunNode);
 auto lampNode = litScene.createNode().value;
-litScene.addComponent<ursa::PointLightComponent>(lampNode);
+litScene.addComponent<Ursa::PointLightComponent>(lampNode);
 litScene.setAmbientLight({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f);
 auto frame = litScene.collectRenderData(16.0f / 9.0f);
 ```
@@ -470,22 +470,22 @@ The returned `SceneRenderData::lighting` is a value snapshot; later scene change
 Assign a shared `MaterialInstance` to `BoxRenderComponent::material`. When it is set, the material controls the box's appearance; `color` is used only by boxes without an explicit material. The material is independent of box geometry. `collectRenderData` captures active box transforms, material references, camera position, and scene lights after the scene update phases. `Renderer3D` reads material values once before recording that frame. In a single-threaded application, edits made during update or late update therefore appear in the same rendered frame.
 
 ```cpp
-auto device = ursa::rhi::createDevice({}).value;
-auto renderer = ursa::Renderer3D::create(device).value;
-ursa::Scene scene;
+auto device = Ursa::Rhi::createDevice({}).value;
+auto renderer = Ursa::Renderer3D::create(device).value;
+Ursa::Scene scene;
 auto cameraNode = scene.createNode().value;
-ursa::LocalTransform cameraPose;
+Ursa::LocalTransform cameraPose;
 cameraPose.position = {0.0f, 0.0f, 5.0f};
 scene.setLocalTransform(cameraNode, cameraPose);
-scene.setActiveCamera(scene.addComponent<ursa::CameraComponent>(cameraNode).value);
+scene.setActiveCamera(scene.addComponent<Ursa::CameraComponent>(cameraNode).value);
 auto boxNode = scene.createNode().value;
-scene.addComponent<ursa::BoxRenderComponent>(boxNode);
-auto material = std::make_shared<ursa::MaterialInstance>(ursa::MaterialType::Unlit);
+scene.addComponent<Ursa::BoxRenderComponent>(boxNode);
+auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
 material->setBaseColor({1.0f, 0.0f, 0.0f, 1.0f});
-scene.findComponent<ursa::BoxRenderComponent>(boxNode)->material = material;
+scene.findComponent<Ursa::BoxRenderComponent>(boxNode)->material = material;
 auto frame = scene.collectRenderData(1.0f).value;
-auto color = device->createTexture({64, 64, ursa::rhi::Format::RGBA8Unorm,
-    ursa::rhi::TextureUsage::ColorAttachment | ursa::rhi::TextureUsage::TransferSource}).value;
+auto color = device->createTexture({64, 64, Ursa::Rhi::Format::RGBA8Unorm,
+    Ursa::Rhi::TextureUsage::ColorAttachment | Ursa::Rhi::TextureUsage::TransferSource}).value;
 auto submitted = renderer->renderOffscreenModels(color, frame.viewProjection, frame.boxes,
                                                   frame.lighting, frame.cameraPosition);
 submitted.value->wait();

@@ -7,113 +7,136 @@
 #include <memory>
 #include <typeindex>
 
-namespace ursa::editor {
-using DocumentWriter = std::function<Result<void>(const std::filesystem::path &, ResourceId)>;
+namespace Ursa::Editor
+{
+using DocumentWriter = std::function<Result<void>(const std::filesystem::path&, ResourceId)>;
 
-class EditorDocument final {
+class EditorDocument final
+{
 public:
-    static Result<std::unique_ptr<EditorDocument>> create(ResourceKind kind, ResourceId id, VirtualPath path,
-                                                          DocumentWriter writer);
+	static Result<std::unique_ptr<EditorDocument>> Create(ResourceKind kind, ResourceId id, VirtualPath path,
+	                                                      DocumentWriter writer);
 
-    ResourceKind kind() const {
-        return kind_;
-    }
+	ResourceKind Kind() const
+	{
+		return kind;
+	}
 
-    ResourceId id() const {
-        return id_;
-    }
+	ResourceId Id() const
+	{
+		return id;
+	}
 
-    const VirtualPath &path() const {
-        return path_;
-    }
+	const VirtualPath& Path() const
+	{
+		return path;
+	}
 
-    void setPath(VirtualPath path) {
-        path_ = std::move(path);
-        dirty_ = true;
-    }
+	void SetPath(VirtualPath path)
+	{
+		this->path = std::move(path);
+		dirty = true;
+	}
 
-    bool dirty() const {
-        return dirty_;
-    }
+	bool Dirty() const
+	{
+		return dirty;
+	}
 
-    void markDirty() {
-        dirty_ = true;
-    }
+	void MarkDirty()
+	{
+		dirty = true;
+	}
 
-    template <class T> void setPayload(std::shared_ptr<T> value) {
-        payload_ = std::move(value);
-        payloadType_ = std::type_index(typeid(T));
-    }
+	template <class T> void SetPayload(std::shared_ptr<T> value)
+	{
+		payload = std::move(value);
+		payloadType = std::type_index(typeid(T));
+	}
 
-    template <class T> std::shared_ptr<T> payload() const {
-        return payloadType_ == std::type_index(typeid(T)) ? std::static_pointer_cast<T>(payload_) : nullptr;
-    }
+	template <class T> std::shared_ptr<T> Payload() const
+	{
+		return payloadType == std::type_index(typeid(T)) ? std::static_pointer_cast<T>(payload) : nullptr;
+	}
 
 private:
-    EditorDocument(ResourceKind kind, ResourceId id, VirtualPath path, DocumentWriter writer)
-        : kind_(kind), id_(id), path_(std::move(path)), writer_(std::move(writer)) {
-    }
+	EditorDocument(ResourceKind kind, ResourceId id, VirtualPath path, DocumentWriter writer)
+	    : kind(kind), id(id), path(std::move(path)), writer(std::move(writer))
+	{
+	}
 
-    friend class EditorDocuments;
+	friend class EditorDocuments;
 
-    ResourceKind kind_;
-    ResourceId id_;
-    VirtualPath path_;
-    DocumentWriter writer_;
-    bool dirty_ = false;
-    std::shared_ptr<void> payload_;
-    std::type_index payloadType_{typeid(void)};
+	ResourceKind kind;
+	ResourceId id;
+	VirtualPath path;
+	DocumentWriter writer;
+	bool dirty = false;
+	std::shared_ptr<void> payload;
+	std::type_index payloadType{typeid(void)};
 };
 
-enum class UnsavedChoice { Save, Discard, Cancel };
+enum class UnsavedChoice
+{
+	save,
+	discard,
+	cancel
+};
 
-class EditorDocuments final {
+class EditorDocuments final
+{
 public:
-    static Result<std::unique_ptr<EditorDocuments>> create(ProjectWorkspace &workspace);
+	static Result<std::unique_ptr<EditorDocuments>> Create(ProjectWorkspace& workspace);
 
-    Result<void> requestOpen(std::unique_ptr<EditorDocument> document);
+	Result<void> RequestOpen(std::unique_ptr<EditorDocument> document);
 
-    Result<void> requestClose();
+	Result<void> RequestClose();
 
-    Result<void> resolvePrompt(UnsavedChoice choice);
+	Result<void> ResolvePrompt(UnsavedChoice choice);
 
-    Result<void> saveCurrent();
+	Result<void> SaveCurrent();
 
-    void setSaveBlocked(bool blocked) {
-        saveBlocked_ = blocked;
-    }
+	void SetSaveBlocked(bool blocked)
+	{
+		saveBlocked = blocked;
+	}
 
-    void drawUnsavedPrompt();
+	void DrawUnsavedPrompt();
 
-    bool promptPending() const {
-        return promptPending_;
-    }
+	bool PromptPending() const
+	{
+		return promptPending;
+	}
 
-    EditorDocument *current() const {
-        return current_.get();
-    }
+	EditorDocument* Current() const
+	{
+		return current.get();
+	}
 
-    ResourceSession &session() const {
-        return *sessions_.back();
-    }
+	ResourceSession& Session() const
+	{
+		return *sessions.back();
+	}
 
-    const String &lastError() const {
-        return lastError_;
-    }
+	const String& LastError() const
+	{
+		return lastError;
+	}
 
 private:
-    explicit EditorDocuments(ProjectWorkspace &workspace) : workspace_(workspace) {
-    }
+	explicit EditorDocuments(ProjectWorkspace& workspace) : workspace(workspace)
+	{
+	}
 
-    void finishPending();
+	void FinishPending();
 
-    ProjectWorkspace &workspace_;
-    std::unique_ptr<EditorDocument> current_;
-    std::unique_ptr<EditorDocument> pending_;
-    bool pendingClose_ = false;
-    bool promptPending_ = false;
-    bool saveBlocked_ = false;
-    String lastError_;
-    Vector<std::unique_ptr<ResourceSession>> sessions_;
+	ProjectWorkspace& workspace;
+	std::unique_ptr<EditorDocument> current;
+	std::unique_ptr<EditorDocument> pending;
+	bool pendingClose = false;
+	bool promptPending = false;
+	bool saveBlocked = false;
+	String lastError;
+	Vector<std::unique_ptr<ResourceSession>> sessions;
 };
-} // namespace ursa::editor
+} // namespace Ursa::Editor

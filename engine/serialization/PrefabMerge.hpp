@@ -4,7 +4,8 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
-namespace ursa {
-Result<nlohmann::json> mergePrefabNodes(const nlohmann::json &source, const nlohmann::json &overrides,
-                                        const String &location);
-} // namespace ursa
+namespace Ursa
+{
+Result<nlohmann::json> MergePrefabNodes(const nlohmann::json& source, const nlohmann::json& overrides,
+                                        const String& location);
+} // namespace Ursa

@@ -5,34 +5,38 @@
 #include <scene/Scene.hpp>
 #include <renderer3d/Renderer3D.hpp>
 
-namespace ursa {
-class Application {
+namespace Ursa
+{
+class Application
+{
 public:
-    virtual ~Application() = default;
+	virtual ~Application() = default;
 
-    Result<void> run(uint32_t width = 1280, uint32_t height = 720, const String &title = "UrsaEngine",
-                     bool visible = true, uint32_t frameLimit = 0);
+	Result<void> Run(uint32_t width = 1280, uint32_t height = 720, const String& title = "UrsaEngine",
+	                 bool visible = true, uint32_t frameLimit = 0);
 
-    Result<void> configureFixedStep(float seconds, uint32_t maxSteps = 5);
+	Result<void> ConfigureFixedStep(float seconds, uint32_t maxSteps = 5);
 
 protected:
-    virtual Result<void> onStart() = 0;
+	virtual Result<void> OnStart() = 0;
 
-    virtual Result<void> onFrame(float deltaSeconds) {
-        (void)deltaSeconds;
-        return {};
-    }
+	virtual Result<void> OnFrame(float deltaSeconds)
+	{
+		(void)deltaSeconds;
+		return {};
+	}
 
-    virtual void onStop() {
-    }
+	virtual void OnStop()
+	{
+	}
 
-    std::shared_ptr<Window> window_;
-    rhi::DevicePtr device_;
-    rhi::SwapchainPtr swapchain_;
-    std::shared_ptr<Scene> scene_;
+	std::shared_ptr<Window> window;
+	Rhi::DevicePtr device;
+	Rhi::SwapchainPtr swapchain;
+	std::shared_ptr<Scene> scene;
 
 private:
-    FrameScheduler frameScheduler_;
-    std::unique_ptr<Renderer3D> sceneRenderer_;
+	FrameScheduler frameScheduler;
+	std::unique_ptr<Renderer3D> sceneRenderer;
 };
-} // namespace ursa
+} // namespace Ursa

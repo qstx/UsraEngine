@@ -1,12 +1,15 @@
 #include <material/Material.hpp>
 #include <memory>
 
-int main() {
-    auto material = std::make_shared<ursa::MaterialInstance>(ursa::MaterialType::PbrMetallicRoughness);
-    auto pixels = ursa::MaterialTexture::create(1, 1, ursa::TextureColorSpace::Srgb, {220, 80, 40, 255});
-    if (!pixels || !material->setTexture(ursa::MaterialTextureSlot::BaseColor, pixels.value) ||
-        !material->setMetallic(0.2f) || !material->setRoughness(0.6f))
-        return 1;
-    auto independent = material->clone();
-    return independent->parameters().roughness == 0.6f ? 0 : 1;
+int main()
+{
+	auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::pbrMetallicRoughness);
+	auto pixels = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::srgb, {220, 80, 40, 255});
+	if (!pixels || !material->SetTexture(Ursa::MaterialTextureSlot::baseColor, pixels.value) ||
+	    !material->SetMetallic(0.2f) || !material->SetRoughness(0.6f))
+	{
+		return 1;
+	}
+	auto independent = material->Clone();
+	return independent->Parameters().roughness == 0.6f ? 0 : 1;
 }

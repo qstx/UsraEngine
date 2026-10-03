@@ -5,20 +5,22 @@
 #include <cstdint>
 #include <string>
 
-namespace ursa {
-struct ResourceId {
-    Array<uint8_t, 16> bytes{};
+namespace Ursa
+{
+struct ResourceId
+{
+	Array<uint8_t, 16> bytes{};
 
-    explicit operator bool() const;
+	explicit operator bool() const;
 
-    String toString() const;
+	String ToString() const;
 
-    static ResourceId generate();
+	static ResourceId Generate();
 
-    static Result<ResourceId> parse(const String &text);
+	static Result<ResourceId> Parse(const String& text);
 };
 
-bool operator==(const ResourceId &left, const ResourceId &right);
+bool operator==(const ResourceId& left, const ResourceId& right);
 
-bool operator!=(const ResourceId &left, const ResourceId &right);
-} // namespace ursa
+bool operator!=(const ResourceId& left, const ResourceId& right);
+} // namespace Ursa

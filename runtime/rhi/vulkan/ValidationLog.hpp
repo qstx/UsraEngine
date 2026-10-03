@@ -2,6 +2,7 @@
 
 #include <vulkan/vulkan_core.h>
 
-namespace ursa::rhi::vulkan_detail {
-void reportValidationMessage(VkDebugUtilsMessageSeverityFlagBitsEXT severity, const char *message) noexcept;
-} // namespace ursa::rhi::vulkan_detail
+namespace Ursa::Rhi::VulkanDetail
+{
+void ReportValidationMessage(VkDebugUtilsMessageSeverityFlagBitsEXT severity, const char* message) noexcept;
+} // namespace Ursa::Rhi::VulkanDetail

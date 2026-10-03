@@ -6,74 +6,85 @@
 #include <cstdint>
 #include <vector>
 
-namespace ursa {
-struct DirectionalLightData {
-    Vec3 direction{0.0f, 0.0f, -1.0f};
-    Color color{};
-    float intensity = 1.0f;
+namespace Ursa
+{
+struct DirectionalLightData
+{
+	Vec3 direction{0.0f, 0.0f, -1.0f};
+	Color color{};
+	float intensity = 1.0f;
 };
 
-struct PointLightData {
-    Vec3 position{};
-    Color color{};
-    float intensity = 1.0f;
-    float range = 10.0f;
+struct PointLightData
+{
+	Vec3 position{};
+	Color color{};
+	float intensity = 1.0f;
+	float range = 10.0f;
 };
 
-struct SceneLighting {
-    static constexpr uint32_t maxDirectionalLights = 4;
-    static constexpr uint32_t maxPointLights = 8;
+struct SceneLighting
+{
+	static constexpr uint32_t maxDirectionalLights = 4;
+	static constexpr uint32_t maxPointLights = 8;
 
-    Color ambientColor{1.0f, 1.0f, 1.0f, 1.0f};
-    float ambientIntensity = 0.1f;
-    Vector<DirectionalLightData> directional;
-    Vector<PointLightData> point;
+	Color ambientColor{1.0f, 1.0f, 1.0f, 1.0f};
+	float ambientIntensity = 0.1f;
+	Vector<DirectionalLightData> directional;
+	Vector<PointLightData> point;
 };
 
-class DirectionalLightComponent final : public Component {
+class DirectionalLightComponent final : public Component
+{
 public:
-    Result<void> setColor(Color color);
+	Result<void> SetColor(Ursa::Color color);
 
-    Result<void> setIntensity(float intensity);
+	Result<void> SetIntensity(float intensity);
 
-    Color color() const {
-        return color_;
-    }
+	Ursa::Color Color() const
+	{
+		return color;
+	}
 
-    float intensity() const {
-        return intensity_;
-    }
+	float Intensity() const
+	{
+		return intensity;
+	}
 
 private:
-    Color color_{};
-    float intensity_ = 1.0f;
+	Ursa::Color color{};
+	float intensity = 1.0f;
 };
 
-class PointLightComponent final : public Component {
+class PointLightComponent final : public Component
+{
 public:
-    Result<void> setColor(Color color);
+	Result<void> SetColor(Ursa::Color color);
 
-    Result<void> setIntensity(float intensity);
+	Result<void> SetIntensity(float intensity);
 
-    Result<void> setRange(float range);
+	Result<void> SetRange(float range);
 
-    Color color() const {
-        return color_;
-    }
+	Ursa::Color Color() const
+	{
+		return color;
+	}
 
-    float intensity() const {
-        return intensity_;
-    }
+	float Intensity() const
+	{
+		return intensity;
+	}
 
-    float range() const {
-        return range_;
-    }
+	float Range() const
+	{
+		return range;
+	}
 
 private:
-    Color color_{};
-    float intensity_ = 1.0f;
-    float range_ = 10.0f;
+	Ursa::Color color{};
+	float intensity = 1.0f;
+	float range = 10.0f;
 };
 
-bool validLightColor(Color color);
-} // namespace ursa
+bool ValidLightColor(Ursa::Color color);
+} // namespace Ursa

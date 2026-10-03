@@ -4,40 +4,44 @@
 #include <serialization/MaterialResource.hpp>
 #include <array>
 
-namespace ursa::editor {
-class MaterialDraft final {
+namespace Ursa::Editor
+{
+class MaterialDraft final
+{
 public:
-    explicit MaterialDraft(MaterialType type) : material_(std::make_shared<MaterialInstance>(type)) {
-    }
+	explicit MaterialDraft(MaterialType type) : material(std::make_shared<MaterialInstance>(type))
+	{
+	}
 
-    static Result<std::shared_ptr<MaterialDraft>> load(const std::filesystem::path &path, ResourceSession &session);
+	static Result<std::shared_ptr<MaterialDraft>> Load(const std::filesystem::path& path, ResourceSession& session);
 
-    Result<void> setTextureId(MaterialTextureSlot slot, ResourceId id, ResourceSession &session);
+	Result<void> SetTextureId(MaterialTextureSlot slot, ResourceId id, ResourceSession& session);
 
-    Result<void> save(const std::filesystem::path &path, ResourceId id, const ResourceIndex &index) const;
+	Result<void> Save(const std::filesystem::path& path, ResourceId id, const ResourceIndex& index) const;
 
-    MaterialInstance &material() {
-        return *material_;
-    }
+	MaterialInstance& Material()
+	{
+		return *material;
+	}
 
-    std::shared_ptr<MaterialInstance> materialPtr() const {
-        return material_;
-    }
+	std::shared_ptr<MaterialInstance> MaterialPtr() const
+	{
+		return material;
+	}
 
-    ResourceId textureId(MaterialTextureSlot slot) const;
+	ResourceId TextureId(MaterialTextureSlot slot) const;
 
 private:
-    std::shared_ptr<MaterialInstance> material_;
-    Array<ResourceId, 5> textureIds_{};
+	std::shared_ptr<MaterialInstance> material;
+	Array<ResourceId, 5> textureIds{};
 };
 
-Result<std::unique_ptr<EditorDocument>> newMaterialDocument(const VirtualPath &path,
-                                                             MaterialType type, ProjectWorkspace &workspace);
+Result<std::unique_ptr<EditorDocument>> NewMaterialDocument(const VirtualPath& path, MaterialType type,
+                                                            ProjectWorkspace& workspace);
 
-Result<std::unique_ptr<EditorDocument>> openMaterialDocument(const VirtualPath &path,
-                                                              ResourceSession &session,
-                                                              ProjectWorkspace &workspace);
+Result<std::unique_ptr<EditorDocument>> OpenMaterialDocument(const VirtualPath& path, ResourceSession& session,
+                                                             ProjectWorkspace& workspace);
 
-Result<bool> drawMaterialInspector(EditorDocument &document, EditorDocuments &documents,
-                                    const ProjectWorkspace &workspace, String &diagnostic);
-} // namespace ursa::editor
+Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& documents,
+                                   const ProjectWorkspace& workspace, String& diagnostic);
+} // namespace Ursa::Editor
