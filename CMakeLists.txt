@@ -11,7 +11,7 @@ endif()
 if(WIN32)
   add_custom_target(UrsaEngineFormatCheck
     COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
-      -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/format.ps1" -Check
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/Tools/Format.ps1" -Check
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     VERBATIM)
   set_target_properties(UrsaEngineFormatCheck PROPERTIES FOLDER "Tools")
@@ -59,11 +59,11 @@ find_package(Vulkan 1.2 REQUIRED COMPONENTS glslc)
 # mounted ahead of the mirror.
 set(URSA_ASSET_CACHE_DIR "${CMAKE_SOURCE_DIR}/cache" CACHE PATH
     "Directory that holds generated engine assets")
-set(URSA_ASSET_MIRROR_DIR "${URSA_ASSET_CACHE_DIR}/assets" CACHE PATH
+set(URSA_ASSET_MIRROR_DIR "${URSA_ASSET_CACHE_DIR}/Assets" CACHE PATH
     "Generated engine asset mirror mounted as the engine resource scheme")
 
-add_subdirectory(runtime)
-add_subdirectory(engine)
+add_subdirectory(Runtime)
+add_subdirectory(Engine)
 
 option(URSA_BUILD_EDITOR "Build the Ursa editor" ON)
 if(URSA_BUILD_EDITOR)
@@ -71,7 +71,7 @@ if(URSA_BUILD_EDITOR)
      NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imguizmo/src/ImGuizmo.cpp")
     message(FATAL_ERROR "Editor submodules are missing. Run: git submodule update --init third_party/imgui third_party/imguizmo")
   endif()
-  add_subdirectory(editor)
+  add_subdirectory(Editor)
 endif()
 
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
@@ -85,163 +85,163 @@ if(URSA_BUILD_TESTS)
   enable_testing()
 
   if(URSA_BUILD_EDITOR)
-    add_executable(UrsaImGuiBridgeTests tests/editor/ImGuiBridgeTests.cpp)
+    add_executable(UrsaImGuiBridgeTests Tests/Editor/ImGuiBridgeTests.cpp)
     target_link_libraries(UrsaImGuiBridgeTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaImGuiBridgeTests COMMAND UrsaImGuiBridgeTests)
 
-    add_executable(UrsaEditorCompositeWindowTests tests/editor/EditorCompositeWindowTests.cpp)
+    add_executable(UrsaEditorCompositeWindowTests Tests/Editor/EditorCompositeWindowTests.cpp)
     target_link_libraries(UrsaEditorCompositeWindowTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorCompositeWindowTests COMMAND UrsaEditorCompositeWindowTests)
 
-    add_executable(UrsaEditorWorkspaceWindowTests tests/editor/EditorWorkspaceWindowTests.cpp)
+    add_executable(UrsaEditorWorkspaceWindowTests Tests/Editor/EditorWorkspaceWindowTests.cpp)
     target_link_libraries(UrsaEditorWorkspaceWindowTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorWorkspaceWindowTests COMMAND UrsaEditorWorkspaceWindowTests)
 
-    add_executable(UrsaEditorPreviewTests tests/editor/EditorPreviewTests.cpp)
+    add_executable(UrsaEditorPreviewTests Tests/Editor/EditorPreviewTests.cpp)
     target_link_libraries(UrsaEditorPreviewTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorPreviewTests COMMAND UrsaEditorPreviewTests)
 
-    add_executable(UrsaEditorHierarchyTests tests/editor/EditorHierarchyTests.cpp)
+    add_executable(UrsaEditorHierarchyTests Tests/Editor/EditorHierarchyTests.cpp)
     target_link_libraries(UrsaEditorHierarchyTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorHierarchyTests COMMAND UrsaEditorHierarchyTests)
 
-    add_executable(UrsaEditorGizmoTests tests/editor/EditorGizmoTests.cpp)
+    add_executable(UrsaEditorGizmoTests Tests/Editor/EditorGizmoTests.cpp)
     target_link_libraries(UrsaEditorGizmoTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorGizmoTests COMMAND UrsaEditorGizmoTests)
 
-    add_executable(UrsaProjectWorkspaceTests tests/editor/ProjectWorkspaceTests.cpp)
+    add_executable(UrsaProjectWorkspaceTests Tests/Editor/ProjectWorkspaceTests.cpp)
     target_link_libraries(UrsaProjectWorkspaceTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaProjectWorkspaceTests COMMAND UrsaProjectWorkspaceTests)
 
-    add_executable(UrsaEditorDocumentsTests tests/editor/EditorDocumentsTests.cpp)
+    add_executable(UrsaEditorDocumentsTests Tests/Editor/EditorDocumentsTests.cpp)
     target_link_libraries(UrsaEditorDocumentsTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorDocumentsTests COMMAND UrsaEditorDocumentsTests)
 
-    add_executable(UrsaTextureDraftTests tests/editor/TextureDraftTests.cpp)
+    add_executable(UrsaTextureDraftTests Tests/Editor/TextureDraftTests.cpp)
     target_link_libraries(UrsaTextureDraftTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaTextureDraftTests COMMAND UrsaTextureDraftTests)
 
-    add_executable(UrsaMaterialDraftTests tests/editor/MaterialDraftTests.cpp)
+    add_executable(UrsaMaterialDraftTests Tests/Editor/MaterialDraftTests.cpp)
     target_link_libraries(UrsaMaterialDraftTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaMaterialDraftTests COMMAND UrsaMaterialDraftTests)
 
-    add_executable(UrsaSceneDraftTests tests/editor/SceneDraftTests.cpp)
+    add_executable(UrsaSceneDraftTests Tests/Editor/SceneDraftTests.cpp)
     target_link_libraries(UrsaSceneDraftTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaSceneDraftTests COMMAND UrsaSceneDraftTests)
 
-    add_executable(UrsaPlaySessionTests tests/editor/PlaySessionTests.cpp)
+    add_executable(UrsaPlaySessionTests Tests/Editor/PlaySessionTests.cpp)
     target_link_libraries(UrsaPlaySessionTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaPlaySessionTests COMMAND UrsaPlaySessionTests)
   endif()
 
-  add_executable(UrsaEastlAllocatorTests tests/core/EastlAllocatorTests.cpp)
+  add_executable(UrsaEastlAllocatorTests Tests/Core/EastlAllocatorTests.cpp)
   target_link_libraries(UrsaEastlAllocatorTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaEastlAllocatorTests COMMAND UrsaEastlAllocatorTests)
 
-  add_executable(UrsaLogTests tests/core/LogTests.cpp)
+  add_executable(UrsaLogTests Tests/Core/LogTests.cpp)
   target_link_libraries(UrsaLogTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaLogTests COMMAND UrsaLogTests)
   add_test(NAME UrsaLogConsoleSmoke COMMAND UrsaLogTests)
   set_tests_properties(UrsaLogConsoleSmoke PROPERTIES PASS_REGULAR_EXPRESSION "\\[RHI\\].*")
 
-  add_executable(UrsaLogHeaderSmoke tests/core/LogHeaderSmoke.cpp)
+  add_executable(UrsaLogHeaderSmoke Tests/Core/LogHeaderSmoke.cpp)
   target_link_libraries(UrsaLogHeaderSmoke PRIVATE Ursa::Runtime)
   add_test(NAME UrsaLogHeaderSmoke COMMAND UrsaLogHeaderSmoke)
 
-  add_executable(UrsaContainerHeaderSmoke tests/core/ContainerHeaderSmoke.cpp)
+  add_executable(UrsaContainerHeaderSmoke Tests/Core/ContainerHeaderSmoke.cpp)
   target_link_libraries(UrsaContainerHeaderSmoke PRIVATE Ursa::Runtime)
   add_test(NAME UrsaContainerHeaderSmoke COMMAND UrsaContainerHeaderSmoke)
 
-  add_executable(UrsaStringInteropTests tests/core/StringInteropTests.cpp)
+  add_executable(UrsaStringInteropTests Tests/Core/StringInteropTests.cpp)
   target_link_libraries(UrsaStringInteropTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaStringInteropTests COMMAND UrsaStringInteropTests)
 
-  add_executable(UrsaVirtualFileSystemTests tests/vfs/VirtualFileSystemTests.cpp)
+  add_executable(UrsaVirtualFileSystemTests Tests/Vfs/VirtualFileSystemTests.cpp)
   target_link_libraries(UrsaVirtualFileSystemTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaVirtualFileSystemTests COMMAND UrsaVirtualFileSystemTests)
 
-  add_executable(UrsaRuntimeHeaderSmoke tests/core/RuntimeHeaderSmoke.cpp)
+  add_executable(UrsaRuntimeHeaderSmoke Tests/Core/RuntimeHeaderSmoke.cpp)
   target_link_libraries(UrsaRuntimeHeaderSmoke PRIVATE Ursa::Runtime)
   add_test(NAME UrsaRuntimeHeaderSmoke COMMAND UrsaRuntimeHeaderSmoke)
 
-  add_executable(UrsaWindowInputTests tests/window/WindowInputTests.cpp)
+  add_executable(UrsaWindowInputTests Tests/Window/WindowInputTests.cpp)
   target_link_libraries(UrsaWindowInputTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaWindowInputTests COMMAND UrsaWindowInputTests)
 
-  add_executable(UrsaMathTests tests/math/MathTests.cpp)
+  add_executable(UrsaMathTests Tests/Math/MathTests.cpp)
   target_link_libraries(UrsaMathTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaMathTests COMMAND UrsaMathTests)
 
-  add_executable(UrsaMaterialTests tests/material/MaterialTests.cpp)
+  add_executable(UrsaMaterialTests Tests/Material/MaterialTests.cpp)
   target_link_libraries(UrsaMaterialTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaMaterialTests COMMAND UrsaMaterialTests)
 
-  add_executable(UrsaSerializationBaseTests tests/serialization/SerializationBaseTests.cpp)
+  add_executable(UrsaSerializationBaseTests Tests/Serialization/SerializationBaseTests.cpp)
   target_link_libraries(UrsaSerializationBaseTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaSerializationBaseTests COMMAND UrsaSerializationBaseTests)
 
-  add_executable(UrsaAssetPersistenceTests tests/serialization/AssetPersistenceTests.cpp)
+  add_executable(UrsaAssetPersistenceTests Tests/Serialization/AssetPersistenceTests.cpp)
   target_link_libraries(UrsaAssetPersistenceTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaAssetPersistenceTests COMMAND UrsaAssetPersistenceTests)
 
-  add_executable(UrsaScenePersistenceTests tests/serialization/ScenePersistenceTests.cpp)
+  add_executable(UrsaScenePersistenceTests Tests/Serialization/ScenePersistenceTests.cpp)
   target_link_libraries(UrsaScenePersistenceTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaScenePersistenceTests COMMAND UrsaScenePersistenceTests)
 
-  add_executable(UrsaCustomComponentTests tests/serialization/CustomComponentTests.cpp)
+  add_executable(UrsaCustomComponentTests Tests/Serialization/CustomComponentTests.cpp)
   target_link_libraries(UrsaCustomComponentTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaCustomComponentTests COMMAND UrsaCustomComponentTests)
 
-  add_executable(UrsaPrefabTests tests/serialization/PrefabTests.cpp)
+  add_executable(UrsaPrefabTests Tests/Serialization/PrefabTests.cpp)
   target_link_libraries(UrsaPrefabTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaPrefabTests COMMAND UrsaPrefabTests)
 
-  add_executable(UrsaMaterialHeaderSmoke tests/material/MaterialHeaderSmoke.cpp)
+  add_executable(UrsaMaterialHeaderSmoke Tests/Material/MaterialHeaderSmoke.cpp)
   target_link_libraries(UrsaMaterialHeaderSmoke PRIVATE Ursa::Engine)
   add_test(NAME UrsaMaterialHeaderSmoke COMMAND UrsaMaterialHeaderSmoke)
 
-  add_executable(UrsaSceneTests tests/scene/SceneTests.cpp)
+  add_executable(UrsaSceneTests Tests/Scene/SceneTests.cpp)
   target_link_libraries(UrsaSceneTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaSceneTests COMMAND UrsaSceneTests)
 
-  add_executable(UrsaLightingTests tests/scene/LightingTests.cpp)
+  add_executable(UrsaLightingTests Tests/Scene/LightingTests.cpp)
   target_link_libraries(UrsaLightingTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaLightingTests COMMAND UrsaLightingTests)
 
-  add_executable(UrsaLightingHeaderSmoke tests/scene/LightingHeaderSmoke.cpp)
+  add_executable(UrsaLightingHeaderSmoke Tests/Scene/LightingHeaderSmoke.cpp)
   target_link_libraries(UrsaLightingHeaderSmoke PRIVATE Ursa::Engine)
   add_test(NAME UrsaLightingHeaderSmoke COMMAND UrsaLightingHeaderSmoke)
 
-  add_executable(UrsaFrameSchedulerTests tests/application/FrameSchedulerTests.cpp)
+  add_executable(UrsaFrameSchedulerTests Tests/Application/FrameSchedulerTests.cpp)
   target_link_libraries(UrsaFrameSchedulerTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaFrameSchedulerTests COMMAND UrsaFrameSchedulerTests)
 
-  add_executable(UrsaApplicationSceneTests tests/application/ApplicationSceneTests.cpp)
+  add_executable(UrsaApplicationSceneTests Tests/Application/ApplicationSceneTests.cpp)
   target_link_libraries(UrsaApplicationSceneTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaApplicationSceneTests COMMAND UrsaApplicationSceneTests)
 
-  add_executable(UrsaRendererTests tests/renderer3d/RendererTests.cpp)
+  add_executable(UrsaRendererTests Tests/Renderer3D/RendererTests.cpp)
   target_link_libraries(UrsaRendererTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaRendererTests COMMAND UrsaRendererTests)
 
-  add_executable(UrsaMaterialRendererTests tests/renderer3d/MaterialRendererTests.cpp)
+  add_executable(UrsaMaterialRendererTests Tests/Renderer3D/MaterialRendererTests.cpp)
   target_link_libraries(UrsaMaterialRendererTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaMaterialRendererTests COMMAND UrsaMaterialRendererTests)
 
-  add_executable(UrsaMaterialSceneSmoke tests/renderer3d/MaterialSceneSmoke.cpp)
+  add_executable(UrsaMaterialSceneSmoke Tests/Renderer3D/MaterialSceneSmoke.cpp)
   target_link_libraries(UrsaMaterialSceneSmoke PRIVATE Ursa::Engine)
   add_test(NAME UrsaMaterialSceneSmoke COMMAND UrsaMaterialSceneSmoke)
 
-  add_executable(UrsaRendererWindowTests tests/renderer3d/RendererWindowTests.cpp)
+  add_executable(UrsaRendererWindowTests Tests/Renderer3D/RendererWindowTests.cpp)
   target_link_libraries(UrsaRendererWindowTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaRendererWindowTests COMMAND UrsaRendererWindowTests)
 
   function(ursa_test_shader target source)
     get_filename_component(name "${source}" NAME)
     set(input "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
-    set(output "${CMAKE_CURRENT_BINARY_DIR}/shaders/${name}.spv")
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/Shaders/${name}.spv")
     add_custom_command(OUTPUT "${output}"
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/Shaders"
       COMMAND Vulkan::glslc "${input}" -o "${output}"
       DEPENDS "${input}" VERBATIM)
     target_sources(${target} PRIVATE "${input}" "${output}")
@@ -251,20 +251,20 @@ if(URSA_BUILD_TESTS)
     source_group("Generated Shaders" FILES "${output}")
   endfunction()
 
-  add_executable(UrsaRhiTests tests/rhi/RhiTests.cpp)
+  add_executable(UrsaRhiTests Tests/Rhi/RhiTests.cpp)
   target_link_libraries(UrsaRhiTests PRIVATE Ursa::Runtime)
-  target_compile_definitions(UrsaRhiTests PRIVATE URSA_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/shaders")
-  ursa_test_shader(UrsaRhiTests tests/rhi/shaders/test.comp)
-  ursa_test_shader(UrsaRhiTests tests/rhi/shaders/test_image.comp)
-  ursa_test_shader(UrsaRhiTests tests/rhi/shaders/test_vertex.vert)
-  ursa_test_shader(UrsaRhiTests tests/rhi/shaders/test.frag)
-  ursa_test_shader(UrsaRhiTests tests/rhi/shaders/test_instance.vert)
-  ursa_test_shader(UrsaRhiTests tests/rhi/shaders/test_instance.frag)
-  ursa_test_shader(UrsaRhiTests tests/rhi/shaders/test_offset.vert)
-  ursa_test_shader(UrsaRhiTests tests/rhi/shaders/test_offset.frag)
+  target_compile_definitions(UrsaRhiTests PRIVATE URSA_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/Shaders")
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/Test.comp)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestImage.comp)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestVertex.vert)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/Test.frag)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestInstance.vert)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestInstance.frag)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestOffset.vert)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestOffset.frag)
   add_test(NAME UrsaRhiTests COMMAND UrsaRhiTests)
 
-  add_executable(UrsaVulkanValidationLogTests tests/rhi/VulkanValidationLogTests.cpp)
+  add_executable(UrsaVulkanValidationLogTests Tests/Rhi/VulkanValidationLogTests.cpp)
   target_link_libraries(UrsaVulkanValidationLogTests PRIVATE Ursa::Runtime Vulkan::Vulkan)
   add_test(NAME UrsaVulkanValidationLogTests COMMAND UrsaVulkanValidationLogTests)
   set_tests_properties(UrsaVulkanValidationLogTests PROPERTIES PASS_REGULAR_EXPRESSION "fallback before initialization")
@@ -272,26 +272,26 @@ if(URSA_BUILD_TESTS)
   set_tests_properties(UrsaVulkanValidationShutdownSmoke PROPERTIES PASS_REGULAR_EXPRESSION "fallback after shutdown")
 
   source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES
-    tests/math/MathTests.cpp
-    tests/vfs/VirtualFileSystemTests.cpp
-    tests/material/MaterialTests.cpp
-    tests/window/WindowInputTests.cpp
-    tests/serialization/SerializationBaseTests.cpp
-    tests/serialization/AssetPersistenceTests.cpp
-    tests/serialization/ScenePersistenceTests.cpp
-    tests/serialization/CustomComponentTests.cpp
-    tests/serialization/PrefabTests.cpp
-    tests/material/MaterialHeaderSmoke.cpp
-    tests/scene/SceneTests.cpp
-    tests/scene/LightingTests.cpp
-    tests/scene/LightingHeaderSmoke.cpp
-    tests/application/FrameSchedulerTests.cpp
-    tests/application/ApplicationSceneTests.cpp
-    tests/renderer3d/RendererTests.cpp
-    tests/renderer3d/MaterialRendererTests.cpp
-    tests/renderer3d/MaterialSceneSmoke.cpp
-    tests/renderer3d/RendererWindowTests.cpp
-    tests/rhi/RhiTests.cpp)
+    Tests/Math/MathTests.cpp
+    Tests/Vfs/VirtualFileSystemTests.cpp
+    Tests/Material/MaterialTests.cpp
+    Tests/Window/WindowInputTests.cpp
+    Tests/Serialization/SerializationBaseTests.cpp
+    Tests/Serialization/AssetPersistenceTests.cpp
+    Tests/Serialization/ScenePersistenceTests.cpp
+    Tests/Serialization/CustomComponentTests.cpp
+    Tests/Serialization/PrefabTests.cpp
+    Tests/Material/MaterialHeaderSmoke.cpp
+    Tests/Scene/SceneTests.cpp
+    Tests/Scene/LightingTests.cpp
+    Tests/Scene/LightingHeaderSmoke.cpp
+    Tests/Application/FrameSchedulerTests.cpp
+    Tests/Application/ApplicationSceneTests.cpp
+    Tests/Renderer3D/RendererTests.cpp
+    Tests/Renderer3D/MaterialRendererTests.cpp
+    Tests/Renderer3D/MaterialSceneSmoke.cpp
+    Tests/Renderer3D/RendererWindowTests.cpp
+    Tests/Rhi/RhiTests.cpp)
 
   # Group the engine test executables under one solution folder.
   get_property(URSA_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)

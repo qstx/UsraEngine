@@ -9,7 +9,7 @@ Engine and Demo use their own matching `.clang-format` and `.editorconfig` files
 - Attach `*` and `&` to the type (`Node*`, `const String&`). Keep include order intentional.
 - Format only first-party C++ sources. Do not format `third_party`, generated build output, shaders, or serialized assets.
 
-Use clang-format 19 with the repository's `tools/format.ps1`, or pass `-Check` to verify without edits. The script finds Visual Studio's clang-format when it is not in `PATH`, and accepts `-ClangFormatPath` for another installation. Run it separately in Engine and Demo. VS Code formats C++ on save using each repository's `.clang-format`.
+Use clang-format 19 with the repository's `Tools/Format.ps1`, or pass `-Check` to verify without edits. The script finds Visual Studio's clang-format when it is not in `PATH`, and accepts `-ClangFormatPath` for another installation. Run it separately in Engine and Demo. VS Code formats C++ on save using each repository's `.clang-format`.
 
 The Engine CMake project exposes `UrsaEngineFormatCheck`. A Demo build exposes `UrsaDemoFormatCheck` and `UrsaFormatCheck`; the last target checks both repositories. These targets run only when selected and do not change source files.
 

@@ -14,16 +14,16 @@ Initialize the top-level dependencies after checkout with `git submodule update 
 
 ## Source layout
 
-`runtime/core`, `runtime/vfs`, `runtime/window`, and `runtime/rhi` contain the runtime modules. Vulkan implementation files live under `runtime/rhi/vulkan`. `engine/application`, `engine/math`, `engine/material`, `engine/scene`, `engine/renderer3d`, and `engine/serialization` contain the engine modules. `editor/application` and `editor/ui` contain the Editor loop and UI bridge. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<rhi/RHI.hpp>` and `<renderer3d/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `assets/`. Tests are grouped by module under `tests/`.
+`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Renderer3D`, and `Engine/Serialization` contain the engine modules. `Editor/Application` and `Editor/Ui` contain the Editor loop and UI bridge. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Renderer3D/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. Tests are grouped by module under `Tests/`.
 
 CMake discovers `.cpp` and `.hpp` files within the listed module directories and checks for additions or removals during a build. New modules and test executables still need a CMake target or directory entry.
 
 ## Logging
 
-Include `<core/Log.hpp>` to record messages from Runtime, Engine, Editor, or a game without using spdlog types in public code. `LogSession` initializes before a window or GPU device and flushes at scope exit:
+Include `<Core/Log.hpp>` to record messages from Runtime, Engine, Editor, or a game without using spdlog types in public code. `LogSession` initializes before a window or GPU device and flushes at scope exit:
 
 ```cpp
-#include <core/Log.hpp>
+#include <Core/Log.hpp>
 
 int main() {
     Ursa::LogSession log;
@@ -40,11 +40,11 @@ Each accepted message includes a timestamp, level, module name, and UTF-8 body. 
 
 ## Public container types
 
-Include `<core/Containers.hpp>` and use `Ursa::String`, `Ursa::Vector<T>`, `Ursa::Array<T, N>`, `Ursa::Map<K, V>`, `Ursa::UnorderedMap<K, V>`, `Ursa::Set<K>`, and `Ursa::Deque<T>` for engine-owned strings and collections. These names currently map to EASTL and keep vendor types out of consumer source. Existing code that passed `std::string` or `std::vector` to Runtime APIs must switch to these aliases or convert explicitly. Smart pointers, `std::function`, and filesystem paths retain their standard-library types.
+Include `<Core/Containers.hpp>` and use `Ursa::String`, `Ursa::Vector<T>`, `Ursa::Array<T, N>`, `Ursa::Map<K, V>`, `Ursa::UnorderedMap<K, V>`, `Ursa::Set<K>`, and `Ursa::Deque<T>` for engine-owned strings and collections. These names currently map to EASTL and keep vendor types out of consumer source. Existing code that passed `std::string` or `std::vector` to Runtime APIs must switch to these aliases or convert explicitly. Smart pointers, `std::function`, and filesystem paths retain their standard-library types.
 
 ```cpp
-#include <core/Containers.hpp>
-#include <rhi/RHI.hpp>
+#include <Core/Containers.hpp>
+#include <Rhi/RHI.hpp>
 
 int main() {
     Ursa::Vector<uint8_t> code{1, 2, 3, 4};
@@ -55,11 +55,11 @@ int main() {
 }
 ```
 
-The same migration applies to Engine scene, material, renderer, and resource APIs. Rebuild Engine and consumers together. Keep `std::string` at APIs that require it, such as JSON, streams, exceptions, and `std::filesystem`; convert at the call site with `<core/StringInterop.hpp>`:
+The same migration applies to Engine scene, material, renderer, and resource APIs. Rebuild Engine and consumers together. Keep `std::string` at APIs that require it, such as JSON, streams, exceptions, and `std::filesystem`; convert at the call site with `<Core/StringInterop.hpp>`:
 
 ```cpp
-#include <core/StringInterop.hpp>
-#include <serialization/ResourceId.hpp>
+#include <Core/StringInterop.hpp>
+#include <Serialization/ResourceId.hpp>
 #include <nlohmann/json.hpp>
 
 void inspectId(Ursa::ResourceId id) {
@@ -68,7 +68,7 @@ void inspectId(Ursa::ResourceId id) {
         Ursa::toUrsaString(record.at("id").get<std::string>()));
     if (!restored)
         return;
-    auto file = Ursa::pathFromUrsaString(Ursa::String("assets/sample.ursamat"));
+    auto file = Ursa::pathFromUrsaString(Ursa::String("Assets/sample.ursamat"));
     auto displayPath = Ursa::pathToUrsaString(file);
 }
 ```
@@ -93,7 +93,7 @@ To edit a scene, enter `level.ursascene` in **New asset**, click **New Scene**, 
 
 For a linked instance, first save its Prefab source. Open a scene, select a regular parent node, and choose that Prefab from **Place Prefab**; each placement receives its own instance ID. Editing an instance node or its components changes only that placement. **Pin label override** records an explicit property override; hierarchy, component, and transform changes are captured as property or structure overrides on save. Open the `.ursaprefab` itself to edit the shared source. The next explicit scene reload merges source changes with saved instance overrides. A missing override target or invalid merge is reported, and the active scene and saved patch remain available. `UrsaSceneDraftTests` checks two placements, source isolation, and round-trip structure; `UrsaPrefabTests` checks source merges and conflict preservation.
 
-Project components need both a `ComponentCodec` in `EditorProject::components` and, for editable fields, a callback in `EditorProject::componentEditors`. Register them in the launcher setup passed to `EditorApplication`. The callback receives the live component, scene, and node and returns whether a persistent field changed; the Editor then marks the document dirty. A codec without a property editor remains visible and its serialized fields are preserved on save. If decoding needs project services, configure `editContextSetup` to provide them and keep those services alive. Demo's `editor/Main.cpp` and `editor/SnakeEditors.cpp` show the Snake registration.
+Project components need both a `ComponentCodec` in `EditorProject::components` and, for editable fields, a callback in `EditorProject::componentEditors`. Register them in the launcher setup passed to `EditorApplication`. The callback receives the live component, scene, and node and returns whether a persistent field changed; the Editor then marks the document dirty. A codec without a property editor remains visible and its serialized fields are preserved on save. If decoding needs project services, configure `editContextSetup` to provide them and keep those services alive. Demo's `Editor/Main.cpp` and `Editor/SnakeEditors.cpp` show the Snake registration.
 
 Click **Run** on a scene to clone the current effective edit scene in memory, including unsaved edits. The copy receives fresh project runtime services from `playContextSetup`; a missing service reports an error and leaves Edit mode intact. Engine `FrameScheduler` drives Update, fixed updates, and Late Update on the copy. The game uses the scene's active camera; focus the viewport image to send keyboard input to the game. Input sent to other Editor panels stays with the UI. **Save** and document switching are disabled during Play. Click **Stop** to destroy the play copy; the edit scene, dirty flag, and asset files remain as they were before Run. `UrsaPlaySessionTests` covers clone isolation, lifecycle order, service failure, save blocking, and cleanup.
 
@@ -101,11 +101,11 @@ Click **Run** on a scene to clone the current effective edit scene in memory, in
 
 The ImGui platform bridge forwards key and modifier state and uses the window's UTF-8 system clipboard callbacks. Editor text fields support Ctrl+C, Ctrl+X, and Ctrl+V with the Windows clipboard.
 
-The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). From the Engine repository, build it with `cmake --build build --config Debug --target UrsaEditor`, then launch it with `& .\build\editor\Debug\UrsaEditor.exe --project ..\Demo\assets`. The project asset directory is required at startup; `--hidden --frames 3` runs a short window smoke test. The default docked workspace places Hierarchy on the left, the scene viewport in the center, Inspector on the right, and Project along the bottom. Run/Stop is in the top bar. Panels can be rearranged during the session. `ctest --test-dir build -C Debug -R '^(UrsaImGuiBridgeTests|UrsaEditorWorkspaceWindowTests)$' --output-on-failure` checks UI rendering and the startup workspace. The same commands accept `Release`.
+The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). From the Engine repository, build it with `cmake --build build --config Debug --target UrsaEditor`, then launch it with `& .\build\Editor\Debug\UrsaEditor.exe --project ..\Demo\Assets`. The project asset directory is required at startup; `--hidden --frames 3` runs a short window smoke test. The default docked workspace places Hierarchy on the left, the scene viewport in the center, Inspector on the right, and Project along the bottom. Run/Stop is in the top bar. Panels can be rearranged during the session. `ctest --test-dir build -C Debug -R '^(UrsaImGuiBridgeTests|UrsaEditorWorkspaceWindowTests)$' --output-on-failure` checks UI rendering and the startup workspace. The same commands accept `Release`.
 
-To author project assets, pass a writable asset directory such as `--project ..\Demo\assets`. The Project panel shows the selected root, lists each file's stable ID, and marks Engine assets as read-only. In the **New asset** field, enter `checker.ursatex`, click **New texture**, edit its pixels or color space, and click **Save**. The new file appears only under the selected project root. Use **Refresh assets** after an external rename; references continue to use the stored ID. Switching or closing a changed document offers **Save**, **Discard**, and **Cancel**. Saving first writes a staged resource, validates its ID and kind, then atomically replaces the destination; a failed save leaves the previous file and the in-memory edit available. Paths outside the project root, including paths reached through symlinks, are rejected. `UrsaProjectWorkspaceTests`, `UrsaEditorDocumentsTests`, and `UrsaTextureDraftTests` exercise these rules.
+To author project assets, pass a writable asset directory such as `--project ..\Demo\Assets`. The Project panel shows the selected root, lists each file's stable ID, and marks Engine assets as read-only. In the **New asset** field, enter `Checker.ursatex`, click **New texture**, edit its pixels or color space, and click **Save**. The new file appears only under the selected project root. Use **Refresh assets** after an external rename; references continue to use the stored ID. Switching or closing a changed document offers **Save**, **Discard**, and **Cancel**. Saving first writes a staged resource, validates its ID and kind, then atomically replaces the destination; a failed save leaves the previous file and the in-memory edit available. Paths outside the project root, including paths reached through symlinks, are rejected. `UrsaProjectWorkspaceTests`, `UrsaEditorDocumentsTests`, and `UrsaTextureDraftTests` exercise these rules.
 
-The texture inspector edits dimensions (up to 2048 × 2048), linear or sRGB color space, an individual RGBA8 pixel, and a generated checker pattern. Its grid shows the current pixels before saving. Image file import is not included. To try a material, enter `surface.ursamat` in **New asset**, click **New Unlit** or **New PBR**, adjust the color, alpha, sampling, and applicable PBR controls, then select a saved texture in the matching slot. The material preview renders a box with the current values. Save the material and reopen it from the browser; texture references retain their resource IDs. Base-color and emissive slots require sRGB textures; data slots require linear textures. The inspector reports incompatible choices and keeps the last accepted value. `UrsaMaterialDraftTests` creates a procedural texture, saves two materials that share its ID, reopens both, checks invalid parameters, and reads back the 3D preview.
+The texture inspector edits dimensions (up to 2048 × 2048), linear or sRGB color space, an individual RGBA8 pixel, and a generated checker pattern. Its grid shows the current pixels before saving. Image file import is not included. To try a material, enter `Surface.ursamat` in **New asset**, click **New Unlit** or **New PBR**, adjust the color, alpha, sampling, and applicable PBR controls, then select a saved texture in the matching slot. The material preview renders a box with the current values. Save the material and reopen it from the browser; texture references retain their resource IDs. Base-color and emissive slots require sRGB textures; data slots require linear textures. The inspector reports incompatible choices and keeps the last accepted value. `UrsaMaterialDraftTests` creates a procedural texture, saves two materials that share its ID, reopens both, checks invalid parameters, and reads back the 3D preview.
 
 `Window` owns GLFW callbacks and publishes key, character, pointer, scroll, and focus events to subscribers. `ImGuiBridge` subscribes to those events without replacing the game's polled input. The Editor calls `beginFrame`, builds widgets, calls `endFrame`, then records ImGui draws inside an RHI color pass with `record`. `endFrame` uploads Dear ImGui font atlas requests through RHI. Project images need a sampled RHI texture in `ShaderRead` state and a sampler; `registerTexture` returns the opaque ID passed to `ImGui::Image`, and `unregisterTexture` releases its UI binding. The Editor waits for each submitted frame fence before replacing transient vertex and index buffers. The bridge uses RHI only and keeps Vulkan types inside the backend.
 
@@ -113,7 +113,7 @@ Debug builds require `VK_LAYER_KHRONOS_validation`. The engine tests use a headl
 
 ## RHI use
 
-Include `<rhi/RHI.hpp>`. `Ursa::Rhi::CreateDevice` chooses the backend; currently `Backend::Vulkan` is implemented. A device exposes adapter details and capabilities and creates buffers, textures, samplers, SPIR-V shaders, descriptor layouts/groups, graphics and compute pipelines, command lists, and a swapchain. Commands require explicit resource barriers and return diagnostic `Result` values. The caller waits on a returned fence before reading GPU output. All RHI handles retain the device context required for their destruction; command lists retain referenced resources until completion.
+Include `<Rhi/RHI.hpp>`. `Ursa::Rhi::CreateDevice` chooses the backend; currently `Backend::Vulkan` is implemented. A device exposes adapter details and capabilities and creates buffers, textures, samplers, SPIR-V shaders, descriptor layouts/groups, graphics and compute pipelines, command lists, and a swapchain. Commands require explicit resource barriers and return diagnostic `Result` values. The caller waits on a returned fence before reading GPU output. All RHI handles retain the device context required for their destruction; command lists retain referenced resources until completion.
 
 The first version supports 2D textures with one mip and one layer, one color target and an optional depth target, one descriptor set per pipeline, one graphics/compute queue, and 32-bit indices. These are the implemented limits of the current public API. Vulkan types remain inside the backend source. The shader description tags its bytecode format so future OpenGL and D3D12 implementations can accept their own shader representations.
 
@@ -127,17 +127,17 @@ Code uses the repository's `.clang-format` rules, including one blank line betwe
 
 ## Virtual file system
 
-`<vfs/VirtualFileSystem.hpp>` addresses resources with `scheme:relative/path` strings instead of host paths. A scheme names an ordered list of host roots: lookup returns the first root that contains the relative path, so an engine root and a generated-assets root can share one layout. Each root is mounted read-only or read-write, and a write only ever lands on the first root of a read-write scheme. `VirtualPath::parse` rejects host drive letters, absolute paths, and any `..` segment, and every resolved file is checked to stay inside its mount root, including through reparse points such as Windows junctions.
+`<Vfs/VirtualFileSystem.hpp>` addresses resources with `scheme:relative/path` strings instead of host paths. A scheme names an ordered list of host roots: lookup returns the first root that contains the relative path, so an engine root and a generated-assets root can share one layout. Each root is mounted read-only or read-write, and a write only ever lands on the first root of a read-write scheme. `VirtualPath::parse` rejects host drive letters, absolute paths, and any `..` segment, and every resolved file is checked to stay inside its mount root, including through reparse points such as Windows junctions.
 
 ```text
-ursa:shaders/renderer3d/cube.vert      -> <engine>/assets/shaders/renderer3d/cube.vert
-ursa:shaders/renderer3d/cube.vert.spv  -> <project>/cache/assets/shaders/renderer3d/cube.vert.spv
-prj:snake/snake.ursascene              -> <project>/assets/snake/snake.ursascene
+ursa:Shaders/Renderer3D/Cube.vert      -> <engine>/Assets/Shaders/Renderer3D/Cube.vert
+ursa:Shaders/Renderer3D/Cube.vert.spv  -> <project>/cache/Assets/Shaders/Renderer3D/Cube.vert.spv
+prj:Snake/Snake.ursascene              -> <project>/Assets/Snake/Snake.ursascene
 ```
 
 ```cpp
-#include <vfs/AssetRoots.hpp>
-#include <vfs/VirtualFileSystem.hpp>
+#include <Vfs/AssetRoots.hpp>
+#include <Vfs/VirtualFileSystem.hpp>
 
 Ursa::Result<void> openResources(const std::filesystem::path &engineRoot,
                                  const std::filesystem::path &engineMirror,
@@ -147,7 +147,7 @@ Ursa::Result<void> openResources(const std::filesystem::path &engineRoot,
         !vfs.mount("ursa", engineMirror, Ursa::MountAccess::ReadOnly) ||
         !vfs.mount("prj", projectAssets, Ursa::MountAccess::ReadWrite))
         return Ursa::Result<void>::failure("Cannot mount resource roots");
-    auto shader = Ursa::VirtualPath::parse("ursa:shaders/renderer3d/cube.vert.spv");
+    auto shader = Ursa::VirtualPath::parse("ursa:Shaders/Renderer3D/Cube.vert.spv");
     if (!shader)
         return Ursa::Result<void>::failure(shader.error);
     auto bytes = vfs.read(shader.value);
@@ -157,18 +157,18 @@ Ursa::Result<void> openResources(const std::filesystem::path &engineRoot,
 }
 ```
 
-`resolveEngineAssetRoots` and `openEngineFileSystem` select the engine roots in the order explicit override, `assets/` beside the executable (a packaged layout), then the engine source assets followed by the generated mirror, which overlay into one `ursa:` view. The mirror defaults to `<project>/cache/assets` and is produced at build time; set `URSA_ASSET_CACHE_DIR` at configure time to move it. `list(scheme)` walks every root, keeps the first occurrence of each relative path, and reports host locations that later roots shadow. The scheme names are a convention, not a built-in: an application registers `ursa` for the engine and `prj` for the writable project. `UrsaVirtualFileSystemTests` covers parsing, mount permissions, overlays, executable-relative resolution, and mount-root isolation.
+`resolveEngineAssetRoots` and `openEngineFileSystem` select the engine roots in the order explicit override, `Assets/` beside the executable (a packaged layout), then the engine source assets followed by the generated mirror, which overlay into one `ursa:` view. The mirror defaults to `<project>/cache/Assets` and is produced at build time; set `URSA_ASSET_CACHE_DIR` at configure time to move it. `list(scheme)` walks every root, keeps the first occurrence of each relative path, and reports host locations that later roots shadow. The scheme names are a convention, not a built-in: an application registers `ursa` for the engine and `prj` for the writable project. `UrsaVirtualFileSystemTests` covers parsing, mount permissions, overlays, executable-relative resolution, and mount-root isolation.
 
 ## Resource files and IDs
 
-Resources can be stored under multiple registered roots, such as `Engine/assets` and a sibling project's `Demo/assets`. The resource index recognizes `.ursatex` (RGBA8 texture), `.ursamat` (material), `.ursascene` (scene), and `.ursaprefab` (node subtree). Each file carries a format version and a stable 128-bit resource ID. References use this ID rather than a path: after moving or renaming a file within a registered root, call `rebuild()` before resolving it again. A copied file must receive a new ID; indexing two files with the same ID reports both paths as an error.
+Resources can be stored under multiple registered roots, such as `Engine/Assets` and a sibling project's `Demo/Assets`. The resource index recognizes `.ursatex` (RGBA8 texture), `.ursamat` (material), `.ursascene` (scene), and `.ursaprefab` (node subtree). Each file carries a format version and a stable 128-bit resource ID. References use this ID rather than a path: after moving or renaming a file within a registered root, call `rebuild()` before resolving it again. A copied file must receive a new ID; indexing two files with the same ID reports both paths as an error.
 
 ```cpp
-#include <serialization/ResourceIndex.hpp>
+#include <Serialization/ResourceIndex.hpp>
 
 void inspectResources() {
 Ursa::ResourceIndex resources;
-auto added = resources.addRoot("assets");
+auto added = resources.addRoot("Assets");
 if (!added)
     return;
 auto scanned = resources.rebuild();
@@ -188,9 +188,9 @@ Header parsing rejects unsupported versions, malformed IDs, and files above conf
 Procedural RGBA8 pixels can be saved directly as a `.ursatex` file. A `.ursamat` file stores validated material parameters and the IDs of its bound textures. The example below needs no window or GPU:
 
 ```cpp
-#include <serialization/MaterialResource.hpp>
-#include <serialization/ResourceSession.hpp>
-#include <serialization/TextureResource.hpp>
+#include <Serialization/MaterialResource.hpp>
+#include <Serialization/ResourceSession.hpp>
+#include <Serialization/TextureResource.hpp>
 
 void saveAndLoadMaterial(const std::filesystem::path &assetRoot) {
     auto pixels = Ursa::MaterialTexture::create(1, 1, Ursa::TextureColorSpace::Srgb,
@@ -227,7 +227,7 @@ Call `refreshed()` to create a new indexed loading session after files change. E
 Register the component codecs used by the scene before saving or loading. A scene file records ordered roots and children, local transforms, enabled flags, ambient light, active camera, and persistent component fields. Resource references in those fields are IDs resolved through `ResourceSession`.
 
 ```cpp
-#include <serialization/SceneResource.hpp>
+#include <Serialization/SceneResource.hpp>
 
 void roundTripScene(const std::filesystem::path &path,
                     Ursa::ResourceSession &resources) {
@@ -254,7 +254,7 @@ void roundTripScene(const std::filesystem::path &path,
 For project components, register a stable type name and data version before either operation. Save only persistent fields; use `ComponentLoadContext::service<T>()` for references to project-owned runtime objects. `create` can read fields and attach the component, while `bind` runs after all nodes and components exist and can resolve saved IDs through `context.node(id)` and `context.component(id)`. A minimal registration looks like this:
 
 ```cpp
-#include <serialization/ComponentRegistry.hpp>
+#include <Serialization/ComponentRegistry.hpp>
 
 struct CounterComponent : Ursa::Component {
     CounterComponent(int &total, int step) : total(total), step(step) {}
@@ -295,8 +295,8 @@ Call `context.provide(total)` before loading and keep `total` alive as long as t
 Use `loadLinkedSceneResource` for a scene containing Prefab instances. The plain `loadSceneResource` entry reports an error on that file so it cannot silently omit the instances.
 
 ```cpp
-#include <serialization/PrefabResource.hpp>
-#include <serialization/JsonResource.hpp>
+#include <Serialization/PrefabResource.hpp>
+#include <Serialization/JsonResource.hpp>
 
 void placePrefab(const std::filesystem::path &root, Ursa::Scene &source,
                  Ursa::NodeId subtree) {
@@ -345,10 +345,10 @@ Property paths use JSON Pointer syntax. Node paths include `/transform/position/
 
 ## Runtime materials
 
-Include `<material/Material.hpp>`. `MaterialInstance` owns editable CPU parameters and immutable `MaterialTexture` references; it does not require a device. Share a `std::shared_ptr<MaterialInstance>` between boxes for synchronized changes, or call `clone()` before changing one box independently. Successful setters increment `version()`; rejected input leaves both parameters and version unchanged.
+Include `<Material/Material.hpp>`. `MaterialInstance` owns editable CPU parameters and immutable `MaterialTexture` references; it does not require a device. Share a `std::shared_ptr<MaterialInstance>` between boxes for synchronized changes, or call `clone()` before changing one box independently. Successful setters increment `version()`; rejected input leaves both parameters and version unchanged.
 
 ```cpp
-#include <material/Material.hpp>
+#include <Material/Material.hpp>
 #include <memory>
 
 auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::PbrMetallicRoughness);
@@ -366,10 +366,10 @@ Base-color channels and alpha, metallic, roughness, occlusion strength, and alph
 
 ## Basic 3D math
 
-Include `<math/Math.hpp>` for `Vec3`, `Mat4`, `Transform`, and `Camera`, or include the corresponding type header directly. Each type has its own header and source file under `engine/math/`. The world is right-handed with +Y up; a board can lie on the XZ plane. Matrices are column-major and multiply column vectors. Perspective projection uses a 0-to-1 depth range, and its aspect argument is framebuffer width divided by height.
+Include `<Math/Math.hpp>` for `Vec3`, `Mat4`, `Transform`, and `Camera`, or include the corresponding type header directly. Each type has its own header and source file under `Engine/Math/`. The world is right-handed with +Y up; a board can lie on the XZ plane. Matrices are column-major and multiply column vectors. Perspective projection uses a 0-to-1 depth range, and its aspect argument is framebuffer width divided by height.
 
 ```cpp
-#include <math/Math.hpp>
+#include <Math/Math.hpp>
 
 Ursa::Camera camera;
 camera.position = {0.0f, 12.0f, 18.0f};
@@ -383,10 +383,10 @@ This example is compiled in the sibling Demo repository's public-header smoke te
 
 ## Runtime scene hierarchy
 
-Include `<scene/Scene.hpp>` to create a runtime hierarchy. `Scene` owns its nodes and returns `NodeId` handles. A handle becomes invalid when its node or an ancestor is destroyed; reusing a storage slot never revives an old handle. Root nodes have an empty parent handle. Reparenting preserves the node's local transform and rejects cycles.
+Include `<Scene/Scene.hpp>` to create a runtime hierarchy. `Scene` owns its nodes and returns `NodeId` handles. A handle becomes invalid when its node or an ancestor is destroyed; reusing a storage slot never revives an old handle. Root nodes have an empty parent handle. Reparenting preserves the node's local transform and rejects cycles.
 
 ```cpp
-#include <scene/Scene.hpp>
+#include <Scene/Scene.hpp>
 
 Ursa::Scene scene;
 const auto root = scene.createNode().value;
@@ -399,7 +399,7 @@ const Ursa::Mat4 world = scene.worldTransform(child).value;
 
 Each node has local position, quaternion rotation, scale, and an enabled flag. World transforms combine ancestor and local transforms; disabling a parent also makes its descendants inactive. The public-header-only `UrsaSceneTests` target exercises the hierarchy, handles, transforms, and activation.
 
-Components derive from `<scene/Component.hpp>`'s `Component` and are owned by a `Scene`. Use `addComponent<T>(node, ...)`, `findComponent<T>(node)`, `findComponents<T>(node)`, `setComponentEnabled`, and `removeComponent`. Multiple components of the same type may be attached to one node. `ComponentId` handles are invalidated on removal. An inactive parent or disabled component pauses callbacks without restarting it after reactivation.
+Components derive from `<Scene/Component.hpp>`'s `Component` and are owned by a `Scene`. Use `addComponent<T>(node, ...)`, `findComponent<T>(node)`, `findComponents<T>(node)`, `setComponentEnabled`, and `removeComponent`. Multiple components of the same type may be attached to one node. `ComponentId` handles are invalidated on removal. An inactive parent or disabled component pauses callbacks without restarting it after reactivation.
 
 For each active component, `onStart` runs once immediately before its first phase callback. The application then invokes `onUpdate`, zero or more `onFixedUpdate` calls, and `onLateUpdate` in that order. Parent components run before child components; components on one node run in attachment order. `onRemove` runs exactly once when a component is removed, its node is destroyed, or the scene is cleared. It also runs for a component that never started. Callbacks receive `FrameContext`, containing a key-state snapshot, frame time, fixed step, frame number, and a window pointer for operations such as changing the title. Returning a failed `Result` stops that frame with a diagnostic error.
 
@@ -413,7 +413,7 @@ The fixed step defaults to 1/60 second and at most five steps per frame. `config
 
 ## Basic 3D rendering
 
-Include `<renderer3d/Renderer3D.hpp>` to draw boxes with a camera. The renderer generates one cube mesh, uploads a frame's transforms and colors, records RHI commands, manages a depth target, and rebuilds size-dependent resources after a resize. It waits for its previous GPU submission before reusing upload resources.
+Include `<Renderer3D/Renderer3D.hpp>` to draw boxes with a camera. The renderer generates one cube mesh, uploads a frame's transforms and colors, records RHI commands, manages a depth target, and rebuilds size-dependent resources after a resize. It waits for its previous GPU submission before reusing upload resources.
 
 ```cpp
 auto created = Ursa::Renderer3D::create(device);
@@ -426,14 +426,14 @@ Ursa::Vector<Ursa::BoxInstance> boxes{
 auto frame = renderer->render(swapchain, camera, boxes);
 ```
 
-`render` acquires and presents a swapchain image. `renderOffscreen` accepts an RHI color texture with color-attachment and transfer-source usage and returns a fence; after waiting for it, the texture is in transfer-source state for readback. The current renderer supports one cube mesh, positive per-axis scaling, one depth target, and one in-flight frame. Its SPIR-V shaders are compiled into the generated asset mirror and read through `ursa:shaders/renderer3d/`.
+`render` acquires and presents a swapchain image. `renderOffscreen` accepts an RHI color texture with color-attachment and transfer-source usage and returns a fence; after waiting for it, the texture is in transfer-source state for readback. The current renderer supports one cube mesh, positive per-axis scaling, one depth target, and one in-flight frame. Its SPIR-V shaders are compiled into the generated asset mirror and read through `ursa:Shaders/Renderer3D/`.
 
 ## Scene rendering
 
 Attach `CameraComponent` to a node and pass its component handle to `scene.setActiveCamera(cameraId)`. The camera looks along its node's local negative Z axis; its node's world transform supplies the view, and its fields specify perspective projection. Attach `BoxRenderComponent` to each visible box node and set its `color`. The scene gathers active boxes with complete world matrices, including ancestor rotation and scale. Disabled nodes or components are omitted. Without an enabled active camera, `collectRenderData(aspect)` and an `Application` scene frame return a diagnostic error.
 
 ```cpp
-#include <scene/Scene.hpp>
+#include <Scene/Scene.hpp>
 
 Ursa::Scene scene;
 const auto cameraNode = scene.createNode().value;

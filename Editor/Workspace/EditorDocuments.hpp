@@ -1,0 +1,142 @@
+#pragma once
+
+#include <Workspace/ProjectWorkspace.hpp>
+#include <Serialization/ResourceSession.hpp>
+#include <Vfs/VirtualPath.hpp>
+#include <functional>
+#include <memory>
+#include <typeindex>
+
+namespace Ursa::Editor
+{
+using DocumentWriter = std::function<Result<void>(const std::filesystem::path&, ResourceId)>;
+
+class EditorDocument final
+{
+public:
+	static Result<std::unique_ptr<EditorDocument>> Create(ResourceKind kind, ResourceId id, VirtualPath path,
+	                                                      DocumentWriter writer);
+
+	ResourceKind Kind() const
+	{
+		return kind;
+	}
+
+	ResourceId Id() const
+	{
+		return id;
+	}
+
+	const VirtualPath& Path() const
+	{
+		return path;
+	}
+
+	void SetPath(VirtualPath path)
+	{
+		this->path = std::move(path);
+		dirty = true;
+	}
+
+	bool Dirty() const
+	{
+		return dirty;
+	}
+
+	void MarkDirty()
+	{
+		dirty = true;
+	}
+
+	template <class T> void SetPayload(std::shared_ptr<T> value)
+	{
+		payload = std::move(value);
+		payloadType = std::type_index(typeid(T));
+	}
+
+	template <class T> std::shared_ptr<T> Payload() const
+	{
+		return payloadType == std::type_index(typeid(T)) ? std::static_pointer_cast<T>(payload) : nullptr;
+	}
+
+private:
+	EditorDocument(ResourceKind kind, ResourceId id, VirtualPath path, DocumentWriter writer)
+	    : kind(kind), id(id), path(std::move(path)), writer(std::move(writer))
+	{
+	}
+
+	friend class EditorDocuments;
+
+	ResourceKind kind;
+	ResourceId id;
+	VirtualPath path;
+	DocumentWriter writer;
+	bool dirty = false;
+	std::shared_ptr<void> payload;
+	std::type_index payloadType{typeid(void)};
+};
+
+enum class UnsavedChoice
+{
+	save,
+	discard,
+	cancel
+};
+
+class EditorDocuments final
+{
+public:
+	static Result<std::unique_ptr<EditorDocuments>> Create(ProjectWorkspace& workspace);
+
+	Result<void> RequestOpen(std::unique_ptr<EditorDocument> document);
+
+	Result<void> RequestClose();
+
+	Result<void> ResolvePrompt(UnsavedChoice choice);
+
+	Result<void> SaveCurrent();
+
+	void SetSaveBlocked(bool blocked)
+	{
+		saveBlocked = blocked;
+	}
+
+	void DrawUnsavedPrompt();
+
+	bool PromptPending() const
+	{
+		return promptPending;
+	}
+
+	EditorDocument* Current() const
+	{
+		return current.get();
+	}
+
+	ResourceSession& Session() const
+	{
+		return *sessions.back();
+	}
+
+	const String& LastError() const
+	{
+		return lastError;
+	}
+
+private:
+	explicit EditorDocuments(ProjectWorkspace& workspace) : workspace(workspace)
+	{
+	}
+
+	void FinishPending();
+
+	ProjectWorkspace& workspace;
+	std::unique_ptr<EditorDocument> current;
+	std::unique_ptr<EditorDocument> pending;
+	bool pendingClose = false;
+	bool promptPending = false;
+	bool saveBlocked = false;
+	String lastError;
+	Vector<std::unique_ptr<ResourceSession>> sessions;
+};
+} // namespace Ursa::Editor
