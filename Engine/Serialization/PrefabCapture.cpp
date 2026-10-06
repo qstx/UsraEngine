@@ -1,9 +1,9 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/PrefabCapture.hpp>
 #include <algorithm>
 #include <functional>
-#include <map>
-#include <set>
 
 namespace Ursa
 {
@@ -22,14 +22,14 @@ struct Indexed
 
 Result<Indexed> Index(const Json& document, const String& location)
 {
-	if (!document.is_object() || !document.contains("nodes") || !document["nodes"].is_array())
+	if (!document.is_object() || !document.contains("gameObjects") || !document["gameObjects"].is_array())
 	{
 		return Result<Indexed>::Failure("Invalid scene nodes at " + location);
 	}
 	Indexed indexed;
-	for (const auto& node : document["nodes"])
+	for (const auto& node : document["gameObjects"])
 	{
-		if (!node.is_object() || !node.contains("id") || !node["id"].is_string() || !node.contains("parent") ||
+		if (!node.is_object() || !node.contains("id") || !node["id"].is_string() || !node.contains("parentId") ||
 		    !node.contains("components") || !node["components"].is_array())
 		{
 			return Result<Indexed>::Failure("Invalid scene node at " + location);
@@ -39,7 +39,7 @@ Result<Indexed> Index(const Json& document, const String& location)
 		{
 			return Result<Indexed>::Failure("Duplicate scene node " + id + " at " + location);
 		}
-		const auto parent = node["parent"].is_null() ? String{} : node["parent"].get<String>();
+		const auto parent = node["parentId"].is_null() ? String{} : node["parentId"].get<String>();
 		indexed.children[parent].push_back(id);
 		for (const auto& component : node["components"])
 		{
@@ -145,7 +145,7 @@ void CaptureFields(const Json& before, const Json& after, const String& pointer,
 	}
 	if (before.is_array() && after.is_array() && before.size() == after.size())
 	{
-		for (size_t position = 0; position < after.size(); ++position)
+		for (Ursa::Size position = 0; position < after.size(); ++position)
 		{
 			CaptureFields(before[position], after[position], pointer + "/" + ToUrsaString(std::to_string(position)),
 			              properties, reverse);
@@ -198,7 +198,7 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 	String root;
 	for (const auto& id : baselineNodes)
 	{
-		const auto& parent = baseline.nodes.at(id)["parent"];
+		const auto& parent = baseline.nodes.at(id)["parentId"];
 		if (parent.is_null() || !baselineNodes.count(parent.get<String>()))
 		{
 			if (!root.empty())
@@ -260,13 +260,14 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 		{
 			const auto local = reverse.at(id);
 			bool wasAdded = false;
-			if (patch.contains("addedNodes") && patch["addedNodes"].is_array())
+			if (patch.contains("addedGameObjects") && patch["addedGameObjects"].is_array())
 			{
-				for (auto iterator = patch["addedNodes"].begin(); iterator != patch["addedNodes"].end(); ++iterator)
+				for (auto iterator = patch["addedGameObjects"].begin(); iterator != patch["addedGameObjects"].end();
+				     ++iterator)
 				{
 					if ((*iterator)["id"] == local)
 					{
-						patch["addedNodes"].erase(iterator);
+						patch["addedGameObjects"].erase(iterator);
 						wasAdded = true;
 						break;
 					}
@@ -274,19 +275,19 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 			}
 			if (!wasAdded)
 			{
-				AppendUnique(patch["deletedNodes"], local);
+				AppendUnique(patch["deletedGameObjects"], local);
 			}
 			if (patch.contains("properties") && patch["properties"].is_object())
 			{
 				patch["properties"].erase(ToStdString(local));
 			}
-			if (patch.contains("nodeParents") && patch["nodeParents"].is_object())
+			if (patch.contains("gameObjectParents") && patch["gameObjectParents"].is_object())
 			{
-				patch["nodeParents"].erase(ToStdString(local));
+				patch["gameObjectParents"].erase(ToStdString(local));
 			}
-			if (patch.contains("nodeOrders") && patch["nodeOrders"].is_object())
+			if (patch.contains("gameObjectOrders") && patch["gameObjectOrders"].is_object())
 			{
-				patch["nodeOrders"].erase(ToStdString(local));
+				patch["gameObjectOrders"].erase(ToStdString(local));
 			}
 			if (patch.contains("componentOrders") && patch["componentOrders"].is_object())
 			{
@@ -367,21 +368,21 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 		{
 			Json added = node;
 			added["id"] = localId;
-			if (node["parent"].is_null() || !reverse.count(node["parent"].get<String>()))
+			if (node["parentId"].is_null() || !reverse.count(node["parentId"].get<String>()))
 			{
 				return Result<void>::Failure("Cross-instance parent for added node " + localId + " at " + location);
 			}
-			added["parent"] = reverse.at(node["parent"].get<String>());
+			added["parentId"] = reverse.at(node["parentId"].get<String>());
 			added["components"] = Json::array();
-			patch["addedNodes"].push_back(std::move(added));
+			patch["addedGameObjects"].push_back(std::move(added));
 			known.emplace(localId, id);
 		}
 		else
 		{
 			const auto& old = baseline.nodes.at(id);
 			Json changes = Json::object();
-			CaptureFields(old["transform"], node["transform"], "/transform", changes, reverse);
-			CaptureFields(old.value("label", Json("")), node.value("label", Json("")), "/label", changes, reverse);
+			CaptureFields(old["localTransform"], node["localTransform"], "/localTransform", changes, reverse);
+			CaptureFields(old.value("name", Json("")), node.value("name", Json("")), "/name", changes, reverse);
 			CaptureFields(old["enabled"], node["enabled"], "/enabled", changes, reverse);
 			if (!changes.empty())
 			{
@@ -392,13 +393,13 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 				}
 				properties.update(changes);
 			}
-			if (old["parent"] != node["parent"] && id != root)
+			if (old["parentId"] != node["parentId"] && id != root)
 			{
-				if (node["parent"].is_null() || !reverse.count(node["parent"].get<String>()))
+				if (node["parentId"].is_null() || !reverse.count(node["parentId"].get<String>()))
 				{
 					return Result<void>::Failure("Cross-instance parent for node " + localId + " at " + location);
 				}
-				patch["nodeParents"][ToStdString(localId)] = reverse.at(node["parent"].get<String>());
+				patch["gameObjectParents"][ToStdString(localId)] = reverse.at(node["parentId"].get<String>());
 			}
 		}
 		for (const auto& component : node["components"])
@@ -444,7 +445,7 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 		                                    reverse, baselineNodes);
 		if (currentChildren != oldChildren && !currentChildren.empty())
 		{
-			patch["nodeOrders"][ToStdString(localId)] = currentChildren;
+			patch["gameObjectOrders"][ToStdString(localId)] = currentChildren;
 		}
 		const auto currentComponents =
 		    LocalOrder(current.componentOrder.count(id) ? current.componentOrder.at(id) : Vector<String>{}, reverse,
@@ -503,12 +504,12 @@ Result<void> CaptureLinkedSceneChanges(const std::filesystem::path& path, Linked
 			return Result<void>::Failure("Regular node moved into Prefab instance: " + id);
 		}
 	}
-	candidate["nodes"] = Json::array();
-	for (const auto& node : encoded.value["nodes"])
+	candidate["gameObjects"] = Json::array();
+	for (const auto& node : encoded.value["gameObjects"])
 	{
 		if (!currentInstanceNodes.count(node["id"].get<String>()))
 		{
-			candidate["nodes"].push_back(node);
+			candidate["gameObjects"].push_back(node);
 		}
 	}
 	candidate["ambient"] = encoded.value["ambient"];

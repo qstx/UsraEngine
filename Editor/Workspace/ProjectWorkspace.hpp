@@ -15,7 +15,7 @@ class ProjectWorkspace final
 {
 public:
 	static Result<std::unique_ptr<ProjectWorkspace>> Open(const std::filesystem::path& projectDirectory,
-	                                                      const Vector<ResourceMount>& engineMounts = {});
+	                                                      const Vector<ResourceMount>& builtinMounts = {});
 
 	Result<void> Refresh();
 

@@ -3,11 +3,11 @@
 int main()
 {
 	Ursa::Scene litScene;
-	auto cameraNode = litScene.CreateNode().value;
+	auto cameraNode = litScene.CreateGameObject().value;
 	litScene.SetActiveCamera(litScene.AddComponent<Ursa::CameraComponent>(cameraNode).value);
-	auto sunNode = litScene.CreateNode().value;
+	auto sunNode = litScene.CreateGameObject().value;
 	litScene.AddComponent<Ursa::DirectionalLightComponent>(sunNode);
-	auto lampNode = litScene.CreateNode().value;
+	auto lampNode = litScene.CreateGameObject().value;
 	litScene.AddComponent<Ursa::PointLightComponent>(lampNode);
 	litScene.SetAmbientLight({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f);
 	auto frame = litScene.CollectRenderData(16.0f / 9.0f);

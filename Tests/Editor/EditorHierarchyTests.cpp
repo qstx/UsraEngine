@@ -43,17 +43,17 @@ int main()
 		ComponentRegistry registry;
 		done(RegisterBuiltinComponents(registry));
 		Scene scene;
-		const auto first = Take(scene.CreateNode());
-		const auto child = Take(scene.CreateNode(first));
-		const auto second = Take(scene.CreateNode());
-		done(scene.ReorderNode(second, 0));
-		done(scene.SetNodeLabel(first, "Root"));
-		done(scene.SetNodeLabel(child, "Child"));
+		const auto first = Take(scene.CreateGameObject());
+		const auto child = Take(scene.CreateGameObject(first));
+		const auto second = Take(scene.CreateGameObject());
+		done(scene.ReorderGameObject(second, 0));
+		done(scene.SetGameObjectName(first, "Root"));
+		done(scene.SetGameObjectName(child, "Child"));
 		done(scene.SetEnabled(child, false));
 		Take(scene.AddComponent<BoxRenderComponent>(first));
-		const auto firstId = Take(scene.NodePersistentId(first));
-		const auto childId = Take(scene.NodePersistentId(child));
-		const auto secondId = Take(scene.NodePersistentId(second));
+		const auto firstId = Take(scene.PersistentId(first));
+		const auto childId = Take(scene.PersistentId(child));
+		const auto secondId = Take(scene.PersistentId(second));
 		Editor::EditorHierarchy hierarchy;
 		done(hierarchy.Select(scene, child));
 
@@ -62,34 +62,30 @@ int main()
 		const auto resources = Take(ResourceSession::Open({std::filesystem::current_path()}));
 		ComponentLoadContext context(*resources);
 		auto loaded = Take(DecodeSceneDocument(path, document, registry, context));
-		Expect(loaded.scene->RootNodes().size() == 2, "Root count changed after save/reopen");
-		Expect(Take(loaded.scene->NodePersistentId(loaded.scene->RootNodes()[0])) == secondId,
+		Expect(loaded.scene->RootGameObjects().size() == 2, "Root count changed after save/reopen");
+		Expect(Take(loaded.scene->PersistentId(loaded.scene->RootGameObjects()[0])) == secondId,
 		       "Root order changed after save/reopen");
-		Expect(Take(loaded.scene->NodePersistentId(loaded.scene->RootNodes()[1])) == firstId,
+		Expect(Take(loaded.scene->PersistentId(loaded.scene->RootGameObjects()[1])) == firstId,
 		       "Root ID changed after save/reopen");
-		const auto reopenedChild = Take(loaded.scene->NodeByPersistentId(childId));
-		Expect(Take(loaded.scene->NodeLabel(reopenedChild)) == "Child", "Child label was not restored");
+		const auto reopenedChild = Take(loaded.scene->GameObjectById(childId));
+		Expect(Take(loaded.scene->GameObjectName(reopenedChild)) == "Child", "Child label was not restored");
 		Expect(!Take(loaded.scene->IsEnabled(reopenedChild)), "Child enabled state changed");
-		Expect(Take(loaded.scene->NodePersistentId(Take(hierarchy.SelectedNode(*loaded.scene)))) == childId,
+		Expect(Take(loaded.scene->PersistentId(Take(hierarchy.SelectedGameObject(*loaded.scene)))) == childId,
 		       "Hierarchy selection did not survive scene replacement");
 
 		auto legacy = document;
-		for (auto& node : legacy["nodes"])
-		{
-			node.erase("label");
-		}
-		auto oldScene = Take(DecodeSceneDocument(path, legacy, registry, context));
-		Expect(Take(oldScene.scene->NodeLabel(Take(oldScene.scene->NodeByPersistentId(childId)))).empty(),
-		       "Old scene without labels did not load");
-		const auto resaved = Take(EncodeSceneDocument(path, ResourceId::Generate(), *oldScene.scene, registry));
-		Expect(resaved["nodes"][1].contains("label"), "Re-saved old scene is missing a label field");
+		legacy.erase("sceneGraphVersion");
+		auto oldScene = DecodeSceneDocument(path, legacy, registry, context);
+		Expect(!oldScene &&
+		           oldScene.error.find("Unsupported or missing GameObject Scene format version") != String::npos,
+		       "Old Scene format was not rejected with a version diagnostic");
 
 		const auto prefabPath = std::filesystem::current_path() / "hierarchy.ursaprefab";
 		done(SavePrefabResource(prefabPath, ResourceId::Generate(), scene, first, registry));
 		auto prefab = Take(LoadPrefabResource(prefabPath, registry, context));
-		Expect(Take(prefab.scene->NodeLabel(Take(prefab.scene->NodeByPersistentId(firstId)))) == "Root",
+		Expect(Take(prefab.scene->GameObjectName(Take(prefab.scene->GameObjectById(firstId)))) == "Root",
 		       "Prefab root label was not restored");
-		Expect(Take(prefab.scene->NodeLabel(Take(prefab.scene->NodeByPersistentId(childId)))) == "Child",
+		Expect(Take(prefab.scene->GameObjectName(Take(prefab.scene->GameObjectById(childId)))) == "Child",
 		       "Prefab child label was not restored");
 
 		auto* imgui = ImGui::CreateContext();

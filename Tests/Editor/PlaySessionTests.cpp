@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Application/PlaySession.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Core/StringInterop.hpp>
@@ -19,7 +20,7 @@ struct TestService
 class TestComponent final : public Component
 {
 public:
-	TestComponent(TestService& service, int value) : service(service), value(value)
+	TestComponent(TestService& runtimeService, int initialValue) : service(runtimeService), value(initialValue)
 	{
 	}
 
@@ -56,6 +57,7 @@ public:
 	void OnRemove() override
 	{
 		events.push_back("remove");
+		++service.value;
 	}
 
 	int Value() const
@@ -111,7 +113,7 @@ int main()
 		{ return dynamic_cast<const TestComponent*>(&component) != nullptr; };
 		codec.save = [](const Component& component, const ComponentSaveContext&)
 		{ return Result<nlohmann::json>::Success({{"value", static_cast<const TestComponent&>(component).Value()}}); };
-		codec.create = [](Scene& scene, NodeId node, const nlohmann::json& data, ComponentLoadContext& context)
+		codec.create = [](Scene& scene, GameObject::Ptr node, const nlohmann::json& data, ComponentLoadContext& context)
 		{
 			auto service = context.Service<TestService>();
 			if (!service)
@@ -122,9 +124,9 @@ int main()
 		};
 		done(registry.RegisterCodec(std::move(codec)));
 		auto document = Take(Editor::NewSceneDocument(Take(VirtualPath::Parse("prj:play.ursascene")),
-		                                              ResourceKind::scene, registry, documents->Session()));
+		                                              ResourceKind::Scene, registry, documents->Session()));
 		auto draft = document->Payload<Editor::SceneDraft>();
-		const auto rootNode = draft->GetScene().RootNodes().front();
+		const auto rootNode = draft->GetScene().RootGameObjects().front();
 		TestService editService;
 		Take(draft->GetScene().AddComponent<TestComponent>(rootNode, editService, 12));
 		document->MarkDirty();
@@ -132,10 +134,10 @@ int main()
 		done(documents->RequestOpen(std::move(document)));
 		Editor::PlaySession play;
 		FrameInput pressed;
-		pressed.keys[static_cast<size_t>(Key::space)] = true;
-		Expect(!Editor::SelectPlayInput(pressed, false, false).KeyDown(Key::space) &&
-		           !Editor::SelectPlayInput(pressed, true, true).KeyDown(Key::space) &&
-		           Editor::SelectPlayInput(pressed, true, false).KeyDown(Key::space),
+		pressed.keys[static_cast<Ursa::Size>(Key::Space)] = true;
+		Expect(!Editor::SelectPlayInput(pressed, false, false).KeyDown(Key::Space) &&
+		           !Editor::SelectPlayInput(pressed, true, true).KeyDown(Key::Space) &&
+		           Editor::SelectPlayInput(pressed, true, false).KeyDown(Key::Space),
 		       "Editor keyboard input leaked to or was blocked from the game viewport");
 		auto missing = play.Start(*draft, documentId, registry, documents->Session());
 		Expect(!missing && !play.Active() && documents->Current()->Dirty(),
@@ -173,6 +175,23 @@ int main()
 		play.Stop();
 		Expect(documents->Current()->Dirty() && draft->GetScene().FindComponent<TestComponent>(rootNode)->Value() == 12,
 		       "Failed play changed the pre-Run edit state");
+		for (int run = 0; run < 2; ++run)
+		{
+			std::weak_ptr<TestService> runtimeService;
+			done(play.Start(*draft, documentId, registry, documents->Session(),
+			                [&runtimeService](ComponentLoadContext& context) -> Result<std::shared_ptr<void>>
+			                {
+				                auto ownedService = std::make_shared<TestService>();
+				                runtimeService = ownedService;
+				                context.Provide(*ownedService);
+				                return Result<std::shared_ptr<void>>::Success(std::move(ownedService));
+			                }));
+			Expect(!runtimeService.expired(), "Play session released its runtime service during Start");
+			done(play.Tick(1.f / 60.f, nullptr, {}));
+			Expect(runtimeService.lock()->value == 1, "Play update did not use its owned runtime service");
+			play.Stop();
+			Expect(runtimeService.expired() && !play.Active(), "Stop retained the runtime service or scene");
+		}
 		done(documents->SaveCurrent());
 		std::filesystem::remove_all(root);
 		std::cout << "Editor Play session test passed\n";

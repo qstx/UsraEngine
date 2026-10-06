@@ -7,7 +7,6 @@
 #include <Rhi/RHI.hpp>
 #include <Scene/Lighting.hpp>
 #include <memory>
-#include <vector>
 
 namespace Ursa
 {
@@ -28,7 +27,7 @@ struct ModelBoxInstance
 class Renderer3D final
 {
 public:
-	static Result<std::unique_ptr<Renderer3D>> Create(Rhi::DevicePtr device);
+	static Result<std::unique_ptr<Renderer3D>> Create(Rhi::DevicePtr selectedDevice);
 
 	~Renderer3D();
 
@@ -61,7 +60,7 @@ public:
 private:
 	struct Impl;
 
-	explicit Renderer3D(std::unique_ptr<Impl> impl);
+	explicit Renderer3D(std::unique_ptr<Impl> implementation);
 
 	std::unique_ptr<Impl> impl;
 };

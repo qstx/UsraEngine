@@ -1,37 +1,41 @@
 #pragma once
 
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Serialization/TextureResource.hpp>
-#include <array>
 
 namespace Ursa::Editor
 {
 class TextureDraft final
 {
 public:
-	static Result<std::shared_ptr<TextureDraft>> Create(uint32_t width, uint32_t height, TextureColorSpace colorSpace,
-	                                                    Vector<uint8_t> pixels);
+	static Result<std::shared_ptr<TextureDraft>> Create(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight,
+	                                                    TextureColorSpace textureColorSpace,
+	                                                    Vector<Ursa::UInt8> texturePixels);
 
 	static Result<std::shared_ptr<TextureDraft>> Load(const std::filesystem::path& path);
 
-	Result<void> ReplacePixels(uint32_t width, uint32_t height, TextureColorSpace colorSpace, Vector<uint8_t> pixels);
+	Result<void> ReplacePixels(Ursa::UInt32 newWidth, Ursa::UInt32 newHeight, TextureColorSpace newColorSpace,
+	                           Vector<Ursa::UInt8> newPixels);
 
-	Result<void> Resize(uint32_t width, uint32_t height);
+	Result<void> Resize(Ursa::UInt32 newWidth, Ursa::UInt32 newHeight);
 
-	Result<void> SetColorSpace(TextureColorSpace colorSpace);
+	Result<void> SetColorSpace(TextureColorSpace newColorSpace);
 
-	Result<void> SetPixel(uint32_t x, uint32_t y, std::array<uint8_t, 4> rgba);
+	Result<void> SetPixel(Ursa::UInt32 x, Ursa::UInt32 y, Ursa::Array<Ursa::UInt8, 4> rgba);
 
-	Result<void> GenerateChecker(uint32_t cellSize, std::array<uint8_t, 4> first, std::array<uint8_t, 4> second);
+	Result<void> GenerateChecker(Ursa::UInt32 cellSize, Ursa::Array<Ursa::UInt8, 4> first,
+	                             Ursa::Array<Ursa::UInt8, 4> second);
 
 	Result<void> Save(const std::filesystem::path& path, ResourceId id) const;
 
-	uint32_t GetWidth() const
+	Ursa::UInt32 GetWidth() const
 	{
 		return width;
 	}
 
-	uint32_t GetHeight() const
+	Ursa::UInt32 GetHeight() const
 	{
 		return height;
 	}
@@ -41,21 +45,22 @@ public:
 		return colorSpace;
 	}
 
-	const Vector<uint8_t>& GetPixels() const
+	const Vector<Ursa::UInt8>& GetPixels() const
 	{
 		return pixels;
 	}
 
 private:
-	TextureDraft(uint32_t width, uint32_t height, TextureColorSpace colorSpace, Vector<uint8_t> pixels)
-	    : width(width), height(height), colorSpace(colorSpace), pixels(std::move(pixels))
+	TextureDraft(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight, TextureColorSpace textureColorSpace,
+	             Vector<Ursa::UInt8> texturePixels)
+	    : width(textureWidth), height(textureHeight), colorSpace(textureColorSpace), pixels(std::move(texturePixels))
 	{
 	}
 
-	uint32_t width;
-	uint32_t height;
+	Ursa::UInt32 width;
+	Ursa::UInt32 height;
 	TextureColorSpace colorSpace;
-	Vector<uint8_t> pixels;
+	Vector<Ursa::UInt8> pixels;
 };
 
 Result<std::unique_ptr<EditorDocument>> NewTextureDocument(const VirtualPath& path);

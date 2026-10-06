@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Scene/Scene.hpp>
@@ -6,7 +7,6 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 namespace
 {
@@ -35,7 +35,7 @@ void Expect(bool condition, const char* message)
 	}
 }
 
-void ExpectNear(float actual, float expected)
+void ExpectNear(Ursa::Float32 actual, Ursa::Float32 expected)
 {
 	if (std::abs(actual - expected) > 0.0001f)
 	{
@@ -46,22 +46,22 @@ void ExpectNear(float actual, float expected)
 void TestHierarchyAndGeneration()
 {
 	Ursa::Scene scene;
-	const auto firstRoot = Take(scene.CreateNode());
-	const auto child = Take(scene.CreateNode(firstRoot));
-	const auto grandchild = Take(scene.CreateNode(child));
-	const auto secondRoot = Take(scene.CreateNode());
+	const auto firstRoot = Take(scene.CreateGameObject());
+	const auto child = Take(scene.CreateGameObject(firstRoot));
+	const auto grandchild = Take(scene.CreateGameObject(child));
+	const auto secondRoot = Take(scene.CreateGameObject());
 	Expect(Take(scene.ParentOf(child)) == firstRoot, "Child parent mismatch");
 	Expect(Take(scene.ChildrenOf(firstRoot)).at(0) == child, "Child listing mismatch");
 	Expect(!scene.SetParent(firstRoot, grandchild), "Ancestor cycle was accepted");
 	Expect(!scene.SetParent(child, child), "Self parenting was accepted");
-	Expect(Take(scene.ParentOf(firstRoot)) == Ursa::NodeId{}, "Rejected cycle changed root");
+	Expect(Take(scene.ParentOf(firstRoot)) == Ursa::GameObject::Ptr{}, "Rejected cycle changed root");
 	done(scene.SetParent(child, secondRoot));
 	Expect(Take(scene.ParentOf(child)) == secondRoot, "Reparenting failed");
 	Expect(Take(scene.ChildrenOf(firstRoot)).empty(), "Old parent retained child");
-	done(scene.DestroyNode(secondRoot));
+	done(scene.DestroyGameObject(secondRoot));
 	Expect(!scene.Contains(child) && !scene.Contains(grandchild), "Destroyed subtree remains alive");
-	Expect(!scene.DestroyNode(child), "Stale node was destroyed twice");
-	const auto reused = Take(scene.CreateNode());
+	Expect(!scene.DestroyGameObject(child), "Stale node was destroyed twice");
+	const auto reused = Take(scene.CreateGameObject());
 	Expect(!scene.Contains(child), "Reused node revived stale handle");
 	Expect(scene.Contains(reused), "Reused node is invalid");
 }
@@ -69,9 +69,9 @@ void TestHierarchyAndGeneration()
 void TestTransformAndActivation()
 {
 	Ursa::Scene scene;
-	const auto parent = Take(scene.CreateNode());
-	const auto child = Take(scene.CreateNode(parent));
-	const auto other = Take(scene.CreateNode());
+	const auto parent = Take(scene.CreateGameObject());
+	const auto child = Take(scene.CreateGameObject(parent));
+	const auto other = Take(scene.CreateGameObject());
 	Ursa::LocalTransform parentTransform;
 	parentTransform.position = {2.0f, 0.0f, 0.0f};
 	parentTransform.rotation = Ursa::Quat::FromAxisAngle({0.0f, 1.0f, 0.0f}, 1.57079633f);
@@ -94,7 +94,8 @@ void TestTransformAndActivation()
 class TraceComponent final : public Ursa::Component
 {
 public:
-	TraceComponent(Ursa::Vector<Ursa::String>& trace, Ursa::String name) : trace(trace), name(std::move(name))
+	TraceComponent(Ursa::Vector<Ursa::String>& eventTrace, Ursa::String componentName)
+	    : trace(eventTrace), name(std::move(componentName))
 	{
 	}
 
@@ -132,12 +133,53 @@ private:
 	Ursa::String name;
 };
 
+class AttachProbe final : public Ursa::Component
+{
+public:
+	AttachProbe(int& startCount, int& updateCount, int& removalCount)
+	    : starts(startCount), updates(updateCount), removals(removalCount)
+	{
+	}
+
+	Ursa::Result<void> OnStart(const Ursa::FrameContext&) override
+	{
+		if (!GetGameObject() || !TryGetScene())
+		{
+			return Ursa::Result<void>::Failure("Attached component could not resolve its owner and Scene");
+		}
+		++starts;
+		return {};
+	}
+
+	Ursa::Result<void> OnUpdate(const Ursa::FrameContext&) override
+	{
+		++updates;
+		if (action)
+		{
+			return action();
+		}
+		return {};
+	}
+
+	void OnRemove() override
+	{
+		++removals;
+	}
+
+	std::function<Ursa::Result<void>()> action;
+
+private:
+	int& starts;
+	int& updates;
+	int& removals;
+};
+
 void TestComponents()
 {
 	Ursa::Vector<Ursa::String> trace;
 	Ursa::Scene scene;
-	const auto parent = Take(scene.CreateNode());
-	const auto child = Take(scene.CreateNode(parent));
+	const auto parent = Take(scene.CreateGameObject());
+	const auto child = Take(scene.CreateGameObject(parent));
 	const auto a = Take(scene.AddComponent<TraceComponent>(parent, trace, "a"));
 	const auto b = Take(scene.AddComponent<TraceComponent>(parent, trace, "b"));
 	const auto c = Take(scene.AddComponent<TraceComponent>(child, trace, "c"));
@@ -160,7 +202,7 @@ void TestComponents()
 	done(scene.Update({}));
 	Expect(trace == Ursa::Vector<Ursa::String>({"a:update", "c:update"}), "Reenabled lifecycle was wrong");
 	done(scene.RemoveComponent(a));
-	done(scene.DestroyNode(parent));
+	done(scene.DestroyGameObject(parent));
 	Expect(!scene.ContainsComponent(a) && !scene.ContainsComponent(b) && !scene.ContainsComponent(c),
 	       "Destroyed components remain valid");
 	Expect(trace == Ursa::Vector<Ursa::String>({"a:update", "c:update", "a:remove", "c:remove", "b:remove"}),
@@ -195,9 +237,9 @@ public:
 void TestDeferredChanges()
 {
 	Ursa::Scene scene;
-	const auto parent = Take(scene.CreateNode());
-	const auto child = Take(scene.CreateNode(parent));
-	const auto other = Take(scene.CreateNode());
+	const auto parent = Take(scene.CreateGameObject());
+	const auto child = Take(scene.CreateGameObject(parent));
+	const auto other = Take(scene.CreateGameObject());
 	int childUpdates = 0;
 	int childRemovals = 0;
 	auto childId = Take(scene.AddComponent<ActionComponent>(child));
@@ -214,14 +256,14 @@ void TestDeferredChanges()
 		const auto newId = Take(scene.AddComponent<ActionComponent>(other));
 		(void)newId;
 		scene.FindComponent<ActionComponent>(other);
-		const auto created = Take(scene.CreateNode(other));
+		const auto created = Take(scene.CreateGameObject(other));
 		Expect(scene.Contains(created), "Created node handle is unavailable");
 		auto added = scene.AddComponent<ActionComponent>(created);
 		Expect(static_cast<bool>(added), "Could not add a component to a pending node");
 		done(scene.RemoveComponent(self.Id()));
 		Expect(!scene.RemoveComponent(self.Id()), "Repeated component removal was accepted");
-		done(scene.DestroyNode(parent));
-		Expect(!scene.DestroyNode(parent), "Repeated node deletion was accepted");
+		done(scene.DestroyGameObject(parent));
+		Expect(!scene.DestroyGameObject(parent), "Repeated GameObject deletion was accepted");
 		Expect(!scene.Contains(parent), "Deleted node was not invalidated immediately");
 		Expect(!scene.ContainsComponent(childId), "Child component remained callable after parent deletion");
 		return Ursa::Result<void>{};
@@ -246,21 +288,21 @@ void TestDeferredChanges()
 void TestFrameContextAndErrors()
 {
 	Ursa::Scene scene;
-	const auto node = Take(scene.CreateNode());
+	const auto node = Take(scene.CreateGameObject());
 	const auto id = Take(scene.AddComponent<ActionComponent>(node));
 	auto* behavior = scene.FindComponent<ActionComponent>(node);
 	int removals = 0;
 	behavior->removals = &removals;
 	behavior->action = [](ActionComponent&, const Ursa::FrameContext& context)
 	{
-		if (!context.input.KeyDown(Ursa::Key::space) || context.deltaSeconds != 0.125f || context.frameIndex != 42)
+		if (!context.input.KeyDown(Ursa::Key::Space) || context.deltaSeconds != 0.125f || context.frameIndex != 42)
 		{
 			return Ursa::Result<void>::Failure("Frame input or time was not forwarded");
 		}
 		return Ursa::Result<void>::Failure("Expected behavior failure");
 	};
 	Ursa::FrameContext context;
-	context.input.keys[static_cast<size_t>(Ursa::Key::space)] = true;
+	context.input.keys[static_cast<Ursa::Size>(Ursa::Key::Space)] = true;
 	context.deltaSeconds = 0.125f;
 	context.frameIndex = 42;
 	scene.BeginFrame();
@@ -272,21 +314,82 @@ void TestFrameContextAndErrors()
 	Expect(removals == 1, "Failed behavior cleanup ran more than once");
 }
 
+void TestAttachGameObjectTree()
+{
+	auto root = Ursa::GameObject::Create("Asset root");
+	auto child = Ursa::GameObject::Create("Asset child");
+	done(child->SetParent(root));
+	int starts = 0;
+	int updates = 0;
+	int removals = 0;
+	auto component = Take(child->AddComponent<AttachProbe>(starts, updates, removals));
+	Ursa::Scene scene;
+	done(scene.AttachGameObject(root));
+	Expect(scene.Contains(root) && scene.Contains(child), "Scene did not attach the complete GameObject tree");
+	Expect(component->GetGameObject() == child && component->TryGetScene() == &scene,
+	       "Scene attachment did not bind component ownership and context");
+	Expect(scene.ContainsComponent(component->Id()), "Scene did not register a preconfigured component");
+	auto otherRoot = Ursa::GameObject::Create("Other root");
+	done(scene.AttachGameObject(otherRoot));
+	done(child->SetParent(otherRoot));
+	Expect(root->Children().empty() && child->Parent() == otherRoot,
+	       "GameObject reparenting did not update its Scene hierarchy");
+	done(child->SetParent(root));
+	Expect(otherRoot->Children().empty() && child->Parent() == root,
+	       "GameObject could not return to its original Scene parent");
+	auto attachedComponent = Take(child->AddComponent<AttachProbe>(starts, updates, removals));
+	Expect(attachedComponent->TryGetScene() == &scene && scene.ContainsComponent(attachedComponent->Id()),
+	       "Adding a component through an attached GameObject bypassed Scene registration");
+	component->action = [&] { return child->SetParent(otherRoot); };
+	done(scene.Update({}));
+	Expect(starts == 2 && updates == 2 && child->Parent() == otherRoot,
+	       "Attached GameObject lifecycle or deferred reparenting was incorrect");
+	component->action = {};
+	done(child->SetParent(root));
+	done(child->RemoveComponent(attachedComponent));
+	Expect(removals == 1, "Removing a component through its GameObject did not invoke cleanup");
+	done(scene.DestroyGameObject(root));
+	Expect(!root->IsValid() && !child->IsValid() && removals == 2,
+	       "Scene destruction did not invalidate and clean up the complete GameObject tree");
+}
+
+void TestGameObjectRenderCollection()
+{
+	Ursa::Scene scene;
+	auto cameraObject = Ursa::GameObject::Create("Camera");
+	Ursa::LocalTransform cameraTransform;
+	cameraTransform.position = {0.0f, 0.0f, 5.0f};
+	done(cameraObject->SetLocalTransform(cameraTransform));
+	auto camera = Take(cameraObject->AddComponent<Ursa::CameraComponent>());
+	auto boxObject = Ursa::GameObject::Create("Box");
+	Ursa::LocalTransform boxTransform;
+	boxTransform.position = {1.0f, 2.0f, 0.0f};
+	done(boxObject->SetLocalTransform(boxTransform));
+	Take(boxObject->AddComponent<Ursa::BoxRenderComponent>());
+	done(scene.AttachGameObject(cameraObject));
+	done(scene.AttachGameObject(boxObject));
+	done(scene.SetActiveCamera(camera->Id()));
+	const auto renderData = Take(scene.CollectRenderData(16.0f / 9.0f));
+	Expect(renderData.boxes.size() == 1 && renderData.boxes.front().model.At(0, 3) == 1.0f &&
+	           renderData.boxes.front().model.At(1, 3) == 2.0f,
+	       "Scene render-data collection did not traverse GameObject transforms and components");
+}
+
 void TestPersistentIdsAndOrder()
 {
 	Ursa::Scene scene;
-	const auto first = Take(scene.CreateNode());
-	const auto second = Take(scene.CreateNode());
-	const auto childA = Take(scene.CreateNode(first));
-	const auto childB = Take(scene.CreateNode(first));
-	const auto firstId = Take(scene.NodePersistentId(first));
-	const auto secondId = Take(scene.NodePersistentId(second));
-	Expect(firstId != secondId && Take(scene.NodeByPersistentId(firstId)) == first,
+	const auto first = Take(scene.CreateGameObject());
+	const auto second = Take(scene.CreateGameObject());
+	const auto childA = Take(scene.CreateGameObject(first));
+	const auto childB = Take(scene.CreateGameObject(first));
+	const auto firstId = Take(scene.PersistentId(first));
+	const auto secondId = Take(scene.PersistentId(second));
+	Expect(firstId != secondId && Take(scene.GameObjectById(firstId)) == first,
 	       "Persistent node IDs are not unique or queryable");
-	Expect(!scene.AssignNodePersistentId(second, firstId), "Duplicate persistent node ID was accepted");
-	done(scene.ReorderNode(second, 0));
-	done(scene.ReorderNode(childB, 0));
-	Expect(scene.RootNodes().at(0) == second && Take(scene.ChildrenOf(first)).at(0) == childB,
+	Expect(!scene.AssignGameObjectId(second, firstId), "Duplicate persistent GameObject ID was accepted");
+	done(scene.ReorderGameObject(second, 0));
+	done(scene.ReorderGameObject(childB, 0));
+	Expect(scene.RootGameObjects().at(0) == second && Take(scene.ChildrenOf(first)).at(0) == childB,
 	       "Node ordering was not preserved");
 
 	const auto componentA = Take(scene.AddComponent<ActionComponent>(first));
@@ -298,14 +401,15 @@ void TestPersistentIdsAndOrder()
 	       "Duplicate persistent component ID was accepted");
 	done(scene.ReorderComponent(componentB, 0));
 	Expect(Take(scene.ComponentsOf(first)).at(0) == componentB, "Component reorder failed");
-	done(scene.SetComponentNode(componentA, second));
-	Expect(Take(scene.ComponentNode(componentA)) == second && scene.GetComponent(componentA)->Node() == second &&
+	done(scene.SetComponentOwner(componentA, second));
+	Expect(Take(scene.ComponentOwner(componentA)) == second &&
+	           scene.GetComponent(componentA)->GetGameObject() == second &&
 	           Take(scene.ComponentsOf(second)).at(0) == componentA,
 	       "Component move did not update owner and order");
 
-	done(scene.DestroyNode(first));
-	const auto reused = Take(scene.CreateNode());
-	Expect(!scene.NodeByPersistentId(firstId) && Take(scene.NodePersistentId(reused)) != firstId,
+	done(scene.DestroyGameObject(first));
+	const auto reused = Take(scene.CreateGameObject());
+	Expect(!scene.GameObjectById(firstId) && Take(scene.PersistentId(reused)) != firstId,
 	       "Reused node slot retained old persistent identity");
 }
 } // namespace
@@ -319,6 +423,8 @@ int main()
 		TestComponents();
 		TestDeferredChanges();
 		TestFrameContextAndErrors();
+		TestAttachGameObjectTree();
+		TestGameObjectRenderCollection();
 		TestPersistentIdsAndOrder();
 		return 0;
 	}

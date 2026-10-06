@@ -1,10 +1,8 @@
+#include <Core/Containers.hpp>
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/PrefabMerge.hpp>
 #include <algorithm>
 #include <functional>
-#include <map>
-#include <set>
-#include <vector>
 
 namespace Ursa
 {
@@ -83,9 +81,9 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 	{
 		return Result<Json>::Failure("Invalid Prefab source or overrides at " + location);
 	}
-	static const Set<String> supported{"properties",      "deletedNodes",    "addedNodes",
-	                                   "nodeParents",     "nodeOrders",      "deletedComponents",
-	                                   "addedComponents", "componentOwners", "componentOrders"};
+	static const Set<String> supported{"properties",        "deletedGameObjects", "addedGameObjects",
+	                                   "gameObjectParents", "gameObjectOrders",   "deletedComponents",
+	                                   "addedComponents",   "componentOwners",    "componentOrders"};
 	for (const auto& entry : overrides.items())
 	{
 		if (!supported.count(ToUrsaString(entry.key())))
@@ -94,7 +92,7 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 			                             location);
 		}
 	}
-	for (const char* name : {"deletedNodes", "addedNodes", "deletedComponents", "addedComponents"})
+	for (const char* name : {"deletedGameObjects", "addedGameObjects", "deletedComponents", "addedComponents"})
 	{
 		auto checked = RequireArray(overrides, name, location);
 		if (!checked)
@@ -102,7 +100,7 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 			return Result<Json>::Failure(checked.error);
 		}
 	}
-	for (const char* name : {"nodeParents", "nodeOrders", "componentOwners", "componentOrders"})
+	for (const char* name : {"gameObjectParents", "gameObjectOrders", "componentOwners", "componentOrders"})
 	{
 		auto checked = RequireObject(overrides, name, location);
 		if (!checked)
@@ -116,7 +114,7 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 	for (const auto& node : source)
 	{
 		auto id = IdOf(node, location + ".sourceNode");
-		if (!id || !node.contains("parent") || !node.contains("components") || !node["components"].is_array())
+		if (!id || !node.contains("parentId") || !node.contains("components") || !node["components"].is_array())
 		{
 			return Result<Json>::Failure(!id ? id.error : "Invalid Prefab node at " + location);
 		}
@@ -135,14 +133,14 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 		}
 	}
 	const auto root = sourceOrder.front();
-	if (!nodes[root]["parent"].is_null())
+	if (!nodes[root]["parentId"].is_null())
 	{
 		return Result<Json>::Failure("Prefab root has a parent at " + location);
 	}
-	if (overrides.contains("deletedNodes"))
+	if (overrides.contains("deletedGameObjects"))
 	{
 		Set<String> deleted;
-		for (const auto& item : overrides["deletedNodes"])
+		for (const auto& item : overrides["deletedGameObjects"])
 		{
 			if (!item.is_string())
 			{
@@ -160,7 +158,7 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 			changed = false;
 			for (const auto& entry : nodes)
 			{
-				if (!entry.second["parent"].is_null() && deleted.count(entry.second["parent"].get<String>()) &&
+				if (!entry.second["parentId"].is_null() && deleted.count(entry.second["parentId"].get<String>()) &&
 				    !deleted.count(entry.first))
 				{
 					deleted.insert(entry.first);
@@ -173,12 +171,12 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 			nodes.erase(id);
 		}
 	}
-	if (overrides.contains("addedNodes"))
+	if (overrides.contains("addedGameObjects"))
 	{
-		for (const auto& node : overrides["addedNodes"])
+		for (const auto& node : overrides["addedGameObjects"])
 		{
 			auto id = IdOf(node, location + ".addedNode");
-			if (!id || !node.contains("parent") || !node["parent"].is_string() || !node.contains("components") ||
+			if (!id || !node.contains("parentId") || !node["parentId"].is_string() || !node.contains("components") ||
 			    !node["components"].is_array())
 			{
 				return Result<Json>::Failure(!id ? id.error : "Invalid added node at " + location);
@@ -198,9 +196,9 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 			}
 		}
 	}
-	if (overrides.contains("nodeParents"))
+	if (overrides.contains("gameObjectParents"))
 	{
-		for (const auto& entry : overrides["nodeParents"].items())
+		for (const auto& entry : overrides["gameObjectParents"].items())
 		{
 			if (ToUrsaString(entry.key()) == root || !nodes.count(ToUrsaString(entry.key())) ||
 			    !entry.value().is_string())
@@ -213,7 +211,7 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 			{
 				return Result<Json>::Failure("Cross-instance or missing parent " + parent + " at " + location);
 			}
-			nodes[ToUrsaString(entry.key())]["parent"] = parent;
+			nodes[ToUrsaString(entry.key())]["parentId"] = parent;
 		}
 	}
 	for (const auto& entry : nodes)
@@ -222,7 +220,7 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 		{
 			continue;
 		}
-		if (!entry.second["parent"].is_string() || !nodes.count(entry.second["parent"].get<String>()))
+		if (!entry.second["parentId"].is_string() || !nodes.count(entry.second["parentId"].get<String>()))
 		{
 			return Result<Json>::Failure("Missing Prefab parent for node " + entry.first + " at " + location);
 		}
@@ -234,7 +232,7 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 			{
 				return Result<Json>::Failure("Prefab parent cycle at node " + current + " in " + location);
 			}
-			current = nodes[current]["parent"].get<String>();
+			current = nodes[current]["parentId"].get<String>();
 		}
 	}
 	if (overrides.contains("deletedComponents"))
@@ -366,12 +364,12 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 	{
 		if (nodes.count(id) && id != root)
 		{
-			children[nodes[id]["parent"].get<String>()].push_back(id);
+			children[nodes[id]["parentId"].get<String>()].push_back(id);
 		}
 	}
-	if (overrides.contains("nodeOrders"))
+	if (overrides.contains("gameObjectOrders"))
 	{
-		for (const auto& entry : overrides["nodeOrders"].items())
+		for (const auto& entry : overrides["gameObjectOrders"].items())
 		{
 			if (!nodes.count(ToUrsaString(entry.key())))
 			{
@@ -379,7 +377,7 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 				                             location);
 			}
 			auto ordered = Reorder(children[ToUrsaString(entry.key())], entry.value(),
-			                       location + ".nodeOrders[" + ToUrsaString(entry.key()) + "]");
+			                       location + ".gameObjectOrders[" + ToUrsaString(entry.key()) + "]");
 			if (!ordered)
 			{
 				return Result<Json>::Failure(ordered.error);

@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Math/Camera.hpp>
 #include <Math/Quat.hpp>
 #include <Math/Transform.hpp>
@@ -7,7 +8,7 @@
 
 namespace
 {
-void ExpectNear(float actual, float expected)
+void ExpectNear(Ursa::Float32 actual, Ursa::Float32 expected)
 {
 	if (std::abs(actual - expected) > 0.0001f)
 	{

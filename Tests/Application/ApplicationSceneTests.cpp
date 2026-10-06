@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Application/Application.hpp>
 #include <iostream>
@@ -9,14 +10,15 @@ namespace
 class Probe final : public Ursa::Component
 {
 public:
-	Probe(int& updates, int& removals, bool fail) : updates(updates), removals(removals), fail(fail)
+	Probe(int& updateCount, int& removalCount, bool shouldFail)
+	    : updates(updateCount), removals(removalCount), fail(shouldFail)
 	{
 	}
 
 	Ursa::Result<void> OnUpdate(const Ursa::FrameContext& context) override
 	{
 		++updates;
-		if (!context.window || context.frameIndex != static_cast<uint64_t>(updates))
+		if (!context.window || context.frameIndex != static_cast<Ursa::UInt64>(updates))
 		{
 			return Ursa::Result<void>::Failure("Frame context was not populated");
 		}
@@ -46,7 +48,7 @@ private:
 class SceneApp final : public Ursa::Application
 {
 public:
-	explicit SceneApp(bool fail) : fail(fail)
+	explicit SceneApp(bool shouldFail) : fail(shouldFail)
 	{
 	}
 
@@ -57,8 +59,12 @@ public:
 private:
 	Ursa::Result<void> OnStart() override
 	{
+		if (!window || !device || !swapchain)
+		{
+			return Ursa::Result<void>::Failure("Application runtime resources were not retained before OnStart");
+		}
 		scene = std::make_shared<Ursa::Scene>();
-		auto node = scene->CreateNode();
+		auto node = scene->CreateGameObject();
 		if (!node)
 		{
 			return Ursa::Result<void>::Failure(node.error);
@@ -68,7 +74,7 @@ private:
 		{
 			return Ursa::Result<void>::Failure(component.error);
 		}
-		auto cameraNode = scene->CreateNode();
+		auto cameraNode = scene->CreateGameObject();
 		if (!cameraNode)
 		{
 			return Ursa::Result<void>::Failure(cameraNode.error);
@@ -93,7 +99,7 @@ private:
 		return {};
 	}
 
-	Ursa::Result<void> OnFrame(float) override
+	Ursa::Result<void> OnFrame(Ursa::Float32) override
 	{
 		++legacyFrames;
 		return {};
@@ -113,7 +119,7 @@ private:
 		return {};
 	}
 
-	Ursa::Result<void> OnFrame(float) override
+	Ursa::Result<void> OnFrame(Ursa::Float32) override
 	{
 		++frames;
 		return {};

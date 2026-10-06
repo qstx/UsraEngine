@@ -1,7 +1,7 @@
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Rhi/RHI.hpp>
 #include <Core/StringInterop.hpp>
-#include <array>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -36,14 +36,14 @@ void Expect(bool condition, const char* message)
 	}
 }
 
-Ursa::Vector<uint8_t> LoadShader(const char* name)
+Ursa::Vector<Ursa::UInt8> LoadShader(const char* name)
 {
 	std::ifstream file(std::string(URSA_SHADER_DIR) + "/" + name + ".spv", std::ios::binary | std::ios::ate);
 	if (!file)
 	{
 		throw std::runtime_error(std::string("Cannot open shader ") + name);
 	}
-	Ursa::Vector<uint8_t> bytes(static_cast<size_t>(file.tellg()));
+	Ursa::Vector<Ursa::UInt8> bytes(static_cast<Ursa::Size>(file.tellg()));
 	file.seekg(0);
 	file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 	if (!file)
@@ -55,28 +55,28 @@ Ursa::Vector<uint8_t> LoadShader(const char* name)
 
 void TestCompute(const DevicePtr& device)
 {
-	constexpr size_t size = 64 * sizeof(uint32_t);
-	auto output = Take(device->CreateBuffer({size, BufferUsage::storage | BufferUsage::transferSource, Memory::gpu}));
-	auto readback = Take(device->CreateBuffer({size, BufferUsage::transferDestination, Memory::readback}));
-	auto layout = Take(device->CreateBindGroupLayout({{0, BindingType::storageBuffer, 1, 4}}));
+	constexpr Ursa::Size size = 64 * sizeof(Ursa::UInt32);
+	auto output = Take(device->CreateBuffer({size, BufferUsage::Storage | BufferUsage::TransferSource, Memory::Gpu}));
+	auto readback = Take(device->CreateBuffer({size, BufferUsage::TransferDestination, Memory::Readback}));
+	auto layout = Take(device->CreateBindGroupLayout({{0, BindingType::StorageBuffer, 1, 4}}));
 	auto group = Take(device->CreateBindGroup({layout, {{0, output, {}, {}}}}));
-	auto shader = Take(device->CreateShader({ShaderStage::compute, ShaderFormat::spirv, LoadShader("Test.comp")}));
+	auto shader = Take(device->CreateShader({ShaderStage::Compute, ShaderFormat::Spirv, LoadShader("Test.comp")}));
 	auto pipeline = Take(device->CreateComputePipeline({shader, layout}));
 	auto cmd = Take(device->CreateCommandList());
 	done(cmd->Begin());
-	done(cmd->Barrier(output, ResourceState::undefined, ResourceState::storageReadWrite));
+	done(cmd->Barrier(output, ResourceState::Undefined, ResourceState::StorageReadWrite));
 	done(cmd->BindPipeline(pipeline));
 	done(cmd->BindGroup(group));
 	done(cmd->Dispatch(1));
-	done(cmd->Barrier(output, ResourceState::storageReadWrite, ResourceState::transferSource));
-	done(cmd->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+	done(cmd->Barrier(output, ResourceState::StorageReadWrite, ResourceState::TransferSource));
+	done(cmd->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(cmd->CopyBuffer(output, readback, size));
 	done(cmd->End());
 	auto fence = Take(device->Submit(cmd));
 	done(fence->Wait());
-	Ursa::Array<uint32_t, 64> values{};
+	Ursa::Array<Ursa::UInt32, 64> values{};
 	done(readback->Read(0, values.data(), size));
-	for (uint32_t i = 0; i < values.size(); ++i)
+	for (Ursa::UInt32 i = 0; i < values.size(); ++i)
 	{
 		Expect(values[i] == i * 3 + 7, "Compute output mismatch");
 	}
@@ -84,51 +84,51 @@ void TestCompute(const DevicePtr& device)
 
 void TestTextureAndOffscreen(const DevicePtr& device, bool srgb)
 {
-	constexpr uint32_t width = 4, height = 4;
-	Ursa::Array<uint8_t, 16> pixels{};
-	for (size_t i = 0; i < pixels.size(); i += 4)
+	constexpr Ursa::UInt32 width = 4, height = 4;
+	Ursa::Array<Ursa::UInt8, 16> pixels{};
+	for (Ursa::Size i = 0; i < pixels.size(); i += 4)
 	{
 		pixels[i] = srgb ? 128 : 240;
 		pixels[i + 1] = srgb ? 128 : 20;
 		pixels[i + 2] = srgb ? 128 : 40;
 		pixels[i + 3] = 255;
 	}
-	auto upload = Take(device->CreateBuffer({pixels.size(), BufferUsage::transferSource, Memory::upload}));
+	auto upload = Take(device->CreateBuffer({pixels.size(), BufferUsage::TransferSource, Memory::Upload}));
 	done(upload->Write(0, pixels.data(), pixels.size()));
-	auto texture = Take(device->CreateTexture({2, 2, srgb ? Format::rgbA8Srgb : Format::rgbA8Unorm,
-	                                           TextureUsage::sampled | TextureUsage::transferDestination}));
+	auto texture = Take(device->CreateTexture({2, 2, srgb ? Format::RgbA8Srgb : Format::RgbA8Unorm,
+	                                           TextureUsage::Sampled | TextureUsage::TransferDestination}));
 	auto color = Take(device->CreateTexture(
-	    {width, height, Format::rgbA8Unorm, TextureUsage::colorAttachment | TextureUsage::transferSource}));
-	auto depth = Take(device->CreateTexture({width, height, Format::d32Float, TextureUsage::depthAttachment}));
+	    {width, height, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
+	auto depth = Take(device->CreateTexture({width, height, Format::D32Float, TextureUsage::DepthAttachment}));
 	auto readback =
-	    Take(device->CreateBuffer({width * height * 4, BufferUsage::transferDestination, Memory::readback}));
+	    Take(device->CreateBuffer({width * height * 4, BufferUsage::TransferDestination, Memory::Readback}));
 	auto sampler = Take(device->CreateSampler({false, false}));
-	constexpr Ursa::Array<float, 16> vertices{
+	constexpr Ursa::Array<Ursa::Float32, 16> vertices{
 	    {-1.f, -1.f, 0.f, 0.f, 1.f, -1.f, 1.f, 0.f, 1.f, 1.f, 1.f, 1.f, -1.f, 1.f, 0.f, 1.f}};
-	constexpr Ursa::Array<uint32_t, 6> indices{{0, 1, 2, 0, 2, 3}};
-	auto vertexBuffer = Take(device->CreateBuffer({sizeof(vertices), BufferUsage::vertex, Memory::upload}));
-	auto indexBuffer = Take(device->CreateBuffer({sizeof(indices), BufferUsage::index, Memory::upload}));
+	constexpr Ursa::Array<Ursa::UInt32, 6> indices{{0, 1, 2, 0, 2, 3}};
+	auto vertexBuffer = Take(device->CreateBuffer({sizeof(vertices), BufferUsage::Vertex, Memory::Upload}));
+	auto indexBuffer = Take(device->CreateBuffer({sizeof(indices), BufferUsage::Index, Memory::Upload}));
 	done(vertexBuffer->Write(0, vertices.data(), sizeof(vertices)));
 	done(indexBuffer->Write(0, indices.data(), sizeof(indices)));
-	auto layout = Take(device->CreateBindGroupLayout({{0, BindingType::combinedImageSampler, 1, 2}}));
+	auto layout = Take(device->CreateBindGroupLayout({{0, BindingType::CombinedImageSampler, 1, 2}}));
 	auto group = Take(device->CreateBindGroup({layout, {{0, {}, texture, sampler}}}));
-	auto vertex = Take(device->CreateShader({ShaderStage::vertex, ShaderFormat::spirv, LoadShader("TestVertex.vert")}));
-	auto fragment = Take(device->CreateShader({ShaderStage::fragment, ShaderFormat::spirv, LoadShader("Test.frag")}));
+	auto vertex = Take(device->CreateShader({ShaderStage::Vertex, ShaderFormat::Spirv, LoadShader("TestVertex.vert")}));
+	auto fragment = Take(device->CreateShader({ShaderStage::Fragment, ShaderFormat::Spirv, LoadShader("Test.frag")}));
 	GraphicsPipelineDesc pipelineDesc;
 	pipelineDesc.vertex = vertex;
 	pipelineDesc.fragment = fragment;
 	pipelineDesc.layout = layout;
 	pipelineDesc.depthTest = true;
-	pipelineDesc.vertexStride = sizeof(float) * 4;
-	pipelineDesc.attributes = {{0, 0, VertexFormat::float2}, {1, sizeof(float) * 2, VertexFormat::float2}};
+	pipelineDesc.vertexStride = sizeof(Ursa::Float32) * 4;
+	pipelineDesc.attributes = {{0, 0, VertexFormat::Float2}, {1, sizeof(Ursa::Float32) * 2, VertexFormat::Float2}};
 	auto pipeline = Take(device->CreateGraphicsPipeline(pipelineDesc));
 	auto cmd = Take(device->CreateCommandList());
 	done(cmd->Begin());
-	done(cmd->Barrier(texture, ResourceState::undefined, ResourceState::transferDestination));
+	done(cmd->Barrier(texture, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(cmd->CopyBufferToTexture(upload, texture));
-	done(cmd->Barrier(texture, ResourceState::transferDestination, ResourceState::shaderRead));
-	done(cmd->Barrier(color, ResourceState::undefined, ResourceState::colorAttachment));
-	done(cmd->Barrier(depth, ResourceState::undefined, ResourceState::depthAttachment));
+	done(cmd->Barrier(texture, ResourceState::TransferDestination, ResourceState::ShaderRead));
+	done(cmd->Barrier(color, ResourceState::Undefined, ResourceState::ColorAttachment));
+	done(cmd->Barrier(depth, ResourceState::Undefined, ResourceState::DepthAttachment));
 	RenderTarget target;
 	target.color = color;
 	target.depth = depth;
@@ -139,15 +139,15 @@ void TestTextureAndOffscreen(const DevicePtr& device, bool srgb)
 	done(cmd->BindIndexBuffer(indexBuffer));
 	done(cmd->DrawIndexed(6));
 	done(cmd->EndRendering());
-	done(cmd->Barrier(color, ResourceState::colorAttachment, ResourceState::transferSource));
-	done(cmd->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+	done(cmd->Barrier(color, ResourceState::ColorAttachment, ResourceState::TransferSource));
+	done(cmd->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(cmd->CopyTextureToBuffer(color, readback));
 	done(cmd->End());
 	auto fence = Take(device->Submit(cmd));
 	done(fence->Wait());
-	Ursa::Array<uint8_t, width * height * 4> result{};
+	Ursa::Array<Ursa::UInt8, width * height * 4> result{};
 	done(readback->Read(0, result.data(), result.size()));
-	for (size_t i = 0; i < result.size(); i += 4)
+	for (Ursa::Size i = 0; i < result.size(); i += 4)
 	{
 		Expect(result[i] == (srgb ? 55 : 240) && result[i + 1] == (srgb ? 55 : 20) &&
 		           result[i + 2] == (srgb ? 55 : 40) && result[i + 3] == 255,
@@ -157,25 +157,25 @@ void TestTextureAndOffscreen(const DevicePtr& device, bool srgb)
 
 void TestFirstInstance(const DevicePtr& device)
 {
-	constexpr uint32_t width = 64, height = 32;
+	constexpr Ursa::UInt32 width = 64, height = 32;
 	auto color = Take(device->CreateTexture(
-	    {width, height, Format::rgbA8Unorm, TextureUsage::colorAttachment | TextureUsage::transferSource}));
+	    {width, height, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
 	auto readback =
-	    Take(device->CreateBuffer({width * height * 4, BufferUsage::transferDestination, Memory::readback}));
-	constexpr Ursa::Array<uint32_t, 3> indices{0, 1, 2};
-	auto indexBuffer = Take(device->CreateBuffer({sizeof(indices), BufferUsage::index, Memory::upload}));
+	    Take(device->CreateBuffer({width * height * 4, BufferUsage::TransferDestination, Memory::Readback}));
+	constexpr Ursa::Array<Ursa::UInt32, 3> indices{0, 1, 2};
+	auto indexBuffer = Take(device->CreateBuffer({sizeof(indices), BufferUsage::Index, Memory::Upload}));
 	done(indexBuffer->Write(0, indices.data(), sizeof(indices)));
 	auto vertex =
-	    Take(device->CreateShader({ShaderStage::vertex, ShaderFormat::spirv, LoadShader("TestInstance.vert")}));
+	    Take(device->CreateShader({ShaderStage::Vertex, ShaderFormat::Spirv, LoadShader("TestInstance.vert")}));
 	auto fragment =
-	    Take(device->CreateShader({ShaderStage::fragment, ShaderFormat::spirv, LoadShader("TestInstance.frag")}));
+	    Take(device->CreateShader({ShaderStage::Fragment, ShaderFormat::Spirv, LoadShader("TestInstance.frag")}));
 	GraphicsPipelineDesc desc;
 	desc.vertex = vertex;
 	desc.fragment = fragment;
 	auto pipeline = Take(device->CreateGraphicsPipeline(desc));
 	auto command = Take(device->CreateCommandList());
 	done(command->Begin());
-	done(command->Barrier(color, ResourceState::undefined, ResourceState::colorAttachment));
+	done(command->Barrier(color, ResourceState::Undefined, ResourceState::ColorAttachment));
 	RenderTarget target;
 	target.color = color;
 	done(command->BeginRendering(target));
@@ -184,44 +184,45 @@ void TestFirstInstance(const DevicePtr& device)
 	done(command->DrawIndexed(3, 1));
 	done(command->DrawIndexed(3, 1, 1));
 	done(command->EndRendering());
-	done(command->Barrier(color, ResourceState::colorAttachment, ResourceState::transferSource));
-	done(command->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+	done(command->Barrier(color, ResourceState::ColorAttachment, ResourceState::TransferSource));
+	done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(command->CopyTextureToBuffer(color, readback));
 	done(command->End());
 	done(Take(device->Submit(command))->Wait());
-	Ursa::Array<uint8_t, width * height * 4> pixels{};
+	Ursa::Array<Ursa::UInt8, width * height * 4> pixels{};
 	done(readback->Read(0, pixels.data(), pixels.size()));
-	const size_t left = (height / 2 * width + width / 4) * 4;
-	const size_t right = (height / 2 * width + width * 3 / 4) * 4;
+	const Ursa::Size left = (height / 2 * width + width / 4) * 4;
+	const Ursa::Size right = (height / 2 * width + width * 3 / 4) * 4;
 	Expect(pixels[left] > 240 && pixels[left + 2] < 10, "First indexed instance is missing");
 	Expect(pixels[right + 2] > 240 && pixels[right] < 10, "firstInstance did not select second instance");
 }
 
 void TestScissorAndIndexedOffsets(const DevicePtr& device)
 {
-	constexpr uint32_t width = 8, height = 8;
+	constexpr Ursa::UInt32 width = 8, height = 8;
 	auto color = Take(device->CreateTexture(
-	    {width, height, Format::rgbA8Unorm, TextureUsage::colorAttachment | TextureUsage::transferSource}));
+	    {width, height, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
 	auto readback =
-	    Take(device->CreateBuffer({width * height * 4, BufferUsage::transferDestination, Memory::readback}));
-	constexpr Ursa::Array<float, 12> vertices{-1.f, -1.f, 0.f, -1.f, -0.5f, 1.f, 0.f, -1.f, 1.f, -1.f, 0.5f, 1.f};
-	constexpr Ursa::Array<uint32_t, 4> indices{0, 0, 1, 2};
-	auto vertexBuffer = Take(device->CreateBuffer({sizeof(vertices), BufferUsage::vertex, Memory::upload}));
-	auto indexBuffer = Take(device->CreateBuffer({sizeof(indices), BufferUsage::index, Memory::upload}));
+	    Take(device->CreateBuffer({width * height * 4, BufferUsage::TransferDestination, Memory::Readback}));
+	constexpr Ursa::Array<Ursa::Float32, 12> vertices{-1.f, -1.f, 0.f, -1.f, -0.5f, 1.f,
+	                                                  0.f,  -1.f, 1.f, -1.f, 0.5f,  1.f};
+	constexpr Ursa::Array<Ursa::UInt32, 4> indices{0, 0, 1, 2};
+	auto vertexBuffer = Take(device->CreateBuffer({sizeof(vertices), BufferUsage::Vertex, Memory::Upload}));
+	auto indexBuffer = Take(device->CreateBuffer({sizeof(indices), BufferUsage::Index, Memory::Upload}));
 	done(vertexBuffer->Write(0, vertices.data(), sizeof(vertices)));
 	done(indexBuffer->Write(0, indices.data(), sizeof(indices)));
-	auto vertex = Take(device->CreateShader({ShaderStage::vertex, ShaderFormat::spirv, LoadShader("TestOffset.vert")}));
+	auto vertex = Take(device->CreateShader({ShaderStage::Vertex, ShaderFormat::Spirv, LoadShader("TestOffset.vert")}));
 	auto fragment =
-	    Take(device->CreateShader({ShaderStage::fragment, ShaderFormat::spirv, LoadShader("TestOffset.frag")}));
+	    Take(device->CreateShader({ShaderStage::Fragment, ShaderFormat::Spirv, LoadShader("TestOffset.frag")}));
 	GraphicsPipelineDesc desc;
 	desc.vertex = vertex;
 	desc.fragment = fragment;
-	desc.vertexStride = sizeof(float) * 2;
-	desc.attributes = {{0, 0, VertexFormat::float2}};
+	desc.vertexStride = sizeof(Ursa::Float32) * 2;
+	desc.attributes = {{0, 0, VertexFormat::Float2}};
 	auto pipeline = Take(device->CreateGraphicsPipeline(desc));
 	auto command = Take(device->CreateCommandList());
 	done(command->Begin());
-	done(command->Barrier(color, ResourceState::undefined, ResourceState::colorAttachment));
+	done(command->Barrier(color, ResourceState::Undefined, ResourceState::ColorAttachment));
 	RenderTarget target;
 	target.color = color;
 	done(command->BeginRendering(target));
@@ -233,46 +234,46 @@ void TestScissorAndIndexedOffsets(const DevicePtr& device)
 	done(command->SetScissor({4, 0, 4, height}));
 	done(command->DrawIndexed(3, 1, 0, 1, 3));
 	done(command->EndRendering());
-	done(command->Barrier(color, ResourceState::colorAttachment, ResourceState::transferSource));
-	done(command->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+	done(command->Barrier(color, ResourceState::ColorAttachment, ResourceState::TransferSource));
+	done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(command->CopyTextureToBuffer(color, readback));
 	done(command->End());
 	done(Take(device->Submit(command))->Wait());
 
-	Ursa::Array<uint8_t, width * height * 4> pixels{};
+	Ursa::Array<Ursa::UInt8, width * height * 4> pixels{};
 	done(readback->Read(0, pixels.data(), pixels.size()));
-	const size_t left = (height / 2 * width + 1) * 4;
-	const size_t right = (height / 2 * width + 6) * 4;
+	const Ursa::Size left = (height / 2 * width + 1) * 4;
+	const Ursa::Size right = (height / 2 * width + 6) * 4;
 	Expect(pixels[left + 1] < 100, "Scissor failed to clip the left side");
 	Expect(pixels[right + 1] > 240 && pixels[right] < 10, "Indexed offsets failed to draw in the scissor");
 }
 
 void TestStorageImage(const DevicePtr& device)
 {
-	constexpr uint32_t width = 4, height = 4;
+	constexpr Ursa::UInt32 width = 4, height = 4;
 	auto texture = Take(device->CreateTexture(
-	    {width, height, Format::rgbA8Unorm, TextureUsage::storage | TextureUsage::transferSource}));
+	    {width, height, Format::RgbA8Unorm, TextureUsage::Storage | TextureUsage::TransferSource}));
 	auto readback =
-	    Take(device->CreateBuffer({width * height * 4, BufferUsage::transferDestination, Memory::readback}));
-	auto layout = Take(device->CreateBindGroupLayout({{0, BindingType::storageTexture, 1, 4}}));
+	    Take(device->CreateBuffer({width * height * 4, BufferUsage::TransferDestination, Memory::Readback}));
+	auto layout = Take(device->CreateBindGroupLayout({{0, BindingType::StorageTexture, 1, 4}}));
 	auto group = Take(device->CreateBindGroup({layout, {{0, {}, texture, {}}}}));
-	auto shader = Take(device->CreateShader({ShaderStage::compute, ShaderFormat::spirv, LoadShader("TestImage.comp")}));
+	auto shader = Take(device->CreateShader({ShaderStage::Compute, ShaderFormat::Spirv, LoadShader("TestImage.comp")}));
 	auto pipeline = Take(device->CreateComputePipeline({shader, layout}));
 	auto cmd = Take(device->CreateCommandList());
 	done(cmd->Begin());
-	done(cmd->Barrier(texture, ResourceState::undefined, ResourceState::shaderWrite));
+	done(cmd->Barrier(texture, ResourceState::Undefined, ResourceState::ShaderWrite));
 	done(cmd->BindPipeline(pipeline));
 	done(cmd->BindGroup(group));
 	done(cmd->Dispatch(1));
-	done(cmd->Barrier(texture, ResourceState::shaderWrite, ResourceState::transferSource));
-	done(cmd->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+	done(cmd->Barrier(texture, ResourceState::ShaderWrite, ResourceState::TransferSource));
+	done(cmd->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(cmd->CopyTextureToBuffer(texture, readback));
 	done(cmd->End());
 	auto fence = Take(device->Submit(cmd));
 	done(fence->Wait());
-	Ursa::Array<uint8_t, width * height * 4> pixels{};
+	Ursa::Array<Ursa::UInt8, width * height * 4> pixels{};
 	done(readback->Read(0, pixels.data(), pixels.size()));
-	for (size_t i = 0; i < pixels.size(); i += 4)
+	for (Ursa::Size i = 0; i < pixels.size(); i += 4)
 	{
 		Expect(pixels[i] == 0 && pixels[i + 1] == 255 && pixels[i + 2] == 0 && pixels[i + 3] == 255,
 		       "Storage image output mismatch");
@@ -281,20 +282,20 @@ void TestStorageImage(const DevicePtr& device)
 
 void TestErrors(const DevicePtr& device)
 {
-	Expect(!device->CreateBuffer({0, BufferUsage::storage, Memory::gpu}), "Zero-sized buffer should fail");
-	const auto unavailable = CreateDevice({Backend::d3D12, {}, false});
+	Expect(!device->CreateBuffer({0, BufferUsage::Storage, Memory::Gpu}), "Zero-sized buffer should fail");
+	const auto unavailable = CreateDevice({Backend::D3D12, {}, false});
 	Expect(!unavailable && !unavailable.error.empty(), "Unavailable backend lacked an initialization diagnostic");
-	const auto badTexture = device->CreateTexture({0, 1, Format::rgbA8Unorm, TextureUsage::sampled});
+	const auto badTexture = device->CreateTexture({0, 1, Format::RgbA8Unorm, TextureUsage::Sampled});
 	Expect(!badTexture && badTexture.error.find("dimensions") != Ursa::String::npos,
 	       "Invalid texture dimensions lacked a diagnostic");
-	const auto badSrgb = device->CreateTexture({1, 1, Format::rgbA8Srgb, TextureUsage::storage});
+	const auto badSrgb = device->CreateTexture({1, 1, Format::RgbA8Srgb, TextureUsage::Storage});
 	Expect(!badSrgb && badSrgb.error.find("sRGB") != Ursa::String::npos,
 	       "Invalid sRGB storage texture lacked a diagnostic");
 	const auto badPipeline = device->CreateGraphicsPipeline({});
 	Expect(!badPipeline && badPipeline.error.find("shader") != Ursa::String::npos,
 	       "Incomplete graphics pipeline lacked a shader diagnostic");
-	auto upload = Take(device->CreateBuffer({4, BufferUsage::transferSource, Memory::upload}));
-	uint32_t value = 0;
+	auto upload = Take(device->CreateBuffer({4, BufferUsage::TransferSource, Memory::Upload}));
+	Ursa::UInt32 value = 0;
 	Expect(!upload->Read(0, &value, sizeof(value)), "Reading upload-only buffer should fail");
 }
 } // namespace

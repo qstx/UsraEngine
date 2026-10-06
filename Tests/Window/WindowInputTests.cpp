@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Window/Window.hpp>
 #include <cstdlib>
 #include <iostream>
@@ -22,17 +23,17 @@ int main()
 
 	auto empty = window->Subscribe({});
 	Expect(!empty, "Empty callback must be rejected");
-	Expect(!window->KeyDown(Ursa::Key::unknown), "Unknown key must not be queried from GLFW");
-	Expect(!window->MouseDown(Ursa::MouseButton::other), "Other mouse button must not be queried from GLFW");
+	Expect(!window->KeyDown(Ursa::Key::Unknown), "Unknown key must not be queried from GLFW");
+	Expect(!window->MouseDown(Ursa::MouseButton::Other), "Other mouse button must not be queried from GLFW");
 
 	int firstCalls = 0;
 	int secondCalls = 0;
-	uint64_t firstId = 0;
+	Ursa::UInt64 firstId = 0;
 	auto first = window->Subscribe(
 	    [&](const Ursa::WindowEvent& event)
 	    {
 		    ++firstCalls;
-		    Expect(event.type == Ursa::WindowEventType::character && event.codepoint == 0x4E2D,
+		    Expect(event.type == Ursa::WindowEventType::Character && event.codepoint == 0x4E2D,
 		           "Character payload was lost");
 		    window->Unsubscribe(firstId);
 	    });
@@ -42,7 +43,7 @@ int main()
 	Expect(static_cast<bool>(second), "Cannot subscribe second callback");
 
 	Ursa::WindowEvent character;
-	character.type = Ursa::WindowEventType::character;
+	character.type = Ursa::WindowEventType::Character;
 	character.codepoint = 0x4E2D;
 	Ursa::Detail::WindowAccess::Dispatch(*window, character);
 	Expect(firstCalls == 1 && secondCalls == 1, "Unsubscribe during dispatch skipped another callback");
@@ -54,15 +55,15 @@ int main()
 	auto mouse = window->Subscribe(
 	    [&](const Ursa::WindowEvent& event)
 	    {
-		    if (event.type == Ursa::WindowEventType::mousePressed && event.button == Ursa::MouseButton::left)
+		    if (event.type == Ursa::WindowEventType::MousePressed && event.button == Ursa::MouseButton::Left)
 		    {
 			    ++mouseCalls;
 		    }
 	    });
 	Expect(static_cast<bool>(mouse), "Cannot subscribe mouse callback");
 	Ursa::WindowEvent pressed;
-	pressed.type = Ursa::WindowEventType::mousePressed;
-	pressed.button = Ursa::MouseButton::left;
+	pressed.type = Ursa::WindowEventType::MousePressed;
+	pressed.button = Ursa::MouseButton::Left;
 	Ursa::Detail::WindowAccess::Dispatch(*window, pressed);
 	Expect(mouseCalls == 1, "Mouse button event was not delivered");
 

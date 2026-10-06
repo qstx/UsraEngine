@@ -1,6 +1,7 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Core/StringInterop.hpp>
-#include <array>
 #include <iostream>
 #include <stdexcept>
 
@@ -34,8 +35,8 @@ void Expect(bool value, const char* message)
 	}
 }
 
-constexpr uint32_t width = 64;
-constexpr uint32_t height = 64;
+constexpr Ursa::UInt32 width = 64;
+constexpr Ursa::UInt32 height = 64;
 int clipboardReads = 0;
 
 void TestImagesFontsAndClipping(const DevicePtr& device)
@@ -43,23 +44,23 @@ void TestImagesFontsAndClipping(const DevicePtr& device)
 	auto bridge = Take(Editor::ImGuiBridge::Create(device));
 	auto sampler = Take(device->CreateSampler({false, false}));
 	auto red = Take(
-	    device->CreateTexture({1, 1, Format::rgbA8Unorm, TextureUsage::sampled | TextureUsage::transferDestination}));
+	    device->CreateTexture({1, 1, Format::RgbA8Unorm, TextureUsage::Sampled | TextureUsage::TransferDestination}));
 	auto green = Take(
-	    device->CreateTexture({1, 1, Format::rgbA8Unorm, TextureUsage::sampled | TextureUsage::transferDestination}));
-	constexpr std::array<uint8_t, 4> redPixel{255, 0, 0, 255};
-	constexpr std::array<uint8_t, 4> greenPixel{0, 255, 0, 255};
-	auto redUpload = Take(device->CreateBuffer({4, BufferUsage::transferSource, Memory::upload}));
-	auto greenUpload = Take(device->CreateBuffer({4, BufferUsage::transferSource, Memory::upload}));
+	    device->CreateTexture({1, 1, Format::RgbA8Unorm, TextureUsage::Sampled | TextureUsage::TransferDestination}));
+	constexpr Ursa::Array<Ursa::UInt8, 4> redPixel{255, 0, 0, 255};
+	constexpr Ursa::Array<Ursa::UInt8, 4> greenPixel{0, 255, 0, 255};
+	auto redUpload = Take(device->CreateBuffer({4, BufferUsage::TransferSource, Memory::Upload}));
+	auto greenUpload = Take(device->CreateBuffer({4, BufferUsage::TransferSource, Memory::Upload}));
 	done(redUpload->Write(0, redPixel.data(), redPixel.size()));
 	done(greenUpload->Write(0, greenPixel.data(), greenPixel.size()));
 	auto upload = Take(device->CreateCommandList());
 	done(upload->Begin());
-	done(upload->Barrier(red, ResourceState::undefined, ResourceState::transferDestination));
-	done(upload->Barrier(green, ResourceState::undefined, ResourceState::transferDestination));
+	done(upload->Barrier(red, ResourceState::Undefined, ResourceState::TransferDestination));
+	done(upload->Barrier(green, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(upload->CopyBufferToTexture(redUpload, red));
 	done(upload->CopyBufferToTexture(greenUpload, green));
-	done(upload->Barrier(red, ResourceState::transferDestination, ResourceState::shaderRead));
-	done(upload->Barrier(green, ResourceState::transferDestination, ResourceState::shaderRead));
+	done(upload->Barrier(red, ResourceState::TransferDestination, ResourceState::ShaderRead));
+	done(upload->Barrier(green, ResourceState::TransferDestination, ResourceState::ShaderRead));
 	done(upload->End());
 	done(Take(device->Submit(upload))->Wait());
 	const auto redId = Take(bridge->RegisterTexture(red, sampler));
@@ -76,12 +77,12 @@ void TestImagesFontsAndClipping(const DevicePtr& device)
 	done(bridge->EndFrame());
 
 	auto color = Take(device->CreateTexture(
-	    {width, height, Format::rgbA8Unorm, TextureUsage::colorAttachment | TextureUsage::transferSource}));
+	    {width, height, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
 	auto readback =
-	    Take(device->CreateBuffer({width * height * 4, BufferUsage::transferDestination, Memory::readback}));
+	    Take(device->CreateBuffer({width * height * 4, BufferUsage::TransferDestination, Memory::Readback}));
 	auto command = Take(device->CreateCommandList());
 	done(command->Begin());
-	done(command->Barrier(color, ResourceState::undefined, ResourceState::colorAttachment));
+	done(command->Barrier(color, ResourceState::Undefined, ResourceState::ColorAttachment));
 	RenderTarget target;
 	target.color = color;
 	target.colorValue[0] = 0;
@@ -89,25 +90,26 @@ void TestImagesFontsAndClipping(const DevicePtr& device)
 	target.colorValue[2] = 0;
 	target.colorValue[3] = 1;
 	done(command->BeginRendering(target));
-	done(bridge->Record(command, Format::rgbA8Unorm, width, height));
+	done(bridge->Record(command, Format::RgbA8Unorm, width, height));
 	done(command->EndRendering());
-	done(command->Barrier(color, ResourceState::colorAttachment, ResourceState::transferSource));
-	done(command->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+	done(command->Barrier(color, ResourceState::ColorAttachment, ResourceState::TransferSource));
+	done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(command->CopyTextureToBuffer(color, readback));
 	done(command->End());
 	done(Take(device->Submit(command))->Wait());
 
-	std::array<uint8_t, width * height * 4> pixels{};
+	Ursa::Array<Ursa::UInt8, width * height * 4> pixels{};
 	done(readback->Read(0, pixels.data(), pixels.size()));
-	const auto channel = [&](uint32_t x, uint32_t y, uint32_t c) -> uint8_t { return pixels[(y * width + x) * 4 + c]; };
+	const auto channel = [&](Ursa::UInt32 x, Ursa::UInt32 y, Ursa::UInt32 c) -> Ursa::UInt8
+	{ return pixels[(y * width + x) * 4 + c]; };
 	Expect(channel(8, 8, 0) > 240 && channel(8, 8, 1) < 10, "First ImGui image is not red");
 	Expect(channel(28, 8, 1) > 240 && channel(28, 8, 0) < 10, "Second ImGui image is not green");
 	Expect(channel(50, 8, 2) > 240, "Clipped ImGui panel did not render");
 	Expect(channel(44, 8, 2) < 10 && channel(57, 8, 2) < 10, "ImGui scissor leaked outside clip");
 	bool textVisible = false;
-	for (uint32_t y = 30; y < 50; ++y)
+	for (Ursa::UInt32 y = 30; y < 50; ++y)
 	{
-		for (uint32_t x = 2; x < 20; ++x)
+		for (Ursa::UInt32 x = 2; x < 20; ++x)
 		{
 			textVisible |= channel(x, y, 0) > 30;
 		}
@@ -154,12 +156,12 @@ void TestTextFieldPaste(const DevicePtr& device)
 	done(bridge->EndFrame());
 
 	WindowEvent control;
-	control.type = WindowEventType::keyPressed;
-	control.key = Key::leftControl;
+	control.type = WindowEventType::KeyPressed;
+	control.key = Key::LeftControl;
 	Detail::WindowAccess::Dispatch(*window, control);
 	WindowEvent paste;
-	paste.type = WindowEventType::keyPressed;
-	paste.key = Key::v;
+	paste.type = WindowEventType::KeyPressed;
+	paste.key = Key::V;
 	Detail::WindowAccess::Dispatch(*window, paste);
 	done(bridge->BeginFrame(1.f / 60.f, 640, 480));
 	ImGui::Begin("Paste test");

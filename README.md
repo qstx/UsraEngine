@@ -89,7 +89,7 @@ For a new clone, run the submodule update commands above before configuring CMak
 
 ## Editor scene and Prefab authoring
 
-To edit a scene, enter `level.ursascene` in **New asset**, click **New Scene**, then select **Root** in **Hierarchy**. **Add child** creates a nested node. The hierarchy checkbox controls whether a node or component is enabled; **Inspector** edits its label, local position and scale, parent, sibling order, and built-in Box, Camera, Directional Light, and Point Light components. Use **Add Box**, then select a saved material by name; the file stores its stable material ID. The **Viewport** always has an editor camera, even when the scene has no game camera. Select a nested node and use **Translate**, **Rotate**, or **Scale** with the gizmo; the world-space movement is converted back to that node's local transform. Zero scale, singular parent transforms, shear, and non-finite gizmo results are rejected with a diagnostic. Save, close, and reopen the scene to check the node label, transform, order, component fields, and material reference. A Prefab source follows the same flow with `tile.ursaprefab` and **New Prefab**, but must keep exactly one root.
+To edit a scene, enter `level.ursascene` in **New asset**, click **New Scene**, then select a GameObject in **Hierarchy**. **Add child** creates a nested GameObject. The hierarchy checkbox controls whether a GameObject or component is enabled; **Inspector** edits its name, local position and scale, parent, sibling order, and built-in Box, Camera, Directional Light, and Point Light components. Use **Add Box**, then select a saved material by name; the file stores its stable material ID. The **Viewport** always has an editor camera, even when the scene has no game camera. Select a nested GameObject and use **Translate**, **Rotate**, or **Scale** with the gizmo; the world-space movement is converted back to that GameObject's local transform. Zero scale, singular parent transforms, shear, and non-finite gizmo results are rejected with a diagnostic. Save, close, and reopen the scene to check its name, transform, order, component fields, and material reference. Prefab assets are edited as independent GameObject graphs; the Editor creates a temporary preview Scene only to render the graph.
 
 For a linked instance, first save its Prefab source. Open a scene, select a regular parent node, and choose that Prefab from **Place Prefab**; each placement receives its own instance ID. Editing an instance node or its components changes only that placement. **Pin label override** records an explicit property override; hierarchy, component, and transform changes are captured as property or structure overrides on save. Open the `.ursaprefab` itself to edit the shared source. The next explicit scene reload merges source changes with saved instance overrides. A missing override target or invalid merge is reported, and the active scene and saved patch remain available. `UrsaSceneDraftTests` checks two placements, source isolation, and round-trip structure; `UrsaPrefabTests` checks source merges and conflict preservation.
 
@@ -224,7 +224,7 @@ Call `refreshed()` to create a new indexed loading session after files change. E
 
 ## Saving and loading scenes
 
-Register the component codecs used by the scene before saving or loading. A scene file records ordered roots and children, local transforms, enabled flags, ambient light, active camera, and persistent component fields. Resource references in those fields are IDs resolved through `ResourceSession`.
+Register the component codecs used by the Scene before saving or loading. The new `.ursascene` schema uses `sceneGraphVersion: 2` and a `gameObjects` array containing object IDs, names, parent IDs, local transforms, enabled flags, and component data. Ambient light and active camera remain Scene-level fields. Files without the supported schema version fail with an explicit diagnostic; old Scene files are not migrated. Resource references in component fields are IDs resolved through `ResourceSession`.
 
 ```cpp
 #include <Serialization/SceneResource.hpp>
@@ -232,26 +232,26 @@ Register the component codecs used by the scene before saving or loading. A scen
 void roundTripScene(const std::filesystem::path &path,
                     Ursa::ResourceSession &resources) {
     Ursa::ComponentRegistry registry;
-    if (!Ursa::registerBuiltinComponents(registry))
+    if (!Ursa::RegisterBuiltinComponents(registry))
         return;
     Ursa::Scene source;
-    auto node = source.createNode();
-    if (!node || !source.addComponent<Ursa::CameraComponent>(node.value))
+    auto camera = Ursa::GameObject::Create("Camera");
+    if (!camera->AddComponent<Ursa::CameraComponent>() || !source.AttachGameObject(camera))
         return;
-    if (!Ursa::saveSceneResource(path, Ursa::ResourceId::generate(), source, registry))
+    if (!Ursa::SaveSceneResource(path, Ursa::ResourceId::Generate(), source, registry))
         return;
     Ursa::ComponentLoadContext context(resources);
-    auto loaded = Ursa::loadSceneResource(path, registry, context);
+    auto loaded = Ursa::LoadSceneResource(path, registry, context);
     if (!loaded)
         return;
     std::unique_ptr<Ursa::Scene> active = std::move(loaded.value.scene);
-    auto reloaded = Ursa::reloadSceneResource(path, registry, context, active);
+    auto reloaded = Ursa::ReloadSceneResource(path, registry, context, active);
 }
 ```
 
-`nodePersistentId` and `componentPersistentId` return IDs stored in the file. `NodeId` and `ComponentId` are generation-checked handles valid only inside one live `Scene`; look up a new handle by persistent ID after loading. `reloadSceneResource` builds and binds a candidate before replacing `active`. On failure the old scene remains alive. Loaded components begin their lifecycle during the next normal frame, not while parsing. Use a newly `refreshed()` resource session to pick up changed texture and material files. `UrsaScenePersistenceTests` compiles and exercises the same save, load, and reload calls.
+`GameObject::Id()` and `Component::PersistentId()` return IDs stored in the file. A `GameObject::Ptr` refers to a GameObject instance; serialization uses persistent IDs rather than pointer values to restore references after load. `ReloadSceneResource` builds and binds a candidate before replacing `active`. On failure the old Scene remains alive. Loaded components begin their lifecycle during the next normal frame, not while parsing. Use a newly `Refreshed()` resource session to pick up changed texture and material files. `UrsaScenePersistenceTests` exercises save, load, and reload.
 
-For project components, register a stable type name and data version before either operation. Save only persistent fields; use `ComponentLoadContext::service<T>()` for references to project-owned runtime objects. `create` can read fields and attach the component, while `bind` runs after all nodes and components exist and can resolve saved IDs through `context.node(id)` and `context.component(id)`. A minimal registration looks like this:
+For project components, register a stable type name and data version before either operation. Save only persistent fields; use `ComponentLoadContext::Service<T>()` for references to project-owned runtime objects. `create` can read fields and attach the component, while `bind` runs after all GameObjects and components exist and can resolve saved IDs through `context.GameObjectById(id)` and `context.Component(id)`. A minimal registration looks like this:
 
 ```cpp
 #include <Serialization/ComponentRegistry.hpp>
@@ -262,7 +262,7 @@ struct CounterComponent : Ursa::Component {
     int step;
 };
 
-Ursa::Result<void> registerCounter(Ursa::ComponentRegistry &registry) {
+Ursa::Result<void> RegisterCounter(Ursa::ComponentRegistry &registry) {
     Ursa::ComponentCodec codec;
     codec.type = "game.Counter";
     codec.version = 1;
@@ -270,78 +270,78 @@ Ursa::Result<void> registerCounter(Ursa::ComponentRegistry &registry) {
         return dynamic_cast<const CounterComponent *>(&value) != nullptr;
     };
     codec.save = [](const Ursa::Component &value, const Ursa::ComponentSaveContext &) {
-        return Ursa::Result<nlohmann::json>::success(
+        return Ursa::Result<nlohmann::json>::Success(
             {{"step", static_cast<const CounterComponent &>(value).step}});
     };
-    codec.create = [](Ursa::Scene &scene, Ursa::NodeId node, const nlohmann::json &data,
+    codec.create = [](Ursa::Scene &scene, const Ursa::GameObject::Ptr &object, const nlohmann::json &data,
                       Ursa::ComponentLoadContext &context) {
         if (!data.is_object() || !data.contains("step") || !data["step"].is_number_integer())
-            return Ursa::Result<Ursa::ComponentId>::failure("Invalid Counter step");
-        auto total = context.service<int>();
+            return Ursa::Result<Ursa::ComponentId>::Failure("Invalid Counter step");
+        auto total = context.Service<int>();
         if (!total)
-            return Ursa::Result<Ursa::ComponentId>::failure(total.error);
-        return scene.addComponent<CounterComponent>(node, *total.value, data["step"].get<int>());
+            return Ursa::Result<Ursa::ComponentId>::Failure(total.error);
+        return scene.AddComponent<CounterComponent>(object, *total.value, data["step"].get<int>());
     };
-    return registry.registerCodec(std::move(codec));
+    return registry.RegisterCodec(std::move(codec));
 }
 ```
 
-Call `context.provide(total)` before loading and keep `total` alive as long as the loaded scene. The type name and version belong to the file format; changing either requires an explicit migration. An unknown type or version fails with a file and node location. `UrsaCustomComponentTests` compiles this registration shape and checks cross-object binding and error paths.
+Call `context.Provide(total)` before loading and keep `total` alive as long as the loaded Scene. The type name and version belong to the file format; changing either requires a deliberate format change. An unknown type or version fails with a file and GameObject location. `UrsaCustomComponentTests` compiles this registration shape and checks cross-object binding and error paths.
 
 ## Prefab files and linked scenes
 
-`savePrefabResource` writes one node and its descendants to a `.ursaprefab` file. A linked `.ursascene` keeps each placement's Prefab resource ID, independent instance ID, optional external parent ID, and overrides. The source subtree stays in its own file. The following calls form the same path exercised by `UrsaPrefabTests`:
+`SavePrefabAssetResource` writes a `PrefabAsset` containing one independent GameObject tree to a `.ursaprefab` file using `prefabGraphVersion: 2` and the GameObject graph schema. `LoadPrefabAssetResource` creates detached GameObjects and components without creating or attaching them to a runtime Scene; their GameObject and component IDs are preserved when saved again. `PrefabAsset::Instantiate` clones that graph into a Scene with fresh runtime identities. The Editor keeps a preview Scene for its viewport and stores a detached PrefabAsset graph for persistence. A linked `.ursascene` keeps each placement's Prefab resource ID, independent instance ID, optional parent GameObject ID, and overrides. Files with missing or unsupported `prefabGraphVersion` fail with an explicit diagnostic; legacy Prefab data is not migrated. The following calls form the path exercised by `UrsaPrefabTests`:
 
-Use `loadLinkedSceneResource` for a scene containing Prefab instances. The plain `loadSceneResource` entry reports an error on that file so it cannot silently omit the instances.
+Use `LoadLinkedSceneResource` for a Scene containing Prefab instances. The plain `LoadSceneResource` entry reports an error on that file so it cannot silently omit the instances.
 
 ```cpp
 #include <Serialization/PrefabResource.hpp>
 #include <Serialization/JsonResource.hpp>
 
 void placePrefab(const std::filesystem::path &root, Ursa::Scene &source,
-                 Ursa::NodeId subtree) {
+                 const Ursa::GameObject::Ptr &subtree) {
     Ursa::ComponentRegistry registry;
-    if (!Ursa::registerBuiltinComponents(registry))
+    if (!Ursa::RegisterBuiltinComponents(registry))
         return;
-    const auto prefabId = Ursa::ResourceId::generate();
-    if (!Ursa::savePrefabResource(root / "tile.ursaprefab", prefabId, source, subtree, registry))
+    const auto prefabId = Ursa::ResourceId::Generate();
+    if (!Ursa::SavePrefabResource(root / "tile.ursaprefab", prefabId, source, subtree, registry))
         return;
     Ursa::Scene empty;
     const auto scenePath = root / "level.ursascene";
-    auto document = Ursa::encodeSceneDocument(scenePath, Ursa::ResourceId::generate(), empty, registry);
+    auto document = Ursa::EncodeSceneDocument(scenePath, Ursa::ResourceId::Generate(), empty, registry);
     if (!document)
         return;
-    const auto instanceId = Ursa::ResourceId::generate();
-    if (!Ursa::addPrefabInstance(document.value, prefabId, instanceId) ||
-        !Ursa::writeJsonResource(scenePath, document.value))
+    const auto instanceId = Ursa::ResourceId::Generate();
+    if (!Ursa::AddPrefabInstance(document.value, prefabId, instanceId) ||
+        !Ursa::WriteJsonResource(scenePath, document.value))
         return;
-    auto resources = Ursa::ResourceSession::open({root});
+    auto resources = Ursa::ResourceSession::Open({root});
     if (!resources)
         return;
     Ursa::ComponentLoadContext context(*resources.value);
-    auto linked = Ursa::loadLinkedSceneResource(scenePath, registry, context);
+    auto linked = Ursa::LoadLinkedSceneResource(scenePath, registry, context);
     if (!linked)
         return;
-    auto sourceId = source.nodePersistentId(subtree);
-    if (!sourceId || !Ursa::setPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
-                                                       "/transform/position/0", 2.0f) ||
-        !Ursa::saveLinkedSceneResource(scenePath, linked.value, registry))
+    auto sourceId = source.PersistentId(subtree);
+    if (!sourceId || !Ursa::SetPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
+                                                       "/localTransform/position/0", 2.0f) ||
+        !Ursa::SaveLinkedSceneResource(scenePath, linked.value, registry))
         return;
-    auto refreshed = resources.value->refreshed();
+    auto refreshed = resources.value->Refreshed();
     if (!refreshed)
         return;
     Ursa::ComponentLoadContext reloadContext(*refreshed.value);
-    if (!Ursa::reloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value))
+    if (!Ursa::ReloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value))
         return;
-    if (!Ursa::clearPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
-                                            "/transform/position/0") ||
-        !Ursa::saveLinkedSceneResource(scenePath, linked.value, registry))
+    if (!Ursa::ClearPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
+                                            "/localTransform/position/0") ||
+        !Ursa::SaveLinkedSceneResource(scenePath, linked.value, registry))
         return;
-    Ursa::reloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value);
+    Ursa::ReloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value);
 }
 ```
 
-Property paths use JSON Pointer syntax. Node paths include `/transform/position/0` and `/enabled`; component paths include `/data/material` and registered persistent fields under `/data/`. Calling `setPrefabPropertyOverride` records explicit intent even if the value currently equals the source. Calling `clearPrefabPropertyOverride` removes that intent; reload then inherits the current source value. `setPrefabStructureOverride` accepts `deletedNodes`, `addedNodes`, `nodeParents`, `nodeOrders`, `deletedComponents`, `addedComponents`, `componentOwners`, and `componentOrders`. IDs in these operations are local to the Prefab instance; an order list fixes the named objects first and leaves newly added source objects in source order afterward. Save compares the current scene to its loaded snapshot, so direct edits to persistent fields and structure are captured as overrides. Keep the resource session alive for `LinkedSceneResource`, and pass a material ID resolver to `saveLinkedSceneResource` when assigning a material object that was not loaded by that session. An invalid merge reports the Prefab, instance, object and operation and leaves the active scene and saved file intact.
+Property paths use JSON Pointer syntax. GameObject paths include `/localTransform/position/0`, `/enabled`, and `/name`; component paths include `/data/material` and registered persistent fields under `/data/`. Calling `SetPrefabPropertyOverride` records explicit intent even if the value currently equals the source. Calling `ClearPrefabPropertyOverride` removes that intent; reload then inherits the current source value. `SetPrefabStructureOverride` accepts `deletedGameObjects`, `addedGameObjects`, `gameObjectParents`, `gameObjectOrders`, `deletedComponents`, `addedComponents`, `componentOwners`, and `componentOrders`. IDs in these operations are local to the Prefab instance; an order list fixes the named objects first and leaves newly added source objects in source order afterward. Save compares the current Scene to its loaded snapshot, so direct edits to persistent fields and structure are captured as overrides. Keep the resource session alive for `LinkedSceneResource`, and pass a material ID resolver to `SaveLinkedSceneResource` when assigning a material object that was not loaded by that session. An invalid merge reports the Prefab, instance, object and operation and leaves the active Scene and saved file intact.
 
 ## Runtime materials
 
@@ -383,27 +383,41 @@ This example is compiled in the sibling Demo repository's public-header smoke te
 
 ## Runtime scene hierarchy
 
-Include `<Scene/Scene.hpp>` to create a runtime hierarchy. `Scene` owns its nodes and returns `NodeId` handles. A handle becomes invalid when its node or an ancestor is destroyed; reusing a storage slot never revives an old handle. Root nodes have an empty parent handle. Reparenting preserves the node's local transform and rejects cycles.
+`GameObject` is the object model for names, local transforms, components, activation, and ordered child objects. It can be constructed and configured before it is attached to a runtime `Scene`. A detached object's components can query their owner with `GetGameObject()`; `TryGetScene()` returns `nullptr` until a Scene attaches the object. `GetScene()` reports an error when called while detached. Destroying the GameObject invalidates all its external handles and destroys its children.
+
+```cpp
+#include <Scene/GameObject.hpp>
+#include <Scene/RenderingComponents.hpp>
+
+auto root = Ursa::GameObject::Create("Root");
+auto box = root->AddComponent<Ursa::BoxRenderComponent>();
+auto owner = box.value->GetGameObject();
+```
+
+Include `<Scene/Scene.hpp>` to attach and run GameObject trees. `Scene::CreateGameObject` creates and attaches a runtime object; `Scene::AttachGameObject` adds a detached root tree. Scene updates and renders only attached objects. `GameObject::Ptr` references identify the object itself; `IsValid()` becomes false after that object or an ancestor is destroyed. Reparenting preserves local transforms and rejects cycles.
 
 ```cpp
 #include <Scene/Scene.hpp>
 
 Ursa::Scene scene;
-const auto root = scene.createNode().value;
-const auto child = scene.createNode(root).value;
+auto root = Ursa::GameObject::Create("Root");
+auto child = Ursa::GameObject::Create("Child");
+if (!child->SetParent(root.get()) || !scene.AttachGameObject(root))
+    return 1;
 Ursa::LocalTransform local;
 local.position = {1.0f, 0.0f, 0.0f};
-scene.setLocalTransform(child, local);
-const Ursa::Mat4 world = scene.worldTransform(child).value;
+if (!child->SetLocalTransform(local))
+    return 1;
+const Ursa::Mat4 world = child->WorldTransform().value;
 ```
 
-Each node has local position, quaternion rotation, scale, and an enabled flag. World transforms combine ancestor and local transforms; disabling a parent also makes its descendants inactive. The public-header-only `UrsaSceneTests` target exercises the hierarchy, handles, transforms, and activation.
+Each GameObject has local position, quaternion rotation, scale, and an enabled flag. World transforms combine ancestor and local transforms; disabling a parent also makes its descendants inactive. The `UrsaGameObjectTests` and `UrsaSceneGraphTests` targets exercise detached object trees, Scene attachment, handles, transforms, activation, and rendering-data collection.
 
-Components derive from `<Scene/Component.hpp>`'s `Component` and are owned by a `Scene`. Use `addComponent<T>(node, ...)`, `findComponent<T>(node)`, `findComponents<T>(node)`, `setComponentEnabled`, and `removeComponent`. Multiple components of the same type may be attached to one node. `ComponentId` handles are invalidated on removal. An inactive parent or disabled component pauses callbacks without restarting it after reactivation.
+Components derive from `<Scene/Component.hpp>`'s `Component` and are owned by their GameObject. Use `GameObject::AddComponent<T>()`, `FindComponent<T>()`, and `FindComponents<T>()`; use `Scene` component operations when a persistent `ComponentId` is needed. Multiple components of the same type may be attached to one GameObject. `ComponentId` handles are invalidated on removal. An inactive parent or disabled component pauses callbacks without restarting it after reactivation.
 
 For each active component, `onStart` runs once immediately before its first phase callback. The application then invokes `onUpdate`, zero or more `onFixedUpdate` calls, and `onLateUpdate` in that order. Parent components run before child components; components on one node run in attachment order. `onRemove` runs exactly once when a component is removed, its node is destroyed, or the scene is cleared. It also runs for a component that never started. Callbacks receive `FrameContext`, containing a key-state snapshot, frame time, fixed step, frame number, and a window pointer for operations such as changing the title. Returning a failed `Result` stops that frame with a diagnostic error.
 
-Creation, removal, and reparenting requested during a callback are committed after the current phase. A removal immediately invalidates its handle and suppresses later callbacks in that frame; the object is cleaned at the phase boundary. Newly attached behavior begins on the following frame, while a new node can be rendered after its creation is committed. Invalid handles and obvious hierarchy cycles fail at request time; a conflict discovered during commit fails the phase. The `UrsaSceneTests` lifecycle and deferred-change cases cover these rules.
+Creation, removal, and reparenting requested during a callback are committed after the current phase. A removal immediately invalidates its handle and suppresses later callbacks in that frame; the object is cleaned at the phase boundary. Newly attached behavior begins on the following frame, while a new GameObject can be rendered after its attachment is committed. Invalid handles and obvious hierarchy cycles fail at request time; a conflict discovered during commit fails the phase. The `UrsaSceneGraphTests` lifecycle and deferred-change cases cover these rules.
 
 ## Application frame loop
 
@@ -430,37 +444,44 @@ auto frame = renderer->render(swapchain, camera, boxes);
 
 ## Scene rendering
 
-Attach `CameraComponent` to a node and pass its component handle to `scene.setActiveCamera(cameraId)`. The camera looks along its node's local negative Z axis; its node's world transform supplies the view, and its fields specify perspective projection. Attach `BoxRenderComponent` to each visible box node and set its `color`. The scene gathers active boxes with complete world matrices, including ancestor rotation and scale. Disabled nodes or components are omitted. Without an enabled active camera, `collectRenderData(aspect)` and an `Application` scene frame return a diagnostic error.
+Attach `CameraComponent` and `BoxRenderComponent` to GameObjects. The camera looks along its GameObject's local negative Z axis; its world transform supplies the view, and its fields specify perspective projection. The Scene gathers active boxes with complete world matrices, including ancestor rotation and scale. Disabled GameObjects or components are omitted. Without an enabled active camera, `CollectRenderData(aspect)` and an `Application` scene frame return a diagnostic error.
 
 ```cpp
 #include <Scene/Scene.hpp>
 
 Ursa::Scene scene;
-const auto cameraNode = scene.createNode().value;
+auto cameraObject = Ursa::GameObject::Create("Camera");
 Ursa::LocalTransform cameraPose;
 cameraPose.position = {0.0f, 0.0f, 4.0f};
-scene.setLocalTransform(cameraNode, cameraPose);
-scene.setActiveCamera(scene.addComponent<Ursa::CameraComponent>(cameraNode).value);
-const auto boxNode = scene.createNode().value;
-scene.addComponent<Ursa::BoxRenderComponent>(boxNode, Ursa::Color{0.2f, 0.8f, 0.3f, 1.0f});
+cameraObject->SetLocalTransform(cameraPose);
+auto camera = cameraObject->AddComponent<Ursa::CameraComponent>();
+auto boxObject = Ursa::GameObject::Create("Box");
+boxObject->AddComponent<Ursa::BoxRenderComponent>(Ursa::Color{0.2f, 0.8f, 0.3f, 1.0f});
+scene.AttachGameObject(cameraObject);
+scene.AttachGameObject(boxObject);
+scene.SetActiveCamera(camera.value->Id());
 ```
 
 An application assigns its scene to `scene_` during `onStart`; `Application` owns the renderer for that path. Direct rendering code can call `collectRenderData(aspect)` and pass the returned view-projection matrix, boxes, lighting and camera position to `Renderer3D::renderModels` or `renderOffscreenModels`. The current path supports one explicitly selected camera and colored or material-bound cubes; arbitrary meshes and multiple active cameras are outside this phase. `UrsaRendererTests` exercises the example's collection path, inherited transforms, color, visibility, and missing-camera error.
 
 ## Scene lighting
 
-Attach `DirectionalLightComponent` or `PointLightComponent` to scene nodes. A directional light shines along its node's local negative Z axis, transformed to world space. A point light uses its node's world position, intensity, color, and positive finite range. Disabling a light component, its node, or an ancestor removes it from the collected frame. `Scene::setAmbientLight(color, intensity)` sets nonnegative ambient fill. Invalid values return a diagnostic `Result` and preserve the previous value.
+Attach `DirectionalLightComponent` or `PointLightComponent` to GameObjects. A directional light shines along its GameObject's local negative Z axis, transformed to world space. A point light uses its GameObject's world position, intensity, color, and positive finite range. Disabling a light component, its GameObject, or an ancestor removes it from the collected frame. `Scene::SetAmbientLight(color, intensity)` sets nonnegative ambient fill. Invalid values return a diagnostic `Result` and preserve the previous value.
 
 ```cpp
 Ursa::Scene litScene;
-auto cameraNode = litScene.createNode().value;
-litScene.setActiveCamera(litScene.addComponent<Ursa::CameraComponent>(cameraNode).value);
-auto sunNode = litScene.createNode().value;
-litScene.addComponent<Ursa::DirectionalLightComponent>(sunNode);
-auto lampNode = litScene.createNode().value;
-litScene.addComponent<Ursa::PointLightComponent>(lampNode);
-litScene.setAmbientLight({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f);
-auto frame = litScene.collectRenderData(16.0f / 9.0f);
+auto cameraObject = Ursa::GameObject::Create("Camera");
+auto camera = cameraObject->AddComponent<Ursa::CameraComponent>();
+auto sunObject = Ursa::GameObject::Create("Sun");
+sunObject->AddComponent<Ursa::DirectionalLightComponent>();
+auto lampObject = Ursa::GameObject::Create("Lamp");
+lampObject->AddComponent<Ursa::PointLightComponent>();
+litScene.AttachGameObject(cameraObject);
+litScene.AttachGameObject(sunObject);
+litScene.AttachGameObject(lampObject);
+litScene.SetActiveCamera(camera.value->Id());
+litScene.SetAmbientLight({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f);
+auto frame = litScene.CollectRenderData(16.0f / 9.0f);
 ```
 
 The returned `SceneRenderData::lighting` is a value snapshot; later scene changes do not alter it. `SceneLighting::maxDirectionalLights` is 4 and `maxPointLights` is 8. Collecting a frame with more active lights returns an error with the actual count and capacity. `UrsaLightingHeaderSmoke` compiles and runs the example, and `UrsaLightingTests` checks transforms, activation, snapshots, validation, and capacity.
@@ -473,17 +494,20 @@ Assign a shared `MaterialInstance` to `BoxRenderComponent::material`. When it is
 auto device = Ursa::Rhi::createDevice({}).value;
 auto renderer = Ursa::Renderer3D::create(device).value;
 Ursa::Scene scene;
-auto cameraNode = scene.createNode().value;
+auto cameraObject = Ursa::GameObject::Create("Camera");
 Ursa::LocalTransform cameraPose;
 cameraPose.position = {0.0f, 0.0f, 5.0f};
-scene.setLocalTransform(cameraNode, cameraPose);
-scene.setActiveCamera(scene.addComponent<Ursa::CameraComponent>(cameraNode).value);
-auto boxNode = scene.createNode().value;
-scene.addComponent<Ursa::BoxRenderComponent>(boxNode);
+cameraObject->SetLocalTransform(cameraPose);
+auto camera = cameraObject->AddComponent<Ursa::CameraComponent>();
+scene.AttachGameObject(cameraObject);
+scene.SetActiveCamera(camera.value->Id());
+auto boxObject = Ursa::GameObject::Create("Box");
+auto box = boxObject->AddComponent<Ursa::BoxRenderComponent>();
+scene.AttachGameObject(boxObject);
 auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
 material->setBaseColor({1.0f, 0.0f, 0.0f, 1.0f});
-scene.findComponent<Ursa::BoxRenderComponent>(boxNode)->material = material;
-auto frame = scene.collectRenderData(1.0f).value;
+box.value->material = material;
+auto frame = scene.CollectRenderData(1.0f).value;
 auto color = device->createTexture({64, 64, Ursa::Rhi::Format::RGBA8Unorm,
     Ursa::Rhi::TextureUsage::ColorAttachment | Ursa::Rhi::TextureUsage::TransferSource}).value;
 auto submitted = renderer->renderOffscreenModels(color, frame.viewProjection, frame.boxes,

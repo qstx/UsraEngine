@@ -14,8 +14,8 @@ using DocumentWriter = std::function<Result<void>(const std::filesystem::path&, 
 class EditorDocument final
 {
 public:
-	static Result<std::unique_ptr<EditorDocument>> Create(ResourceKind kind, ResourceId id, VirtualPath path,
-	                                                      DocumentWriter writer);
+	static Result<std::unique_ptr<EditorDocument>> Create(ResourceKind documentKind, ResourceId documentId,
+	                                                      VirtualPath documentPath, DocumentWriter documentWriter);
 
 	ResourceKind Kind() const
 	{
@@ -32,9 +32,9 @@ public:
 		return path;
 	}
 
-	void SetPath(VirtualPath path)
+	void SetPath(VirtualPath newPath)
 	{
-		this->path = std::move(path);
+		this->path = std::move(newPath);
 		dirty = true;
 	}
 
@@ -60,8 +60,9 @@ public:
 	}
 
 private:
-	EditorDocument(ResourceKind kind, ResourceId id, VirtualPath path, DocumentWriter writer)
-	    : kind(kind), id(id), path(std::move(path)), writer(std::move(writer))
+	EditorDocument(ResourceKind documentKind, ResourceId documentId, VirtualPath documentPath,
+	               DocumentWriter documentWriter)
+	    : kind(documentKind), id(documentId), path(std::move(documentPath)), writer(std::move(documentWriter))
 	{
 	}
 
@@ -78,15 +79,15 @@ private:
 
 enum class UnsavedChoice
 {
-	save,
-	discard,
-	cancel
+	Save,
+	Discard,
+	Cancel
 };
 
 class EditorDocuments final
 {
 public:
-	static Result<std::unique_ptr<EditorDocuments>> Create(ProjectWorkspace& workspace);
+	static Result<std::unique_ptr<EditorDocuments>> Create(ProjectWorkspace& projectWorkspace);
 
 	Result<void> RequestOpen(std::unique_ptr<EditorDocument> document);
 
@@ -124,7 +125,7 @@ public:
 	}
 
 private:
-	explicit EditorDocuments(ProjectWorkspace& workspace) : workspace(workspace)
+	explicit EditorDocuments(ProjectWorkspace& projectWorkspace) : workspace(projectWorkspace)
 	{
 	}
 

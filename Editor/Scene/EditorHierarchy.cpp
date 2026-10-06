@@ -1,12 +1,14 @@
+#include <Core/Types.hpp>
 #include <Scene/EditorHierarchy.hpp>
+#include <Serialization/PrefabAsset.hpp>
 #include <algorithm>
 #include <cstring>
 
 namespace Ursa::Editor
 {
-Result<void> EditorHierarchy::Select(const Scene& scene, NodeId node)
+Result<void> EditorHierarchy::Select(const Scene& scene, GameObject::Ptr node)
 {
-	auto id = scene.NodePersistentId(node);
+	auto id = scene.PersistentId(node);
 	if (!id)
 	{
 		return Result<void>::Failure(id.error);
@@ -20,19 +22,117 @@ void EditorHierarchy::ClearSelection()
 	selected = {};
 }
 
-Result<NodeId> EditorHierarchy::SelectedNode(const Scene& scene) const
+Result<GameObject::Ptr> EditorHierarchy::SelectedGameObject(const Scene& scene) const
 {
 	if (!selected)
 	{
-		return Result<NodeId>::Failure("No node selected");
+		return Result<GameObject::Ptr>::Failure("No node selected");
 	}
-	return scene.NodeByPersistentId(selected);
+	return scene.GameObjectById(selected);
 }
 
-Result<bool> EditorHierarchy::DrawNode(Scene& scene, NodeId node, const ComponentRegistry& registry)
+Result<GameObject::Ptr> EditorHierarchy::SelectedGameObject(const PrefabAsset& asset) const
 {
-	auto id = scene.NodePersistentId(node);
-	auto name = scene.NodeLabel(node);
+	if (!selected || !asset.Root())
+	{
+		return Result<GameObject::Ptr>::Failure("No Prefab GameObject selected");
+	}
+	std::function<GameObject::Ptr(const GameObject::Ptr&)> find = [&](const GameObject::Ptr& object)
+	{
+		if (object->Id() == selected)
+		{
+			return object;
+		}
+		for (const auto& child : object->Children())
+		{
+			auto result = find(child);
+			if (result)
+			{
+				return result;
+			}
+		}
+		return GameObject::Ptr{};
+	};
+	auto object = find(asset.Root());
+	return object ? Result<GameObject::Ptr>::Success(std::move(object))
+	              : Result<GameObject::Ptr>::Failure("Selected Prefab GameObject no longer exists");
+}
+
+Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, const ComponentRegistry& registry)
+{
+	if (!asset.Root())
+	{
+		return Result<bool>::Failure("PrefabAsset has no root GameObject");
+	}
+	bool changed = false;
+	ImGui::Begin("Hierarchy");
+	std::function<void(const GameObject::Ptr&)> draw = [&](const GameObject::Ptr& object)
+	{
+		const ResourceId id = object->Id();
+		const String key = id.ToString();
+		const auto name = object->Name();
+		const auto children = object->Children();
+		ImGui::PushID(key.c_str());
+		bool enabled = object->IsEnabled().value;
+		if (ImGui::Checkbox("##enabled", &enabled))
+		{
+			object->SetEnabled(enabled);
+			changed = true;
+		}
+		ImGui::SameLine();
+		const String label = name && !name.value.empty() ? name.value : String("GameObject ") + key.substr(0, 8);
+		const bool hasContent = !children.empty() || !object->Components().empty();
+		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
+		if (!hasContent)
+		{
+			flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+		}
+		if (selected == id)
+		{
+			flags |= ImGuiTreeNodeFlags_Selected;
+		}
+		const bool open = ImGui::TreeNodeEx("##gameObject", flags, "%s", label.c_str());
+		if (ImGui::IsItemClicked())
+		{
+			selected = id;
+		}
+		if (open && hasContent)
+		{
+			for (Component* component : object->Components())
+			{
+				ImGui::PushID(component->PersistentId().ToString().c_str());
+				bool componentEnabled = component->IsEnabled();
+				if (ImGui::Checkbox("##componentEnabled", &componentEnabled))
+				{
+					component->SetEnabled(componentEnabled);
+					changed = true;
+				}
+				ImGui::SameLine();
+				auto codec = registry.FindFor(*component);
+				ImGui::TextUnformatted(codec ? codec.value->type.c_str() : "Unregistered component");
+				ImGui::PopID();
+			}
+			for (const auto& child : children)
+			{
+				draw(child);
+			}
+			ImGui::TreePop();
+		}
+		ImGui::PopID();
+	};
+	draw(asset.Root());
+	ImGui::End();
+	if (selected && !SelectedGameObject(asset))
+	{
+		ClearSelection();
+	}
+	return Result<bool>::Success(changed);
+}
+
+Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node, const ComponentRegistry& registry)
+{
+	auto id = scene.PersistentId(node);
+	auto name = scene.GameObjectName(node);
 	auto enabled = scene.IsEnabled(node);
 	auto children = scene.ChildrenOf(node);
 	auto components = scene.ComponentsOf(node);
@@ -109,9 +209,9 @@ Result<bool> EditorHierarchy::DrawNode(Scene& scene, NodeId node, const Componen
 			ImGui::TextUnformatted(codec ? codec.value->type.c_str() : "Unregistered component");
 			ImGui::PopID();
 		}
-		for (NodeId child : children.value)
+		for (GameObject::Ptr child : children.value)
 		{
-			auto drawn = DrawNode(scene, child, registry);
+			auto drawn = DrawGameObject(scene, child, registry);
 			if (!drawn)
 			{
 				ImGui::TreePop();
@@ -130,9 +230,9 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, const ComponentRegistry& regist
 {
 	bool changed = false;
 	ImGui::Begin("Hierarchy");
-	for (NodeId root : scene.RootNodes())
+	for (GameObject::Ptr root : scene.RootGameObjects())
 	{
-		auto drawn = DrawNode(scene, root, registry);
+		auto drawn = DrawGameObject(scene, root, registry);
 		if (!drawn)
 		{
 			ImGui::End();
@@ -143,24 +243,24 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, const ComponentRegistry& regist
 	ImGui::End();
 	if (selected)
 	{
-		auto selected = SelectedNode(scene);
-		if (!selected)
+		auto selectedObject = SelectedGameObject(scene);
+		if (!selectedObject)
 		{
 			ClearSelection();
 		}
 		else
 		{
-			auto label = scene.NodeLabel(selected.value);
+			auto label = scene.GameObjectName(selectedObject.value);
 			if (!label)
 			{
 				return Result<bool>::Failure(label.error);
 			}
 			char buffer[257]{};
-			std::memcpy(buffer, label.value.data(), std::min<size_t>(label.value.size(), sizeof(buffer) - 1));
+			std::memcpy(buffer, label.value.data(), std::min<Ursa::Size>(label.value.size(), sizeof(buffer) - 1));
 			ImGui::Begin("Inspector");
 			if (ImGui::InputText("Label", buffer, sizeof(buffer)))
 			{
-				auto set = scene.SetNodeLabel(selected.value, String(buffer));
+				auto set = scene.SetGameObjectName(selectedObject.value, String(buffer));
 				if (!set)
 				{
 					ImGui::End();

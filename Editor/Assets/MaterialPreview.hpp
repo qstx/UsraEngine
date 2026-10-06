@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Types.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 #include <Ui/ImGuiBridge.hpp>
 
@@ -8,8 +9,8 @@ namespace Ursa::Editor
 class MaterialPreview final
 {
 public:
-	static Result<std::unique_ptr<MaterialPreview>> Create(Rhi::DevicePtr device, ImGuiBridge& gui,
-	                                                       uint32_t size = 256);
+	static Result<std::unique_ptr<MaterialPreview>> Create(Rhi::DevicePtr selectedDevice, ImGuiBridge& guiBridge,
+	                                                       Ursa::UInt32 size = 256);
 
 	~MaterialPreview();
 
@@ -26,10 +27,10 @@ public:
 	}
 
 private:
-	MaterialPreview(Rhi::DevicePtr device, ImGuiBridge& gui, std::unique_ptr<Renderer3D> renderer,
-	                Rhi::TexturePtr color, Rhi::SamplerPtr sampler, ImTextureID imageId)
-	    : device(std::move(device)), gui(gui), renderer(std::move(renderer)), color(std::move(color)),
-	      sampler(std::move(sampler)), imageId(imageId)
+	MaterialPreview(Rhi::DevicePtr selectedDevice, ImGuiBridge& guiBridge, std::unique_ptr<Renderer3D> selectedRenderer,
+	                Rhi::TexturePtr colorTexture, Rhi::SamplerPtr textureSampler, ImTextureID registeredImageId)
+	    : device(std::move(selectedDevice)), gui(guiBridge), renderer(std::move(selectedRenderer)),
+	      color(std::move(colorTexture)), sampler(std::move(textureSampler)), imageId(registeredImageId)
 	{
 	}
 

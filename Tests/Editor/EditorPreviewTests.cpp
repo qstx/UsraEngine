@@ -1,6 +1,7 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Scene/EditorScenePreview.hpp>
 #include <Core/StringInterop.hpp>
-#include <array>
 #include <iostream>
 #include <stdexcept>
 
@@ -37,7 +38,7 @@ void Expect(bool value, const char* message)
 class SpyComponent final : public Component
 {
 public:
-	explicit SpyComponent(int& starts, int& updates) : starts(starts), updates(updates)
+	explicit SpyComponent(int& startCount, int& updateCount) : starts(startCount), updates(updateCount)
 	{
 	}
 
@@ -72,27 +73,27 @@ int main()
 		preview->GetCamera().position = {0, 0, 5};
 		preview->GetCamera().target = {0, 0, 0};
 		Scene scene;
-		const auto node = Take(scene.CreateNode());
+		const auto node = Take(scene.CreateGameObject());
 		Take(scene.AddComponent<BoxRenderComponent>(node, Color{0.8f, 0.1f, 0.1f, 1.f}));
 		int starts = 0;
 		int updates = 0;
 		Take(scene.AddComponent<SpyComponent>(node, starts, updates));
 		Expect(!scene.CollectRenderData(1.f), "Game rendering should still require an active scene camera");
-		constexpr uint32_t size = 64;
+		constexpr Ursa::UInt32 size = 64;
 		auto color = Take(device->CreateTexture(
-		    {size, size, Format::rgbA8Unorm, TextureUsage::colorAttachment | TextureUsage::transferSource}));
+		    {size, size, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
 		auto readback =
-		    Take(device->CreateBuffer({size * size * 4, BufferUsage::transferDestination, Memory::readback}));
+		    Take(device->CreateBuffer({size * size * 4, BufferUsage::TransferDestination, Memory::Readback}));
 		auto command = Take(device->CreateCommandList());
 		done(command->Begin());
-		done(preview->Record(scene, command, color, ResourceState::undefined, ResourceState::transferSource));
-		done(command->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+		done(preview->Record(scene, command, color, ResourceState::Undefined, ResourceState::TransferSource));
+		done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 		done(command->CopyTextureToBuffer(color, readback));
 		done(command->End());
 		done(Take(device->Submit(command))->Wait());
-		std::array<uint8_t, size * size * 4> pixels{};
+		Ursa::Array<Ursa::UInt8, size * size * 4> pixels{};
 		done(readback->Read(0, pixels.data(), pixels.size()));
-		const size_t center = (size / 2 * size + size / 2) * 4;
+		const Ursa::Size center = (size / 2 * size + size / 2) * 4;
 		Expect(pixels[center] > pixels[center + 1] * 2, "Preview camera did not render the box");
 		Expect(starts == 0 && updates == 0, "Edit preview invoked a component lifecycle callback");
 		done(device->WaitIdle());

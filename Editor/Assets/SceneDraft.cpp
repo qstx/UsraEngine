@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Assets/SceneDraft.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/JsonResource.hpp>
@@ -8,65 +9,81 @@
 
 namespace Ursa::Editor
 {
-Result<std::shared_ptr<SceneDraft>> SceneDraft::Create(ResourceKind kind, ComponentRegistry& registry,
-                                                       ResourceSession& resources, const EditContextSetup& setup)
+Result<std::shared_ptr<SceneDraft>> SceneDraft::Create(ResourceKind resourceKind, ComponentRegistry& componentRegistry,
+                                                       ResourceSession& resourceSession,
+                                                       const EditContextSetup& contextSetup)
 {
-	if (kind != ResourceKind::scene && kind != ResourceKind::prefab)
+	if (resourceKind != ResourceKind::Scene && resourceKind != ResourceKind::Prefab)
 	{
 		return Result<std::shared_ptr<SceneDraft>>::Failure("Scene draft kind must be Scene or Prefab");
 	}
-	auto draft = std::shared_ptr<SceneDraft>(new SceneDraft(kind, registry, resources, setup));
-	draft->scene = std::make_unique<Scene>();
-	auto root = draft->scene->CreateNode();
-	if (!root)
+	auto draft =
+	    std::shared_ptr<SceneDraft>(new SceneDraft(resourceKind, componentRegistry, resourceSession, contextSetup));
+	if (resourceKind == ResourceKind::Prefab)
 	{
-		return Result<std::shared_ptr<SceneDraft>>::Failure(root.error);
+		draft->prefabAsset = std::make_unique<PrefabAsset>(ResourceId::Generate(), GameObject::Create("Prefab"));
+		auto refreshed = draft->RefreshPrefabPreview();
+		if (!refreshed)
+		{
+			return Result<std::shared_ptr<SceneDraft>>::Failure(refreshed.error);
+		}
 	}
-	auto labeled = draft->scene->SetNodeLabel(root.value, kind == ResourceKind::scene ? "Root" : "Prefab");
-	if (!labeled)
+	else
 	{
-		return Result<std::shared_ptr<SceneDraft>>::Failure(labeled.error);
+		draft->scene = std::make_unique<Scene>();
+		auto root = draft->scene->CreateGameObject("Root");
+		if (!root)
+		{
+			return Result<std::shared_ptr<SceneDraft>>::Failure(root.error);
+		}
 	}
 	return Result<std::shared_ptr<SceneDraft>>::Success(std::move(draft));
 }
 
-Result<std::shared_ptr<SceneDraft>> SceneDraft::Load(const std::filesystem::path& path, ResourceKind kind,
-                                                     ComponentRegistry& registry, ResourceSession& resources,
-                                                     const EditContextSetup& setup)
+Result<std::shared_ptr<SceneDraft>> SceneDraft::Load(const std::filesystem::path& path, ResourceKind resourceKind,
+                                                     ComponentRegistry& componentRegistry,
+                                                     ResourceSession& resourceSession,
+                                                     const EditContextSetup& contextSetup)
 {
-	if (kind != ResourceKind::scene && kind != ResourceKind::prefab)
+	if (resourceKind != ResourceKind::Scene && resourceKind != ResourceKind::Prefab)
 	{
 		return Result<std::shared_ptr<SceneDraft>>::Failure("Scene draft kind must be Scene or Prefab");
 	}
-	ComponentLoadContext context(resources);
-	if (setup)
+	ComponentLoadContext context(resourceSession);
+	if (contextSetup)
 	{
-		auto configured = setup(context);
+		auto configured = contextSetup(context);
 		if (!configured)
 		{
 			return Result<std::shared_ptr<SceneDraft>>::Failure(configured.error);
 		}
 	}
-	auto draft = std::shared_ptr<SceneDraft>(new SceneDraft(kind, registry, resources, setup));
-	if (kind == ResourceKind::prefab)
+	auto draft =
+	    std::shared_ptr<SceneDraft>(new SceneDraft(resourceKind, componentRegistry, resourceSession, contextSetup));
+	if (resourceKind == ResourceKind::Prefab)
 	{
-		auto loaded = LoadPrefabResource(path, registry, context);
-		if (!loaded)
+		auto asset = LoadPrefabAssetResource(path, componentRegistry, context);
+		if (!asset)
 		{
-			return Result<std::shared_ptr<SceneDraft>>::Failure(loaded.error);
+			return Result<std::shared_ptr<SceneDraft>>::Failure(asset.error);
 		}
-		draft->scene = std::move(loaded.value.scene);
+		draft->prefabAsset = std::make_unique<PrefabAsset>(std::move(asset.value));
+		auto refreshed = draft->RefreshPrefabPreview();
+		if (!refreshed)
+		{
+			return Result<std::shared_ptr<SceneDraft>>::Failure(refreshed.error);
+		}
 	}
 	else
 	{
-		auto json = ReadJsonResource(path, ResourceKind::scene);
+		auto json = ReadJsonResource(path, ResourceKind::Scene);
 		if (!json)
 		{
 			return Result<std::shared_ptr<SceneDraft>>::Failure(json.error);
 		}
 		if (json.value.contains("instances"))
 		{
-			auto loaded = LoadLinkedSceneResource(path, registry, context);
+			auto loaded = LoadLinkedSceneResource(path, componentRegistry, context);
 			if (!loaded)
 			{
 				return Result<std::shared_ptr<SceneDraft>>::Failure(loaded.error);
@@ -75,7 +92,7 @@ Result<std::shared_ptr<SceneDraft>> SceneDraft::Load(const std::filesystem::path
 		}
 		else
 		{
-			auto loaded = LoadSceneResource(path, registry, context);
+			auto loaded = LoadSceneResource(path, componentRegistry, context);
 			if (!loaded)
 			{
 				return Result<std::shared_ptr<SceneDraft>>::Failure(loaded.error);
@@ -104,14 +121,14 @@ Result<void> SceneDraft::Save(const std::filesystem::path& path, ResourceId id)
 {
 	const MaterialIdResolver resolver = [this](const std::shared_ptr<MaterialInstance>& material)
 	{ return MaterialId(material); };
-	if (kind == ResourceKind::prefab)
+	if (kind == ResourceKind::Prefab)
 	{
-		const auto roots = GetScene().RootNodes();
-		if (roots.size() != 1)
+		if (!prefabAsset || !prefabAsset->Root())
 		{
-			return Result<void>::Failure("Prefab document must contain exactly one root node");
+			return Result<void>::Failure("Prefab document has no detached asset graph");
 		}
-		return SavePrefabResource(path, id, GetScene(), roots.front(), registry, resolver);
+		PrefabAsset resource(id, prefabAsset->Root());
+		return SavePrefabAssetResource(path, resource, registry, resolver);
 	}
 	if (linked)
 	{
@@ -120,8 +137,125 @@ Result<void> SceneDraft::Save(const std::filesystem::path& path, ResourceId id)
 	return SaveSceneResource(path, id, GetScene(), registry, resolver);
 }
 
-Result<void> SceneDraft::AssignMaterial(NodeId node, ResourceId materialId, ResourceSession& resources)
+Result<void> SceneDraft::RefreshPrefabPreview()
 {
+	if (kind != ResourceKind::Prefab || !prefabAsset || !prefabAsset->Root())
+	{
+		return Result<void>::Failure("Only a PrefabAsset draft can refresh its preview Scene");
+	}
+	auto preview = std::make_unique<Scene>();
+	ComponentLoadContext context(resources);
+	if (setup)
+	{
+		auto prepared = setup(context);
+		if (!prepared)
+		{
+			return prepared;
+		}
+	}
+	const MaterialIdResolver resolver = [this](const std::shared_ptr<MaterialInstance>& material)
+	{ return MaterialId(material); };
+	auto instantiated = prefabAsset->Instantiate(*preview, registry, context, resolver);
+	if (!instantiated)
+	{
+		return Result<void>::Failure(instantiated.error);
+	}
+	previewObjects.clear();
+	std::function<Result<void>(const GameObject::Ptr&)> mapPreview = [&](const GameObject::Ptr& source) -> Result<void>
+	{
+		auto previewObject = context.GameObjectById(source->Id());
+		if (!previewObject)
+		{
+			return Result<void>::Failure(previewObject.error);
+		}
+		previewObjects[source->Id().ToString()] = previewObject.value;
+		for (const auto& child : source->Children())
+		{
+			auto result = mapPreview(child);
+			if (!result)
+			{
+				return result;
+			}
+		}
+		return {};
+	};
+	auto mapped = mapPreview(prefabAsset->Root());
+	if (!mapped)
+	{
+		return mapped;
+	}
+	scene = std::move(preview);
+	return {};
+}
+
+Result<GameObject::Ptr> SceneDraft::PreviewGameObject(ResourceId prefabObjectId) const
+{
+	const auto found = previewObjects.find(prefabObjectId.ToString());
+	return found == previewObjects.end()
+	           ? Result<GameObject::Ptr>::Failure("Prefab preview has no mapping for GameObject " +
+	                                              prefabObjectId.ToString())
+	           : Result<GameObject::Ptr>::Success(found->second);
+}
+
+Result<void> SceneDraft::SyncPrefabTransform(ResourceId prefabObjectId)
+{
+	if (!prefabAsset || !prefabAsset->Root())
+	{
+		return Result<void>::Failure("Prefab draft has no detached asset graph");
+	}
+	auto previewObject = PreviewGameObject(prefabObjectId);
+	if (!previewObject)
+	{
+		return Result<void>::Failure(previewObject.error);
+	}
+	std::function<GameObject::Ptr(const GameObject::Ptr&)> find = [&](const GameObject::Ptr& object)
+	{
+		if (object->Id() == prefabObjectId)
+		{
+			return object;
+		}
+		for (const auto& child : object->Children())
+		{
+			auto found = find(child);
+			if (found)
+			{
+				return found;
+			}
+		}
+		return GameObject::Ptr{};
+	};
+	auto assetObject = find(prefabAsset->Root());
+	if (!assetObject)
+	{
+		return Result<void>::Failure("Prefab asset has no GameObject " + prefabObjectId.ToString());
+	}
+	auto local = previewObject.value->GetLocalTransform();
+	return local ? assetObject->SetLocalTransform(local.value) : Result<void>::Failure(local.error);
+}
+
+Result<void> SceneDraft::AssignMaterial(GameObject::Ptr node, ResourceId materialId, ResourceSession& resourceSession)
+{
+	if (kind == ResourceKind::Prefab)
+	{
+		auto* box = node ? node->FindComponent<BoxRenderComponent>() : nullptr;
+		if (!box)
+		{
+			return Result<void>::Failure("Selected Prefab GameObject has no box renderer component");
+		}
+		if (!materialId)
+		{
+			box->material.reset();
+			return {};
+		}
+		auto material = resourceSession.LoadMaterial(materialId);
+		if (!material)
+		{
+			return Result<void>::Failure(material.error);
+		}
+		box->material = material.value;
+		assignedMaterials[material.value.get()] = materialId;
+		return {};
+	}
 	auto* box = GetScene().FindComponent<BoxRenderComponent>(node);
 	if (!box)
 	{
@@ -136,13 +270,13 @@ Result<void> SceneDraft::AssignMaterial(NodeId node, ResourceId materialId, Reso
 	{
 		if (GetScene().GetComponent(id) == box)
 		{
-			return AssignMaterial(id, materialId, resources);
+			return AssignMaterial(id, materialId, resourceSession);
 		}
 	}
 	return Result<void>::Failure("Box renderer component is missing");
 }
 
-Result<void> SceneDraft::AssignMaterial(ComponentId component, ResourceId materialId, ResourceSession& resources)
+Result<void> SceneDraft::AssignMaterial(ComponentId component, ResourceId materialId, ResourceSession& resourceSession)
 {
 	auto* box = dynamic_cast<BoxRenderComponent*>(GetScene().GetComponent(component));
 	if (!box)
@@ -154,7 +288,7 @@ Result<void> SceneDraft::AssignMaterial(ComponentId component, ResourceId materi
 		box->material.reset();
 		return {};
 	}
-	auto material = resources.LoadMaterial(materialId);
+	auto material = resourceSession.LoadMaterial(materialId);
 	if (!material)
 	{
 		return Result<void>::Failure(material.error);
@@ -184,22 +318,12 @@ Result<void> SceneDraft::SetInstanceStructure(ResourceId instanceId, const Strin
 	return SetPrefabStructureOverride(*linked, instanceId, operation, value);
 }
 
-Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, NodeId parent, const std::filesystem::path& scenePath,
-                                           ResourceId sceneId)
+Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId parentId,
+                                           const std::filesystem::path& scenePath, ResourceId sceneId)
 {
-	if (kind != ResourceKind::scene)
+	if (kind != ResourceKind::Scene)
 	{
 		return Result<ResourceId>::Failure("Prefab instances can only be placed in scenes");
-	}
-	ResourceId parentId;
-	if (parent)
-	{
-		auto resolved = GetScene().NodePersistentId(parent);
-		if (!resolved)
-		{
-			return Result<ResourceId>::Failure(resolved.error);
-		}
-		parentId = resolved.value;
 	}
 	const MaterialIdResolver resolver = [this](const std::shared_ptr<MaterialInstance>& material)
 	{ return MaterialId(material); };
@@ -315,6 +439,209 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 	{
 		return Result<bool>::Failure("Scene document has no scene draft");
 	}
+	if (draft->Kind() == ResourceKind::Prefab)
+	{
+		auto* asset = draft->GetPrefabAsset();
+		if (!asset)
+		{
+			return Result<bool>::Failure("Prefab document has no detached PrefabAsset");
+		}
+		auto hierarchyChanged = hierarchy.Draw(*asset, registry);
+		if (!hierarchyChanged)
+		{
+			return hierarchyChanged;
+		}
+		bool changed = hierarchyChanged.value;
+		auto selected = hierarchy.SelectedGameObject(*asset);
+		ImGui::Begin("Inspector");
+		if (!selected)
+		{
+			ImGui::TextDisabled("Select a GameObject in the Prefab hierarchy.");
+		}
+		else
+		{
+			GameObject::Ptr object = selected.value;
+			String name = object->Name().value;
+			char nameBuffer[257]{};
+			std::memcpy(nameBuffer, name.data(), std::min<Ursa::Size>(name.size(), sizeof(nameBuffer) - 1));
+			if (ImGui::InputText("Name", nameBuffer, sizeof(nameBuffer)))
+			{
+				auto renamed = object->SetName(String(nameBuffer));
+				diagnostic = renamed ? String{} : renamed.error;
+				changed |= static_cast<bool>(renamed);
+			}
+			bool enabled = object->IsEnabled().value;
+			if (ImGui::Checkbox("Enabled", &enabled))
+			{
+				auto set = object->SetEnabled(enabled);
+				diagnostic = set ? String{} : set.error;
+				changed |= static_cast<bool>(set);
+			}
+			if (ImGui::Button("Add child"))
+			{
+				auto child = GameObject::Create("GameObject");
+				auto parented = child->SetParent(object);
+				diagnostic = parented ? String{} : parented.error;
+				changed |= static_cast<bool>(parented);
+			}
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!object->Parent());
+			if (ImGui::Button("Delete GameObject"))
+			{
+				auto removed = object->Destroy();
+				diagnostic = removed ? String{} : removed.error;
+				if (removed)
+				{
+					hierarchy.ClearSelection();
+					selected = Result<GameObject::Ptr>::Failure("Deleted selection");
+					changed = true;
+				}
+			}
+			ImGui::EndDisabled();
+			auto local = object->GetLocalTransform();
+			if (local)
+			{
+				LocalTransform transform = local.value;
+				Ursa::Float32 position[3]{transform.position.x, transform.position.y, transform.position.z};
+				Ursa::Float32 scale[3]{transform.scale.x, transform.scale.y, transform.scale.z};
+				bool edited = ImGui::DragFloat3("Position", position, 0.05f);
+				edited |= ImGui::DragFloat3("Scale", scale, 0.05f, 0.001f, 100.f);
+				if (edited)
+				{
+					transform.position = {position[0], position[1], position[2]};
+					transform.scale = {scale[0], scale[1], scale[2]};
+					auto set = object->SetLocalTransform(transform);
+					diagnostic = set ? String{} : set.error;
+					changed |= static_cast<bool>(set);
+				}
+			}
+			if (ImGui::Button("Add Box"))
+			{
+				auto added = object->AddComponent<BoxRenderComponent>();
+				diagnostic = added ? String{} : added.error;
+				changed |= static_cast<bool>(added);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Add Camera"))
+			{
+				auto added = object->AddComponent<CameraComponent>();
+				diagnostic = added ? String{} : added.error;
+				changed |= static_cast<bool>(added);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Add Light"))
+			{
+				auto added = object->AddComponent<DirectionalLightComponent>();
+				diagnostic = added ? String{} : added.error;
+				changed |= static_cast<bool>(added);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Add Point Light"))
+			{
+				auto added = object->AddComponent<PointLightComponent>();
+				diagnostic = added ? String{} : added.error;
+				changed |= static_cast<bool>(added);
+			}
+			for (Component* component : object->Components())
+			{
+				ImGui::PushID(component->PersistentId().ToString().c_str());
+				auto codec = registry.FindFor(*component);
+				ImGui::SeparatorText(codec ? codec.value->type.c_str() : "Component");
+				if (auto* box = dynamic_cast<BoxRenderComponent*>(component))
+				{
+					Ursa::Float32 color[4]{box->color.red, box->color.green, box->color.blue, box->color.alpha};
+					if (ImGui::ColorEdit4("Color", color))
+					{
+						box->color = {color[0], color[1], color[2], color[3]};
+						changed = true;
+					}
+					if (ImGui::BeginCombo("Material", box->material ? "Assigned" : "None"))
+					{
+						if (ImGui::Selectable("None", !box->material))
+						{
+							box->material.reset();
+							changed = true;
+						}
+						for (const auto& entry : workspace.Resources())
+						{
+							if (entry.location.kind == ResourceKind::Material)
+							{
+								const auto label = entry.location.path.FileName();
+								if (ImGui::Selectable(label.c_str()))
+								{
+									auto material = documents.Session().LoadMaterial(entry.id);
+									diagnostic = material ? String{} : material.error;
+									if (material)
+									{
+										box->material = material.value;
+										changed = true;
+									}
+								}
+							}
+						}
+						ImGui::EndCombo();
+					}
+				}
+				else if (auto* camera = dynamic_cast<CameraComponent*>(component))
+				{
+					Ursa::Float32 fov = camera->verticalFovRadians * 57.2957795f;
+					bool edited = ImGui::DragFloat("FOV degrees", &fov, 0.5f, 1.f, 179.f);
+					edited |= ImGui::DragFloat("Near", &camera->nearPlane, 0.01f, 0.001f, 10000.f);
+					edited |= ImGui::DragFloat("Far", &camera->farPlane, 0.1f, 0.002f, 100000.f);
+					if (edited && fov > 0.f && fov < 180.f)
+					{
+						camera->verticalFovRadians = fov * 0.0174532925f;
+						changed = true;
+					}
+				}
+				else if (auto* light = dynamic_cast<DirectionalLightComponent*>(component))
+				{
+					Ursa::Float32 intensity = light->Intensity();
+					if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
+					{
+						light->SetIntensity(intensity);
+						changed = true;
+					}
+				}
+				else if (auto* pointLight = dynamic_cast<PointLightComponent*>(component))
+				{
+					Ursa::Float32 intensity = pointLight->Intensity();
+					Ursa::Float32 range = pointLight->Range();
+					bool edited = ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f);
+					edited |= ImGui::DragFloat("Range", &range, 0.05f, 0.001f, 10000.f);
+					if (edited)
+					{
+						pointLight->SetIntensity(intensity);
+						pointLight->SetRange(range);
+						changed = true;
+					}
+				}
+				else
+				{
+					ImGui::TextDisabled("This component has no detached Prefab inspector.");
+				}
+				if (ImGui::Button("Remove component"))
+				{
+					auto removed = object->RemoveComponent(component);
+					diagnostic = removed ? String{} : removed.error;
+					changed |= static_cast<bool>(removed);
+				}
+				ImGui::PopID();
+			}
+		}
+		if (!diagnostic.empty())
+		{
+			ImGui::TextWrapped("%s", diagnostic.c_str());
+		}
+		ImGui::End();
+		if (changed)
+		{
+			auto refreshed = draft->RefreshPrefabPreview();
+			diagnostic = refreshed ? String{} : refreshed.error;
+			document.MarkDirty();
+		}
+		return Result<bool>::Success(changed);
+	}
 	Scene& scene = draft->GetScene();
 	auto hierarchyChanged = hierarchy.Draw(scene, registry);
 	if (!hierarchyChanged)
@@ -323,25 +650,25 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 	}
 	bool changed = hierarchyChanged.value;
 	ResourceId prefabToPlace;
-	NodeId placementParent;
+	ResourceId placementParent;
 	ImGui::Begin("Inspector");
-	auto selected = hierarchy.SelectedNode(scene);
+	auto selected = hierarchy.SelectedGameObject(scene);
 	if (!selected)
 	{
 		ImGui::TextDisabled("Select a node in Hierarchy to edit its properties.");
 	}
-	if (draft->Kind() == ResourceKind::scene && ImGui::BeginCombo("Place Prefab", "Select source"))
+	if (draft->Kind() == ResourceKind::Scene && ImGui::BeginCombo("Place Prefab", "Select source"))
 	{
 		for (const auto& entry : workspace.Resources())
 		{
-			if (entry.location.kind == ResourceKind::prefab)
+			if (entry.location.kind == ResourceKind::Prefab)
 			{
 				ImGui::PushID(entry.id.ToString().c_str());
 				const auto name = entry.location.path.FileName();
 				if (ImGui::Selectable(name.c_str()))
 				{
 					prefabToPlace = entry.id;
-					placementParent = selected ? selected.value : NodeId{};
+					placementParent = selected ? selected.value->Id() : ResourceId{};
 				}
 				ImGui::PopID();
 			}
@@ -350,10 +677,10 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 	}
 	if (selected)
 	{
-		NodeId node = selected.value;
+		GameObject::Ptr node = selected.value;
 		if (draft->Linked())
 		{
-			auto selectedId = scene.NodePersistentId(node);
+			auto selectedId = scene.PersistentId(node);
 			if (selectedId)
 			{
 				for (const auto& instance : draft->LinkedScene()->scopedIds)
@@ -367,10 +694,10 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 							{
 								auto instanceId = ResourceId::Parse(instance.first);
 								auto sourceId = ResourceId::Parse(mapping.first);
-								auto label = scene.NodeLabel(node);
+								auto label = scene.GameObjectName(node);
 								if (instanceId && sourceId && label)
 								{
-									auto pinned = draft->SetInstanceProperty(instanceId.value, sourceId.value, "/label",
+									auto pinned = draft->SetInstanceProperty(instanceId.value, sourceId.value, "/name",
 									                                         ToStdString(label.value));
 									diagnostic = pinned ? String{} : pinned.error;
 									changed |= static_cast<bool>(pinned);
@@ -384,14 +711,14 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		}
 		if (ImGui::Button("Add child"))
 		{
-			auto added = scene.CreateNode(node);
+			auto added = scene.CreateGameObject(node);
 			diagnostic = added ? String{} : added.error;
 			changed |= static_cast<bool>(added);
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Delete node"))
 		{
-			auto removed = scene.DestroyNode(node);
+			auto removed = scene.DestroyGameObject(node);
 			diagnostic = removed ? String{} : removed.error;
 			if (removed)
 			{
@@ -404,7 +731,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 			auto parent = scene.ParentOf(node);
 			if (parent)
 			{
-				Vector<NodeId> siblings;
+				Vector<GameObject::Ptr> siblings;
 				if (parent.value)
 				{
 					auto children = scene.ChildrenOf(parent.value);
@@ -415,16 +742,16 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				}
 				else
 				{
-					siblings = scene.RootNodes();
+					siblings = scene.RootGameObjects();
 				}
 				const auto position = std::find(siblings.begin(), siblings.end(), node);
 				if (position != siblings.end())
 				{
-					const size_t index = static_cast<size_t>(position - siblings.begin());
+					const Ursa::Size index = static_cast<Ursa::Size>(position - siblings.begin());
 					ImGui::BeginDisabled(index == 0);
 					if (ImGui::Button("Move up"))
 					{
-						auto moved = scene.ReorderNode(node, index - 1);
+						auto moved = scene.ReorderGameObject(node, index - 1);
 						diagnostic = moved ? String{} : moved.error;
 						changed |= static_cast<bool>(moved);
 					}
@@ -433,7 +760,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					ImGui::BeginDisabled(index + 1 >= siblings.size());
 					if (ImGui::Button("Move down"))
 					{
-						auto moved = scene.ReorderNode(node, index + 1);
+						auto moved = scene.ReorderGameObject(node, index + 1);
 						diagnostic = moved ? String{} : moved.error;
 						changed |= static_cast<bool>(moved);
 					}
@@ -447,12 +774,12 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						diagnostic = moved ? String{} : moved.error;
 						changed |= static_cast<bool>(moved);
 					}
-					std::function<void(NodeId)> offer = [&](NodeId candidate)
+					std::function<void(GameObject::Ptr)> offer = [&](GameObject::Ptr candidate)
 					{
 						if (candidate != node)
 						{
-							auto label = scene.NodeLabel(candidate);
-							auto id = scene.NodePersistentId(candidate);
+							auto label = scene.GameObjectName(candidate);
+							auto id = scene.PersistentId(candidate);
 							if (label && id)
 							{
 								ImGui::PushID(id.value.ToString().c_str());
@@ -468,13 +795,13 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						auto children = scene.ChildrenOf(candidate);
 						if (children)
 						{
-							for (NodeId child : children.value)
+							for (GameObject::Ptr child : children.value)
 							{
 								offer(child);
 							}
 						}
 					};
-					for (NodeId root : scene.RootNodes())
+					for (GameObject::Ptr root : scene.RootGameObjects())
 					{
 						offer(root);
 					}
@@ -485,8 +812,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 			if (local)
 			{
 				LocalTransform value = local.value;
-				float position[3]{value.position.x, value.position.y, value.position.z};
-				float scale[3]{value.scale.x, value.scale.y, value.scale.z};
+				Ursa::Float32 position[3]{value.position.x, value.position.y, value.position.z};
+				Ursa::Float32 scale[3]{value.scale.x, value.scale.y, value.scale.z};
 				bool transformChanged = ImGui::DragFloat3("Position", position, 0.05f);
 				transformChanged |= ImGui::DragFloat3("Scale", scale, 0.05f, 0.001f, 100.f);
 				if (transformChanged)
@@ -587,7 +914,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				}
 				if (auto* box = dynamic_cast<BoxRenderComponent*>(object))
 				{
-					float color[4]{box->color.red, box->color.green, box->color.blue, box->color.alpha};
+					Ursa::Float32 color[4]{box->color.red, box->color.green, box->color.blue, box->color.alpha};
 					if (ImGui::ColorEdit4("Color", color))
 					{
 						box->color = {color[0], color[1], color[2], color[3]};
@@ -615,7 +942,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						}
 						for (const auto& entry : workspace.Resources())
 						{
-							if (entry.location.kind == ResourceKind::material)
+							if (entry.location.kind == ResourceKind::Material)
 							{
 								ImGui::PushID(entry.id.ToString().c_str());
 								const auto name = entry.location.path.FileName();
@@ -634,9 +961,9 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				}
 				else if (auto* camera = dynamic_cast<CameraComponent*>(object))
 				{
-					float fov = camera->verticalFovRadians * 57.2957795f;
-					float nearPlane = camera->nearPlane;
-					float farPlane = camera->farPlane;
+					Ursa::Float32 fov = camera->verticalFovRadians * 57.2957795f;
+					Ursa::Float32 nearPlane = camera->nearPlane;
+					Ursa::Float32 farPlane = camera->farPlane;
 					bool edited = ImGui::DragFloat("FOV degrees", &fov, 0.5f, 1.f, 179.f);
 					edited |= ImGui::DragFloat("Near", &nearPlane, 0.01f, 0.001f, 10000.f);
 					edited |= ImGui::DragFloat("Far", &farPlane, 0.1f, 0.002f, 100000.f);
@@ -666,14 +993,14 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				else if (auto* directional = dynamic_cast<DirectionalLightComponent*>(object))
 				{
 					Color value = directional->Color();
-					float color[4]{value.red, value.green, value.blue, value.alpha};
+					Ursa::Float32 color[4]{value.red, value.green, value.blue, value.alpha};
 					if (ImGui::ColorEdit4("Color", color))
 					{
 						auto set = directional->SetColor({color[0], color[1], color[2], color[3]});
 						diagnostic = set ? String{} : set.error;
 						changed |= static_cast<bool>(set);
 					}
-					float intensity = directional->Intensity();
+					Ursa::Float32 intensity = directional->Intensity();
 					if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
 					{
 						auto set = directional->SetIntensity(intensity);
@@ -684,15 +1011,15 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				else if (auto* point = dynamic_cast<PointLightComponent*>(object))
 				{
 					Color value = point->Color();
-					float color[4]{value.red, value.green, value.blue, value.alpha};
+					Ursa::Float32 color[4]{value.red, value.green, value.blue, value.alpha};
 					if (ImGui::ColorEdit4("Color", color))
 					{
 						auto set = point->SetColor({color[0], color[1], color[2], color[3]});
 						diagnostic = set ? String{} : set.error;
 						changed |= static_cast<bool>(set);
 					}
-					float intensity = point->Intensity();
-					float range = point->Range();
+					Ursa::Float32 intensity = point->Intensity();
+					Ursa::Float32 range = point->Range();
 					if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
 					{
 						auto set = point->SetIntensity(intensity);

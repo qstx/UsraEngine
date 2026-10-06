@@ -1,4 +1,5 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Result.hpp>
 #include <Core/Containers.hpp>
 #include <Window/Window.hpp>
@@ -10,119 +11,119 @@ namespace Ursa::Rhi
 {
 enum class Backend
 {
-	vulkan,
-	openGl,
-	d3D12
+	Vulkan,
+	OpenGl,
+	D3D12
 };
 enum class Format
 {
-	rgbA8Unorm,
-	rgbA8Srgb,
-	bgrA8Unorm,
-	r32Uint,
-	d32Float
+	RgbA8Unorm,
+	RgbA8Srgb,
+	BgrA8Unorm,
+	R32Uint,
+	D32Float
 };
 enum class ShaderFormat
 {
-	spirv,
-	glsl,
-	dxil
+	Spirv,
+	Glsl,
+	Dxil
 };
 enum class ShaderStage
 {
-	vertex,
-	fragment,
-	compute
+	Vertex,
+	Fragment,
+	Compute
 };
 enum class ResourceState
 {
-	undefined,
-	present,
-	transferSource,
-	transferDestination,
-	shaderRead,
-	shaderWrite,
-	colorAttachment,
-	depthAttachment,
-	vertexBuffer,
-	indexBuffer,
-	uniformRead,
-	storageReadWrite
+	Undefined,
+	Present,
+	TransferSource,
+	TransferDestination,
+	ShaderRead,
+	ShaderWrite,
+	ColorAttachment,
+	DepthAttachment,
+	VertexBuffer,
+	IndexBuffer,
+	UniformRead,
+	StorageReadWrite
 };
-enum class BufferUsage : uint32_t
+enum class BufferUsage : Ursa::UInt32
 {
-	none = 0,
-	transferSource = 1,
-	transferDestination = 2,
-	vertex = 4,
-	index = 8,
-	uniform = 16,
-	storage = 32
+	None = 0,
+	TransferSource = 1,
+	TransferDestination = 2,
+	Vertex = 4,
+	Index = 8,
+	Uniform = 16,
+	Storage = 32
 };
-enum class TextureUsage : uint32_t
+enum class TextureUsage : Ursa::UInt32
 {
-	none = 0,
-	transferSource = 1,
-	transferDestination = 2,
-	sampled = 4,
-	storage = 8,
-	colorAttachment = 16,
-	depthAttachment = 32
+	None = 0,
+	TransferSource = 1,
+	TransferDestination = 2,
+	Sampled = 4,
+	Storage = 8,
+	ColorAttachment = 16,
+	DepthAttachment = 32
 };
 
 inline BufferUsage operator|(BufferUsage a, BufferUsage b)
 {
-	return static_cast<BufferUsage>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+	return static_cast<BufferUsage>(static_cast<Ursa::UInt32>(a) | static_cast<Ursa::UInt32>(b));
 }
 
 inline TextureUsage operator|(TextureUsage a, TextureUsage b)
 {
-	return static_cast<TextureUsage>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+	return static_cast<TextureUsage>(static_cast<Ursa::UInt32>(a) | static_cast<Ursa::UInt32>(b));
 }
 
 inline bool Has(BufferUsage a, BufferUsage b)
 {
-	return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) != 0;
+	return (static_cast<Ursa::UInt32>(a) & static_cast<Ursa::UInt32>(b)) != 0;
 }
 
 inline bool Has(TextureUsage a, TextureUsage b)
 {
-	return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) != 0;
+	return (static_cast<Ursa::UInt32>(a) & static_cast<Ursa::UInt32>(b)) != 0;
 }
 enum class Memory
 {
-	gpu,
-	upload,
-	readback
+	Gpu,
+	Upload,
+	Readback
 };
 enum class BindingType
 {
-	uniformBuffer,
-	storageBuffer,
-	sampledTexture,
-	storageTexture,
-	sampler,
-	combinedImageSampler
+	UniformBuffer,
+	StorageBuffer,
+	SampledTexture,
+	StorageTexture,
+	Sampler,
+	CombinedImageSampler
 };
 enum class VertexFormat
 {
-	float2,
-	float3,
-	float4
+	Float2,
+	Float3,
+	Float4
 };
 enum class Compare
 {
-	never,
-	less,
-	lessEqual,
-	equal,
-	greater,
-	always
+	Never,
+	Less,
+	LessEqual,
+	Equal,
+	Greater,
+	Always
 };
 
 struct DeviceDesc
 {
-	Backend backend = Backend::vulkan;
+	Backend backend = Backend::Vulkan;
 	std::shared_ptr<Window> window;
 	bool validation = false;
 };
@@ -130,9 +131,9 @@ struct DeviceDesc
 struct AdapterInfo
 {
 	String name;
-	uint32_t vendorId = 0;
-	uint32_t deviceId = 0;
-	uint32_t apiVersion = 0;
+	Ursa::UInt32 vendorId = 0;
+	Ursa::UInt32 deviceId = 0;
+	Ursa::UInt32 apiVersion = 0;
 };
 
 struct Capabilities
@@ -142,22 +143,22 @@ struct Capabilities
 	bool textureSampling = false;
 	bool storageImage = false;
 	bool offscreenRendering = false;
-	uint32_t maxTextureSize = 0;
-	uint32_t maxPushConstants = 0;
+	Ursa::UInt32 maxTextureSize = 0;
+	Ursa::UInt32 maxPushConstants = 0;
 };
 
 struct BufferDesc
 {
-	size_t size = 0;
-	BufferUsage usage = BufferUsage::none;
-	Memory memory = Memory::gpu;
+	Ursa::Size size = 0;
+	BufferUsage usage = BufferUsage::None;
+	Memory memory = Memory::Gpu;
 };
 
 struct TextureDesc
 {
-	uint32_t width = 0, height = 0;
-	Format format = Format::rgbA8Unorm;
-	TextureUsage usage = TextureUsage::none;
+	Ursa::UInt32 width = 0, height = 0;
+	Format format = Format::RgbA8Unorm;
+	TextureUsage usage = TextureUsage::None;
 };
 
 struct SamplerDesc
@@ -168,24 +169,24 @@ struct SamplerDesc
 
 struct ShaderDesc
 {
-	ShaderStage stage = ShaderStage::vertex;
-	ShaderFormat format = ShaderFormat::spirv;
-	Vector<uint8_t> code;
+	ShaderStage stage = ShaderStage::Vertex;
+	ShaderFormat format = ShaderFormat::Spirv;
+	Vector<Ursa::UInt8> code;
 	String entry = "main";
 };
 
 struct LayoutBinding
 {
-	uint32_t binding = 0;
-	BindingType type = BindingType::uniformBuffer;
-	uint32_t count = 1;
-	uint32_t stages = 7;
+	Ursa::UInt32 binding = 0;
+	BindingType type = BindingType::UniformBuffer;
+	Ursa::UInt32 count = 1;
+	Ursa::UInt32 stages = 7;
 };
 
 struct VertexAttribute
 {
-	uint32_t location = 0, offset = 0;
-	VertexFormat format = VertexFormat::float3;
+	Ursa::UInt32 location = 0, offset = 0;
+	VertexFormat format = VertexFormat::Float3;
 };
 
 struct SwapchainDesc
@@ -202,9 +203,9 @@ public:
 
 	virtual ~Buffer() = default;
 
-	virtual Result<void> Write(size_t offset, const void* data, size_t size) = 0;
+	virtual Result<void> Write(Ursa::Size offset, const void* data, Ursa::Size size) = 0;
 
-	virtual Result<void> Read(size_t offset, void* data, size_t size) = 0;
+	virtual Result<void> Read(Ursa::Size offset, void* data, Ursa::Size size) = 0;
 	const BufferDesc desc;
 };
 
@@ -254,7 +255,7 @@ class Fence
 public:
 	virtual ~Fence() = default;
 
-	virtual Result<void> Wait(uint64_t timeoutNanoseconds = UINT64_MAX) = 0;
+	virtual Result<void> Wait(Ursa::UInt64 timeoutNanoseconds = UINT64_MAX) = 0;
 
 	virtual bool Completed() const = 0;
 };
@@ -272,7 +273,7 @@ using SwapchainPtr = std::shared_ptr<class Swapchain>;
 
 struct BindingResource
 {
-	uint32_t binding = 0;
+	Ursa::UInt32 binding = 0;
 	BufferPtr buffer;
 	TexturePtr texture;
 	SamplerPtr sampler;
@@ -288,14 +289,14 @@ struct GraphicsPipelineDesc
 {
 	ShaderPtr vertex, fragment;
 	LayoutPtr layout;
-	Format colorFormat = Format::rgbA8Unorm;
+	Format colorFormat = Format::RgbA8Unorm;
 	bool depthTest = false;
-	Format depthFormat = Format::d32Float;
-	Compare depthCompare = Compare::less;
+	Format depthFormat = Format::D32Float;
+	Compare depthCompare = Compare::Less;
 	bool depthWrite = true;
 	bool blend = false;
 	bool cullBack = false;
-	uint32_t vertexStride = 0;
+	Ursa::UInt32 vertexStride = 0;
 	Vector<VertexAttribute> attributes;
 };
 
@@ -310,23 +311,23 @@ struct RenderTarget
 	TexturePtr color;
 	TexturePtr depth;
 	bool clearColor = true;
-	float colorValue[4] = {0.02f, 0.03f, 0.06f, 1.0f};
+	Ursa::Float32 colorValue[4] = {0.02f, 0.03f, 0.06f, 1.0f};
 	bool clearDepth = true;
-	float depthValue = 1.0f;
+	Ursa::Float32 depthValue = 1.0f;
 };
 
 struct ScissorRect
 {
-	int32_t x = 0;
-	int32_t y = 0;
-	uint32_t width = 0;
-	uint32_t height = 0;
+	Ursa::Int32 x = 0;
+	Ursa::Int32 y = 0;
+	Ursa::UInt32 width = 0;
+	Ursa::UInt32 height = 0;
 };
 
 struct AcquiredImage
 {
 	TexturePtr texture;
-	ResourceState initialState = ResourceState::undefined;
+	ResourceState initialState = ResourceState::Undefined;
 };
 
 class CommandList
@@ -342,8 +343,8 @@ public:
 
 	virtual Result<void> Barrier(const BufferPtr& buffer, ResourceState before, ResourceState after) = 0;
 
-	virtual Result<void> CopyBuffer(const BufferPtr& source, const BufferPtr& destination, size_t size,
-	                                size_t sourceOffset = 0, size_t destinationOffset = 0) = 0;
+	virtual Result<void> CopyBuffer(const BufferPtr& source, const BufferPtr& destination, Ursa::Size size,
+	                                Ursa::Size sourceOffset = 0, Ursa::Size destinationOffset = 0) = 0;
 
 	virtual Result<void> CopyBufferToTexture(const BufferPtr& source, const TexturePtr& destination) = 0;
 
@@ -363,12 +364,13 @@ public:
 
 	virtual Result<void> SetScissor(const ScissorRect& rect) = 0;
 
-	virtual Result<void> Draw(uint32_t vertexCount, uint32_t instanceCount = 1) = 0;
+	virtual Result<void> Draw(Ursa::UInt32 vertexCount, Ursa::UInt32 instanceCount = 1) = 0;
 
-	virtual Result<void> DrawIndexed(uint32_t indexCount, uint32_t instanceCount = 1, uint32_t firstInstance = 0,
-	                                 uint32_t firstIndex = 0, int32_t vertexOffset = 0) = 0;
+	virtual Result<void> DrawIndexed(Ursa::UInt32 indexCount, Ursa::UInt32 instanceCount = 1,
+	                                 Ursa::UInt32 firstInstance = 0, Ursa::UInt32 firstIndex = 0,
+	                                 Ursa::Int32 vertexOffset = 0) = 0;
 
-	virtual Result<void> Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1) = 0;
+	virtual Result<void> Dispatch(Ursa::UInt32 x, Ursa::UInt32 y = 1, Ursa::UInt32 z = 1) = 0;
 };
 
 class Swapchain

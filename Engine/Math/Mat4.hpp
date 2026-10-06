@@ -1,19 +1,19 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Math/Quat.hpp>
 #include <Math/Vec3.hpp>
-#include <array>
 
 namespace Ursa
 {
 // Column-major matrices multiply column vectors. World coordinates are right-handed with +Y up.
 struct Mat4
 {
-	Array<float, 16> values{};
+	Array<Ursa::Float32, 16> values{};
 
-	float& At(int row, int column);
+	Ursa::Float32& At(int row, int column);
 
-	float At(int row, int column) const;
+	Ursa::Float32 At(int row, int column) const;
 
 	static Mat4 Identity();
 
@@ -23,7 +23,8 @@ struct Mat4
 
 	static Mat4 Rotation(Quat rotation);
 
-	static Mat4 Perspective(float verticalFovRadians, float aspect, float nearPlane, float farPlane);
+	static Mat4 Perspective(Ursa::Float32 verticalFovRadians, Ursa::Float32 aspect, Ursa::Float32 nearPlane,
+	                        Ursa::Float32 farPlane);
 
 	static Mat4 LookAt(Vec3 eye, Vec3 target, Vec3 up);
 

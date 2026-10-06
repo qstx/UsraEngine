@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <EASTL/allocator.h>
 #include <EASTL/vector.h>
 
@@ -18,7 +19,7 @@ int main()
 	{
 		return 2;
 	}
-	if ((reinterpret_cast<uintptr_t>(aligned) + 8) % 64 != 0)
+	if ((reinterpret_cast<Ursa::UIntPtr>(aligned) + 8) % 64 != 0)
 	{
 		return 3;
 	}

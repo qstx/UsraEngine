@@ -15,9 +15,12 @@ The Engine CMake project exposes `UrsaEngineFormatCheck`. A Demo build exposes `
 
 ## Naming
 
+- Use PascalCase for enumeration values (`LogLevel::Trace`, `WindowEventType::KeyPressed`).
+- Use the numeric type aliases from `Core/Types.hpp` (`UInt32`, `Float32`, `Size`) instead of their underlying types in first-party C++ code. Define the underlying types only in `Types.hpp`.
 - Use PascalCase for types, methods, and free functions (`Scene`, `GetScene`, `BuildScene`).
 - Use PascalCase for namespaces (`Ursa`, `Ursa::Rhi`, `Ursa::Editor`, `Ursa::Demo`).
 - Use camelCase for fields, parameters, and local variables (`activeCamera`, `deltaSeconds`). Boolean values do not need a special prefix.
+- Do not shadow members with parameters or local variables. Use distinct role-based names (`newWidth`, `selectedDevice`, `resourceSession`), including in constructors, and assign runtime state to the intended member.
 - Do not add category prefixes such as `F`, `E`, `T`, or `I` to type names. Use `URSA_` followed by uppercase words for macros.
 - Keep spelling required by third-party hooks and APIs at integration boundaries.
 - Keep serialized JSON keys, persistent component type strings, resource IDs, and file extensions stable when renaming C++ symbols.

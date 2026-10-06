@@ -1,3 +1,5 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -6,7 +8,6 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
-#include <vector>
 
 namespace Ursa::Editor
 {
@@ -14,155 +15,156 @@ namespace
 {
 struct GuiVertex
 {
-	float position[2];
-	float uv[2];
-	float color[4];
+	Ursa::Float32 position[2];
+	Ursa::Float32 uv[2];
+	Ursa::Float32 color[4];
 };
 
 ImGuiKey ToImGuiKey(Key key)
 {
 	switch (key)
 	{
-		case Key::tab:
+		case Key::Tab:
 			return ImGuiKey_Tab;
-		case Key::left:
+		case Key::Left:
 			return ImGuiKey_LeftArrow;
-		case Key::right:
+		case Key::Right:
 			return ImGuiKey_RightArrow;
-		case Key::up:
+		case Key::Up:
 			return ImGuiKey_UpArrow;
-		case Key::down:
+		case Key::Down:
 			return ImGuiKey_DownArrow;
-		case Key::pageUp:
+		case Key::PageUp:
 			return ImGuiKey_PageUp;
-		case Key::pageDown:
+		case Key::PageDown:
 			return ImGuiKey_PageDown;
-		case Key::home:
+		case Key::Home:
 			return ImGuiKey_Home;
-		case Key::end:
+		case Key::End:
 			return ImGuiKey_End;
-		case Key::insert:
+		case Key::Insert:
 			return ImGuiKey_Insert;
 		case Key::Delete:
 			return ImGuiKey_Delete;
-		case Key::backspace:
+		case Key::Backspace:
 			return ImGuiKey_Backspace;
-		case Key::space:
+		case Key::Space:
 			return ImGuiKey_Space;
-		case Key::enter:
+		case Key::Enter:
 			return ImGuiKey_Enter;
-		case Key::escape:
+		case Key::Escape:
 			return ImGuiKey_Escape;
-		case Key::leftShift:
+		case Key::LeftShift:
 			return ImGuiKey_LeftShift;
-		case Key::rightShift:
+		case Key::RightShift:
 			return ImGuiKey_RightShift;
-		case Key::leftControl:
+		case Key::LeftControl:
 			return ImGuiKey_LeftCtrl;
-		case Key::rightControl:
+		case Key::RightControl:
 			return ImGuiKey_RightCtrl;
-		case Key::leftAlt:
+		case Key::LeftAlt:
 			return ImGuiKey_LeftAlt;
-		case Key::rightAlt:
+		case Key::RightAlt:
 			return ImGuiKey_RightAlt;
-		case Key::leftSuper:
+		case Key::LeftSuper:
 			return ImGuiKey_LeftSuper;
-		case Key::rightSuper:
+		case Key::RightSuper:
 			return ImGuiKey_RightSuper;
-		case Key::a:
+		case Key::A:
 			return ImGuiKey_A;
-		case Key::b:
+		case Key::B:
 			return ImGuiKey_B;
-		case Key::c:
+		case Key::C:
 			return ImGuiKey_C;
-		case Key::d:
+		case Key::D:
 			return ImGuiKey_D;
-		case Key::e:
+		case Key::E:
 			return ImGuiKey_E;
-		case Key::f:
+		case Key::F:
 			return ImGuiKey_F;
-		case Key::g:
+		case Key::G:
 			return ImGuiKey_G;
-		case Key::h:
+		case Key::H:
 			return ImGuiKey_H;
-		case Key::i:
+		case Key::I:
 			return ImGuiKey_I;
-		case Key::j:
+		case Key::J:
 			return ImGuiKey_J;
-		case Key::k:
+		case Key::K:
 			return ImGuiKey_K;
-		case Key::l:
+		case Key::L:
 			return ImGuiKey_L;
-		case Key::m:
+		case Key::M:
 			return ImGuiKey_M;
-		case Key::n:
+		case Key::N:
 			return ImGuiKey_N;
-		case Key::o:
+		case Key::O:
 			return ImGuiKey_O;
-		case Key::p:
+		case Key::P:
 			return ImGuiKey_P;
-		case Key::q:
+		case Key::Q:
 			return ImGuiKey_Q;
-		case Key::r:
+		case Key::R:
 			return ImGuiKey_R;
-		case Key::s:
+		case Key::S:
 			return ImGuiKey_S;
-		case Key::t:
+		case Key::T:
 			return ImGuiKey_T;
-		case Key::u:
+		case Key::U:
 			return ImGuiKey_U;
-		case Key::v:
+		case Key::V:
 			return ImGuiKey_V;
-		case Key::w:
+		case Key::W:
 			return ImGuiKey_W;
-		case Key::x:
+		case Key::X:
 			return ImGuiKey_X;
-		case Key::y:
+		case Key::Y:
 			return ImGuiKey_Y;
-		case Key::z:
+		case Key::Z:
 			return ImGuiKey_Z;
 		default:
 			break;
 	}
-	if (key >= Key::digit0 && key <= Key::digit9)
+	if (key >= Key::Digit0 && key <= Key::Digit9)
 	{
-		return static_cast<ImGuiKey>(ImGuiKey_0 + static_cast<int>(key) - static_cast<int>(Key::digit0));
+		return static_cast<ImGuiKey>(ImGuiKey_0 + static_cast<int>(key) - static_cast<int>(Key::Digit0));
 	}
 	return ImGuiKey_None;
 }
 
-Result<Vector<uint8_t>> ReadShader(const VirtualFileSystem& files, const char* name)
+Result<Vector<Ursa::UInt8>> ReadShader(const VirtualFileSystem& files, const char* name)
 {
 	auto path = VirtualPath::Parse(String(engineScheme) + ":Shaders/Ui/" + name + ".spv");
 	if (!path)
 	{
-		return Result<Vector<uint8_t>>::Failure(path.error);
+		return Result<Vector<Ursa::UInt8>>::Failure(path.error);
 	}
 	auto bytes = files.Read(path.value);
 	if (!bytes)
 	{
-		return Result<Vector<uint8_t>>::Failure(bytes.error);
+		return Result<Vector<Ursa::UInt8>>::Failure(bytes.error);
 	}
 	if (bytes.value.empty())
 	{
-		return Result<Vector<uint8_t>>::Failure(String("Empty Editor shader: ") + name);
+		return Result<Vector<Ursa::UInt8>>::Failure(String("Empty Editor shader: ") + name);
 	}
 	return bytes;
 }
 } // namespace
 
-ImGuiBridge::ImGuiBridge(Rhi::DevicePtr device, std::shared_ptr<Window> window)
-    : device(std::move(device)), window(std::move(window))
+ImGuiBridge::ImGuiBridge(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow)
+    : device(std::move(selectedDevice)), window(std::move(selectedWindow))
 {
 }
 
-Result<std::unique_ptr<ImGuiBridge>> ImGuiBridge::Create(Rhi::DevicePtr device, std::shared_ptr<Window> window)
+Result<std::unique_ptr<ImGuiBridge>> ImGuiBridge::Create(Rhi::DevicePtr selectedDevice,
+                                                         std::shared_ptr<Window> selectedWindow)
 {
-	if (!device)
+	if (!selectedDevice)
 	{
 		return Result<std::unique_ptr<ImGuiBridge>>::Failure("ImGui RHI bridge requires a device");
 	}
-	auto bridge = std::unique_ptr<ImGuiBridge>(new ImGuiBridge(std::move(device), std::move(window)));
+	auto bridge = std::unique_ptr<ImGuiBridge>(new ImGuiBridge(std::move(selectedDevice), std::move(selectedWindow)));
 	auto initialized = bridge->Initialize();
 	if (!initialized)
 	{
@@ -189,7 +191,7 @@ Result<void> ImGuiBridge::Initialize()
 		platform.Platform_GetClipboardTextFn = &ImGuiBridge::GetClipboardText;
 		platform.Platform_SetClipboardTextFn = &ImGuiBridge::SetClipboardText;
 	}
-	auto layoutResult = device->CreateBindGroupLayout({{0, Rhi::BindingType::combinedImageSampler, 1, 2}});
+	auto layoutResult = device->CreateBindGroupLayout({{0, Rhi::BindingType::CombinedImageSampler, 1, 2}});
 	if (!layoutResult)
 	{
 		return Result<void>::Failure(layoutResult.error);
@@ -211,14 +213,14 @@ Result<void> ImGuiBridge::Initialize()
 		return Result<void>::Failure(fragmentCode.error);
 	}
 	auto vertex =
-	    device->CreateShader({Rhi::ShaderStage::vertex, Rhi::ShaderFormat::spirv, std::move(vertexCode.value)});
+	    device->CreateShader({Rhi::ShaderStage::Vertex, Rhi::ShaderFormat::Spirv, std::move(vertexCode.value)});
 	if (!vertex)
 	{
 		return Result<void>::Failure(vertex.error);
 	}
 	vertexShader = std::move(vertex.value);
 	auto fragment =
-	    device->CreateShader({Rhi::ShaderStage::fragment, Rhi::ShaderFormat::spirv, std::move(fragmentCode.value)});
+	    device->CreateShader({Rhi::ShaderStage::Fragment, Rhi::ShaderFormat::Spirv, std::move(fragmentCode.value)});
 	if (!fragment)
 	{
 		return Result<void>::Failure(fragment.error);
@@ -239,45 +241,45 @@ Result<void> ImGuiBridge::Initialize()
 			    auto& input = ImGui::GetIO();
 			    switch (event.type)
 			    {
-				    case WindowEventType::keyPressed:
-				    case WindowEventType::keyReleased:
+				    case WindowEventType::KeyPressed:
+				    case WindowEventType::KeyReleased:
 				    {
-					    const bool pressed = event.type == WindowEventType::keyPressed;
+					    const bool pressed = event.type == WindowEventType::KeyPressed;
 					    if (const auto key = ToImGuiKey(event.key); key != ImGuiKey_None)
 					    {
 						    input.AddKeyEvent(key, pressed);
 					    }
 					    switch (event.key)
 					    {
-						    case Key::leftControl:
+						    case Key::LeftControl:
 							    leftControl = pressed;
 							    input.AddKeyEvent(ImGuiMod_Ctrl, leftControl || rightControl);
 							    break;
-						    case Key::rightControl:
+						    case Key::RightControl:
 							    rightControl = pressed;
 							    input.AddKeyEvent(ImGuiMod_Ctrl, leftControl || rightControl);
 							    break;
-						    case Key::leftShift:
+						    case Key::LeftShift:
 							    leftShift = pressed;
 							    input.AddKeyEvent(ImGuiMod_Shift, leftShift || rightShift);
 							    break;
-						    case Key::rightShift:
+						    case Key::RightShift:
 							    rightShift = pressed;
 							    input.AddKeyEvent(ImGuiMod_Shift, leftShift || rightShift);
 							    break;
-						    case Key::leftAlt:
+						    case Key::LeftAlt:
 							    leftAlt = pressed;
 							    input.AddKeyEvent(ImGuiMod_Alt, leftAlt || rightAlt);
 							    break;
-						    case Key::rightAlt:
+						    case Key::RightAlt:
 							    rightAlt = pressed;
 							    input.AddKeyEvent(ImGuiMod_Alt, leftAlt || rightAlt);
 							    break;
-						    case Key::leftSuper:
+						    case Key::LeftSuper:
 							    leftSuper = pressed;
 							    input.AddKeyEvent(ImGuiMod_Super, leftSuper || rightSuper);
 							    break;
-						    case Key::rightSuper:
+						    case Key::RightSuper:
 							    rightSuper = pressed;
 							    input.AddKeyEvent(ImGuiMod_Super, leftSuper || rightSuper);
 							    break;
@@ -286,26 +288,28 @@ Result<void> ImGuiBridge::Initialize()
 					    }
 					    break;
 				    }
-				    case WindowEventType::keyRepeated:
+				    case WindowEventType::KeyRepeated:
 					    break;
-				    case WindowEventType::character:
+				    case WindowEventType::Character:
 					    input.AddInputCharacter(event.codepoint);
 					    break;
-				    case WindowEventType::cursorMoved:
-					    input.AddMousePosEvent(static_cast<float>(event.x), static_cast<float>(event.y));
+				    case WindowEventType::CursorMoved:
+					    input.AddMousePosEvent(static_cast<Ursa::Float32>(event.x),
+					                           static_cast<Ursa::Float32>(event.y));
 					    break;
-				    case WindowEventType::mousePressed:
-				    case WindowEventType::mouseReleased:
-					    if (event.button != MouseButton::other)
+				    case WindowEventType::MousePressed:
+				    case WindowEventType::MouseReleased:
+					    if (event.button != MouseButton::Other)
 					    {
 						    input.AddMouseButtonEvent(static_cast<int>(event.button),
-						                              event.type == WindowEventType::mousePressed);
+						                              event.type == WindowEventType::MousePressed);
 					    }
 					    break;
-				    case WindowEventType::scrolled:
-					    input.AddMouseWheelEvent(static_cast<float>(event.x), static_cast<float>(event.y));
+				    case WindowEventType::Scrolled:
+					    input.AddMouseWheelEvent(static_cast<Ursa::Float32>(event.x),
+					                             static_cast<Ursa::Float32>(event.y));
 					    break;
-				    case WindowEventType::focused:
+				    case WindowEventType::Focused:
 					    input.AddFocusEvent(event.focused);
 					    if (!event.focused)
 					    {
@@ -339,9 +343,9 @@ ImGuiBridge::~ImGuiBridge()
 	}
 }
 
-const char* ImGuiBridge::GetClipboardText(ImGuiContext* context)
+const char* ImGuiBridge::GetClipboardText(ImGuiContext* guiContext)
 {
-	ImGui::SetCurrentContext(context);
+	ImGui::SetCurrentContext(guiContext);
 	auto* bridge = static_cast<ImGuiBridge*>(ImGui::GetPlatformIO().Platform_ClipboardUserData);
 	if (!bridge || !bridge->window)
 	{
@@ -351,9 +355,9 @@ const char* ImGuiBridge::GetClipboardText(ImGuiContext* context)
 	return bridge->clipboardText.c_str();
 }
 
-void ImGuiBridge::SetClipboardText(ImGuiContext* context, const char* text)
+void ImGuiBridge::SetClipboardText(ImGuiContext* guiContext, const char* text)
 {
-	ImGui::SetCurrentContext(context);
+	ImGui::SetCurrentContext(guiContext);
 	auto* bridge = static_cast<ImGuiBridge*>(ImGui::GetPlatformIO().Platform_ClipboardUserData);
 	if (bridge && bridge->window)
 	{
@@ -361,7 +365,7 @@ void ImGuiBridge::SetClipboardText(ImGuiContext* context, const char* text)
 	}
 }
 
-Result<void> ImGuiBridge::BeginFrame(float deltaSeconds, uint32_t width, uint32_t height)
+Result<void> ImGuiBridge::BeginFrame(Ursa::Float32 deltaSeconds, Ursa::UInt32 width, Ursa::UInt32 height)
 {
 	if (!width || !height)
 	{
@@ -369,7 +373,7 @@ Result<void> ImGuiBridge::BeginFrame(float deltaSeconds, uint32_t width, uint32_
 	}
 	ImGui::SetCurrentContext(context);
 	auto& io = ImGui::GetIO();
-	io.DisplaySize = ImVec2(static_cast<float>(width), static_cast<float>(height));
+	io.DisplaySize = ImVec2(static_cast<Ursa::Float32>(width), static_cast<Ursa::Float32>(height));
 	io.DisplayFramebufferScale = ImVec2(1, 1);
 	io.DeltaTime = std::max(deltaSeconds, 0.00001f);
 	ImGui::NewFrame();
@@ -389,7 +393,7 @@ Result<ImTextureID> ImGuiBridge::RegisterTexture(Rhi::TexturePtr texture, Rhi::S
 	{
 		return Result<ImTextureID>::Failure("ImGui image requires a texture and sampler");
 	}
-	if (!Rhi::Has(texture->desc.usage, Rhi::TextureUsage::sampled))
+	if (!Rhi::Has(texture->desc.usage, Rhi::TextureUsage::Sampled))
 	{
 		return Result<ImTextureID>::Failure("ImGui image texture must have Sampled usage");
 	}
@@ -414,21 +418,21 @@ Result<void> ImGuiBridge::UploadAtlas(ImTextureData* data)
 	{
 		return Result<void>::Failure("ImGui requested an invalid font atlas");
 	}
-	const auto width = static_cast<uint32_t>(data->Width);
-	const auto height = static_cast<uint32_t>(data->Height);
-	if (width > std::numeric_limits<size_t>::max() / 4 / height)
+	const auto width = static_cast<Ursa::UInt32>(data->Width);
+	const auto height = static_cast<Ursa::UInt32>(data->Height);
+	if (width > std::numeric_limits<Ursa::Size>::max() / 4 / height)
 	{
 		return Result<void>::Failure("ImGui font atlas size overflow");
 	}
-	const size_t byteCount = static_cast<size_t>(width) * height * 4;
-	std::vector<uint8_t> rgba(byteCount);
+	const Ursa::Size byteCount = static_cast<Ursa::Size>(width) * height * 4;
+	Ursa::Vector<Ursa::UInt8> rgba(byteCount);
 	if (data->Format == ImTextureFormat_RGBA32)
 	{
 		std::memcpy(rgba.data(), data->GetPixels(), byteCount);
 	}
 	else if (data->Format == ImTextureFormat_Alpha8)
 	{
-		for (size_t i = 0; i < static_cast<size_t>(width) * height; ++i)
+		for (Ursa::Size i = 0; i < static_cast<Ursa::Size>(width) * height; ++i)
 		{
 			rgba[i * 4 + 0] = 255;
 			rgba[i * 4 + 1] = 255;
@@ -440,7 +444,7 @@ Result<void> ImGuiBridge::UploadAtlas(ImTextureData* data)
 	{
 		return Result<void>::Failure("Unsupported ImGui font atlas format");
 	}
-	auto upload = device->CreateBuffer({byteCount, Rhi::BufferUsage::transferSource, Rhi::Memory::upload});
+	auto upload = device->CreateBuffer({byteCount, Rhi::BufferUsage::TransferSource, Rhi::Memory::Upload});
 	if (!upload)
 	{
 		return Result<void>::Failure(upload.error);
@@ -451,7 +455,7 @@ Result<void> ImGuiBridge::UploadAtlas(ImTextureData* data)
 		return written;
 	}
 	auto texture = device->CreateTexture(
-	    {width, height, Rhi::Format::rgbA8Unorm, Rhi::TextureUsage::sampled | Rhi::TextureUsage::transferDestination});
+	    {width, height, Rhi::Format::RgbA8Unorm, Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination});
 	if (!texture)
 	{
 		return Result<void>::Failure(texture.error);
@@ -464,8 +468,8 @@ Result<void> ImGuiBridge::UploadAtlas(ImTextureData* data)
 	auto result = command.value->Begin();
 	if (result)
 	{
-		result = command.value->Barrier(texture.value, Rhi::ResourceState::undefined,
-		                                Rhi::ResourceState::transferDestination);
+		result = command.value->Barrier(texture.value, Rhi::ResourceState::Undefined,
+		                                Rhi::ResourceState::TransferDestination);
 	}
 	if (result)
 	{
@@ -473,8 +477,8 @@ Result<void> ImGuiBridge::UploadAtlas(ImTextureData* data)
 	}
 	if (result)
 	{
-		result = command.value->Barrier(texture.value, Rhi::ResourceState::transferDestination,
-		                                Rhi::ResourceState::shaderRead);
+		result = command.value->Barrier(texture.value, Rhi::ResourceState::TransferDestination,
+		                                Rhi::ResourceState::ShaderRead);
 	}
 	if (result)
 	{
@@ -540,8 +544,8 @@ Result<void> ImGuiBridge::UpdateAtlas()
 	return {};
 }
 
-Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format colorFormat, uint32_t framebufferWidth,
-                                 uint32_t framebufferHeight)
+Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format colorFormat,
+                                 Ursa::UInt32 framebufferWidth, Ursa::UInt32 framebufferHeight)
 {
 	if (!command || !framebufferWidth || !framebufferHeight)
 	{
@@ -566,7 +570,7 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 		desc.cullBack = false;
 		desc.vertexStride = sizeof(GuiVertex);
 		desc.attributes = {
-		    {0, 0, Rhi::VertexFormat::float2}, {1, 8, Rhi::VertexFormat::float2}, {2, 16, Rhi::VertexFormat::float4}};
+		    {0, 0, Rhi::VertexFormat::Float2}, {1, 8, Rhi::VertexFormat::Float2}, {2, 16, Rhi::VertexFormat::Float4}};
 		auto created = device->CreateGraphicsPipeline(desc);
 		if (!created)
 		{
@@ -574,10 +578,10 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 		}
 		pipeline = pipelines.emplace(formatKey, std::move(created.value)).first;
 	}
-	std::vector<GuiVertex> vertices;
-	std::vector<uint32_t> indices;
-	vertices.reserve(static_cast<size_t>(data->TotalVtxCount));
-	indices.reserve(static_cast<size_t>(data->TotalIdxCount));
+	Ursa::Vector<GuiVertex> vertices;
+	Ursa::Vector<Ursa::UInt32> indices;
+	vertices.reserve(static_cast<Ursa::Size>(data->TotalVtxCount));
+	indices.reserve(static_cast<Ursa::Size>(data->TotalIdxCount));
 	for (int listIndex = 0; listIndex < data->CmdListsCount; ++listIndex)
 	{
 		const ImDrawList* list = data->CmdLists[listIndex];
@@ -590,23 +594,23 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 			vertex.uv[1] = source.uv.y;
 			for (int channel = 0; channel < 4; ++channel)
 			{
-				vertex.color[channel] = static_cast<float>((source.col >> (channel * 8)) & 255u) / 255.f;
+				vertex.color[channel] = static_cast<Ursa::Float32>((source.col >> (channel * 8)) & 255u) / 255.f;
 			}
 			vertices.push_back(vertex);
 		}
 		for (ImDrawIdx index : list->IdxBuffer)
 		{
-			indices.push_back(static_cast<uint32_t>(index));
+			indices.push_back(static_cast<Ursa::UInt32>(index));
 		}
 	}
 	auto vertexBufferResult =
-	    device->CreateBuffer({vertices.size() * sizeof(GuiVertex), Rhi::BufferUsage::vertex, Rhi::Memory::upload});
+	    device->CreateBuffer({vertices.size() * sizeof(GuiVertex), Rhi::BufferUsage::Vertex, Rhi::Memory::Upload});
 	if (!vertexBufferResult)
 	{
 		return Result<void>::Failure(vertexBufferResult.error);
 	}
 	auto indexBufferResult =
-	    device->CreateBuffer({indices.size() * sizeof(uint32_t), Rhi::BufferUsage::index, Rhi::Memory::upload});
+	    device->CreateBuffer({indices.size() * sizeof(Ursa::UInt32), Rhi::BufferUsage::Index, Rhi::Memory::Upload});
 	if (!indexBufferResult)
 	{
 		return Result<void>::Failure(indexBufferResult.error);
@@ -614,7 +618,7 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 	auto result = vertexBufferResult.value->Write(0, vertices.data(), vertices.size() * sizeof(GuiVertex));
 	if (result)
 	{
-		result = indexBufferResult.value->Write(0, indices.data(), indices.size() * sizeof(uint32_t));
+		result = indexBufferResult.value->Write(0, indices.data(), indices.size() * sizeof(Ursa::UInt32));
 	}
 	if (!result)
 	{
@@ -635,8 +639,8 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 	{
 		return result;
 	}
-	uint32_t globalVertex = 0;
-	uint32_t globalIndex = 0;
+	Ursa::UInt32 globalVertex = 0;
+	Ursa::UInt32 globalIndex = 0;
 	for (int listIndex = 0; listIndex < data->CmdListsCount; ++listIndex)
 	{
 		const ImDrawList* list = data->CmdLists[listIndex];
@@ -666,16 +670,16 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 				}
 				continue;
 			}
-			const float minX = (draw.ClipRect.x - data->DisplayPos.x) * data->FramebufferScale.x;
-			const float minY = (draw.ClipRect.y - data->DisplayPos.y) * data->FramebufferScale.y;
-			const float maxX = (draw.ClipRect.z - data->DisplayPos.x) * data->FramebufferScale.x;
-			const float maxY = (draw.ClipRect.w - data->DisplayPos.y) * data->FramebufferScale.y;
-			const int32_t left = std::max<int32_t>(0, static_cast<int32_t>(std::floor(minX)));
-			const int32_t top = std::max<int32_t>(0, static_cast<int32_t>(std::floor(minY)));
-			const int32_t right =
-			    std::min<int32_t>(static_cast<int32_t>(framebufferWidth), static_cast<int32_t>(std::ceil(maxX)));
-			const int32_t bottom =
-			    std::min<int32_t>(static_cast<int32_t>(framebufferHeight), static_cast<int32_t>(std::ceil(maxY)));
+			const Ursa::Float32 minX = (draw.ClipRect.x - data->DisplayPos.x) * data->FramebufferScale.x;
+			const Ursa::Float32 minY = (draw.ClipRect.y - data->DisplayPos.y) * data->FramebufferScale.y;
+			const Ursa::Float32 maxX = (draw.ClipRect.z - data->DisplayPos.x) * data->FramebufferScale.x;
+			const Ursa::Float32 maxY = (draw.ClipRect.w - data->DisplayPos.y) * data->FramebufferScale.y;
+			const Ursa::Int32 left = std::max<Ursa::Int32>(0, static_cast<Ursa::Int32>(std::floor(minX)));
+			const Ursa::Int32 top = std::max<Ursa::Int32>(0, static_cast<Ursa::Int32>(std::floor(minY)));
+			const Ursa::Int32 right = std::min<Ursa::Int32>(static_cast<Ursa::Int32>(framebufferWidth),
+			                                                static_cast<Ursa::Int32>(std::ceil(maxX)));
+			const Ursa::Int32 bottom = std::min<Ursa::Int32>(static_cast<Ursa::Int32>(framebufferHeight),
+			                                                 static_cast<Ursa::Int32>(std::ceil(maxY)));
 			if (right <= left || bottom <= top || draw.ElemCount == 0)
 			{
 				continue;
@@ -689,20 +693,20 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 			if (result)
 			{
 				result = command->SetScissor(
-				    {left, top, static_cast<uint32_t>(right - left), static_cast<uint32_t>(bottom - top)});
+				    {left, top, static_cast<Ursa::UInt32>(right - left), static_cast<Ursa::UInt32>(bottom - top)});
 			}
 			if (result)
 			{
 				result = command->DrawIndexed(draw.ElemCount, 1, 0, globalIndex + draw.IdxOffset,
-				                              static_cast<int32_t>(globalVertex + draw.VtxOffset));
+				                              static_cast<Ursa::Int32>(globalVertex + draw.VtxOffset));
 			}
 			if (!result)
 			{
 				return result;
 			}
 		}
-		globalVertex += static_cast<uint32_t>(list->VtxBuffer.Size);
-		globalIndex += static_cast<uint32_t>(list->IdxBuffer.Size);
+		globalVertex += static_cast<Ursa::UInt32>(list->VtxBuffer.Size);
+		globalIndex += static_cast<Ursa::UInt32>(list->IdxBuffer.Size);
 	}
 	return {};
 }

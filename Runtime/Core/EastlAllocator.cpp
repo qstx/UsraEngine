@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <EASTL/allocator.h>
 
 #include <algorithm>
@@ -40,10 +41,10 @@ allocator& allocator::operator=(const allocator& other)
 	return *this;
 }
 
-void* allocator::allocate(size_t size, int flags)
+void* allocator::allocate(Ursa::Size size, int flags)
 {
 	(void)flags;
-	void* memory = _aligned_malloc(std::max<size_t>(size, 1), alignof(std::max_align_t));
+	void* memory = _aligned_malloc(std::max<Ursa::Size>(size, 1), alignof(std::max_align_t));
 	if (!memory)
 	{
 		throw std::bad_alloc();
@@ -51,7 +52,7 @@ void* allocator::allocate(size_t size, int flags)
 	return memory;
 }
 
-void* allocator::allocate(size_t size, size_t alignment, size_t offset, int flags)
+void* allocator::allocate(Ursa::Size size, Ursa::Size alignment, Ursa::Size offset, int flags)
 {
 	(void)flags;
 	if (alignment == 0 || (alignment & (alignment - 1)) != 0 || offset == SIZE_MAX)
@@ -67,7 +68,7 @@ void* allocator::allocate(size_t size, size_t alignment, size_t offset, int flag
 	return memory;
 }
 
-void allocator::deallocate(void* memory, size_t)
+void allocator::deallocate(void* memory, Ursa::Size)
 {
 	_aligned_free(memory);
 }

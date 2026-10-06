@@ -1,4 +1,5 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
 #include <cstdint>
@@ -14,97 +15,97 @@ struct WindowAccess;
 }
 enum class Key
 {
-	escape,
-	space,
-	left,
-	right,
-	up,
-	down,
-	w,
-	a,
-	s,
-	d,
-	unknown,
-	tab,
-	enter,
-	backspace,
+	Escape,
+	Space,
+	Left,
+	Right,
+	Up,
+	Down,
+	W,
+	A,
+	S,
+	D,
+	Unknown,
+	Tab,
+	Enter,
+	Backspace,
 	Delete,
-	home,
-	end,
-	pageUp,
-	pageDown,
-	insert,
-	leftShift,
-	rightShift,
-	leftControl,
-	rightControl,
-	leftAlt,
-	rightAlt,
-	leftSuper,
-	rightSuper,
-	b,
-	c,
-	e,
-	f,
-	g,
-	h,
-	i,
-	j,
-	k,
-	l,
-	m,
-	n,
-	o,
-	p,
-	q,
-	r,
-	t,
-	u,
-	v,
-	x,
-	y,
-	z,
-	digit0,
-	digit1,
-	digit2,
-	digit3,
-	digit4,
-	digit5,
-	digit6,
-	digit7,
-	digit8,
-	digit9
+	Home,
+	End,
+	PageUp,
+	PageDown,
+	Insert,
+	LeftShift,
+	RightShift,
+	LeftControl,
+	RightControl,
+	LeftAlt,
+	RightAlt,
+	LeftSuper,
+	RightSuper,
+	B,
+	C,
+	E,
+	F,
+	G,
+	H,
+	I,
+	J,
+	K,
+	L,
+	M,
+	N,
+	O,
+	P,
+	Q,
+	R,
+	T,
+	U,
+	V,
+	X,
+	Y,
+	Z,
+	Digit0,
+	Digit1,
+	Digit2,
+	Digit3,
+	Digit4,
+	Digit5,
+	Digit6,
+	Digit7,
+	Digit8,
+	Digit9
 };
 
 enum class MouseButton
 {
-	left,
-	right,
-	middle,
-	other
+	Left,
+	Right,
+	Middle,
+	Other
 };
 
 enum class WindowEventType
 {
-	keyPressed,
-	keyReleased,
-	keyRepeated,
-	character,
-	cursorMoved,
-	mousePressed,
-	mouseReleased,
-	scrolled,
-	focused
+	KeyPressed,
+	KeyReleased,
+	KeyRepeated,
+	Character,
+	CursorMoved,
+	MousePressed,
+	MouseReleased,
+	Scrolled,
+	Focused
 };
 
 struct WindowEvent
 {
-	WindowEventType type = WindowEventType::cursorMoved;
-	Key key = Key::unknown;
-	MouseButton button = MouseButton::other;
-	uint32_t codepoint = 0;
-	double x = 0.0;
-	double y = 0.0;
+	WindowEventType type = WindowEventType::CursorMoved;
+	Key key = Key::Unknown;
+	MouseButton button = MouseButton::Other;
+	Ursa::UInt32 codepoint = 0;
+	Ursa::Float64 x = 0.0;
+	Ursa::Float64 y = 0.0;
 	bool focused = false;
 };
 
@@ -113,7 +114,7 @@ using WindowEventCallback = std::function<void(const WindowEvent&)>;
 class Window final
 {
 public:
-	static Result<std::shared_ptr<Window>> Create(uint32_t width, uint32_t height, const String& title,
+	static Result<std::shared_ptr<Window>> Create(Ursa::UInt32 width, Ursa::UInt32 height, const String& title,
 	                                              bool visible = true);
 
 	~Window();
@@ -144,24 +145,24 @@ public:
 
 	bool MouseDown(MouseButton button) const;
 
-	std::pair<double, double> CursorPosition() const;
+	std::pair<Ursa::Float64, Ursa::Float64> CursorPosition() const;
 
-	Result<uint64_t> Subscribe(WindowEventCallback callback);
+	Result<Ursa::UInt64> Subscribe(WindowEventCallback callback);
 
-	void Unsubscribe(uint64_t subscription);
+	void Unsubscribe(Ursa::UInt64 subscription);
 
-	void Resize(uint32_t width, uint32_t height);
+	void Resize(Ursa::UInt32 width, Ursa::UInt32 height);
 
 	void Minimize();
 
 	void Restore();
 
-	uint32_t FramebufferWidth() const;
+	Ursa::UInt32 FramebufferWidth() const;
 
-	uint32_t FramebufferHeight() const;
+	Ursa::UInt32 FramebufferHeight() const;
 
 private:
-	explicit Window(void* handle) : handle(handle)
+	explicit Window(void* nativeHandle) : handle(nativeHandle)
 	{
 	}
 	friend struct Detail::WindowAccess;
@@ -169,8 +170,8 @@ private:
 	void DispatchEvent(const WindowEvent& event);
 
 	void* handle{};
-	uint64_t nextSubscription = 1;
-	Vector<std::pair<uint64_t, WindowEventCallback>> subscriptions;
+	Ursa::UInt64 nextSubscription = 1;
+	Vector<std::pair<Ursa::UInt64, WindowEventCallback>> subscriptions;
 };
 
 namespace Detail

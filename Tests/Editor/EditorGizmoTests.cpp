@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Scene/EditorGizmo.hpp>
 #include <Core/StringInterop.hpp>
 #include <cmath>
@@ -35,7 +36,7 @@ void Expect(bool value, const char* message)
 
 bool near(const Mat4& a, const Mat4& b)
 {
-	for (size_t index = 0; index < a.values.size(); ++index)
+	for (Ursa::Size index = 0; index < a.values.size(); ++index)
 	{
 		if (std::abs(a.values[index] - b.values[index]) > 0.001f)
 		{
@@ -51,8 +52,8 @@ int main()
 	try
 	{
 		Scene scene;
-		const auto parent = Take(scene.CreateNode());
-		const auto child = Take(scene.CreateNode(parent));
+		const auto parent = Take(scene.CreateGameObject());
+		const auto child = Take(scene.CreateGameObject(parent));
 		LocalTransform parentLocal;
 		parentLocal.position = {3, 1, -2};
 		parentLocal.rotation = Quat::FromAxisAngle({0, 0, 1}, 0.5f);

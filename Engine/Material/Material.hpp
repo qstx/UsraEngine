@@ -1,37 +1,36 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
 #include <Material/Color.hpp>
-#include <array>
 #include <cstdint>
 #include <memory>
-#include <vector>
 
 namespace Ursa
 {
 enum class MaterialType
 {
-	unlit,
-	pbrMetallicRoughness
+	Unlit,
+	PbrMetallicRoughness
 };
 enum class AlphaMode
 {
-	opaque,
-	mask,
-	blend
+	Opaque,
+	Mask,
+	Blend
 };
 enum class TextureColorSpace
 {
-	linear,
-	srgb
+	Linear,
+	Srgb
 };
 enum class MaterialTextureSlot
 {
-	baseColor,
-	metallicRoughness,
-	normal,
-	occlusion,
-	emissive
+	BaseColor,
+	MetallicRoughness,
+	Normal,
+	Occlusion,
+	Emissive
 };
 
 struct MaterialSampler
@@ -43,15 +42,16 @@ struct MaterialSampler
 class MaterialTexture final
 {
 public:
-	static Result<std::shared_ptr<const MaterialTexture>> Create(uint32_t width, uint32_t height,
-	                                                             TextureColorSpace colorSpace, Vector<uint8_t> rgba8);
+	static Result<std::shared_ptr<const MaterialTexture>> Create(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight,
+	                                                             TextureColorSpace textureColorSpace,
+	                                                             Vector<Ursa::UInt8> rgba8);
 
-	uint32_t GetWidth() const
+	Ursa::UInt32 GetWidth() const
 	{
 		return width;
 	}
 
-	uint32_t GetHeight() const
+	Ursa::UInt32 GetHeight() const
 	{
 		return height;
 	}
@@ -61,18 +61,19 @@ public:
 		return colorSpace;
 	}
 
-	const Vector<uint8_t>& GetPixels() const
+	const Vector<Ursa::UInt8>& GetPixels() const
 	{
 		return pixels;
 	}
 
 private:
-	MaterialTexture(uint32_t width, uint32_t height, TextureColorSpace colorSpace, Vector<uint8_t> pixels);
+	MaterialTexture(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight, TextureColorSpace textureColorSpace,
+	                Vector<Ursa::UInt8> texturePixels);
 
-	uint32_t width;
-	uint32_t height;
+	Ursa::UInt32 width;
+	Ursa::UInt32 height;
 	TextureColorSpace colorSpace;
-	Vector<uint8_t> pixels;
+	Vector<Ursa::UInt8> pixels;
 };
 
 using MaterialTexturePtr = std::shared_ptr<const MaterialTexture>;
@@ -80,27 +81,27 @@ using MaterialTexturePtr = std::shared_ptr<const MaterialTexture>;
 struct MaterialParameters
 {
 	Color baseColor{};
-	float metallic = 0.0f;
-	float roughness = 1.0f;
-	float normalScale = 1.0f;
-	float occlusionStrength = 1.0f;
+	Ursa::Float32 metallic = 0.0f;
+	Ursa::Float32 roughness = 1.0f;
+	Ursa::Float32 normalScale = 1.0f;
+	Ursa::Float32 occlusionStrength = 1.0f;
 	Color emissive{0.0f, 0.0f, 0.0f, 1.0f};
-	AlphaMode alphaMode = AlphaMode::opaque;
-	float alphaCutoff = 0.5f;
+	AlphaMode alphaMode = AlphaMode::Opaque;
+	Ursa::Float32 alphaCutoff = 0.5f;
 	MaterialSampler sampler{};
 };
 
 class MaterialInstance final
 {
 public:
-	explicit MaterialInstance(MaterialType type);
+	explicit MaterialInstance(MaterialType materialType);
 
 	MaterialType Type() const
 	{
 		return type;
 	}
 
-	uint64_t Version() const
+	Ursa::UInt64 Version() const
 	{
 		return version;
 	}
@@ -112,17 +113,17 @@ public:
 
 	Result<void> SetBaseColor(Color color);
 
-	Result<void> SetMetallic(float value);
+	Result<void> SetMetallic(Ursa::Float32 value);
 
-	Result<void> SetRoughness(float value);
+	Result<void> SetRoughness(Ursa::Float32 value);
 
-	Result<void> SetNormalScale(float value);
+	Result<void> SetNormalScale(Ursa::Float32 value);
 
-	Result<void> SetOcclusionStrength(float value);
+	Result<void> SetOcclusionStrength(Ursa::Float32 value);
 
 	Result<void> SetEmissive(Color color);
 
-	Result<void> SetAlphaMode(AlphaMode mode, float cutoff = 0.5f);
+	Result<void> SetAlphaMode(AlphaMode mode, Ursa::Float32 cutoff = 0.5f);
 
 	Result<void> SetSampler(MaterialSampler sampler);
 
@@ -138,7 +139,7 @@ private:
 	MaterialType type;
 	MaterialParameters parameters;
 	Array<MaterialTexturePtr, 5> textures{};
-	uint64_t version = 1;
+	Ursa::UInt64 version = 1;
 };
 
 MaterialTexturePtr DefaultMaterialTexture(MaterialTextureSlot slot);

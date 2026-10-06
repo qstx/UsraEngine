@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Application/FrameScheduler.hpp>
 #include <Scene/Scene.hpp>
@@ -5,7 +6,6 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 namespace
 {
@@ -20,7 +20,7 @@ void Expect(bool condition, const char* message)
 class Trace final : public Ursa::Component
 {
 public:
-	explicit Trace(Ursa::Vector<char>& events) : events(events)
+	explicit Trace(Ursa::Vector<char>& eventTrace) : events(eventTrace)
 	{
 	}
 
@@ -54,12 +54,12 @@ void TestSchedule()
 	Expect(!scheduler.Configure(0.02f, 0), "Zero step cap was accepted");
 	Expect(static_cast<bool>(scheduler.Configure(0.02f, 2)), "Valid step configuration failed");
 	Ursa::Scene scene;
-	const auto node = scene.CreateNode();
+	const auto node = scene.CreateGameObject();
 	Expect(static_cast<bool>(node), "Could not create test node");
 	Ursa::Vector<char> events;
 	Expect(static_cast<bool>(scene.AddComponent<Trace>(node.value, events)), "Could not add test behavior");
-	uint64_t frame = 0;
-	auto drive = [&](float seconds)
+	Ursa::UInt64 frame = 0;
+	auto drive = [&](Ursa::Float32 seconds)
 	{
 		const auto schedule = scheduler.Advance(seconds);
 		Ursa::FrameContext context;
@@ -68,7 +68,7 @@ void TestSchedule()
 		context.frameIndex = ++frame;
 		scene.BeginFrame();
 		Expect(static_cast<bool>(scene.Update(context)), "Update failed");
-		for (uint32_t step = 0; step < schedule.fixedSteps; ++step)
+		for (Ursa::UInt32 step = 0; step < schedule.fixedSteps; ++step)
 		{
 			Expect(static_cast<bool>(scene.FixedUpdate(context)), "Fixed update failed");
 		}

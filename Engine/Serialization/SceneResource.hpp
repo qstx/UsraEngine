@@ -1,4 +1,5 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
 #include <Serialization/ComponentRegistry.hpp>
@@ -7,6 +8,8 @@
 
 namespace Ursa
 {
+constexpr Ursa::UInt32 sceneGraphFormatVersion = 2;
+
 struct LoadedSceneResource
 {
 	ResourceId id;
@@ -15,7 +18,7 @@ struct LoadedSceneResource
 
 Result<nlohmann::json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId id, const Scene& scene,
                                            const ComponentRegistry& registry, const MaterialIdResolver& materialId = {},
-                                           NodeId subtree = {});
+                                           const GameObject::Ptr& subtree = {});
 
 Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& path, const nlohmann::json& document,
                                                 const ComponentRegistry& registry, ComponentLoadContext& context);

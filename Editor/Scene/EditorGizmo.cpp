@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Scene/EditorGizmo.hpp>
 #include <imgui.h>
 #include <ImGuizmo.h>
@@ -9,7 +10,7 @@ namespace Ursa::Editor
 {
 namespace
 {
-float Length3(float x, float y, float z)
+Ursa::Float32 Length3(Ursa::Float32 x, Ursa::Float32 y, Ursa::Float32 z)
 {
 	return std::sqrt(x * x + y * y + z * z);
 }
@@ -17,28 +18,28 @@ float Length3(float x, float y, float z)
 Quat RotationFromMatrix(const Mat4& matrix)
 {
 	Quat result;
-	const float trace = matrix.At(0, 0) + matrix.At(1, 1) + matrix.At(2, 2);
+	const Ursa::Float32 trace = matrix.At(0, 0) + matrix.At(1, 1) + matrix.At(2, 2);
 	if (trace > 0.f)
 	{
-		const float s = std::sqrt(trace + 1.f) * 2.f;
+		const Ursa::Float32 s = std::sqrt(trace + 1.f) * 2.f;
 		result = {(matrix.At(2, 1) - matrix.At(1, 2)) / s, (matrix.At(0, 2) - matrix.At(2, 0)) / s,
 		          (matrix.At(1, 0) - matrix.At(0, 1)) / s, s / 4.f};
 	}
 	else if (matrix.At(0, 0) > matrix.At(1, 1) && matrix.At(0, 0) > matrix.At(2, 2))
 	{
-		const float s = std::sqrt(1.f + matrix.At(0, 0) - matrix.At(1, 1) - matrix.At(2, 2)) * 2.f;
+		const Ursa::Float32 s = std::sqrt(1.f + matrix.At(0, 0) - matrix.At(1, 1) - matrix.At(2, 2)) * 2.f;
 		result = {s / 4.f, (matrix.At(0, 1) + matrix.At(1, 0)) / s, (matrix.At(0, 2) + matrix.At(2, 0)) / s,
 		          (matrix.At(2, 1) - matrix.At(1, 2)) / s};
 	}
 	else if (matrix.At(1, 1) > matrix.At(2, 2))
 	{
-		const float s = std::sqrt(1.f + matrix.At(1, 1) - matrix.At(0, 0) - matrix.At(2, 2)) * 2.f;
+		const Ursa::Float32 s = std::sqrt(1.f + matrix.At(1, 1) - matrix.At(0, 0) - matrix.At(2, 2)) * 2.f;
 		result = {(matrix.At(0, 1) + matrix.At(1, 0)) / s, s / 4.f, (matrix.At(1, 2) + matrix.At(2, 1)) / s,
 		          (matrix.At(0, 2) - matrix.At(2, 0)) / s};
 	}
 	else
 	{
-		const float s = std::sqrt(1.f + matrix.At(2, 2) - matrix.At(0, 0) - matrix.At(1, 1)) * 2.f;
+		const Ursa::Float32 s = std::sqrt(1.f + matrix.At(2, 2) - matrix.At(0, 0) - matrix.At(1, 1)) * 2.f;
 		result = {(matrix.At(0, 2) + matrix.At(2, 0)) / s, (matrix.At(1, 2) + matrix.At(2, 1)) / s, s / 4.f,
 		          (matrix.At(1, 0) - matrix.At(0, 1)) / s};
 	}
@@ -47,7 +48,7 @@ Quat RotationFromMatrix(const Mat4& matrix)
 
 Result<LocalTransform> Decompose(const Mat4& matrix)
 {
-	for (float value : matrix.values)
+	for (Ursa::Float32 value : matrix.values)
 	{
 		if (!std::isfinite(value))
 		{
@@ -61,10 +62,10 @@ Result<LocalTransform> Decompose(const Mat4& matrix)
 	}
 	LocalTransform local;
 	local.position = {matrix.At(0, 3), matrix.At(1, 3), matrix.At(2, 3)};
-	const float scale[3] = {Length3(matrix.At(0, 0), matrix.At(1, 0), matrix.At(2, 0)),
-	                        Length3(matrix.At(0, 1), matrix.At(1, 1), matrix.At(2, 1)),
-	                        Length3(matrix.At(0, 2), matrix.At(1, 2), matrix.At(2, 2))};
-	for (float value : scale)
+	const Ursa::Float32 scale[3] = {Length3(matrix.At(0, 0), matrix.At(1, 0), matrix.At(2, 0)),
+	                                Length3(matrix.At(0, 1), matrix.At(1, 1), matrix.At(2, 1)),
+	                                Length3(matrix.At(0, 2), matrix.At(1, 2), matrix.At(2, 2))};
+	for (Ursa::Float32 value : scale)
 	{
 		if (!std::isfinite(value) || value <= 0.00001f)
 		{
@@ -84,7 +85,7 @@ Result<LocalTransform> Decompose(const Mat4& matrix)
 	{
 		for (int b = a + 1; b < 3; ++b)
 		{
-			float dot = 0.f;
+			Ursa::Float32 dot = 0.f;
 			for (int row = 0; row < 3; ++row)
 			{
 				dot += rotation.At(row, a) * rotation.At(row, b);
@@ -95,7 +96,7 @@ Result<LocalTransform> Decompose(const Mat4& matrix)
 			}
 		}
 	}
-	const float determinant =
+	const Ursa::Float32 determinant =
 	    rotation.At(0, 0) * (rotation.At(1, 1) * rotation.At(2, 2) - rotation.At(1, 2) * rotation.At(2, 1)) -
 	    rotation.At(0, 1) * (rotation.At(1, 0) * rotation.At(2, 2) - rotation.At(1, 2) * rotation.At(2, 0)) +
 	    rotation.At(0, 2) * (rotation.At(1, 0) * rotation.At(2, 1) - rotation.At(1, 1) * rotation.At(2, 0));
@@ -105,7 +106,7 @@ Result<LocalTransform> Decompose(const Mat4& matrix)
 	}
 	local.rotation = RotationFromMatrix(rotation);
 	const Mat4 rebuilt = local.Matrix();
-	for (size_t i = 0; i < matrix.values.size(); ++i)
+	for (Ursa::Size i = 0; i < matrix.values.size(); ++i)
 	{
 		if (std::abs(rebuilt.values[i] - matrix.values[i]) > 0.001f * std::max(1.f, std::abs(matrix.values[i])))
 		{
@@ -116,7 +117,7 @@ Result<LocalTransform> Decompose(const Mat4& matrix)
 }
 } // namespace
 
-Result<void> ApplyGizmoWorldTransform(Scene& scene, NodeId node, const Mat4& world)
+Result<void> ApplyGizmoWorldTransform(Scene& scene, GameObject::Ptr node, const Mat4& world)
 {
 	if (!scene.Contains(node))
 	{
@@ -152,7 +153,8 @@ Result<void> ApplyGizmoWorldTransform(Scene& scene, NodeId node, const Mat4& wor
 	}
 }
 
-Result<bool> DrawGizmo(Scene& scene, NodeId node, const Camera& camera, ViewportRect rect, GizmoOperation operation)
+Result<bool> DrawGizmo(Scene& scene, GameObject::Ptr node, const Camera& camera, ViewportRect rect,
+                       GizmoOperation operation)
 {
 	if (!scene.Contains(node))
 	{
@@ -176,11 +178,11 @@ Result<bool> DrawGizmo(Scene& scene, NodeId node, const Camera& camera, Viewport
 		ImGuizmo::SetDrawlist();
 		ImGuizmo::SetRect(rect.x, rect.y, rect.width, rect.height);
 		ImGuizmo::OPERATION selected = ImGuizmo::TRANSLATE;
-		if (operation == GizmoOperation::rotate)
+		if (operation == GizmoOperation::Rotate)
 		{
 			selected = ImGuizmo::ROTATE;
 		}
-		else if (operation == GizmoOperation::scale)
+		else if (operation == GizmoOperation::Scale)
 		{
 			selected = ImGuizmo::SCALE;
 		}

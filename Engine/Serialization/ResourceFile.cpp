@@ -1,7 +1,8 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/ResourceFile.hpp>
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <fstream>
 #include <limits>
@@ -12,8 +13,8 @@ namespace Ursa
 {
 namespace
 {
-constexpr size_t textureHeaderBytes = 28;
-constexpr Array<uint8_t, 8> textureMagic{'U', 'R', 'S', 'A', 'T', 'E', 'X', 0};
+constexpr Ursa::Size textureHeaderBytes = 28;
+constexpr Array<Ursa::UInt8, 8> textureMagic{'U', 'R', 'S', 'A', 'T', 'E', 'X', 0};
 
 String Lowered(const String& text)
 {
@@ -27,22 +28,22 @@ const char* FormatName(ResourceKind kind)
 {
 	switch (kind)
 	{
-		case ResourceKind::material:
+		case ResourceKind::Material:
 			return "UrsaMaterial";
-		case ResourceKind::scene:
+		case ResourceKind::Scene:
 			return "UrsaScene";
-		case ResourceKind::prefab:
+		case ResourceKind::Prefab:
 			return "UrsaPrefab";
-		case ResourceKind::texture:
+		case ResourceKind::Texture:
 			return "UrsaTexture";
 	}
 	return "";
 }
 
-uint32_t ReadUint32(const Array<uint8_t, textureHeaderBytes>& bytes, size_t offset)
+Ursa::UInt32 ReadUint32(const Array<Ursa::UInt8, textureHeaderBytes>& bytes, Ursa::Size offset)
 {
-	return static_cast<uint32_t>(bytes[offset]) | (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
-	       (static_cast<uint32_t>(bytes[offset + 2]) << 16) | (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+	return static_cast<Ursa::UInt32>(bytes[offset]) | (static_cast<Ursa::UInt32>(bytes[offset + 1]) << 8) |
+	       (static_cast<Ursa::UInt32>(bytes[offset + 2]) << 16) | (static_cast<Ursa::UInt32>(bytes[offset + 3]) << 24);
 }
 
 Result<ResourceHeader> FinishHeader(ResourceHeader header, const String& where)
@@ -59,25 +60,25 @@ Result<ResourceHeader> FinishHeader(ResourceHeader header, const String& where)
 	return Result<ResourceHeader>::Success(header);
 }
 
-Result<ResourceHeader> ParseTextureHeader(const Vector<uint8_t>& bytes, const String& where)
+Result<ResourceHeader> ParseTextureHeader(const Vector<Ursa::UInt8>& bytes, const String& where)
 {
 	if (bytes.size() < textureHeaderBytes)
 	{
 		return Result<ResourceHeader>::Failure("Truncated texture header at " + where);
 	}
-	Array<uint8_t, textureHeaderBytes> header{};
+	Array<Ursa::UInt8, textureHeaderBytes> header{};
 	std::copy(bytes.begin(), bytes.begin() + textureHeaderBytes, header.begin());
 	if (!std::equal(textureMagic.begin(), textureMagic.end(), header.begin()))
 	{
 		return Result<ResourceHeader>::Failure("Invalid texture magic at " + where);
 	}
-	ResourceHeader resource{ResourceKind::texture};
+	ResourceHeader resource{ResourceKind::Texture};
 	resource.version = ReadUint32(header, 8);
 	std::copy(header.begin() + 12, header.end(), resource.id.bytes.begin());
 	return FinishHeader(resource, where);
 }
 
-Result<ResourceHeader> ParseJsonHeader(const Vector<uint8_t>& bytes, const String& where, ResourceKind kind)
+Result<ResourceHeader> ParseJsonHeader(const Vector<Ursa::UInt8>& bytes, const String& where, ResourceKind kind)
 {
 	const std::string content(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 	const auto document = nlohmann::json::parse(content, nullptr, false);
@@ -91,12 +92,12 @@ Result<ResourceHeader> ParseJsonHeader(const Vector<uint8_t>& bytes, const Strin
 		return Result<ResourceHeader>::Failure("Invalid resource format at " + where + " field format");
 	}
 	if (!document.contains("version") || !document["version"].is_number_unsigned() ||
-	    document["version"].get<uint64_t>() > std::numeric_limits<uint32_t>::max())
+	    document["version"].get<Ursa::UInt64>() > std::numeric_limits<Ursa::UInt32>::max())
 	{
 		return Result<ResourceHeader>::Failure("Invalid resource version at " + where + " field version");
 	}
 	ResourceHeader resource{kind};
-	resource.version = document["version"].get<uint32_t>();
+	resource.version = document["version"].get<Ursa::UInt32>();
 	if (!document.contains("id") || !document["id"].is_string())
 	{
 		return Result<ResourceHeader>::Failure("Invalid resource ID at " + where + " field id");
@@ -110,9 +111,9 @@ Result<ResourceHeader> ParseJsonHeader(const Vector<uint8_t>& bytes, const Strin
 	return FinishHeader(resource, where);
 }
 
-uint64_t SizeLimitFor(ResourceKind kind)
+Ursa::UInt64 SizeLimitFor(ResourceKind kind)
 {
-	return kind == ResourceKind::texture ? maxTextureResourceBytes : maxJsonResourceBytes;
+	return kind == ResourceKind::Texture ? maxTextureResourceBytes : maxJsonResourceBytes;
 }
 
 Result<ResourceKind> KindFromExtension(const String& extension, const String& where)
@@ -120,19 +121,19 @@ Result<ResourceKind> KindFromExtension(const String& extension, const String& wh
 	const String loweredExtension = Lowered(extension);
 	if (loweredExtension == ".ursatex")
 	{
-		return Result<ResourceKind>::Success(ResourceKind::texture);
+		return Result<ResourceKind>::Success(ResourceKind::Texture);
 	}
 	if (loweredExtension == ".ursamat")
 	{
-		return Result<ResourceKind>::Success(ResourceKind::material);
+		return Result<ResourceKind>::Success(ResourceKind::Material);
 	}
 	if (loweredExtension == ".ursascene")
 	{
-		return Result<ResourceKind>::Success(ResourceKind::scene);
+		return Result<ResourceKind>::Success(ResourceKind::Scene);
 	}
 	if (loweredExtension == ".ursaprefab")
 	{
-		return Result<ResourceKind>::Success(ResourceKind::prefab);
+		return Result<ResourceKind>::Success(ResourceKind::Prefab);
 	}
 	return Result<ResourceKind>::Failure("Unsupported resource file extension: " + where);
 }
@@ -174,22 +175,22 @@ Result<ResourceHeader> ReadResourceHeader(const std::filesystem::path& path)
 	{
 		return Result<ResourceHeader>::Failure("Cannot open resource at " + where);
 	}
-	if (kind.value == ResourceKind::texture)
+	if (kind.value == ResourceKind::Texture)
 	{
-		Array<uint8_t, textureHeaderBytes> header{};
+		Array<Ursa::UInt8, textureHeaderBytes> header{};
 		if (size < header.size() || !input.read(reinterpret_cast<char*>(header.data()), header.size()))
 		{
 			return Result<ResourceHeader>::Failure("Truncated texture header at " + where);
 		}
-		Vector<uint8_t> bytes;
+		Vector<Ursa::UInt8> bytes;
 		bytes.reserve(header.size());
-		for (uint8_t byte : header)
+		for (Ursa::UInt8 byte : header)
 		{
 			bytes.push_back(byte);
 		}
 		return ParseTextureHeader(bytes, where);
 	}
-	Vector<uint8_t> bytes(static_cast<size_t>(size));
+	Vector<Ursa::UInt8> bytes(static_cast<Ursa::Size>(size));
 	if (!bytes.empty() &&
 	    !input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
 	{
@@ -215,7 +216,7 @@ Result<ResourceHeader> ReadResourceHeader(const VirtualFileSystem& filesystem, c
 	{
 		return Result<ResourceHeader>::Failure("Resource exceeds size limit at " + where);
 	}
-	if (kind.value == ResourceKind::texture)
+	if (kind.value == ResourceKind::Texture)
 	{
 		auto bytes = filesystem.ReadPrefix(path, textureHeaderBytes);
 		if (!bytes)

@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/MaterialPreview.hpp>
 #include <Serialization/TextureResource.hpp>
@@ -54,17 +55,17 @@ int main()
 		std::filesystem::create_directories(root / "Assets");
 		const auto textureId = ResourceId::Generate();
 		auto texture = Take(MaterialTexture::Create(
-		    2, 2, TextureColorSpace::srgb, {255, 80, 20, 255, 255, 80, 20, 255, 255, 80, 20, 255, 255, 80, 20, 255}));
+		    2, 2, TextureColorSpace::Srgb, {255, 80, 20, 255, 255, 80, 20, 255, 255, 80, 20, 255, 255, 80, 20, 255}));
 		done(SaveTextureResource(root / "Assets" / "shared.ursatex", textureId, *texture));
 		auto workspace = Take(Editor::ProjectWorkspace::Open(root));
 		auto documents = Take(Editor::EditorDocuments::Create(*workspace));
 		const auto firstPath = root / "Assets" / "first.ursamat";
 		auto first = Take(Editor::NewMaterialDocument(Take(VirtualPath::Parse("prj:first.ursamat")),
-		                                              MaterialType::unlit, *workspace));
+		                                              MaterialType::Unlit, *workspace));
 		const auto firstId = first->Id();
 		auto firstDraft = first->Payload<Editor::MaterialDraft>();
-		done(firstDraft->SetTextureId(MaterialTextureSlot::baseColor, textureId, documents->Session()));
-		Expect(!firstDraft->SetTextureId(MaterialTextureSlot::normal, textureId, documents->Session()),
+		done(firstDraft->SetTextureId(MaterialTextureSlot::BaseColor, textureId, documents->Session()));
+		Expect(!firstDraft->SetTextureId(MaterialTextureSlot::Normal, textureId, documents->Session()),
 		       "Unlit material accepted an unsupported texture slot");
 		done(firstDraft->Material().SetBaseColor({0.8f, 0.6f, 0.4f, 1.f}));
 		done(documents->RequestOpen(std::move(first)));
@@ -75,13 +76,13 @@ int main()
 
 		const auto secondPath = root / "Assets" / "second.ursamat";
 		auto second = Take(Editor::NewMaterialDocument(Take(VirtualPath::Parse("prj:second.ursamat")),
-		                                               MaterialType::pbrMetallicRoughness, *workspace));
+		                                               MaterialType::PbrMetallicRoughness, *workspace));
 		const auto secondId = second->Id();
 		auto secondDraft = second->Payload<Editor::MaterialDraft>();
-		done(secondDraft->SetTextureId(MaterialTextureSlot::baseColor, textureId, documents->Session()));
+		done(secondDraft->SetTextureId(MaterialTextureSlot::BaseColor, textureId, documents->Session()));
 		done(secondDraft->Material().SetMetallic(0.7f));
 		done(secondDraft->Material().SetRoughness(0.3f));
-		done(secondDraft->Material().SetAlphaMode(AlphaMode::mask, 0.4f));
+		done(secondDraft->Material().SetAlphaMode(AlphaMode::Mask, 0.4f));
 		done(secondDraft->Material().SetSampler({false, true}));
 		done(documents->RequestOpen(std::move(second)));
 		done(documents->SaveCurrent());
@@ -93,15 +94,15 @@ int main()
 		auto secondLoaded = reopenedSecond->Payload<Editor::MaterialDraft>();
 		Expect(reopenedFirst->Id() == firstId && reopenedSecond->Id() == secondId,
 		       "Material resource IDs changed after reopen");
-		Expect(firstLoaded->TextureId(MaterialTextureSlot::baseColor) == textureId &&
-		           secondLoaded->TextureId(MaterialTextureSlot::baseColor) == textureId,
+		Expect(firstLoaded->TextureId(MaterialTextureSlot::BaseColor) == textureId &&
+		           secondLoaded->TextureId(MaterialTextureSlot::BaseColor) == textureId,
 		       "Shared material texture reference ID changed");
-		Expect(firstLoaded->Material().Texture(MaterialTextureSlot::baseColor) ==
-		           secondLoaded->Material().Texture(MaterialTextureSlot::baseColor),
+		Expect(firstLoaded->Material().Texture(MaterialTextureSlot::BaseColor) ==
+		           secondLoaded->Material().Texture(MaterialTextureSlot::BaseColor),
 		       "Shared texture did not resolve to the same resource-session object");
 		Expect(secondLoaded->Material().Parameters().roughness == 0.3f &&
 		           secondLoaded->Material().Parameters().sampler.linear == false &&
-		           secondLoaded->Material().Parameters().alphaMode == AlphaMode::mask,
+		           secondLoaded->Material().Parameters().alphaMode == AlphaMode::Mask,
 		       "PBR parameters did not reopen");
 
 		DeviceDesc desc;
@@ -112,17 +113,17 @@ int main()
 		auto gui = Take(Editor::ImGuiBridge::Create(device));
 		auto preview = Take(Editor::MaterialPreview::Create(device, *gui, 64));
 		done(preview->Render(secondLoaded->MaterialPtr()));
-		auto readback = Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::transferDestination, Memory::readback}));
+		auto readback = Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Memory::Readback}));
 		auto command = Take(device->CreateCommandList());
 		done(command->Begin());
-		done(command->Barrier(preview->ColorTexture(), ResourceState::shaderRead, ResourceState::transferSource));
-		done(command->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+		done(command->Barrier(preview->ColorTexture(), ResourceState::ShaderRead, ResourceState::TransferSource));
+		done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 		done(command->CopyTextureToBuffer(preview->ColorTexture(), readback));
 		done(command->End());
 		done(Take(device->Submit(command))->Wait());
-		Array<uint8_t, 64 * 64 * 4> pixels{};
+		Array<Ursa::UInt8, 64 * 64 * 4> pixels{};
 		done(readback->Read(0, pixels.data(), pixels.size()));
-		const size_t center = (32 * 64 + 32) * 4;
+		const Ursa::Size center = (32 * 64 + 32) * 4;
 		Expect(pixels[center] > 30 || pixels[center + 1] > 30, "Material 3D preview did not render the cube");
 		done(device->WaitIdle());
 		preview.reset();

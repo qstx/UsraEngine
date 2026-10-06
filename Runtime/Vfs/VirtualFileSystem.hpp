@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
 #include <Vfs/VirtualPath.hpp>
@@ -10,8 +11,8 @@ namespace Ursa
 {
 enum class MountAccess
 {
-	readOnly,
-	readWrite
+	ReadOnly,
+	ReadWrite
 };
 
 // One file reported by VirtualFileSystem::list(). The path resolves to the
@@ -37,15 +38,15 @@ public:
 
 	Result<Vector<std::filesystem::path>> Roots(const String& scheme) const;
 
-	Result<Vector<uint8_t>> Read(const VirtualPath& path) const;
+	Result<Vector<Ursa::UInt8>> Read(const VirtualPath& path) const;
 
-	Result<Vector<uint8_t>> ReadPrefix(const VirtualPath& path, uint64_t maxBytes) const;
+	Result<Vector<Ursa::UInt8>> ReadPrefix(const VirtualPath& path, Ursa::UInt64 maxBytes) const;
 
 	Result<String> ReadText(const VirtualPath& path) const;
 
 	Result<bool> Exists(const VirtualPath& path) const;
 
-	Result<uint64_t> Size(const VirtualPath& path) const;
+	Result<Ursa::UInt64> Size(const VirtualPath& path) const;
 
 	Result<std::filesystem::path> ResolveToDisk(const VirtualPath& path) const;
 
@@ -53,7 +54,7 @@ public:
 	// writable; the file itself does not have to exist yet.
 	Result<std::filesystem::path> ResolveForWrite(const VirtualPath& path) const;
 
-	Result<void> Write(const VirtualPath& path, const Vector<uint8_t>& bytes, bool createDirectories = true);
+	Result<void> Write(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes, bool createDirectories = true);
 
 	Result<Vector<VirtualFileEntry>> List(const String& scheme) const;
 

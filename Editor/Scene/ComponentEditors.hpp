@@ -7,7 +7,7 @@
 
 namespace Ursa::Editor
 {
-using ComponentEditor = std::function<Result<bool>(Component&, Scene&, NodeId)>;
+using ComponentEditor = std::function<Result<bool>(Component&, Scene&, GameObject::Ptr)>;
 
 class ComponentEditors final
 {

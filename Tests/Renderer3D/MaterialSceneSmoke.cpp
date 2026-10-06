@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 #include <Scene/Scene.hpp>
@@ -36,33 +37,33 @@ int main()
 		auto device = Take(Ursa::Rhi::CreateDevice(desc));
 		auto renderer = Take(Ursa::Renderer3D::Create(device));
 		Ursa::Scene scene;
-		auto cameraNode = Take(scene.CreateNode());
+		auto cameraNode = Take(scene.CreateGameObject());
 		Ursa::LocalTransform cameraPose;
 		cameraPose.position = {0.0f, 0.0f, 5.0f};
 		done(scene.SetLocalTransform(cameraNode, cameraPose));
 		done(scene.SetActiveCamera(Take(scene.AddComponent<Ursa::CameraComponent>(cameraNode))));
-		auto boxNode = Take(scene.CreateNode());
+		auto boxNode = Take(scene.CreateGameObject());
 		Take(scene.AddComponent<Ursa::BoxRenderComponent>(boxNode));
-		auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::unlit);
+		auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
 		done(material->SetBaseColor({1.0f, 0.0f, 0.0f, 1.0f}));
 		scene.FindComponent<Ursa::BoxRenderComponent>(boxNode)->material = material;
 		auto frame = Take(scene.CollectRenderData(1.0f));
 		auto color = Take(device->CreateTexture(
-		    {64, 64, Ursa::Rhi::Format::rgbA8Unorm,
-		     Ursa::Rhi::TextureUsage::colorAttachment | Ursa::Rhi::TextureUsage::transferSource}));
+		    {64, 64, Ursa::Rhi::Format::RgbA8Unorm,
+		     Ursa::Rhi::TextureUsage::ColorAttachment | Ursa::Rhi::TextureUsage::TransferSource}));
 		auto submitted = renderer->RenderOffscreenModels(color, frame.viewProjection, frame.boxes, frame.lighting,
 		                                                 frame.cameraPosition);
 		done(Take(std::move(submitted))->Wait());
 		auto readback = Take(device->CreateBuffer(
-		    {64 * 64 * 4, Ursa::Rhi::BufferUsage::transferDestination, Ursa::Rhi::Memory::readback}));
+		    {64 * 64 * 4, Ursa::Rhi::BufferUsage::TransferDestination, Ursa::Rhi::Memory::Readback}));
 		auto command = Take(device->CreateCommandList());
 		done(command->Begin());
-		done(command->Barrier(readback, Ursa::Rhi::ResourceState::undefined,
-		                      Ursa::Rhi::ResourceState::transferDestination));
+		done(command->Barrier(readback, Ursa::Rhi::ResourceState::Undefined,
+		                      Ursa::Rhi::ResourceState::TransferDestination));
 		done(command->CopyTextureToBuffer(color, readback));
 		done(command->End());
 		done(Take(device->Submit(command))->Wait());
-		uint8_t center[4]{};
+		Ursa::UInt8 center[4]{};
 		done(readback->Read((32 * 64 + 32) * 4, center, sizeof(center)));
 		if (center[0] < 240 || center[1] > 20 || center[2] > 20)
 		{

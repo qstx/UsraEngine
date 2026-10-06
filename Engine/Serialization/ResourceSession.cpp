@@ -50,7 +50,7 @@ Result<MaterialTexturePtr> ResourceSession::LoadTexture(ResourceId id)
 	{
 		return Result<MaterialTexturePtr>::Failure(location.error);
 	}
-	if (location.value.kind != ResourceKind::texture)
+	if (location.value.kind != ResourceKind::Texture)
 	{
 		return Result<MaterialTexturePtr>::Failure("Resource " + key +
 		                                           " is not a texture: " + location.value.path.ToString());
@@ -88,7 +88,7 @@ Result<std::shared_ptr<MaterialInstance>> ResourceSession::LoadMaterial(Resource
 	{
 		return Result<std::shared_ptr<MaterialInstance>>::Failure(location.error);
 	}
-	if (location.value.kind != ResourceKind::material)
+	if (location.value.kind != ResourceKind::Material)
 	{
 		return Result<std::shared_ptr<MaterialInstance>>::Failure(
 		    "Resource " + key + " is not a material: " + location.value.path.ToString());

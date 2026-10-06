@@ -1,4 +1,5 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
 #include <Serialization/ResourceId.hpp>
@@ -10,22 +11,22 @@ namespace Ursa
 {
 enum class ResourceKind
 {
-	texture,
-	material,
-	scene,
-	prefab
+	Texture,
+	Material,
+	Scene,
+	Prefab
 };
 
 struct ResourceHeader
 {
 	ResourceKind kind;
-	uint32_t version = 0;
+	Ursa::UInt32 version = 0;
 	ResourceId id;
 };
 
-constexpr uint32_t resourceFormatVersion = 1;
-constexpr uint64_t maxJsonResourceBytes = 16ull * 1024 * 1024;
-constexpr uint64_t maxTextureResourceBytes = 256ull * 1024 * 1024;
+constexpr Ursa::UInt32 resourceFormatVersion = 1;
+constexpr Ursa::UInt64 maxJsonResourceBytes = 16ull * 1024 * 1024;
+constexpr Ursa::UInt64 maxTextureResourceBytes = 256ull * 1024 * 1024;
 
 Result<ResourceHeader> ReadResourceHeader(const std::filesystem::path& path);
 

@@ -5,7 +5,6 @@
 #include <Serialization/ResourceIndex.hpp>
 #include <fstream>
 #include <iostream>
-#include <set>
 #include <stdexcept>
 
 namespace
@@ -51,7 +50,7 @@ void TestHeaders(const std::filesystem::path& directory)
 		output << "{\"format\":\"UrsaMaterial\",\"version\":1,\"id\":\"" << Ursa::ToStdString(id.ToString()) << "\"}";
 	}
 	const auto header = Ursa::ReadResourceHeader(valid);
-	Expect(header && header.value.kind == Ursa::ResourceKind::material && header.value.id == id,
+	Expect(header && header.value.kind == Ursa::ResourceKind::Material && header.value.id == id,
 	       "Valid material header was rejected");
 
 	const auto unknown = directory / "future.ursascene";
@@ -101,8 +100,8 @@ void TestIndex(const std::filesystem::path& directory)
 		output << document;
 	}
 	Ursa::ResourceIndex index;
-	const auto firstMount = Ursa::ResourceMount{Ursa::projectScheme, firstRoot, Ursa::MountAccess::readOnly};
-	const auto secondMount = Ursa::ResourceMount{Ursa::engineScheme, secondRoot, Ursa::MountAccess::readOnly};
+	const auto firstMount = Ursa::ResourceMount{Ursa::projectScheme, firstRoot, Ursa::MountAccess::ReadOnly};
+	const auto secondMount = Ursa::ResourceMount{Ursa::engineScheme, secondRoot, Ursa::MountAccess::ReadOnly};
 	const auto firstPath = Take(Ursa::VirtualPath::Parse("prj:original.ursamat"));
 	const auto movedPath = Take(Ursa::VirtualPath::Parse("prj:renamed.ursamat"));
 	Expect(index.Mount(firstMount) && index.Mount(secondMount), "Could not mount resource roots");

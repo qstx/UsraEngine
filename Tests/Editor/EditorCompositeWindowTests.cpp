@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 #include <Scene/EditorGizmo.hpp>
@@ -30,12 +31,12 @@ void done(Result<void> result)
 }
 
 void CompositeFrame(const DevicePtr& device, const SwapchainPtr& swapchain, Renderer3D& renderer,
-                    Editor::ImGuiBridge& gui, const std::shared_ptr<Window>& window, Scene& selection, NodeId selected,
-                    uint32_t previewSize, const Scene* game = nullptr)
+                    Editor::ImGuiBridge& gui, const std::shared_ptr<Window>& window, Scene& selection,
+                    GameObject::Ptr selected, Ursa::UInt32 previewSize, const Scene* game = nullptr)
 {
 	window->PollEvents();
 	auto preview = Take(device->CreateTexture(
-	    {previewSize, previewSize, Format::rgbA8Unorm, TextureUsage::colorAttachment | TextureUsage::sampled}));
+	    {previewSize, previewSize, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::Sampled}));
 	auto sampler = Take(device->CreateSampler({true, false}));
 	const auto image = Take(gui.RegisterTexture(preview, sampler));
 	done(gui.BeginFrame(1.f / 60.f, window->FramebufferWidth(), window->FramebufferHeight()));
@@ -45,9 +46,10 @@ void CompositeFrame(const DevicePtr& device, const SwapchainPtr& swapchain, Rend
 	Camera gizmoCamera;
 	gizmoCamera.position = {0, 0, 5};
 	gizmoCamera.target = {0, 0, 0};
-	const auto gizmo = Editor::DrawGizmo(selection, selected, gizmoCamera,
-	                                     {20, 20, static_cast<float>(previewSize), static_cast<float>(previewSize)},
-	                                     Editor::GizmoOperation::translate);
+	const auto gizmo =
+	    Editor::DrawGizmo(selection, selected, gizmoCamera,
+	                      {20, 20, static_cast<Ursa::Float32>(previewSize), static_cast<Ursa::Float32>(previewSize)},
+	                      Editor::GizmoOperation::Translate);
 	if (!gizmo)
 	{
 		throw std::runtime_error(ToStdString(gizmo.error));
@@ -66,22 +68,22 @@ void CompositeFrame(const DevicePtr& device, const SwapchainPtr& swapchain, Rend
 	if (game)
 	{
 		auto frame = Take(game->CollectRenderData(1.f));
-		done(renderer.RecordOffscreenModels(command, preview, ResourceState::undefined, ResourceState::shaderRead,
+		done(renderer.RecordOffscreenModels(command, preview, ResourceState::Undefined, ResourceState::ShaderRead,
 		                                    frame.viewProjection, frame.boxes, frame.lighting, frame.cameraPosition));
 	}
 	else
 	{
 		const Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {0.9f, 0.2f, 0.1f, 1.f}, {}}};
-		done(renderer.RecordOffscreenModels(command, preview, ResourceState::undefined, ResourceState::shaderRead,
+		done(renderer.RecordOffscreenModels(command, preview, ResourceState::Undefined, ResourceState::ShaderRead,
 		                                    camera.ViewProjection(1.f), boxes, {}, camera.position));
 	}
-	done(command->Barrier(acquired.texture, acquired.initialState, ResourceState::colorAttachment));
+	done(command->Barrier(acquired.texture, acquired.initialState, ResourceState::ColorAttachment));
 	RenderTarget target;
 	target.color = acquired.texture;
 	done(command->BeginRendering(target));
 	done(gui.Record(command, swapchain->Format(), acquired.texture->desc.width, acquired.texture->desc.height));
 	done(command->EndRendering());
-	done(command->Barrier(acquired.texture, ResourceState::colorAttachment, ResourceState::present));
+	done(command->Barrier(acquired.texture, ResourceState::ColorAttachment, ResourceState::Present));
 	done(command->End());
 	const auto fence = Take(device->Submit(command, swapchain));
 	done(swapchain->Present());
@@ -105,7 +107,7 @@ int main()
 		auto renderer = Take(Renderer3D::Create(device));
 		auto gui = Take(Editor::ImGuiBridge::Create(device, window));
 		Scene selection;
-		const auto selected = Take(selection.CreateNode());
+		const auto selected = Take(selection.CreateGameObject());
 		CompositeFrame(device, swapchain, *renderer, *gui, window, selection, selected, 128);
 		done(Editor::ApplyGizmoWorldTransform(selection, selected, Mat4::Translation({0.5f, 0, 0})));
 		window->Resize(800, 600);
@@ -116,15 +118,15 @@ int main()
 		auto resources = Take(ResourceSession::Open({root}));
 		ComponentRegistry registry;
 		done(RegisterBuiltinComponents(registry));
-		auto draft = Take(Editor::SceneDraft::Create(ResourceKind::scene, registry, *resources));
-		const NodeId gameRoot = draft->GetScene().RootNodes().front();
-		auto cameraNode = Take(draft->GetScene().CreateNode(gameRoot));
+		auto draft = Take(Editor::SceneDraft::Create(ResourceKind::Scene, registry, *resources));
+		const GameObject::Ptr gameRoot = draft->GetScene().RootGameObjects().front();
+		auto cameraNode = Take(draft->GetScene().CreateGameObject(gameRoot));
 		LocalTransform cameraPose;
 		cameraPose.position = {0, 0, 5};
 		done(draft->GetScene().SetLocalTransform(cameraNode, cameraPose));
 		const auto cameraId = Take(draft->GetScene().AddComponent<CameraComponent>(cameraNode));
 		done(draft->GetScene().SetActiveCamera(cameraId));
-		auto boxNode = Take(draft->GetScene().CreateNode(gameRoot));
+		auto boxNode = Take(draft->GetScene().CreateGameObject(gameRoot));
 		Take(draft->GetScene().AddComponent<BoxRenderComponent>(boxNode, Color{0.2f, 0.8f, 0.4f, 1.f}));
 		Editor::PlaySession play;
 		done(play.Start(*draft, ResourceId::Generate(), registry, *resources));

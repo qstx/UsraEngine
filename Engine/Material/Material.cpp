@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Material/Material.hpp>
 #include <cmath>
 #include <limits>
@@ -8,12 +9,12 @@ namespace Ursa
 {
 namespace
 {
-bool unit(float value)
+bool unit(Ursa::Float32 value)
 {
 	return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
 }
 
-bool Nonnegative(float value)
+bool Nonnegative(Ursa::Float32 value)
 {
 	return std::isfinite(value) && value >= 0.0f;
 }
@@ -24,9 +25,9 @@ bool ValidColor(Color color, bool hdr)
 	return valid(color.red) && valid(color.green) && valid(color.blue) && unit(color.alpha);
 }
 
-size_t SlotIndex(MaterialTextureSlot slot)
+Ursa::Size SlotIndex(MaterialTextureSlot slot)
 {
-	return static_cast<size_t>(slot);
+	return static_cast<Ursa::Size>(slot);
 }
 
 bool ValidSlot(MaterialTextureSlot slot)
@@ -36,33 +37,35 @@ bool ValidSlot(MaterialTextureSlot slot)
 
 TextureColorSpace RequiredColorSpace(MaterialTextureSlot slot)
 {
-	return slot == MaterialTextureSlot::baseColor || slot == MaterialTextureSlot::emissive ? TextureColorSpace::srgb
-	                                                                                       : TextureColorSpace::linear;
+	return slot == MaterialTextureSlot::BaseColor || slot == MaterialTextureSlot::Emissive ? TextureColorSpace::Srgb
+	                                                                                       : TextureColorSpace::Linear;
 }
 } // namespace
 
-MaterialTexture::MaterialTexture(uint32_t width, uint32_t height, TextureColorSpace colorSpace, Vector<uint8_t> pixels)
-    : width(width), height(height), colorSpace(colorSpace), pixels(std::move(pixels))
+MaterialTexture::MaterialTexture(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight,
+                                 TextureColorSpace textureColorSpace, Vector<Ursa::UInt8> texturePixels)
+    : width(textureWidth), height(textureHeight), colorSpace(textureColorSpace), pixels(std::move(texturePixels))
 {
 }
 
-Result<MaterialTexturePtr> MaterialTexture::Create(uint32_t width, uint32_t height, TextureColorSpace colorSpace,
-                                                   Vector<uint8_t> rgba8)
+Result<MaterialTexturePtr> MaterialTexture::Create(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight,
+                                                   TextureColorSpace textureColorSpace, Vector<Ursa::UInt8> rgba8)
 {
-	if (!width || !height || static_cast<uint64_t>(width) * height > std::numeric_limits<size_t>::max() / 4 ||
-	    rgba8.size() != static_cast<size_t>(width) * height * 4)
+	if (!textureWidth || !textureHeight ||
+	    static_cast<Ursa::UInt64>(textureWidth) * textureHeight > std::numeric_limits<Ursa::Size>::max() / 4 ||
+	    rgba8.size() != static_cast<Ursa::Size>(textureWidth) * textureHeight * 4)
 	{
 		return Result<MaterialTexturePtr>::Failure("Material texture dimensions or RGBA8 pixel byte count are invalid");
 	}
-	if (colorSpace != TextureColorSpace::linear && colorSpace != TextureColorSpace::srgb)
+	if (textureColorSpace != TextureColorSpace::Linear && textureColorSpace != TextureColorSpace::Srgb)
 	{
 		return Result<MaterialTexturePtr>::Failure("Material texture color space is invalid");
 	}
 	return Result<MaterialTexturePtr>::Success(
-	    MaterialTexturePtr(new MaterialTexture(width, height, colorSpace, std::move(rgba8))));
+	    MaterialTexturePtr(new MaterialTexture(textureWidth, textureHeight, textureColorSpace, std::move(rgba8))));
 }
 
-MaterialInstance::MaterialInstance(MaterialType type) : type(type)
+MaterialInstance::MaterialInstance(MaterialType materialType) : type(materialType)
 {
 }
 
@@ -77,9 +80,9 @@ Result<void> MaterialInstance::SetBaseColor(Color color)
 	return {};
 }
 
-Result<void> MaterialInstance::SetMetallic(float value)
+Result<void> MaterialInstance::SetMetallic(Ursa::Float32 value)
 {
-	if (type != MaterialType::pbrMetallicRoughness)
+	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Metallic is only valid for a PBR material");
 	}
@@ -92,9 +95,9 @@ Result<void> MaterialInstance::SetMetallic(float value)
 	return {};
 }
 
-Result<void> MaterialInstance::SetRoughness(float value)
+Result<void> MaterialInstance::SetRoughness(Ursa::Float32 value)
 {
-	if (type != MaterialType::pbrMetallicRoughness)
+	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Roughness is only valid for a PBR material");
 	}
@@ -107,9 +110,9 @@ Result<void> MaterialInstance::SetRoughness(float value)
 	return {};
 }
 
-Result<void> MaterialInstance::SetNormalScale(float value)
+Result<void> MaterialInstance::SetNormalScale(Ursa::Float32 value)
 {
-	if (type != MaterialType::pbrMetallicRoughness)
+	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Normal scale is only valid for a PBR material");
 	}
@@ -122,9 +125,9 @@ Result<void> MaterialInstance::SetNormalScale(float value)
 	return {};
 }
 
-Result<void> MaterialInstance::SetOcclusionStrength(float value)
+Result<void> MaterialInstance::SetOcclusionStrength(Ursa::Float32 value)
 {
-	if (type != MaterialType::pbrMetallicRoughness)
+	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Occlusion is only valid for a PBR material");
 	}
@@ -139,7 +142,7 @@ Result<void> MaterialInstance::SetOcclusionStrength(float value)
 
 Result<void> MaterialInstance::SetEmissive(Color color)
 {
-	if (type != MaterialType::pbrMetallicRoughness)
+	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Emissive is only valid for a PBR material");
 	}
@@ -152,9 +155,9 @@ Result<void> MaterialInstance::SetEmissive(Color color)
 	return {};
 }
 
-Result<void> MaterialInstance::SetAlphaMode(AlphaMode mode, float cutoff)
+Result<void> MaterialInstance::SetAlphaMode(AlphaMode mode, Ursa::Float32 cutoff)
 {
-	if (mode != AlphaMode::opaque && mode != AlphaMode::mask && mode != AlphaMode::blend)
+	if (mode != AlphaMode::Opaque && mode != AlphaMode::Mask && mode != AlphaMode::Blend)
 	{
 		return Result<void>::Failure("Material alpha mode is invalid");
 	}
@@ -181,7 +184,7 @@ Result<void> MaterialInstance::SetTexture(MaterialTextureSlot slot, MaterialText
 	{
 		return Result<void>::Failure("Material texture slot is invalid");
 	}
-	if (type == MaterialType::unlit && slot != MaterialTextureSlot::baseColor)
+	if (type == MaterialType::Unlit && slot != MaterialTextureSlot::BaseColor)
 	{
 		return Result<void>::Failure("Unlit material only accepts a base color texture");
 	}
@@ -213,11 +216,11 @@ std::shared_ptr<MaterialInstance> MaterialInstance::Clone() const
 MaterialTexturePtr DefaultMaterialTexture(MaterialTextureSlot slot)
 {
 	static const Array<MaterialTexturePtr, 5> defaults = {
-	    MaterialTexture::Create(1, 1, TextureColorSpace::srgb, {255, 255, 255, 255}).value,
-	    MaterialTexture::Create(1, 1, TextureColorSpace::linear, {0, 255, 255, 255}).value,
-	    MaterialTexture::Create(1, 1, TextureColorSpace::linear, {128, 128, 255, 255}).value,
-	    MaterialTexture::Create(1, 1, TextureColorSpace::linear, {255, 255, 255, 255}).value,
-	    MaterialTexture::Create(1, 1, TextureColorSpace::srgb, {255, 255, 255, 255}).value,
+	    MaterialTexture::Create(1, 1, TextureColorSpace::Srgb, {255, 255, 255, 255}).value,
+	    MaterialTexture::Create(1, 1, TextureColorSpace::Linear, {0, 255, 255, 255}).value,
+	    MaterialTexture::Create(1, 1, TextureColorSpace::Linear, {128, 128, 255, 255}).value,
+	    MaterialTexture::Create(1, 1, TextureColorSpace::Linear, {255, 255, 255, 255}).value,
+	    MaterialTexture::Create(1, 1, TextureColorSpace::Srgb, {255, 255, 255, 255}).value,
 	};
 	return ValidSlot(slot) ? defaults[SlotIndex(slot)] : MaterialTexturePtr{};
 }

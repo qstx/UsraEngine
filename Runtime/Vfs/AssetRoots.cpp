@@ -1,6 +1,7 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Core/StringInterop.hpp>
-#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -126,7 +127,7 @@ Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& expl
 	VirtualFileSystem files;
 	for (const std::filesystem::path& root : roots.value)
 	{
-		auto mounted = files.Mount(engineScheme, root, MountAccess::readOnly);
+		auto mounted = files.Mount(engineScheme, root, MountAccess::ReadOnly);
 		if (!mounted)
 		{
 			return Result<VirtualFileSystem>::Failure(mounted.error);
@@ -138,7 +139,7 @@ Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& expl
 std::filesystem::path CurrentExecutablePath()
 {
 #ifdef _WIN32
-	std::vector<wchar_t> buffer(MAX_PATH);
+	Ursa::Vector<wchar_t> buffer(MAX_PATH);
 	while (true)
 	{
 		const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
@@ -153,13 +154,13 @@ std::filesystem::path CurrentExecutablePath()
 		buffer.resize(buffer.size() * 2);
 	}
 #else
-	std::vector<char> buffer(PATH_MAX);
+	Ursa::Vector<char> buffer(PATH_MAX);
 	const auto length = ::readlink("/proc/self/exe", buffer.data(), buffer.size());
 	if (length <= 0)
 	{
 		return {};
 	}
-	return std::filesystem::path(std::string(buffer.data(), static_cast<size_t>(length)));
+	return std::filesystem::path(std::string(buffer.data(), static_cast<Ursa::Size>(length)));
 #endif
 }
 } // namespace Ursa

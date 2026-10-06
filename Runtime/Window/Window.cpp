@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <GLFW/glfw3.h>
 #include <Window/Window.hpp>
 #include <algorithm>
@@ -8,7 +9,7 @@ namespace Ursa
 namespace
 {
 std::mutex glfwMutex;
-uint32_t windowCount = 0;
+Ursa::UInt32 windowCount = 0;
 
 struct KeyMapping
 {
@@ -16,65 +17,65 @@ struct KeyMapping
 	int native;
 };
 
-constexpr KeyMapping keyMappings[] = {{Key::escape, GLFW_KEY_ESCAPE},
-                                      {Key::space, GLFW_KEY_SPACE},
-                                      {Key::left, GLFW_KEY_LEFT},
-                                      {Key::right, GLFW_KEY_RIGHT},
-                                      {Key::up, GLFW_KEY_UP},
-                                      {Key::down, GLFW_KEY_DOWN},
-                                      {Key::w, GLFW_KEY_W},
-                                      {Key::a, GLFW_KEY_A},
-                                      {Key::s, GLFW_KEY_S},
-                                      {Key::d, GLFW_KEY_D},
-                                      {Key::tab, GLFW_KEY_TAB},
-                                      {Key::enter, GLFW_KEY_ENTER},
-                                      {Key::backspace, GLFW_KEY_BACKSPACE},
+constexpr KeyMapping keyMappings[] = {{Key::Escape, GLFW_KEY_ESCAPE},
+                                      {Key::Space, GLFW_KEY_SPACE},
+                                      {Key::Left, GLFW_KEY_LEFT},
+                                      {Key::Right, GLFW_KEY_RIGHT},
+                                      {Key::Up, GLFW_KEY_UP},
+                                      {Key::Down, GLFW_KEY_DOWN},
+                                      {Key::W, GLFW_KEY_W},
+                                      {Key::A, GLFW_KEY_A},
+                                      {Key::S, GLFW_KEY_S},
+                                      {Key::D, GLFW_KEY_D},
+                                      {Key::Tab, GLFW_KEY_TAB},
+                                      {Key::Enter, GLFW_KEY_ENTER},
+                                      {Key::Backspace, GLFW_KEY_BACKSPACE},
                                       {Key::Delete, GLFW_KEY_DELETE},
-                                      {Key::home, GLFW_KEY_HOME},
-                                      {Key::end, GLFW_KEY_END},
-                                      {Key::pageUp, GLFW_KEY_PAGE_UP},
-                                      {Key::pageDown, GLFW_KEY_PAGE_DOWN},
-                                      {Key::insert, GLFW_KEY_INSERT},
-                                      {Key::leftShift, GLFW_KEY_LEFT_SHIFT},
-                                      {Key::rightShift, GLFW_KEY_RIGHT_SHIFT},
-                                      {Key::leftControl, GLFW_KEY_LEFT_CONTROL},
-                                      {Key::rightControl, GLFW_KEY_RIGHT_CONTROL},
-                                      {Key::leftAlt, GLFW_KEY_LEFT_ALT},
-                                      {Key::rightAlt, GLFW_KEY_RIGHT_ALT},
-                                      {Key::leftSuper, GLFW_KEY_LEFT_SUPER},
-                                      {Key::rightSuper, GLFW_KEY_RIGHT_SUPER},
-                                      {Key::b, GLFW_KEY_B},
-                                      {Key::c, GLFW_KEY_C},
-                                      {Key::e, GLFW_KEY_E},
-                                      {Key::f, GLFW_KEY_F},
-                                      {Key::g, GLFW_KEY_G},
-                                      {Key::h, GLFW_KEY_H},
-                                      {Key::i, GLFW_KEY_I},
-                                      {Key::j, GLFW_KEY_J},
-                                      {Key::k, GLFW_KEY_K},
-                                      {Key::l, GLFW_KEY_L},
-                                      {Key::m, GLFW_KEY_M},
-                                      {Key::n, GLFW_KEY_N},
-                                      {Key::o, GLFW_KEY_O},
-                                      {Key::p, GLFW_KEY_P},
-                                      {Key::q, GLFW_KEY_Q},
-                                      {Key::r, GLFW_KEY_R},
-                                      {Key::t, GLFW_KEY_T},
-                                      {Key::u, GLFW_KEY_U},
-                                      {Key::v, GLFW_KEY_V},
-                                      {Key::x, GLFW_KEY_X},
-                                      {Key::y, GLFW_KEY_Y},
-                                      {Key::z, GLFW_KEY_Z},
-                                      {Key::digit0, GLFW_KEY_0},
-                                      {Key::digit1, GLFW_KEY_1},
-                                      {Key::digit2, GLFW_KEY_2},
-                                      {Key::digit3, GLFW_KEY_3},
-                                      {Key::digit4, GLFW_KEY_4},
-                                      {Key::digit5, GLFW_KEY_5},
-                                      {Key::digit6, GLFW_KEY_6},
-                                      {Key::digit7, GLFW_KEY_7},
-                                      {Key::digit8, GLFW_KEY_8},
-                                      {Key::digit9, GLFW_KEY_9}};
+                                      {Key::Home, GLFW_KEY_HOME},
+                                      {Key::End, GLFW_KEY_END},
+                                      {Key::PageUp, GLFW_KEY_PAGE_UP},
+                                      {Key::PageDown, GLFW_KEY_PAGE_DOWN},
+                                      {Key::Insert, GLFW_KEY_INSERT},
+                                      {Key::LeftShift, GLFW_KEY_LEFT_SHIFT},
+                                      {Key::RightShift, GLFW_KEY_RIGHT_SHIFT},
+                                      {Key::LeftControl, GLFW_KEY_LEFT_CONTROL},
+                                      {Key::RightControl, GLFW_KEY_RIGHT_CONTROL},
+                                      {Key::LeftAlt, GLFW_KEY_LEFT_ALT},
+                                      {Key::RightAlt, GLFW_KEY_RIGHT_ALT},
+                                      {Key::LeftSuper, GLFW_KEY_LEFT_SUPER},
+                                      {Key::RightSuper, GLFW_KEY_RIGHT_SUPER},
+                                      {Key::B, GLFW_KEY_B},
+                                      {Key::C, GLFW_KEY_C},
+                                      {Key::E, GLFW_KEY_E},
+                                      {Key::F, GLFW_KEY_F},
+                                      {Key::G, GLFW_KEY_G},
+                                      {Key::H, GLFW_KEY_H},
+                                      {Key::I, GLFW_KEY_I},
+                                      {Key::J, GLFW_KEY_J},
+                                      {Key::K, GLFW_KEY_K},
+                                      {Key::L, GLFW_KEY_L},
+                                      {Key::M, GLFW_KEY_M},
+                                      {Key::N, GLFW_KEY_N},
+                                      {Key::O, GLFW_KEY_O},
+                                      {Key::P, GLFW_KEY_P},
+                                      {Key::Q, GLFW_KEY_Q},
+                                      {Key::R, GLFW_KEY_R},
+                                      {Key::T, GLFW_KEY_T},
+                                      {Key::U, GLFW_KEY_U},
+                                      {Key::V, GLFW_KEY_V},
+                                      {Key::X, GLFW_KEY_X},
+                                      {Key::Y, GLFW_KEY_Y},
+                                      {Key::Z, GLFW_KEY_Z},
+                                      {Key::Digit0, GLFW_KEY_0},
+                                      {Key::Digit1, GLFW_KEY_1},
+                                      {Key::Digit2, GLFW_KEY_2},
+                                      {Key::Digit3, GLFW_KEY_3},
+                                      {Key::Digit4, GLFW_KEY_4},
+                                      {Key::Digit5, GLFW_KEY_5},
+                                      {Key::Digit6, GLFW_KEY_6},
+                                      {Key::Digit7, GLFW_KEY_7},
+                                      {Key::Digit8, GLFW_KEY_8},
+                                      {Key::Digit9, GLFW_KEY_9}};
 
 int GlfwKey(Key key)
 {
@@ -97,20 +98,20 @@ Key UrsaKey(int native)
 			return mapping.key;
 		}
 	}
-	return Key::unknown;
+	return Key::Unknown;
 }
 
 int GlfwButton(MouseButton button)
 {
 	switch (button)
 	{
-		case MouseButton::left:
+		case MouseButton::Left:
 			return GLFW_MOUSE_BUTTON_LEFT;
-		case MouseButton::right:
+		case MouseButton::Right:
 			return GLFW_MOUSE_BUTTON_RIGHT;
-		case MouseButton::middle:
+		case MouseButton::Middle:
 			return GLFW_MOUSE_BUTTON_MIDDLE;
-		case MouseButton::other:
+		case MouseButton::Other:
 			return -1;
 	}
 	return -1;
@@ -121,13 +122,13 @@ MouseButton UrsaButton(int native)
 	switch (native)
 	{
 		case GLFW_MOUSE_BUTTON_LEFT:
-			return MouseButton::left;
+			return MouseButton::Left;
 		case GLFW_MOUSE_BUTTON_RIGHT:
-			return MouseButton::right;
+			return MouseButton::Right;
 		case GLFW_MOUSE_BUTTON_MIDDLE:
-			return MouseButton::middle;
+			return MouseButton::Middle;
 		default:
-			return MouseButton::other;
+			return MouseButton::Other;
 	}
 }
 
@@ -145,7 +146,8 @@ void Send(GLFWwindow* handle, const WindowEvent& event)
 }
 } // namespace
 
-Result<std::shared_ptr<Window>> Window::Create(uint32_t width, uint32_t height, const String& title, bool visible)
+Result<std::shared_ptr<Window>> Window::Create(Ursa::UInt32 width, Ursa::UInt32 height, const String& title,
+                                               bool visible)
 {
 	if (width == 0 || height == 0)
 	{
@@ -177,9 +179,9 @@ Result<std::shared_ptr<Window>> Window::Create(uint32_t width, uint32_t height, 
 	                   [](GLFWwindow* native, int key, int, int action, int)
 	                   {
 		                   WindowEvent event;
-		                   event.type = action == GLFW_RELEASE  ? WindowEventType::keyReleased
-		                                : action == GLFW_REPEAT ? WindowEventType::keyRepeated
-		                                                        : WindowEventType::keyPressed;
+		                   event.type = action == GLFW_RELEASE  ? WindowEventType::KeyReleased
+		                                : action == GLFW_REPEAT ? WindowEventType::KeyRepeated
+		                                                        : WindowEventType::KeyPressed;
 		                   event.key = UrsaKey(key);
 		                   Send(native, event);
 	                   });
@@ -187,15 +189,15 @@ Result<std::shared_ptr<Window>> Window::Create(uint32_t width, uint32_t height, 
 	                    [](GLFWwindow* native, unsigned int codepoint)
 	                    {
 		                    WindowEvent event;
-		                    event.type = WindowEventType::character;
+		                    event.type = WindowEventType::Character;
 		                    event.codepoint = codepoint;
 		                    Send(native, event);
 	                    });
 	glfwSetCursorPosCallback(handle,
-	                         [](GLFWwindow* native, double x, double y)
+	                         [](GLFWwindow* native, Ursa::Float64 x, Ursa::Float64 y)
 	                         {
 		                         WindowEvent event;
-		                         event.type = WindowEventType::cursorMoved;
+		                         event.type = WindowEventType::CursorMoved;
 		                         event.x = x;
 		                         event.y = y;
 		                         Send(native, event);
@@ -204,16 +206,16 @@ Result<std::shared_ptr<Window>> Window::Create(uint32_t width, uint32_t height, 
 	                           [](GLFWwindow* native, int button, int action, int)
 	                           {
 		                           WindowEvent event;
-		                           event.type = action == GLFW_RELEASE ? WindowEventType::mouseReleased
-		                                                               : WindowEventType::mousePressed;
+		                           event.type = action == GLFW_RELEASE ? WindowEventType::MouseReleased
+		                                                               : WindowEventType::MousePressed;
 		                           event.button = UrsaButton(button);
 		                           Send(native, event);
 	                           });
 	glfwSetScrollCallback(handle,
-	                      [](GLFWwindow* native, double x, double y)
+	                      [](GLFWwindow* native, Ursa::Float64 x, Ursa::Float64 y)
 	                      {
 		                      WindowEvent event;
-		                      event.type = WindowEventType::scrolled;
+		                      event.type = WindowEventType::Scrolled;
 		                      event.x = x;
 		                      event.y = y;
 		                      Send(native, event);
@@ -222,7 +224,7 @@ Result<std::shared_ptr<Window>> Window::Create(uint32_t width, uint32_t height, 
 	                           [](GLFWwindow* native, int focused)
 	                           {
 		                           WindowEvent event;
-		                           event.type = WindowEventType::focused;
+		                           event.type = WindowEventType::Focused;
 		                           event.focused = focused == GLFW_TRUE;
 		                           Send(native, event);
 	                           });
@@ -301,26 +303,26 @@ bool Window::MouseDown(MouseButton button) const
 	return native >= 0 && glfwGetMouseButton(static_cast<GLFWwindow*>(handle), native) == GLFW_PRESS;
 }
 
-std::pair<double, double> Window::CursorPosition() const
+std::pair<Ursa::Float64, Ursa::Float64> Window::CursorPosition() const
 {
-	double x = 0.0;
-	double y = 0.0;
+	Ursa::Float64 x = 0.0;
+	Ursa::Float64 y = 0.0;
 	glfwGetCursorPos(static_cast<GLFWwindow*>(handle), &x, &y);
 	return {x, y};
 }
 
-Result<uint64_t> Window::Subscribe(WindowEventCallback callback)
+Result<Ursa::UInt64> Window::Subscribe(WindowEventCallback callback)
 {
 	if (!callback)
 	{
-		return Result<uint64_t>::Failure("Window event callback is empty");
+		return Result<Ursa::UInt64>::Failure("Window event callback is empty");
 	}
-	const uint64_t id = nextSubscription++;
+	const Ursa::UInt64 id = nextSubscription++;
 	subscriptions.push_back({id, std::move(callback)});
-	return Result<uint64_t>::Success(id);
+	return Result<Ursa::UInt64>::Success(id);
 }
 
-void Window::Unsubscribe(uint64_t subscription)
+void Window::Unsubscribe(Ursa::UInt64 subscription)
 {
 	auto found = std::find_if(subscriptions.begin(), subscriptions.end(),
 	                          [subscription](const auto& entry) { return entry.first == subscription; });
@@ -339,7 +341,7 @@ void Window::DispatchEvent(const WindowEvent& event)
 	}
 }
 
-void Window::Resize(uint32_t width, uint32_t height)
+void Window::Resize(Ursa::UInt32 width, Ursa::UInt32 height)
 {
 	if (width && height)
 	{
@@ -357,17 +359,17 @@ void Window::Restore()
 	glfwRestoreWindow(static_cast<GLFWwindow*>(handle));
 }
 
-uint32_t Window::FramebufferWidth() const
+Ursa::UInt32 Window::FramebufferWidth() const
 {
 	int w = 0, h = 0;
 	glfwGetFramebufferSize(static_cast<GLFWwindow*>(handle), &w, &h);
-	return static_cast<uint32_t>(w);
+	return static_cast<Ursa::UInt32>(w);
 }
 
-uint32_t Window::FramebufferHeight() const
+Ursa::UInt32 Window::FramebufferHeight() const
 {
 	int w = 0, h = 0;
 	glfwGetFramebufferSize(static_cast<GLFWwindow*>(handle), &w, &h);
-	return static_cast<uint32_t>(h);
+	return static_cast<Ursa::UInt32>(h);
 }
 } // namespace Ursa

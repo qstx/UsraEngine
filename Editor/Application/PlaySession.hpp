@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Types.hpp>
 #include <Application/FrameScheduler.hpp>
 #include <Assets/SceneDraft.hpp>
 #include <memory>
@@ -16,7 +17,7 @@ public:
 	Result<void> Start(const SceneDraft& draft, ResourceId documentId, const ComponentRegistry& registry,
 	                   ResourceSession& resources, const PlayContextSetup& setup = {});
 
-	Result<void> Tick(float deltaSeconds, Window* window, FrameInput input);
+	Result<void> Tick(Ursa::Float32 deltaSeconds, Window* window, FrameInput input);
 
 	void Stop();
 
@@ -44,7 +45,7 @@ private:
 	std::shared_ptr<void> services;
 	std::unique_ptr<Scene> scene;
 	FrameScheduler scheduler;
-	uint64_t frameIndex = 0;
-	double elapsedSeconds = 0.0;
+	Ursa::UInt64 frameIndex = 0;
+	Ursa::Float64 elapsedSeconds = 0.0;
 };
 } // namespace Ursa::Editor

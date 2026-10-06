@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <cmath>
@@ -14,18 +15,18 @@ Json ColorJson(Color color)
 	return Json::array({color.red, color.green, color.blue, color.alpha});
 }
 
-Result<float> number(const Json& data, const char* field)
+Result<Ursa::Float32> number(const Json& data, const char* field)
 {
 	if (!data.is_object() || !data.contains(field) || !data[field].is_number())
 	{
-		return Result<float>::Failure(String("Missing or invalid component field ") + field);
+		return Result<Ursa::Float32>::Failure(String("Missing or invalid component field ") + field);
 	}
-	const double value = data[field].get<double>();
-	if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+	const Ursa::Float64 value = data[field].get<Ursa::Float64>();
+	if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<Ursa::Float32>::max())
 	{
-		return Result<float>::Failure(String("Out-of-range component field ") + field);
+		return Result<Ursa::Float32>::Failure(String("Out-of-range component field ") + field);
 	}
-	return Result<float>::Success(static_cast<float>(value));
+	return Result<Ursa::Float32>::Success(static_cast<Ursa::Float32>(value));
 }
 
 Result<Color> ParseColor(const Json& data, const char* field)
@@ -35,19 +36,19 @@ Result<Color> ParseColor(const Json& data, const char* field)
 		return Result<Color>::Failure(String("Missing or invalid component field ") + field);
 	}
 	Color color;
-	float* channels[] = {&color.red, &color.green, &color.blue, &color.alpha};
-	for (size_t index = 0; index < 4; ++index)
+	Ursa::Float32* channels[] = {&color.red, &color.green, &color.blue, &color.alpha};
+	for (Ursa::Size index = 0; index < 4; ++index)
 	{
 		if (!data[field][index].is_number())
 		{
 			return Result<Color>::Failure(String("Invalid component color field ") + field);
 		}
-		const double channel = data[field][index].get<double>();
-		if (!std::isfinite(channel) || std::abs(channel) > std::numeric_limits<float>::max())
+		const Ursa::Float64 channel = data[field][index].get<Ursa::Float64>();
+		if (!std::isfinite(channel) || std::abs(channel) > std::numeric_limits<Ursa::Float32>::max())
 		{
 			return Result<Color>::Failure(String("Out-of-range component color field ") + field);
 		}
-		*channels[index] = static_cast<float>(channel);
+		*channels[index] = static_cast<Ursa::Float32>(channel);
 	}
 	return Result<Color>::Success(color);
 }
@@ -64,7 +65,7 @@ Result<void> RegisterCamera(ComponentRegistry& registry)
 		                              {"nearPlane", camera.nearPlane},
 		                              {"farPlane", camera.farPlane}});
 	};
-	codec.create = [](Scene& scene, NodeId node, const Json& data, ComponentLoadContext&)
+	codec.create = [](Scene& scene, GameObject::Ptr node, const Json& data, ComponentLoadContext&)
 	{
 		const auto fov = number(data, "verticalFovRadians");
 		const auto nearPlane = number(data, "nearPlane");
@@ -84,6 +85,26 @@ Result<void> RegisterCamera(ComponentRegistry& registry)
 		camera->nearPlane = nearPlane.value;
 		camera->farPlane = farPlane.value;
 		return added;
+	};
+	codec.createDetached = [](const GameObject::Ptr& object, const Json& data, ComponentLoadContext&)
+	{
+		const auto fov = number(data, "verticalFovRadians");
+		const auto nearPlane = number(data, "nearPlane");
+		const auto farPlane = number(data, "farPlane");
+		if (!fov || !nearPlane || !farPlane || fov.value <= 0.0f || fov.value >= 3.14159265f ||
+		    nearPlane.value <= 0.0f || farPlane.value <= nearPlane.value)
+		{
+			return Result<Component*>::Failure("Invalid camera projection fields");
+		}
+		auto added = object->AddComponent<CameraComponent>();
+		if (!added)
+		{
+			return Result<Component*>::Failure(added.error);
+		}
+		added.value->verticalFovRadians = fov.value;
+		added.value->nearPlane = nearPlane.value;
+		added.value->farPlane = farPlane.value;
+		return Result<Component*>::Success(added.value);
 	};
 	return registry.RegisterCodec(std::move(codec));
 }
@@ -112,7 +133,7 @@ Result<void> RegisterBox(ComponentRegistry& registry)
 		}
 		return Result<Json>::Success({{"color", ColorJson(box.color)}, {"material", std::move(material)}});
 	};
-	codec.create = [](Scene& scene, NodeId node, const Json& data, ComponentLoadContext& context)
+	codec.create = [](Scene& scene, GameObject::Ptr node, const Json& data, ComponentLoadContext& context)
 	{
 		auto selectedColor = ParseColor(data, "color");
 		if (!selectedColor || !data.is_object() || !data.contains("material"))
@@ -145,6 +166,38 @@ Result<void> RegisterBox(ComponentRegistry& registry)
 		}
 		return added;
 	};
+	codec.createDetached = [](const GameObject::Ptr& object, const Json& data, ComponentLoadContext& context)
+	{
+		auto color = ParseColor(data, "color");
+		if (!color || !data.is_object() || !data.contains("material"))
+		{
+			return Result<Component*>::Failure("Invalid box renderer fields");
+		}
+		auto added = object->AddComponent<BoxRenderComponent>(color.value);
+		if (!added)
+		{
+			return Result<Component*>::Failure(added.error);
+		}
+		if (!data["material"].is_null())
+		{
+			if (!data["material"].is_string())
+			{
+				return Result<Component*>::Failure("Invalid box renderer material ID");
+			}
+			auto id = ResourceId::Parse(data["material"].get<String>());
+			if (!id)
+			{
+				return Result<Component*>::Failure(id.error);
+			}
+			auto material = context.Resources().LoadMaterial(id.value);
+			if (!material)
+			{
+				return Result<Component*>::Failure(material.error);
+			}
+			added.value->material = material.value;
+		}
+		return Result<Component*>::Success(added.value);
+	};
 	return registry.RegisterCodec(std::move(codec));
 }
 
@@ -159,7 +212,7 @@ Result<void> RegisterDirectionalLight(ComponentRegistry& registry)
 		const auto& light = static_cast<const DirectionalLightComponent&>(value);
 		return Result<Json>::Success({{"color", ColorJson(light.Color())}, {"intensity", light.Intensity()}});
 	};
-	codec.create = [](Scene& scene, NodeId node, const Json& data, ComponentLoadContext&)
+	codec.create = [](Scene& scene, GameObject::Ptr node, const Json& data, ComponentLoadContext&)
 	{
 		const auto selectedColor = ParseColor(data, "color");
 		const auto intensity = number(data, "intensity");
@@ -180,6 +233,26 @@ Result<void> RegisterDirectionalLight(ComponentRegistry& registry)
 		}
 		return changed ? added : Result<ComponentId>::Failure(changed.error);
 	};
+	codec.createDetached = [](const GameObject::Ptr& object, const Json& data, ComponentLoadContext&)
+	{
+		const auto color = ParseColor(data, "color");
+		const auto intensity = number(data, "intensity");
+		if (!color || !intensity)
+		{
+			return Result<Component*>::Failure(!color ? color.error : intensity.error);
+		}
+		auto added = object->AddComponent<DirectionalLightComponent>();
+		if (!added)
+		{
+			return Result<Component*>::Failure(added.error);
+		}
+		auto changed = added.value->SetColor(color.value);
+		if (changed)
+		{
+			changed = added.value->SetIntensity(intensity.value);
+		}
+		return changed ? Result<Component*>::Success(added.value) : Result<Component*>::Failure(changed.error);
+	};
 	return registry.RegisterCodec(std::move(codec));
 }
 
@@ -194,7 +267,7 @@ Result<void> RegisterPointLight(ComponentRegistry& registry)
 		return Result<Json>::Success(
 		    {{"color", ColorJson(light.Color())}, {"intensity", light.Intensity()}, {"range", light.Range()}});
 	};
-	codec.create = [](Scene& scene, NodeId node, const Json& data, ComponentLoadContext&)
+	codec.create = [](Scene& scene, GameObject::Ptr node, const Json& data, ComponentLoadContext&)
 	{
 		const auto selectedColor = ParseColor(data, "color");
 		const auto intensity = number(data, "intensity");
@@ -221,6 +294,31 @@ Result<void> RegisterPointLight(ComponentRegistry& registry)
 			changed = light->SetRange(range.value);
 		}
 		return changed ? added : Result<ComponentId>::Failure(changed.error);
+	};
+	codec.createDetached = [](const GameObject::Ptr& object, const Json& data, ComponentLoadContext&)
+	{
+		const auto color = ParseColor(data, "color");
+		const auto intensity = number(data, "intensity");
+		const auto range = number(data, "range");
+		if (!color || !intensity || !range)
+		{
+			return Result<Component*>::Failure(!color ? color.error : !intensity ? intensity.error : range.error);
+		}
+		auto added = object->AddComponent<PointLightComponent>();
+		if (!added)
+		{
+			return Result<Component*>::Failure(added.error);
+		}
+		auto changed = added.value->SetColor(color.value);
+		if (changed)
+		{
+			changed = added.value->SetIntensity(intensity.value);
+		}
+		if (changed)
+		{
+			changed = added.value->SetRange(range.value);
+		}
+		return changed ? Result<Component*>::Success(added.value) : Result<Component*>::Failure(changed.error);
 	};
 	return registry.RegisterCodec(std::move(codec));
 }

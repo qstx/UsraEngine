@@ -1,4 +1,5 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Rhi/RHI.hpp>
 #include <Application/FrameScheduler.hpp>
@@ -12,15 +13,15 @@ class Application
 public:
 	virtual ~Application() = default;
 
-	Result<void> Run(uint32_t width = 1280, uint32_t height = 720, const String& title = "UrsaEngine",
-	                 bool visible = true, uint32_t frameLimit = 0);
+	Result<void> Run(Ursa::UInt32 width = 1280, Ursa::UInt32 height = 720, const String& title = "UrsaEngine",
+	                 bool visible = true, Ursa::UInt32 frameLimit = 0);
 
-	Result<void> ConfigureFixedStep(float seconds, uint32_t maxSteps = 5);
+	Result<void> ConfigureFixedStep(Ursa::Float32 seconds, Ursa::UInt32 maxSteps = 5);
 
 protected:
 	virtual Result<void> OnStart() = 0;
 
-	virtual Result<void> OnFrame(float deltaSeconds)
+	virtual Result<void> OnFrame(Ursa::Float32 deltaSeconds)
 	{
 		(void)deltaSeconds;
 		return {};

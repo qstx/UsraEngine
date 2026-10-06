@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Core/Result.hpp>
 #include <Rhi/RHI.hpp>
 #include <Serialization/ComponentRegistry.hpp>
@@ -12,7 +14,6 @@
 #include <Scene/EditorGizmo.hpp>
 #include <Scene/ComponentEditors.hpp>
 #include <Application/PlaySession.hpp>
-#include <array>
 #include <functional>
 
 namespace Ursa::Editor
@@ -36,8 +37,8 @@ public:
 
 	virtual ~EditorApplication() = default;
 
-	Result<void> Run(uint32_t width = 1280, uint32_t height = 720, const String& title = "Ursa Editor",
-	                 bool visible = true, uint32_t frameLimit = 0);
+	Result<void> Run(Ursa::UInt32 width = 1280, Ursa::UInt32 height = 720, const String& title = "Ursa Editor",
+	                 bool visible = true, Ursa::UInt32 frameLimit = 0);
 
 	Result<void> OpenProject(const std::filesystem::path& root);
 
@@ -47,7 +48,7 @@ protected:
 		return {};
 	}
 
-	virtual Result<void> OnFrame(float deltaSeconds)
+	virtual Result<void> OnFrame(Ursa::Float32 deltaSeconds)
 	{
 		(void)deltaSeconds;
 		return {};
@@ -95,12 +96,12 @@ private:
 	ImTextureID scenePreviewId = ImTextureID_Invalid;
 	bool scenePreviewRendered = false;
 	ResourceId displayedSceneId;
-	GizmoOperation gizmoOperation = GizmoOperation::translate;
+	GizmoOperation gizmoOperation = GizmoOperation::Translate;
 	PlaySession play;
 	bool viewportFocused = false;
 	std::unique_ptr<ProjectWorkspace> workspace;
 	std::unique_ptr<EditorDocuments> documents;
-	std::array<char, 256> assetNameInput{};
+	Ursa::Array<char, 256> assetNameInput{};
 	String workspaceError;
 	String inspectorError;
 	bool exitRequested = false;

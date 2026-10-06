@@ -1,3 +1,5 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Core/Log.hpp>
 #include <chrono>
 #include <filesystem>
@@ -6,7 +8,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <vector>
 
 namespace
 {
@@ -27,19 +28,19 @@ std::string ReadFile(const std::filesystem::path& path)
 void Run(const std::filesystem::path& root)
 {
 	using namespace Ursa;
-	static_assert(static_cast<int>(LogLevel::trace) < static_cast<int>(LogLevel::debug));
-	static_assert(static_cast<int>(LogLevel::debug) < static_cast<int>(LogLevel::info));
-	static_assert(static_cast<int>(LogLevel::info) < static_cast<int>(LogLevel::warn));
-	static_assert(static_cast<int>(LogLevel::warn) < static_cast<int>(LogLevel::error));
-	static_assert(static_cast<int>(LogLevel::error) < static_cast<int>(LogLevel::critical));
-	static_assert(static_cast<int>(LogLevel::critical) < static_cast<int>(LogLevel::off));
+	static_assert(static_cast<int>(LogLevel::Trace) < static_cast<int>(LogLevel::Debug));
+	static_assert(static_cast<int>(LogLevel::Debug) < static_cast<int>(LogLevel::Info));
+	static_assert(static_cast<int>(LogLevel::Info) < static_cast<int>(LogLevel::Warn));
+	static_assert(static_cast<int>(LogLevel::Warn) < static_cast<int>(LogLevel::Error));
+	static_assert(static_cast<int>(LogLevel::Error) < static_cast<int>(LogLevel::Critical));
+	static_assert(static_cast<int>(LogLevel::Critical) < static_cast<int>(LogLevel::Off));
 
 #ifndef NDEBUG
-	Expect(Log::DefaultLevel() == LogLevel::debug, "Debug default level is wrong");
+	Expect(Log::DefaultLevel() == LogLevel::Debug, "Debug default level is wrong");
 #else
 	expect(Log::defaultLevel() == LogLevel::Info, "Release default level is wrong");
 #endif
-	Log::Write(LogLevel::error, "Bootstrap", "message before initialization");
+	Log::Write(LogLevel::Error, "Bootstrap", "message before initialization");
 
 	const auto blocked = root / "blocked";
 	{
@@ -55,12 +56,12 @@ void Run(const std::filesystem::path& root)
 	const auto filePath = root / "logs" / "rotation.log";
 	LogConfig config;
 	config.filePath = filePath;
-	config.level = LogLevel::trace;
+	config.level = LogLevel::Trace;
 	config.maxFileBytes = 512;
 	config.maxFiles = 2;
 	auto initialized = Log::Initialize(root / "LogTests.exe", config);
 	Expect(static_cast<bool>(initialized) && Log::Initialized(), "Log initialization failed");
-	Expect(Log::Level() == LogLevel::trace, "Configured log level was lost");
+	Expect(Log::Level() == LogLevel::Trace, "Configured log level was lost");
 	URSA_LOG_TRACE("Runtime", "trace message");
 	URSA_LOG_DEBUG("Runtime", "debug message");
 	URSA_LOG_INFO("Runtime", "info message");
@@ -71,24 +72,24 @@ void Run(const std::filesystem::path& root)
 	       "Warn was not flushed with level, module and UTF-8 text");
 	URSA_LOG_CRITICAL("Runtime", "critical message");
 
-	Log::SetLevel(LogLevel::warn);
+	Log::SetLevel(LogLevel::Warn);
 	int evaluated = 0;
 	URSA_LOG_INFO("Runtime", String(std::to_string(++evaluated).c_str()));
-	Expect(evaluated == 0 && !Log::Enabled(LogLevel::info), "Filtered message was evaluated");
+	Expect(evaluated == 0 && !Log::Enabled(LogLevel::Info), "Filtered message was evaluated");
 	URSA_LOG_ERROR("Runtime", "kept error");
-	Log::SetLevel(LogLevel::off);
+	Log::SetLevel(LogLevel::Off);
 	URSA_LOG_CRITICAL("Runtime", "filtered critical");
-	Expect(!Log::Enabled(LogLevel::critical), "Off did not suppress messages");
-	Log::SetLevel(LogLevel::trace);
+	Expect(!Log::Enabled(LogLevel::Critical), "Off did not suppress messages");
+	Log::SetLevel(LogLevel::Trace);
 	for (int index = 0; index < 40; ++index)
 	{
-		Log::Write(LogLevel::info, "Rotation",
+		Log::Write(LogLevel::Info, "Rotation",
 		           String(("entry-" + std::to_string(index) + std::string(100, 'x')).c_str()));
 	}
 	Log::Shutdown();
 	Expect(!Log::Initialized(), "Shutdown retained the logger");
 	Expect(ReadFile(filePath).find("filtered critical") == std::string::npos, "Filtered message reached the file");
-	size_t rotatedFiles = 0;
+	Ursa::Size rotatedFiles = 0;
 	for (const auto& entry : std::filesystem::directory_iterator(filePath.parent_path()))
 	{
 		if (entry.path().filename().string().find("rotation") == 0)
@@ -101,7 +102,7 @@ void Run(const std::filesystem::path& root)
 	config.filePath = root / "logs" / "threads.log";
 	config.maxFileBytes = 1024 * 1024;
 	Expect(static_cast<bool>(Log::Initialize(root / "LogTests.exe", config)), "Thread log init failed");
-	std::vector<std::thread> threads;
+	Ursa::Vector<std::thread> threads;
 	for (int thread = 0; thread < 4; ++thread)
 	{
 		threads.emplace_back(
@@ -109,7 +110,7 @@ void Run(const std::filesystem::path& root)
 		    {
 			    for (int index = 0; index < 50; ++index)
 			    {
-				    Log::Write(LogLevel::info, "Threads",
+				    Log::Write(LogLevel::Info, "Threads",
 				               String(("thread-" + std::to_string(thread) + "-" + std::to_string(index)).c_str()));
 			    }
 		    });
@@ -136,7 +137,7 @@ void Run(const std::filesystem::path& root)
 	Log::Shutdown();
 	Expect(ReadFile(root / "bin" / "logs" / "LogTests.log").find("default path message") != std::string::npos,
 	       "Default log path is not beside the executable");
-	Log::Write(LogLevel::error, "Bootstrap", "message after shutdown");
+	Log::Write(LogLevel::Error, "Bootstrap", "message after shutdown");
 }
 } // namespace
 

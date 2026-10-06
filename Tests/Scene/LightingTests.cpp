@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Scene/Scene.hpp>
@@ -40,7 +41,7 @@ void TestValidation()
 	Expect(!scene.SetAmbientLight({-1.0f, 0.0f, 0.0f, 1.0f}, 0.5f) && !scene.SetAmbientLight({}, -1.0f) &&
 	           scene.AmbientLightIntensity() == 0.2f && scene.AmbientLightColor().red == 0.3f,
 	       "Invalid ambient light changed the last valid setting");
-	const auto directionalNode = Take(scene.CreateNode());
+	const auto directionalNode = Take(scene.CreateGameObject());
 	Take(scene.AddComponent<Ursa::DirectionalLightComponent>(directionalNode));
 	auto* directional = scene.FindComponent<Ursa::DirectionalLightComponent>(directionalNode);
 	done(directional->SetColor({0.8f, 0.6f, 0.2f, 1.0f}));
@@ -49,7 +50,7 @@ void TestValidation()
 	Expect(!badDirectional && badDirectional.error.find("intensity") != Ursa::String::npos &&
 	           directional->Intensity() == 2.0f,
 	       "Invalid directional intensity changed the light");
-	const auto pointNode = Take(scene.CreateNode());
+	const auto pointNode = Take(scene.CreateGameObject());
 	Take(scene.AddComponent<Ursa::PointLightComponent>(pointNode));
 	auto* point = scene.FindComponent<Ursa::PointLightComponent>(pointNode);
 	done(point->SetRange(4.0f));
@@ -62,13 +63,13 @@ void TestValidation()
 void TestWorldSnapshotAndCapacity()
 {
 	Ursa::Scene scene;
-	const auto cameraNode = Take(scene.CreateNode());
+	const auto cameraNode = Take(scene.CreateGameObject());
 	const auto cameraId = Take(scene.AddComponent<Ursa::CameraComponent>(cameraNode));
 	done(scene.SetActiveCamera(cameraId));
-	const auto parent = Take(scene.CreateNode());
-	const auto directionalNode = Take(scene.CreateNode(parent));
+	const auto parent = Take(scene.CreateGameObject());
+	const auto directionalNode = Take(scene.CreateGameObject(parent));
 	Take(scene.AddComponent<Ursa::DirectionalLightComponent>(directionalNode));
-	const auto pointNode = Take(scene.CreateNode(parent));
+	const auto pointNode = Take(scene.CreateGameObject(parent));
 	Take(scene.AddComponent<Ursa::PointLightComponent>(pointNode));
 	Ursa::LocalTransform parentTransform;
 	parentTransform.position = {2.0f, 0.0f, 0.0f};
@@ -94,14 +95,14 @@ void TestWorldSnapshotAndCapacity()
 	       "Disabled ancestor still contributed lights");
 	done(scene.SetEnabled(parent, true));
 	Expect(Take(scene.CollectRenderData(1.0f)).lighting.point.size() == 1, "Reenabled ancestor did not restore lights");
-	for (uint32_t index = 1; index < Ursa::SceneLighting::maxPointLights; ++index)
+	for (Ursa::UInt32 index = 1; index < Ursa::SceneLighting::maxPointLights; ++index)
 	{
-		const auto node = Take(scene.CreateNode());
+		const auto node = Take(scene.CreateGameObject());
 		Take(scene.AddComponent<Ursa::PointLightComponent>(node));
 	}
 	Expect(Take(scene.CollectRenderData(1.0f)).lighting.point.size() == Ursa::SceneLighting::maxPointLights,
 	       "Point light capacity boundary failed");
-	const auto extra = Take(scene.CreateNode());
+	const auto extra = Take(scene.CreateGameObject());
 	Take(scene.AddComponent<Ursa::PointLightComponent>(extra));
 	const auto overflow = scene.CollectRenderData(1.0f);
 	Expect(!overflow && overflow.error.find("9") != Ursa::String::npos &&

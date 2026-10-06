@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Serialization/MaterialResource.hpp>
@@ -21,14 +22,14 @@ void TestTexture(const std::filesystem::path& directory)
 {
 	const auto path = directory / "checker.ursatex";
 	const auto id = Ursa::ResourceId::Generate();
-	const Ursa::Vector<uint8_t> pixels{255, 30, 20, 255, 10, 200, 80, 128, 0, 0, 0, 0, 45, 55, 230, 240};
-	const auto texture = Ursa::MaterialTexture::Create(2, 2, Ursa::TextureColorSpace::srgb, pixels);
+	const Ursa::Vector<Ursa::UInt8> pixels{255, 30, 20, 255, 10, 200, 80, 128, 0, 0, 0, 0, 45, 55, 230, 240};
+	const auto texture = Ursa::MaterialTexture::Create(2, 2, Ursa::TextureColorSpace::Srgb, pixels);
 	Expect(static_cast<bool>(texture), "Cannot create source texture");
 	Expect(static_cast<bool>(Ursa::SaveTextureResource(path, id, *texture.value)), "Cannot save texture resource");
 	const auto restored = Ursa::LoadTextureResource(path);
 	Expect(restored && restored.value.id == id && restored.value.texture->GetWidth() == 2 &&
 	           restored.value.texture->GetHeight() == 2 &&
-	           restored.value.texture->GetColorSpace() == Ursa::TextureColorSpace::srgb &&
+	           restored.value.texture->GetColorSpace() == Ursa::TextureColorSpace::Srgb &&
 	           restored.value.texture->GetPixels() == pixels,
 	       "Texture resource roundtrip lost data");
 
@@ -47,21 +48,21 @@ void TestMaterial(const std::filesystem::path& directory)
 	const auto materialId = Ursa::ResourceId::Generate();
 	const auto colorId = Ursa::ResourceId::Generate();
 	const auto normalId = Ursa::ResourceId::Generate();
-	auto color = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::srgb, {210, 80, 40, 200});
-	auto normal = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::linear, {128, 128, 255, 255});
+	auto color = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::Srgb, {210, 80, 40, 200});
+	auto normal = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::Linear, {128, 128, 255, 255});
 	Expect(color && normal, "Could not create test textures");
 	Expect(static_cast<bool>(Ursa::SaveTextureResource(colorPath, colorId, *color.value)) &&
 	           static_cast<bool>(Ursa::SaveTextureResource(normalPath, normalId, *normal.value)),
 	       "Could not save material textures");
-	Ursa::MaterialInstance source(Ursa::MaterialType::pbrMetallicRoughness);
+	Ursa::MaterialInstance source(Ursa::MaterialType::PbrMetallicRoughness);
 	Expect(static_cast<bool>(source.SetBaseColor({0.8f, 0.3f, 0.2f, 0.7f})) &&
 	           static_cast<bool>(source.SetMetallic(0.35f)) && static_cast<bool>(source.SetRoughness(0.62f)) &&
 	           static_cast<bool>(source.SetNormalScale(1.4f)) && static_cast<bool>(source.SetOcclusionStrength(0.5f)) &&
 	           static_cast<bool>(source.SetEmissive({0.2f, 0.1f, 0.05f, 1.0f})) &&
-	           static_cast<bool>(source.SetAlphaMode(Ursa::AlphaMode::blend, 0.4f)) &&
+	           static_cast<bool>(source.SetAlphaMode(Ursa::AlphaMode::Blend, 0.4f)) &&
 	           static_cast<bool>(source.SetSampler({false, false})) &&
-	           static_cast<bool>(source.SetTexture(Ursa::MaterialTextureSlot::baseColor, color.value)) &&
-	           static_cast<bool>(source.SetTexture(Ursa::MaterialTextureSlot::normal, normal.value)),
+	           static_cast<bool>(source.SetTexture(Ursa::MaterialTextureSlot::BaseColor, color.value)) &&
+	           static_cast<bool>(source.SetTexture(Ursa::MaterialTextureSlot::Normal, normal.value)),
 	       "Could not configure source material");
 	const auto saved = Ursa::SaveMaterialResource(materialPath, materialId, source,
 	                                              [&](Ursa::MaterialTexturePtr texture)
@@ -89,20 +90,20 @@ void TestMaterial(const std::filesystem::path& directory)
 		                               return Ursa::Result<Ursa::MaterialTexturePtr>::Success(loaded.value.texture);
 	                               });
 	Expect(restored && restored.value.id == materialId &&
-	           restored.value.material->Type() == Ursa::MaterialType::pbrMetallicRoughness &&
+	           restored.value.material->Type() == Ursa::MaterialType::PbrMetallicRoughness &&
 	           restored.value.material->Parameters().baseColor.red == 0.8f &&
 	           restored.value.material->Parameters().metallic == 0.35f &&
 	           restored.value.material->Parameters().roughness == 0.62f &&
 	           restored.value.material->Parameters().normalScale == 1.4f &&
 	           restored.value.material->Parameters().occlusionStrength == 0.5f &&
 	           restored.value.material->Parameters().emissive.red == 0.2f &&
-	           restored.value.material->Parameters().alphaMode == Ursa::AlphaMode::blend &&
+	           restored.value.material->Parameters().alphaMode == Ursa::AlphaMode::Blend &&
 	           restored.value.material->Parameters().alphaCutoff == 0.4f &&
 	           !restored.value.material->Parameters().sampler.linear &&
 	           !restored.value.material->Parameters().sampler.repeat &&
-	           restored.value.material->Texture(Ursa::MaterialTextureSlot::baseColor)->GetPixels() ==
+	           restored.value.material->Texture(Ursa::MaterialTextureSlot::BaseColor)->GetPixels() ==
 	               color.value->GetPixels() &&
-	           restored.value.material->Texture(Ursa::MaterialTextureSlot::normal)->GetPixels() ==
+	           restored.value.material->Texture(Ursa::MaterialTextureSlot::Normal)->GetPixels() ==
 	               normal.value->GetPixels(),
 	       "PBR material roundtrip lost data");
 
@@ -146,11 +147,11 @@ void TestSession(const std::filesystem::path& directory)
 	const auto texturePath = root / "shared.ursatex";
 	const auto firstPath = root / "first.ursamat";
 	const auto secondPath = root / "second.ursamat";
-	auto red = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::srgb, {255, 0, 0, 255});
+	auto red = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::Srgb, {255, 0, 0, 255});
 	Expect(red && static_cast<bool>(Ursa::SaveTextureResource(texturePath, textureId, *red.value)),
 	       "Could not save shared texture");
-	Ursa::MaterialInstance source(Ursa::MaterialType::unlit);
-	Expect(static_cast<bool>(source.SetTexture(Ursa::MaterialTextureSlot::baseColor, red.value)),
+	Ursa::MaterialInstance source(Ursa::MaterialType::Unlit);
+	Expect(static_cast<bool>(source.SetTexture(Ursa::MaterialTextureSlot::BaseColor, red.value)),
 	       "Could not bind shared texture");
 	auto resolve = [&](Ursa::MaterialTexturePtr selected)
 	{
@@ -166,19 +167,19 @@ void TestSession(const std::filesystem::path& directory)
 	auto firstAgain = opened.value->LoadMaterial(firstId);
 	auto second = opened.value->LoadMaterial(secondId);
 	Expect(first && firstAgain && second && first.value == firstAgain.value &&
-	           first.value->Texture(Ursa::MaterialTextureSlot::baseColor) ==
-	               second.value->Texture(Ursa::MaterialTextureSlot::baseColor),
+	           first.value->Texture(Ursa::MaterialTextureSlot::BaseColor) ==
+	               second.value->Texture(Ursa::MaterialTextureSlot::BaseColor),
 	       "Resource session did not preserve shared identity");
 
-	auto blue = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::srgb, {0, 0, 255, 255});
+	auto blue = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::Srgb, {0, 0, 255, 255});
 	Expect(blue && static_cast<bool>(Ursa::SaveTextureResource(texturePath, textureId, *blue.value)),
 	       "Could not update texture on disk");
 	auto refreshed = opened.value->Refreshed();
 	Expect(static_cast<bool>(refreshed), "Could not refresh resource session");
 	auto reloaded = refreshed.value->LoadMaterial(firstId);
 	Expect(reloaded && reloaded.value != first.value &&
-	           reloaded.value->Texture(Ursa::MaterialTextureSlot::baseColor)->GetPixels()[0] == 0 &&
-	           first.value->Texture(Ursa::MaterialTextureSlot::baseColor)->GetPixels()[0] == 255,
+	           reloaded.value->Texture(Ursa::MaterialTextureSlot::BaseColor)->GetPixels()[0] == 0 &&
+	           first.value->Texture(Ursa::MaterialTextureSlot::BaseColor)->GetPixels()[0] == 255,
 	       "Fresh session failed to see disk update or modified old resource");
 	std::filesystem::remove(texturePath);
 	std::filesystem::remove(firstPath);

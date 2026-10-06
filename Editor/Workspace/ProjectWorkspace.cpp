@@ -35,7 +35,7 @@ bool ContainedIn(const std::filesystem::path& root, const std::filesystem::path&
 } // namespace
 
 Result<std::unique_ptr<ProjectWorkspace>> ProjectWorkspace::Open(const std::filesystem::path& projectDirectory,
-                                                                 const Vector<ResourceMount>& engineMounts)
+                                                                 const Vector<ResourceMount>& builtinMounts)
 {
 	std::error_code error;
 	const auto canonicalProject = std::filesystem::canonical(projectDirectory, error);
@@ -54,14 +54,14 @@ Result<std::unique_ptr<ProjectWorkspace>> ProjectWorkspace::Open(const std::file
 	auto workspace = std::unique_ptr<ProjectWorkspace>(new ProjectWorkspace());
 	workspace->projectRoot = canonicalProject;
 	workspace->assetsRoot = canonicalAssets;
-	workspace->engineMounts = engineMounts;
+	workspace->engineMounts = builtinMounts;
 
-	auto added = workspace->index.Mount(ResourceMount{projectResourceScheme, canonicalAssets, MountAccess::readWrite});
+	auto added = workspace->index.Mount(ResourceMount{projectResourceScheme, canonicalAssets, MountAccess::ReadWrite});
 	if (!added)
 	{
 		return Result<std::unique_ptr<ProjectWorkspace>>::Failure(added.error);
 	}
-	for (const ResourceMount& mount : engineMounts)
+	for (const ResourceMount& mount : builtinMounts)
 	{
 		const auto canonicalEngine = std::filesystem::canonical(mount.root, error);
 		if (error || !std::filesystem::is_directory(canonicalEngine))

@@ -42,7 +42,7 @@ void RoundTripScene(const std::filesystem::path& path, Ursa::ResourceSession& re
 		return;
 	}
 	Ursa::Scene source;
-	auto node = source.CreateNode();
+	auto node = source.CreateGameObject();
 	if (!node || !source.AddComponent<Ursa::CameraComponent>(node.value))
 	{
 		return;
@@ -70,10 +70,10 @@ void TestScene(const std::filesystem::path& root)
 	Ursa::ComponentRegistry registry;
 	done(Ursa::RegisterBuiltinComponents(registry));
 	Ursa::Scene scene;
-	const auto first = Take(scene.CreateNode());
-	const auto child = Take(scene.CreateNode(first));
-	const auto second = Take(scene.CreateNode());
-	done(scene.ReorderNode(second, 0));
+	const auto first = Take(scene.CreateGameObject());
+	const auto child = Take(scene.CreateGameObject(first));
+	const auto second = Take(scene.CreateGameObject());
+	done(scene.ReorderGameObject(second, 0));
 	Ursa::LocalTransform transform;
 	transform.position = {2.0f, 3.0f, 4.0f};
 	transform.scale = {1.2f, 0.8f, 2.0f};
@@ -96,16 +96,16 @@ void TestScene(const std::filesystem::path& root)
 	auto* lampObject = static_cast<Ursa::PointLightComponent*>(scene.GetComponent(lamp));
 	done(lampObject->SetRange(7.0f));
 	Take(scene.AddComponent<Ursa::PointLightComponent>(second));
-	auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::unlit);
+	auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
 	done(material->SetBaseColor({0.2f, 0.5f, 0.8f, 1.0f}));
 	const auto materialId = Ursa::ResourceId::Generate();
 	const auto materialPath = root / "box.ursamat";
 	done(Ursa::SaveMaterialResource(materialPath, materialId, *material, {}));
 	const auto visibleBox = Take(scene.AddComponent<Ursa::BoxRenderComponent>(first));
 	static_cast<Ursa::BoxRenderComponent*>(scene.GetComponent(visibleBox))->material = material;
-	const auto firstId = Take(scene.NodePersistentId(first));
-	const auto childId = Take(scene.NodePersistentId(child));
-	const auto secondId = Take(scene.NodePersistentId(second));
+	const auto firstId = Take(scene.PersistentId(first));
+	const auto childId = Take(scene.PersistentId(child));
+	const auto secondId = Take(scene.PersistentId(second));
 	const auto cameraId = Take(scene.ComponentPersistentId(camera));
 	const auto sunId = Take(scene.ComponentPersistentId(sun));
 	const auto sceneId = Ursa::ResourceId::Generate();
@@ -120,11 +120,11 @@ void TestScene(const std::filesystem::path& root)
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext context(*session);
 	auto loaded = Take(Ursa::LoadSceneResource(path, registry, context));
-	Expect(loaded.id == sceneId && loaded.scene->RootNodes().size() == 2 &&
-	           Take(loaded.scene->NodePersistentId(loaded.scene->RootNodes()[0])) == secondId,
+	Expect(loaded.id == sceneId && loaded.scene->RootGameObjects().size() == 2 &&
+	           Take(loaded.scene->PersistentId(loaded.scene->RootGameObjects()[0])) == secondId,
 	       "Scene root identity or order was lost");
-	const auto restoredFirst = Take(loaded.scene->NodeByPersistentId(firstId));
-	const auto restoredChild = Take(loaded.scene->NodeByPersistentId(childId));
+	const auto restoredFirst = Take(loaded.scene->GameObjectById(firstId));
+	const auto restoredChild = Take(loaded.scene->GameObjectById(childId));
 	Expect(Take(loaded.scene->ParentOf(restoredChild)) == restoredFirst &&
 	           Take(loaded.scene->GetLocalTransform(restoredChild)).position.x == 2.0f &&
 	           !Take(loaded.scene->IsEnabled(restoredChild)),
@@ -133,7 +133,7 @@ void TestScene(const std::filesystem::path& root)
 	           loaded.scene->AmbientLightColor().green == 0.4f && loaded.scene->AmbientLightIntensity() == 0.25f &&
 	           !Take(loaded.scene->IsComponentEnabled(Take(loaded.scene->ComponentsOf(restoredChild))[0])),
 	       "Scene camera, ambient light, or component enabled state was lost");
-	Expect(Take(loaded.scene->ComponentsOf(Take(loaded.scene->NodeByPersistentId(secondId)))).size() == 3 &&
+	Expect(Take(loaded.scene->ComponentsOf(Take(loaded.scene->GameObjectById(secondId)))).size() == 3 &&
 	           loaded.scene->GetComponent(Take(loaded.scene->ComponentByPersistentId(sunId))) != nullptr,
 	       "Scene components were not restored");
 	const auto restoredCamera = loaded.scene->FindComponent<Ursa::CameraComponent>(restoredFirst);
@@ -150,8 +150,8 @@ void TestScene(const std::filesystem::path& root)
 		std::ifstream input(path);
 		input >> document;
 	}
-	const auto originalId = document["nodes"][1]["id"];
-	document["nodes"][1]["id"] = document["nodes"][0]["id"];
+	const auto originalId = document["gameObjects"][1]["id"];
+	document["gameObjects"][1]["id"] = document["gameObjects"][0]["id"];
 	const auto duplicate = root / "duplicate.ursascene";
 	{
 		std::ofstream output(duplicate);
@@ -159,10 +159,10 @@ void TestScene(const std::filesystem::path& root)
 	}
 	Ursa::ComponentLoadContext duplicateContext(*session);
 	auto repeated = Ursa::LoadSceneResource(duplicate, registry, duplicateContext);
-	Expect(!repeated && repeated.error.find("Duplicate node ID") != Ursa::String::npos,
-	       "Duplicate node ID was accepted");
-	document["nodes"][1]["id"] = originalId;
-	document["nodes"][1]["parent"] = Ursa::ToStdString(Ursa::ResourceId::Generate().ToString());
+	Expect(!repeated && repeated.error.find("Duplicate GameObject ID") != Ursa::String::npos,
+	       "Duplicate GameObject ID was accepted");
+	document["gameObjects"][1]["id"] = originalId;
+	document["gameObjects"][1]["parentId"] = Ursa::ToStdString(Ursa::ResourceId::Generate().ToString());
 	const auto missing = root / "missing.ursascene";
 	{
 		std::ofstream output(missing);
@@ -186,7 +186,7 @@ struct ProbeCounters
 class ProbeComponent final : public Ursa::Component
 {
 public:
-	explicit ProbeComponent(ProbeCounters& counters) : counters(counters)
+	explicit ProbeComponent(ProbeCounters& probeCounters) : counters(probeCounters)
 	{
 	}
 
@@ -215,7 +215,8 @@ void TestReload(const std::filesystem::path& root)
 	{ return dynamic_cast<const ProbeComponent*>(&component) != nullptr; };
 	codec.save = [](const Ursa::Component&, const Ursa::ComponentSaveContext&)
 	{ return Ursa::Result<nlohmann::json>::Success(nlohmann::json::object()); };
-	codec.create = [](Ursa::Scene& scene, Ursa::NodeId node, const nlohmann::json&, Ursa::ComponentLoadContext& context)
+	codec.create =
+	    [](Ursa::Scene& scene, Ursa::GameObject::Ptr node, const nlohmann::json&, Ursa::ComponentLoadContext& context)
 	{
 		auto service = context.Service<ProbeCounters>();
 		if (!service)
@@ -226,7 +227,7 @@ void TestReload(const std::filesystem::path& root)
 	};
 	done(registry.RegisterCodec(std::move(codec)));
 	auto active = std::make_unique<Ursa::Scene>();
-	const auto node = Take(active->CreateNode());
+	const auto node = Take(active->CreateGameObject());
 	Take(active->AddComponent<ProbeComponent>(node, counters));
 	const auto path = root / "reload.ursascene";
 	done(Ursa::SaveSceneResource(path, Ursa::ResourceId::Generate(), *active, registry));

@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -20,18 +21,18 @@ void Expect(bool condition, const char* message)
 	}
 }
 
-Ursa::Vector<uint8_t> BytesOf(const std::string& text)
+Ursa::Vector<Ursa::UInt8> BytesOf(const std::string& text)
 {
-	Ursa::Vector<uint8_t> bytes;
+	Ursa::Vector<Ursa::UInt8> bytes;
 	bytes.reserve(text.size());
 	for (char character : text)
 	{
-		bytes.push_back(static_cast<uint8_t>(character));
+		bytes.push_back(static_cast<Ursa::UInt8>(character));
 	}
 	return bytes;
 }
 
-std::string TextOf(const Ursa::Vector<uint8_t>& bytes)
+std::string TextOf(const Ursa::Vector<Ursa::UInt8>& bytes)
 {
 	return std::string(bytes.begin(), bytes.end());
 }
@@ -64,9 +65,9 @@ Ursa::Result<void> OpenResourcesExample(const std::filesystem::path& engineRoot,
                                         const std::filesystem::path& projectAssets)
 {
 	Ursa::VirtualFileSystem vfs;
-	if (!vfs.Mount("ursa", engineRoot, Ursa::MountAccess::readOnly) ||
-	    !vfs.Mount("ursa", engineMirror, Ursa::MountAccess::readOnly) ||
-	    !vfs.Mount("prj", projectAssets, Ursa::MountAccess::readWrite))
+	if (!vfs.Mount("ursa", engineRoot, Ursa::MountAccess::ReadOnly) ||
+	    !vfs.Mount("ursa", engineMirror, Ursa::MountAccess::ReadOnly) ||
+	    !vfs.Mount("prj", projectAssets, Ursa::MountAccess::ReadWrite))
 	{
 		return Ursa::Result<void>::Failure("Cannot mount resource roots");
 	}
@@ -114,11 +115,11 @@ void TestReadWriteAndPermissions(const std::filesystem::path& root)
 	WriteFile(engineRoot / "Shaders" / "Cube.vert", "engine-shader");
 
 	Ursa::VirtualFileSystem vfs;
-	Expect(static_cast<bool>(vfs.Mount("ursa", engineRoot, Ursa::MountAccess::readOnly)),
+	Expect(static_cast<bool>(vfs.Mount("ursa", engineRoot, Ursa::MountAccess::ReadOnly)),
 	       "Cannot mount the engine root");
-	Expect(static_cast<bool>(vfs.Mount("prj", projectRoot, Ursa::MountAccess::readWrite)),
+	Expect(static_cast<bool>(vfs.Mount("prj", projectRoot, Ursa::MountAccess::ReadWrite)),
 	       "Cannot mount the project root");
-	Expect(!vfs.Mount("ursa", root / "missing", Ursa::MountAccess::readOnly), "Mounted a missing directory");
+	Expect(!vfs.Mount("ursa", root / "missing", Ursa::MountAccess::ReadOnly), "Mounted a missing directory");
 
 	const auto shader = Ursa::VirtualPath::Parse("ursa:Shaders/Cube.vert").value;
 	Expect(TextOf(vfs.Read(shader).value) == "engine-shader", "Read returned the wrong bytes");
@@ -151,8 +152,8 @@ void TestOverlayAndShadowing(const std::filesystem::path& root)
 	       "The documented VirtualFileSystem example failed");
 
 	Ursa::VirtualFileSystem vfs;
-	Expect(static_cast<bool>(vfs.Mount("ursa", sourceRoot, Ursa::MountAccess::readOnly)) &&
-	           static_cast<bool>(vfs.Mount("ursa", generatedRoot, Ursa::MountAccess::readOnly)),
+	Expect(static_cast<bool>(vfs.Mount("ursa", sourceRoot, Ursa::MountAccess::ReadOnly)) &&
+	           static_cast<bool>(vfs.Mount("ursa", generatedRoot, Ursa::MountAccess::ReadOnly)),
 	       "Cannot mount the overlay roots");
 
 	const auto roots = vfs.Roots("ursa");
@@ -184,7 +185,7 @@ void TestTraversalIsolation(const std::filesystem::path& root)
 	WriteFile(outsideRoot / "secret.ursatex", "secret");
 
 	Ursa::VirtualFileSystem vfs;
-	Expect(static_cast<bool>(vfs.Mount("prj", projectRoot, Ursa::MountAccess::readWrite)),
+	Expect(static_cast<bool>(vfs.Mount("prj", projectRoot, Ursa::MountAccess::ReadWrite)),
 	       "Cannot mount the traversal fixture");
 
 	Expect(CreateEscapeLink(projectRoot / "escape", outsideRoot), "Cannot create the escape-link fixture");

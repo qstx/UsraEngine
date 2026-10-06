@@ -1,7 +1,7 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
-#include <array>
 #include <cstdint>
 #include <string>
 
@@ -9,7 +9,7 @@ namespace Ursa
 {
 struct ResourceId
 {
-	Array<uint8_t, 16> bytes{};
+	Array<Ursa::UInt8, 16> bytes{};
 
 	explicit operator bool() const;
 

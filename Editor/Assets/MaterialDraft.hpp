@@ -1,8 +1,8 @@
 #pragma once
 
+#include <Core/Containers.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Serialization/MaterialResource.hpp>
-#include <array>
 
 namespace Ursa::Editor
 {

@@ -1,10 +1,11 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
+#include <Scene/Component.hpp>
 #include <Scene/Scene.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <functional>
-#include <map>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <typeindex>
@@ -15,24 +16,26 @@ using MaterialIdResolver = std::function<Result<ResourceId>(const std::shared_pt
 
 struct ComponentSaveContext
 {
-	const Scene& scene;
+	const Scene* scene = nullptr;
 	MaterialIdResolver materialId;
 
-	Result<ResourceId> GetNodeId(NodeId node) const
+	Result<ResourceId> GetGameObjectId(const GameObject::Ptr& object) const
 	{
-		return scene.NodePersistentId(node);
+		return object ? Result<ResourceId>::Success(object->Id())
+		              : Result<ResourceId>::Failure("Cannot query the ID of an empty GameObject handle");
 	}
 
 	Result<ResourceId> GetComponentId(ComponentId component) const
 	{
-		return scene.ComponentPersistentId(component);
+		return scene ? scene->ComponentPersistentId(component)
+		             : Result<ResourceId>::Failure("No Scene context is available for this component reference");
 	}
 };
 
 class ComponentLoadContext final
 {
 public:
-	explicit ComponentLoadContext(ResourceSession& resources) : resources(resources)
+	explicit ComponentLoadContext(ResourceSession& resourceSession) : resources(resourceSession)
 	{
 	}
 
@@ -56,31 +59,40 @@ public:
 		return Result<T*>::Success(static_cast<T*>(found->second));
 	}
 
-	Result<NodeId> Node(ResourceId id) const;
+	Result<GameObject::Ptr> GameObjectById(ResourceId id) const;
 
 	Result<ComponentId> Component(ResourceId id) const;
 
-	Result<void> MapNode(ResourceId id, NodeId node);
+	Result<void> MapGameObject(ResourceId id, GameObject::Ptr object);
 
 	Result<void> MapComponent(ResourceId id, ComponentId component);
+
+	Result<::Ursa::Component*> ComponentObjectById(ResourceId id) const;
+
+	Result<void> MapComponentObject(ResourceId id, ::Ursa::Component* component);
 
 	void ClearMappings();
 
 private:
 	ResourceSession& resources;
 	Map<std::type_index, void*> services;
-	Map<String, NodeId> nodes;
+	Map<String, GameObject::Ptr> gameObjects;
 	Map<String, ComponentId> components;
+	Map<String, ::Ursa::Component*> componentObjects;
 };
 
 struct ComponentCodec
 {
 	String type;
-	uint32_t version = 1;
+	Ursa::UInt32 version = 1;
 	std::function<bool(const Component&)> matches;
 	std::function<Result<nlohmann::json>(const Component&, const ComponentSaveContext&)> save;
-	std::function<Result<ComponentId>(Scene&, NodeId, const nlohmann::json&, ComponentLoadContext&)> create;
+	std::function<Result<ComponentId>(Scene&, const GameObject::Ptr&, const nlohmann::json&, ComponentLoadContext&)>
+	    create;
 	std::function<Result<void>(Scene&, ComponentId, const nlohmann::json&, ComponentLoadContext&)> bind;
+	std::function<Result<Component*>(const GameObject::Ptr&, const nlohmann::json&, ComponentLoadContext&)>
+	    createDetached;
+	std::function<Result<void>(Component*, const nlohmann::json&, ComponentLoadContext&)> bindDetached;
 };
 
 class ComponentRegistry final

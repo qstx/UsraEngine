@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Math/Mat4.hpp>
 #include <cmath>
 #include <cstddef>
@@ -5,14 +6,14 @@
 
 namespace Ursa
 {
-float& Mat4::At(int row, int column)
+Ursa::Float32& Mat4::At(int row, int column)
 {
-	return values[static_cast<std::size_t>(column * 4 + row)];
+	return values[static_cast<Ursa::Size>(column * 4 + row)];
 }
 
-float Mat4::At(int row, int column) const
+Ursa::Float32 Mat4::At(int row, int column) const
 {
-	return values[static_cast<std::size_t>(column * 4 + row)];
+	return values[static_cast<Ursa::Size>(column * 4 + row)];
 }
 
 Mat4 Mat4::Identity()
@@ -45,16 +46,16 @@ Mat4 Mat4::Scale(Vec3 size)
 
 Mat4 Mat4::Rotation(Quat rotation)
 {
-	const float length = std::sqrt(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z +
-	                               rotation.w * rotation.w);
+	const Ursa::Float32 length = std::sqrt(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z +
+	                                       rotation.w * rotation.w);
 	if (length <= 0.000001f)
 	{
 		throw std::invalid_argument("Cannot create a matrix from a zero-length quaternion");
 	}
-	const float x = rotation.x / length;
-	const float y = rotation.y / length;
-	const float z = rotation.z / length;
-	const float w = rotation.w / length;
+	const Ursa::Float32 x = rotation.x / length;
+	const Ursa::Float32 y = rotation.y / length;
+	const Ursa::Float32 z = rotation.z / length;
+	const Ursa::Float32 w = rotation.w / length;
 	Mat4 result = Identity();
 	result.At(0, 0) = 1.0f - 2.0f * (y * y + z * z);
 	result.At(0, 1) = 2.0f * (x * y - z * w);
@@ -68,14 +69,15 @@ Mat4 Mat4::Rotation(Quat rotation)
 	return result;
 }
 
-Mat4 Mat4::Perspective(float verticalFovRadians, float aspect, float nearPlane, float farPlane)
+Mat4 Mat4::Perspective(Ursa::Float32 verticalFovRadians, Ursa::Float32 aspect, Ursa::Float32 nearPlane,
+                       Ursa::Float32 farPlane)
 {
 	if (verticalFovRadians <= 0.0f || verticalFovRadians >= 3.14159265f || aspect <= 0.0f || nearPlane <= 0.0f ||
 	    farPlane <= nearPlane)
 	{
 		throw std::invalid_argument("Invalid perspective camera parameters");
 	}
-	const float focal = 1.0f / std::tan(verticalFovRadians * 0.5f);
+	const Ursa::Float32 focal = 1.0f / std::tan(verticalFovRadians * 0.5f);
 	Mat4 result;
 	result.At(0, 0) = focal / aspect;
 	result.At(1, 1) = focal;
@@ -114,16 +116,16 @@ Mat4 Mat4::InverseAffine() const
 		throw std::invalid_argument("Matrix is not affine");
 	}
 
-	const float a = At(0, 0), b = At(0, 1), c = At(0, 2);
-	const float d = At(1, 0), e = At(1, 1), f = At(1, 2);
-	const float g = At(2, 0), h = At(2, 1), i = At(2, 2);
-	const float determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+	const Ursa::Float32 a = At(0, 0), b = At(0, 1), c = At(0, 2);
+	const Ursa::Float32 d = At(1, 0), e = At(1, 1), f = At(1, 2);
+	const Ursa::Float32 g = At(2, 0), h = At(2, 1), i = At(2, 2);
+	const Ursa::Float32 determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
 	if (std::abs(determinant) <= 0.000001f)
 	{
 		throw std::invalid_argument("Affine matrix is not invertible");
 	}
 
-	const float inverseDeterminant = 1.0f / determinant;
+	const Ursa::Float32 inverseDeterminant = 1.0f / determinant;
 	Mat4 result = Identity();
 	result.At(0, 0) = (e * i - f * h) * inverseDeterminant;
 	result.At(0, 1) = (c * h - b * i) * inverseDeterminant;

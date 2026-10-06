@@ -27,7 +27,7 @@ public:
 	                        Rhi::ResourceState initialState, Rhi::ResourceState finalState);
 
 private:
-	explicit EditorScenePreview(std::unique_ptr<Renderer3D> renderer) : renderer(std::move(renderer))
+	explicit EditorScenePreview(std::unique_ptr<Renderer3D> sceneRenderer) : renderer(std::move(sceneRenderer))
 	{
 	}
 

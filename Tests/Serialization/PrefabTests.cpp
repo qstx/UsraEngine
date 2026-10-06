@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Serialization/PrefabResource.hpp>
@@ -38,7 +39,7 @@ class UnregisteredComponent final : public Ursa::Component
 {
 };
 
-void PlacePrefab(const std::filesystem::path& root, Ursa::Scene& source, Ursa::NodeId subtree)
+void PlacePrefab(const std::filesystem::path& root, Ursa::Scene& source, Ursa::GameObject::Ptr subtree)
 {
 	Ursa::ComponentRegistry registry;
 	if (!Ursa::RegisterBuiltinComponents(registry))
@@ -74,9 +75,10 @@ void PlacePrefab(const std::filesystem::path& root, Ursa::Scene& source, Ursa::N
 	{
 		return;
 	}
-	auto sourceId = source.NodePersistentId(subtree);
+	auto sourceId = source.PersistentId(subtree);
 	if (!sourceId ||
-	    !Ursa::SetPrefabPropertyOverride(linked.value, instanceId, sourceId.value, "/transform/position/0", 2.0f) ||
+	    !Ursa::SetPrefabPropertyOverride(linked.value, instanceId, sourceId.value, "/localTransform/position/0",
+	                                     2.0f) ||
 	    !Ursa::SaveLinkedSceneResource(scenePath, linked.value, registry))
 	{
 		return;
@@ -91,7 +93,7 @@ void PlacePrefab(const std::filesystem::path& root, Ursa::Scene& source, Ursa::N
 	{
 		return;
 	}
-	if (!Ursa::ClearPrefabPropertyOverride(linked.value, instanceId, sourceId.value, "/transform/position/0") ||
+	if (!Ursa::ClearPrefabPropertyOverride(linked.value, instanceId, sourceId.value, "/localTransform/position/0") ||
 	    !Ursa::SaveLinkedSceneResource(scenePath, linked.value, registry))
 	{
 		return;
@@ -104,10 +106,10 @@ void TestInstances(const std::filesystem::path& root)
 	Ursa::ComponentRegistry registry;
 	done(Ursa::RegisterBuiltinComponents(registry));
 	Ursa::Scene source;
-	auto prefabRoot = Take(source.CreateNode());
-	auto child = Take(source.CreateNode(prefabRoot));
+	auto prefabRoot = Take(source.CreateGameObject());
+	auto child = Take(source.CreateGameObject(prefabRoot));
 	Take(source.AddComponent<Ursa::BoxRenderComponent>(child, Ursa::Color{0.2f, 0.3f, 0.4f, 1.0f}));
-	auto unrelated = Take(source.CreateNode());
+	auto unrelated = Take(source.CreateGameObject());
 	Take(source.AddComponent<UnregisteredComponent>(unrelated));
 	const auto prefabId = Ursa::ResourceId::Generate();
 	const auto prefabPath = root / "box.ursaprefab";
@@ -115,13 +117,57 @@ void TestInstances(const std::filesystem::path& root)
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext prefabContext(*session);
 	auto direct = Take(Ursa::LoadPrefabResource(prefabPath, registry, prefabContext));
-	Expect(direct.scene->RootNodes().size() == 1 &&
-	           Take(direct.scene->ChildrenOf(direct.scene->RootNodes()[0])).size() == 1,
+	Ursa::ComponentLoadContext assetContext(*session);
+	auto asset = Take(Ursa::LoadPrefabAssetResource(prefabPath, registry, assetContext));
+	const auto assetRootId = asset.Root()->Id();
+	const auto assetChildren = asset.Root()->Children();
+	Expect(asset.Id() == prefabId && assetRootId == prefabRoot->Id() && assetChildren.size() == 1 &&
+	           assetChildren[0]->Id() == child->Id() && assetChildren[0]->FindComponent<Ursa::BoxRenderComponent>() &&
+	           assetChildren[0]->FindComponent<Ursa::BoxRenderComponent>()->TryGetScene() == nullptr,
+	       "PrefabAsset did not preserve detached GameObject or component identity");
+	const auto copiedPrefabPath = root / "asset-copy.ursaprefab";
+	done(Ursa::SavePrefabAssetResource(copiedPrefabPath, asset, registry));
+	Ursa::ComponentLoadContext copiedAssetContext(*session);
+	auto copiedAsset = Take(Ursa::LoadPrefabAssetResource(copiedPrefabPath, registry, copiedAssetContext));
+	Expect(copiedAsset.Root()->Id() == assetRootId && copiedAsset.Root()->Children()[0]->Id() == child->Id(),
+	       "PrefabAsset save/reopen changed object IDs");
+	Ursa::Scene instantiatedScene;
+	Ursa::ComponentLoadContext instantiateContext(*session);
+	auto instance = Take(asset.Instantiate(instantiatedScene, registry, instantiateContext));
+	auto secondPrefabInstance = Take(asset.Instantiate(instantiatedScene, registry, instantiateContext));
+	Ursa::Scene secondInstanceScene;
+	Ursa::ComponentLoadContext secondInstantiateContext(*session);
+	auto instanceInSecondScene = Take(asset.Instantiate(secondInstanceScene, registry, secondInstantiateContext));
+	Expect(instance->Id() != assetRootId && instance->Children()[0]->Id() != child->Id() &&
+	           instantiatedScene.Contains(instance) && secondPrefabInstance->Id() != instance->Id() &&
+	           secondInstanceScene.Contains(instanceInSecondScene) && instanceInSecondScene->Id() != instance->Id(),
+	       "PrefabAsset instantiation did not create independent runtime GameObjects across instances and Scenes");
+	done(instantiatedScene.DestroyGameObject(instance));
+	done(instantiatedScene.DestroyGameObject(secondPrefabInstance));
+	done(secondInstanceScene.DestroyGameObject(instanceInSecondScene));
+	std::filesystem::remove(copiedPrefabPath);
+	auto legacyDocument = Take(Ursa::ReadJsonResource(prefabPath, Ursa::ResourceKind::Prefab));
+	legacyDocument.erase("prefabGraphVersion");
+	const auto legacyPath = root / "legacy.ursaprefab";
+	done(Ursa::WriteJsonResource(legacyPath, legacyDocument));
+	Ursa::ComponentLoadContext legacyContext(*session);
+	const auto legacyLoad = Ursa::LoadPrefabResource(legacyPath, registry, legacyContext);
+	Expect(!legacyLoad &&
+	           legacyLoad.error.find("Unsupported or missing GameObject Prefab format version") != Ursa::String::npos,
+	       "Legacy Prefab format was not rejected with a version diagnostic");
+	Ursa::ComponentLoadContext legacyAssetContext(*session);
+	const auto legacyAssetLoad = Ursa::LoadPrefabAssetResource(legacyPath, registry, legacyAssetContext);
+	Expect(!legacyAssetLoad && legacyAssetLoad.error.find("Unsupported or missing GameObject Prefab format version") !=
+	                               Ursa::String::npos,
+	       "PrefabAsset loader did not reject the unsupported legacy graph version");
+	std::filesystem::remove(legacyPath);
+	Expect(direct.scene->RootGameObjects().size() == 1 &&
+	           Take(direct.scene->ChildrenOf(direct.scene->RootGameObjects()[0])).size() == 1,
 	       "Standalone Prefab subtree was not restored");
 
 	Ursa::Scene plain;
-	auto outside = Take(plain.CreateNode());
-	const auto outsideId = Take(plain.NodePersistentId(outside));
+	auto outside = Take(plain.CreateGameObject());
+	const auto outsideId = Take(plain.PersistentId(outside));
 	const auto firstPath = root / "first.ursascene";
 	auto first = Take(Ursa::EncodeSceneDocument(firstPath, Ursa::ResourceId::Generate(), plain, registry));
 	const auto firstInstance = Ursa::ResourceId::Generate();
@@ -142,13 +188,13 @@ void TestInstances(const std::filesystem::path& root)
 	Ursa::ComponentLoadContext secondContext(*refreshed);
 	auto firstLoaded = Take(Ursa::LoadLinkedSceneResource(firstPath, registry, firstContext));
 	auto secondLoaded = Take(Ursa::LoadLinkedSceneResource(secondPath, registry, secondContext));
-	auto firstRoot = Take(firstLoaded.scene->NodeByPersistentId(outsideId));
-	auto secondRoot = Take(secondLoaded.scene->NodeByPersistentId(outsideId));
+	auto firstRoot = Take(firstLoaded.scene->GameObjectById(outsideId));
+	auto secondRoot = Take(secondLoaded.scene->GameObjectById(outsideId));
 	const auto firstChildren = Take(firstLoaded.scene->ChildrenOf(firstRoot));
 	const auto secondChildren = Take(secondLoaded.scene->ChildrenOf(secondRoot));
 	Expect(firstChildren.size() == 2 && secondChildren.size() == 1 &&
-	           Take(firstLoaded.scene->NodePersistentId(firstChildren[0])) !=
-	               Take(firstLoaded.scene->NodePersistentId(firstChildren[1])) &&
+	           Take(firstLoaded.scene->PersistentId(firstChildren[0])) !=
+	               Take(firstLoaded.scene->PersistentId(firstChildren[1])) &&
 	           firstLoaded.document["instances"][0]["prefab"] == Ursa::ToStdString(prefabId.ToString()) &&
 	           secondLoaded.document["instances"][0]["prefab"] == Ursa::ToStdString(prefabId.ToString()),
 	       "Prefab instances lost their independent identity or source reference");
@@ -161,8 +207,8 @@ void TestProperties(const std::filesystem::path& root)
 {
 	Ursa::ComponentRegistry registry;
 	done(Ursa::RegisterBuiltinComponents(registry));
-	auto initialMaterial = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::unlit);
-	auto changedMaterial = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::unlit);
+	auto initialMaterial = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
+	auto changedMaterial = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
 	done(initialMaterial->SetBaseColor({0.8f, 0.1f, 0.1f, 1.0f}));
 	done(changedMaterial->SetBaseColor({0.1f, 0.8f, 0.1f, 1.0f}));
 	const auto initialMaterialId = Ursa::ResourceId::Generate();
@@ -170,8 +216,8 @@ void TestProperties(const std::filesystem::path& root)
 	done(Ursa::SaveMaterialResource(root / "initial.ursamat", initialMaterialId, *initialMaterial, {}));
 	done(Ursa::SaveMaterialResource(root / "changed.ursamat", changedMaterialId, *changedMaterial, {}));
 	Ursa::Scene source;
-	const auto sourceRoot = Take(source.CreateNode());
-	const auto sourceChild = Take(source.CreateNode(sourceRoot));
+	const auto sourceRoot = Take(source.CreateGameObject());
+	const auto sourceChild = Take(source.CreateGameObject(sourceRoot));
 	Ursa::LocalTransform initialTransform;
 	initialTransform.position = {1.0f, 1.0f, 0.0f};
 	done(source.SetLocalTransform(sourceRoot, initialTransform));
@@ -179,7 +225,7 @@ void TestProperties(const std::filesystem::path& root)
 	    Take(source.AddComponent<Ursa::BoxRenderComponent>(sourceChild, Ursa::Color{0.2f, 0.3f, 0.4f, 1.0f}));
 	auto* box = static_cast<Ursa::BoxRenderComponent*>(source.GetComponent(boxId));
 	box->material = initialMaterial;
-	const auto sourceRootId = Take(source.NodePersistentId(sourceRoot));
+	const auto sourceRootId = Take(source.PersistentId(sourceRoot));
 	const auto sourceBoxId = Take(source.ComponentPersistentId(boxId));
 	const auto prefabId = Ursa::ResourceId::Generate();
 	const auto prefabPath = root / "properties.ursaprefab";
@@ -200,7 +246,7 @@ void TestProperties(const std::filesystem::path& root)
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext context(*session);
 	auto loaded = Take(Ursa::LoadLinkedSceneResource(path, registry, context));
-	done(Ursa::SetPrefabPropertyOverride(loaded, firstInstance, sourceRootId, "/transform/position/0", 9.0f));
+	done(Ursa::SetPrefabPropertyOverride(loaded, firstInstance, sourceRootId, "/localTransform/position/0", 9.0f));
 	done(Ursa::SetPrefabPropertyOverride(loaded, firstInstance, sourceBoxId, "/data/color/0", 0.9f));
 	done(Ursa::SetPrefabPropertyOverride(loaded, firstInstance, sourceBoxId, "/data/material",
 	                                     Ursa::ToStdString(initialMaterialId.ToString())));
@@ -214,7 +260,7 @@ void TestProperties(const std::filesystem::path& root)
 	auto refreshed = Take(session->Refreshed());
 	Ursa::ComponentLoadContext refreshContext(*refreshed);
 	done(Ursa::ReloadLinkedSceneResource(path, registry, refreshContext, loaded));
-	const auto roots = loaded.scene->RootNodes();
+	const auto roots = loaded.scene->RootGameObjects();
 	Expect(roots.size() == 2, "Updated Prefab lost an instance");
 	const auto firstTransform = Take(loaded.scene->GetLocalTransform(roots[0]));
 	const auto secondTransform = Take(loaded.scene->GetLocalTransform(roots[1]));
@@ -231,7 +277,7 @@ void TestProperties(const std::filesystem::path& root)
 	done(Ursa::ClearPrefabPropertyOverride(loaded, firstInstance, sourceBoxId, "/data/material"));
 	done(Ursa::SaveLinkedSceneResource(path, loaded, registry));
 	done(Ursa::ReloadLinkedSceneResource(path, registry, refreshContext, loaded));
-	firstChild = Take(loaded.scene->ChildrenOf(loaded.scene->RootNodes()[0]))[0];
+	firstChild = Take(loaded.scene->ChildrenOf(loaded.scene->RootGameObjects()[0]))[0];
 	firstBox = loaded.scene->FindComponent<Ursa::BoxRenderComponent>(firstChild);
 	Expect(firstBox && firstBox->material->Parameters().baseColor.green == 0.8f,
 	       "Clearing the explicit material override did not restore source inheritance");
@@ -246,16 +292,16 @@ void TestStructure(const std::filesystem::path& root)
 	Ursa::ComponentRegistry registry;
 	done(Ursa::RegisterBuiltinComponents(registry));
 	Ursa::Scene source;
-	const auto sourceRoot = Take(source.CreateNode());
-	const auto first = Take(source.CreateNode(sourceRoot));
-	const auto removed = Take(source.CreateNode(sourceRoot));
-	const auto moved = Take(source.CreateNode(sourceRoot));
+	const auto sourceRoot = Take(source.CreateGameObject());
+	const auto first = Take(source.CreateGameObject(sourceRoot));
+	const auto removed = Take(source.CreateGameObject(sourceRoot));
+	const auto moved = Take(source.CreateGameObject(sourceRoot));
 	const auto firstComponent = Take(source.AddComponent<Ursa::BoxRenderComponent>(first));
 	const auto removedComponent = Take(source.AddComponent<Ursa::BoxRenderComponent>(first));
-	const auto rootId = Ursa::ToStdString(Take(source.NodePersistentId(sourceRoot)).ToString());
-	const auto firstId = Ursa::ToStdString(Take(source.NodePersistentId(first)).ToString());
-	const auto removedId = Ursa::ToStdString(Take(source.NodePersistentId(removed)).ToString());
-	const auto movedId = Ursa::ToStdString(Take(source.NodePersistentId(moved)).ToString());
+	const auto rootId = Ursa::ToStdString(Take(source.PersistentId(sourceRoot)).ToString());
+	const auto firstId = Ursa::ToStdString(Take(source.PersistentId(first)).ToString());
+	const auto removedId = Ursa::ToStdString(Take(source.PersistentId(removed)).ToString());
+	const auto movedId = Ursa::ToStdString(Take(source.PersistentId(moved)).ToString());
 	const auto firstComponentId = Ursa::ToStdString(Take(source.ComponentPersistentId(firstComponent)).ToString());
 	const auto removedComponentId = Ursa::ToStdString(Take(source.ComponentPersistentId(removedComponent)).ToString());
 	const auto addedId = Ursa::ToStdString(Ursa::ResourceId::Generate().ToString());
@@ -275,12 +321,12 @@ void TestStructure(const std::filesystem::path& root)
 	auto linked = Take(Ursa::LoadLinkedSceneResource(path, registry, context));
 	const nlohmann::json addedNode{
 	    {"id", addedId},
-	    {"parent", rootId},
-	    {"transform",
+	    {"parentId", rootId},
+	    {"localTransform",
 	     {{"position", {0.0f, 0.0f, 0.0f}}, {"rotation", {0.0f, 0.0f, 0.0f, 1.0f}}, {"scale", {1.0f, 1.0f, 1.0f}}}},
 	    {"enabled", true},
 	    {"components", nlohmann::json::array()}};
-	const auto componentRecord = [](const std::string& id, float red)
+	const auto componentRecord = [](const std::string& id, Ursa::Float32 red)
 	{
 		return nlohmann::json{{"id", id},
 		                      {"type", "ursa.BoxRender"},
@@ -288,10 +334,10 @@ void TestStructure(const std::filesystem::path& root)
 		                      {"enabled", true},
 		                      {"data", {{"color", {red, 0.0f, 0.0f, 1.0f}}, {"material", nullptr}}}};
 	};
-	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "deletedNodes", {removedId}));
-	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "addedNodes", nlohmann::json::array({addedNode})));
-	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "nodeParents", {{movedId, firstId}}));
-	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "nodeOrders", {{rootId, {addedId, firstId}}}));
+	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "deletedGameObjects", {removedId}));
+	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "addedGameObjects", nlohmann::json::array({addedNode})));
+	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "gameObjectParents", {{movedId, firstId}}));
+	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "gameObjectOrders", {{rootId, {addedId, firstId}}}));
 	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "deletedComponents", {removedComponentId}));
 	done(Ursa::SetPrefabStructureOverride(
 	    linked, instanceId, "addedComponents",
@@ -301,19 +347,19 @@ void TestStructure(const std::filesystem::path& root)
 	done(Ursa::SetPrefabStructureOverride(linked, instanceId, "componentOrders",
 	                                      {{movedId, {secondAddedComponentId, firstComponentId}}}));
 	done(Ursa::SaveLinkedSceneResource(path, linked, registry));
-	const auto sourceNew = Take(source.CreateNode(sourceRoot));
-	const auto sourceNewId = Take(source.NodePersistentId(sourceNew));
+	const auto sourceNew = Take(source.CreateGameObject(sourceRoot));
+	const auto sourceNewId = Take(source.PersistentId(sourceNew));
 	done(Ursa::SavePrefabResource(prefabPath, prefabId, source, sourceRoot, registry));
 	auto refreshed = Take(session->Refreshed());
 	Ursa::ComponentLoadContext refreshContext(*refreshed);
 	done(Ursa::ReloadLinkedSceneResource(path, registry, refreshContext, linked));
-	const auto runtimeRoot = linked.scene->RootNodes()[0];
+	const auto runtimeRoot = linked.scene->RootGameObjects()[0];
 	const auto rootChildren = Take(linked.scene->ChildrenOf(runtimeRoot));
 	Expect(rootChildren.size() == 3, "Structural merge lost source addition or instance addition");
 	const auto addedRuntime = rootChildren[0];
 	const auto firstRuntime = rootChildren[1];
 	const auto movedRuntime = Take(linked.scene->ChildrenOf(firstRuntime))[0];
-	Expect(Take(linked.scene->NodePersistentId(rootChildren[2])) != sourceNewId &&
+	Expect(Take(linked.scene->PersistentId(rootChildren[2])) != sourceNewId &&
 	           Take(linked.scene->ChildrenOf(firstRuntime)).size() == 1 &&
 	           Take(linked.scene->ComponentsOf(firstRuntime)).empty() &&
 	           Take(linked.scene->ComponentsOf(addedRuntime)).size() == 1 &&
@@ -324,22 +370,22 @@ void TestStructure(const std::filesystem::path& root)
 	Expect(ordered && ordered->color.red == 0.8f, "Prefab component order override was not preserved");
 	auto* edited = static_cast<Ursa::BoxRenderComponent*>(linked.scene->GetComponent(movedComponents[1]));
 	edited->color.red = 0.6f;
-	const auto runtimeAdded = Take(linked.scene->CreateNode(runtimeRoot));
+	const auto runtimeAdded = Take(linked.scene->CreateGameObject(runtimeRoot));
 	Take(linked.scene->AddComponent<Ursa::BoxRenderComponent>(runtimeAdded, Ursa::Color{0.4f, 0.5f, 0.6f, 1.0f}));
 	done(Ursa::SaveLinkedSceneResource(path, linked, registry));
 	done(Ursa::SaveLinkedSceneResource(path, linked, registry));
 	done(Ursa::ReloadLinkedSceneResource(path, registry, refreshContext, linked));
-	const auto capturedRoot = linked.scene->RootNodes()[0];
+	const auto capturedRoot = linked.scene->RootGameObjects()[0];
 	const auto capturedChildren = Take(linked.scene->ChildrenOf(capturedRoot));
 	Expect(capturedChildren.size() == 4, "Directly added instance node was not captured on save");
 	const auto capturedMoved = Take(linked.scene->ChildrenOf(capturedChildren[1]))[0];
 	const auto capturedComponents = Take(linked.scene->ComponentsOf(capturedMoved));
 	edited = static_cast<Ursa::BoxRenderComponent*>(linked.scene->GetComponent(capturedComponents[1]));
 	Expect(edited && edited->color.red == 0.6f, "Directly edited component field was not captured on save");
-	done(linked.scene->DestroyNode(capturedChildren[3]));
+	done(linked.scene->DestroyGameObject(capturedChildren[3]));
 	done(Ursa::SaveLinkedSceneResource(path, linked, registry));
 	done(Ursa::ReloadLinkedSceneResource(path, registry, refreshContext, linked));
-	Expect(Take(linked.scene->ChildrenOf(linked.scene->RootNodes()[0])).size() == 3,
+	Expect(Take(linked.scene->ChildrenOf(linked.scene->RootGameObjects()[0])).size() == 3,
 	       "Deleting a directly added Prefab node left a stale structural override");
 	std::filesystem::remove(path);
 	std::filesystem::remove(prefabPath);
@@ -350,12 +396,12 @@ void TestConflicts(const std::filesystem::path& root)
 	Ursa::ComponentRegistry registry;
 	done(Ursa::RegisterBuiltinComponents(registry));
 	Ursa::Scene source;
-	const auto sourceRoot = Take(source.CreateNode());
-	const auto first = Take(source.CreateNode(sourceRoot));
-	const auto second = Take(source.CreateNode(sourceRoot));
-	const auto rootId = Take(source.NodePersistentId(sourceRoot));
-	const auto firstId = Take(source.NodePersistentId(first));
-	const auto secondId = Take(source.NodePersistentId(second));
+	const auto sourceRoot = Take(source.CreateGameObject());
+	const auto first = Take(source.CreateGameObject(sourceRoot));
+	const auto second = Take(source.CreateGameObject(sourceRoot));
+	const auto rootId = Take(source.PersistentId(sourceRoot));
+	const auto firstId = Take(source.PersistentId(first));
+	const auto secondId = Take(source.PersistentId(second));
 	const auto prefabId = Ursa::ResourceId::Generate();
 	const auto prefabPath = root / "conflict.ursaprefab";
 	done(Ursa::SavePrefabResource(prefabPath, prefabId, source, sourceRoot, registry));
@@ -388,31 +434,31 @@ void TestConflicts(const std::filesystem::path& root)
 
 	auto missing = base;
 	missing["instances"][0]["overrides"]["properties"][Ursa::ToStdString(firstId.ToString())]["/enabled"] = false;
-	done(source.DestroyNode(first));
+	done(source.DestroyGameObject(first));
 	done(Ursa::SavePrefabResource(prefabPath, prefabId, source, sourceRoot, registry));
 	checkFailure(missing, "missing property target");
-	const auto restoredFirst = Take(source.CreateNode(sourceRoot));
-	done(source.AssignNodePersistentId(restoredFirst, firstId));
+	const auto restoredFirst = Take(source.CreateGameObject(sourceRoot));
+	done(source.AssignGameObjectId(restoredFirst, firstId));
 	done(Ursa::SavePrefabResource(prefabPath, prefabId, source, sourceRoot, registry));
 
 	auto duplicate = base;
-	duplicate["instances"][0]["overrides"]["addedNodes"] =
+	duplicate["instances"][0]["overrides"]["addedGameObjects"] =
 	    nlohmann::json::array({{{"id", Ursa::ToStdString(secondId.ToString())},
-	                            {"parent", Ursa::ToStdString(rootId.ToString())},
+	                            {"parentId", Ursa::ToStdString(rootId.ToString())},
 	                            {"components", nlohmann::json::array()}}});
 	checkFailure(duplicate, "Duplicate added node ID");
 
 	auto cycle = base;
-	cycle["instances"][0]["overrides"]["nodeParents"] = {
+	cycle["instances"][0]["overrides"]["gameObjectParents"] = {
 	    {Ursa::ToStdString(firstId.ToString()), Ursa::ToStdString(secondId.ToString())},
 	    {Ursa::ToStdString(secondId.ToString()), Ursa::ToStdString(firstId.ToString())}};
 	checkFailure(cycle, "cycle");
 
 	auto crossInstance = base;
-	const auto otherRoot = active.scene->RootNodes()[1];
-	crossInstance["instances"][0]["overrides"]["nodeParents"] = {
+	const auto otherRoot = active.scene->RootGameObjects()[1];
+	crossInstance["instances"][0]["overrides"]["gameObjectParents"] = {
 	    {Ursa::ToStdString(firstId.ToString()),
-	     Ursa::ToStdString(Take(active.scene->NodePersistentId(otherRoot)).ToString())}};
+	     Ursa::ToStdString(Take(active.scene->PersistentId(otherRoot)).ToString())}};
 	checkFailure(crossInstance, "Cross-instance");
 	done(Ursa::WriteJsonResource(path, base));
 	done(Ursa::ReloadLinkedSceneResource(path, registry, context, active));
@@ -434,7 +480,7 @@ int main()
 		TestStructure(root);
 		TestConflicts(root);
 		Ursa::Scene docsSource;
-		const auto docsRoot = Take(docsSource.CreateNode());
+		const auto docsRoot = Take(docsSource.CreateGameObject());
 		PlacePrefab(root, docsSource, docsRoot);
 		std::filesystem::remove(root / "tile.ursaprefab");
 		std::filesystem::remove(root / "level.ursascene");

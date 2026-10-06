@@ -1,3 +1,4 @@
+#include <Core/Containers.hpp>
 #include <Core/Log.hpp>
 #include <spdlog/logger.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -8,7 +9,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <vector>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -24,26 +24,26 @@ std::atomic<LogLevel> minimumLevel{Log::DefaultLevel()};
 
 bool valid(LogLevel level)
 {
-	return level >= LogLevel::trace && level <= LogLevel::off;
+	return level >= LogLevel::Trace && level <= LogLevel::Off;
 }
 
 spdlog::level::level_enum NativeLevel(LogLevel level)
 {
 	switch (level)
 	{
-		case LogLevel::trace:
+		case LogLevel::Trace:
 			return spdlog::level::trace;
-		case LogLevel::debug:
+		case LogLevel::Debug:
 			return spdlog::level::debug;
-		case LogLevel::info:
+		case LogLevel::Info:
 			return spdlog::level::info;
-		case LogLevel::warn:
+		case LogLevel::Warn:
 			return spdlog::level::warn;
-		case LogLevel::error:
+		case LogLevel::Error:
 			return spdlog::level::err;
-		case LogLevel::critical:
+		case LogLevel::Critical:
 			return spdlog::level::critical;
-		case LogLevel::off:
+		case LogLevel::Off:
 			return spdlog::level::off;
 	}
 	return spdlog::level::off;
@@ -53,19 +53,19 @@ const char* LevelName(LogLevel level)
 {
 	switch (level)
 	{
-		case LogLevel::trace:
+		case LogLevel::Trace:
 			return "trace";
-		case LogLevel::debug:
+		case LogLevel::Debug:
 			return "debug";
-		case LogLevel::info:
+		case LogLevel::Info:
 			return "info";
-		case LogLevel::warn:
+		case LogLevel::Warn:
 			return "warn";
-		case LogLevel::error:
+		case LogLevel::Error:
 			return "error";
-		case LogLevel::critical:
+		case LogLevel::Critical:
 			return "critical";
-		case LogLevel::off:
+		case LogLevel::Off:
 			return "off";
 	}
 	return "unknown";
@@ -85,7 +85,7 @@ LogConfig::LogConfig() : level(Log::DefaultLevel())
 LogLevel Log::DefaultLevel() noexcept
 {
 #ifndef NDEBUG
-	return LogLevel::debug;
+	return LogLevel::Debug;
 #else
 	return LogLevel::Info;
 #endif
@@ -115,14 +115,14 @@ Result<void> Log::Initialize(const std::filesystem::path& executable, const LogC
 		{
 			const String diagnostic = "Cannot create log directory " + String(path.u8string().c_str()) + ": " +
 			                          String(error.message().c_str());
-			fallback(LogLevel::error, "Log", diagnostic);
+			fallback(LogLevel::Error, "Log", diagnostic);
 			return Result<void>::Failure(diagnostic);
 		}
 
 		auto console = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
 		auto file =
 		    std::make_shared<spdlog::sinks::rotating_file_sink_mt>(path.string(), config.maxFileBytes, config.maxFiles);
-		std::vector<spdlog::sink_ptr> sinks{console, file};
+		Ursa::Vector<spdlog::sink_ptr> sinks{console, file};
 		auto created = std::make_shared<spdlog::logger>("Ursa", sinks.begin(), sinks.end());
 		created->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
 		created->set_level(NativeLevel(config.level));
@@ -141,7 +141,7 @@ Result<void> Log::Initialize(const std::filesystem::path& executable, const LogC
 	{
 		const String diagnostic =
 		    "Cannot initialize log file " + String(path.u8string().c_str()) + ": " + String(error.what());
-		fallback(LogLevel::error, "Log", diagnostic);
+		fallback(LogLevel::Error, "Log", diagnostic);
 		return Result<void>::Failure(diagnostic);
 	}
 }
@@ -154,7 +154,7 @@ Result<void> Log::InitializeForCurrentProcess(const LogConfig& config)
 	if (length == 0 || length >= buffer.size())
 	{
 		const String diagnostic = "Cannot locate executable for default log path";
-		fallback(LogLevel::error, "Log", diagnostic);
+		fallback(LogLevel::Error, "Log", diagnostic);
 		return Result<void>::Failure(diagnostic);
 	}
 	buffer.resize(length);
@@ -216,7 +216,7 @@ void Log::SetLevel(LogLevel level) noexcept
 
 bool Log::Enabled(LogLevel level) noexcept
 {
-	return valid(level) && level != LogLevel::off && level >= minimumLevel.load(std::memory_order_acquire);
+	return valid(level) && level != LogLevel::Off && level >= minimumLevel.load(std::memory_order_acquire);
 }
 
 void Log::Write(LogLevel level, const char* module, const String& message) noexcept

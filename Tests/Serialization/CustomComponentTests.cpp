@@ -39,7 +39,7 @@ struct RuntimeService
 
 struct CounterComponent : Ursa::Component
 {
-	CounterComponent(int& total, int step) : total(total), step(step)
+	CounterComponent(int& totalCount, int stepValue) : total(totalCount), step(stepValue)
 	{
 	}
 
@@ -56,8 +56,8 @@ Ursa::Result<void> RegisterCounter(Ursa::ComponentRegistry& registry)
 	{ return dynamic_cast<const CounterComponent*>(&value) != nullptr; };
 	codec.save = [](const Ursa::Component& value, const Ursa::ComponentSaveContext&)
 	{ return Ursa::Result<nlohmann::json>::Success({{"step", static_cast<const CounterComponent&>(value).step}}); };
-	codec.create =
-	    [](Ursa::Scene& scene, Ursa::NodeId node, const nlohmann::json& data, Ursa::ComponentLoadContext& context)
+	codec.create = [](Ursa::Scene& scene, Ursa::GameObject::Ptr node, const nlohmann::json& data,
+	                  Ursa::ComponentLoadContext& context)
 	{
 		if (!data.is_object() || !data.contains("step") || !data["step"].is_number_integer())
 		{
@@ -76,7 +76,7 @@ Ursa::Result<void> RegisterCounter(Ursa::ComponentRegistry& registry)
 class LinkComponent final : public Ursa::Component
 {
 public:
-	LinkComponent(RuntimeService& service, int value) : service(service), value(value)
+	LinkComponent(RuntimeService& runtimeService, int initialValue) : service(runtimeService), value(initialValue)
 	{
 	}
 
@@ -86,7 +86,7 @@ public:
 		return {};
 	}
 
-	Ursa::NodeId targetNode;
+	Ursa::GameObject::Ptr targetNode;
 	Ursa::ComponentId targetComponent;
 	int value = 0;
 
@@ -107,7 +107,7 @@ Ursa::ComponentCodec MakeCodec()
 		nlohmann::json data{{"value", link.value}, {"node", nullptr}, {"component", nullptr}};
 		if (link.targetNode)
 		{
-			data["node"] = Ursa::ToStdString(Take(context.GetNodeId(link.targetNode)).ToString());
+			data["node"] = Ursa::ToStdString(Take(context.GetGameObjectId(link.targetNode)).ToString());
 		}
 		if (link.targetComponent)
 		{
@@ -115,8 +115,8 @@ Ursa::ComponentCodec MakeCodec()
 		}
 		return Ursa::Result<nlohmann::json>::Success(std::move(data));
 	};
-	codec.create =
-	    [](Ursa::Scene& scene, Ursa::NodeId node, const nlohmann::json& data, Ursa::ComponentLoadContext& context)
+	codec.create = [](Ursa::Scene& scene, Ursa::GameObject::Ptr node, const nlohmann::json& data,
+	                  Ursa::ComponentLoadContext& context)
 	{
 		if (!data.is_object() || !data.contains("value") || !data["value"].is_number_integer())
 		{
@@ -150,7 +150,7 @@ Ursa::ComponentCodec MakeCodec()
 			}
 			if (Ursa::String(field) == "node")
 			{
-				auto target = context.Node(id.value);
+				auto target = context.GameObjectById(id.value);
 				if (!target)
 				{
 					return Ursa::Result<void>::Failure(target.error);
@@ -182,15 +182,15 @@ void TestCustomComponents(const std::filesystem::path& root)
 	Expect(!duplicate && duplicate.error.find("Duplicate") != Ursa::String::npos,
 	       "Duplicate component type was accepted");
 	Ursa::Scene source;
-	const auto first = Take(source.CreateNode());
-	const auto second = Take(source.CreateNode());
+	const auto first = Take(source.CreateGameObject());
+	const auto second = Take(source.CreateGameObject());
 	const auto target = Take(source.AddComponent<LinkComponent>(second, service, 7));
 	const auto linkId = Take(source.AddComponent<LinkComponent>(first, service, 42));
 	auto* link = static_cast<LinkComponent*>(source.GetComponent(linkId));
 	link->targetNode = second;
 	link->targetComponent = target;
-	const auto firstPersistent = Take(source.NodePersistentId(first));
-	const auto secondPersistent = Take(source.NodePersistentId(second));
+	const auto firstPersistent = Take(source.PersistentId(first));
+	const auto secondPersistent = Take(source.PersistentId(second));
 	const auto linkPersistent = Take(source.ComponentPersistentId(linkId));
 	const auto targetPersistent = Take(source.ComponentPersistentId(target));
 	const auto path = root / "custom.ursascene";
@@ -200,11 +200,11 @@ void TestCustomComponents(const std::filesystem::path& root)
 	Ursa::ComponentLoadContext context(*session);
 	context.Provide(service);
 	auto loaded = Take(Ursa::LoadSceneResource(path, registry, context));
-	auto restoredNode = Take(loaded.scene->NodeByPersistentId(firstPersistent));
-	auto restoredTargetNode = Take(loaded.scene->NodeByPersistentId(secondPersistent));
+	auto restoredNode = Take(loaded.scene->GameObjectById(firstPersistent));
+	auto restoredTargetNode = Take(loaded.scene->GameObjectById(secondPersistent));
 	auto* restored = static_cast<LinkComponent*>(
 	    loaded.scene->GetComponent(Take(loaded.scene->ComponentByPersistentId(linkPersistent))));
-	Expect(restored && restored != link && restored->value == 42 && restored->Node() == restoredNode &&
+	Expect(restored && restored != link && restored->value == 42 && restored->GetGameObject() == restoredNode &&
 	           restored->targetNode == restoredTargetNode &&
 	           restored->targetComponent == Take(loaded.scene->ComponentByPersistentId(targetPersistent)),
 	       "Custom fields or cross-object references were not restored");
@@ -231,7 +231,7 @@ void TestCustomComponents(const std::filesystem::path& root)
 	Expect(document.dump().find("service_") == Ursa::String::npos &&
 	           document.dump().find(Ursa::ToStdString(secondPersistent.ToString())) != Ursa::String::npos,
 	       "Scene stored a process dependency or omitted persistent references");
-	document["nodes"][0]["components"][0]["version"] = 99;
+	document["gameObjects"][0]["components"][0]["version"] = 99;
 	const auto unsupported = root / "unsupported.ursascene";
 	{
 		std::ofstream output(unsupported);

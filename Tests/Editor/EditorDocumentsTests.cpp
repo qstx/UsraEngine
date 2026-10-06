@@ -53,16 +53,16 @@ int main()
 		std::filesystem::create_directories(root / "Assets");
 		LogConfig config;
 		config.filePath = logPath;
-		config.level = LogLevel::debug;
+		config.level = LogLevel::Debug;
 		done(Log::Initialize(root / "EditorDocumentsTests.exe", config));
 		const auto firstPath = root / "Assets" / "first.ursamat";
 		const auto firstId = ResourceId::Generate();
-		MaterialInstance original(MaterialType::unlit);
+		MaterialInstance original(MaterialType::Unlit);
 		done(SaveMaterialResource(firstPath, firstId, original, {}));
 		const std::string oldBytes = bytes(firstPath);
 		auto workspace = Take(Editor::ProjectWorkspace::Open(root));
 		auto documents = Take(Editor::EditorDocuments::Create(*workspace));
-		auto edited = std::make_shared<MaterialInstance>(MaterialType::unlit);
+		auto edited = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 		done(edited->SetBaseColor({0.2f, 0.7f, 0.3f, 1.f}));
 		bool failWrite = true;
 		const Editor::DocumentWriter writer = [edited, &failWrite](const std::filesystem::path& path, ResourceId id)
@@ -73,32 +73,32 @@ int main()
 			}
 			return SaveMaterialResource(path, id, *edited, {});
 		};
-		auto first = Take(Editor::EditorDocument::Create(ResourceKind::material, firstId,
+		auto first = Take(Editor::EditorDocument::Create(ResourceKind::Material, firstId,
 		                                                 Take(VirtualPath::Parse("prj:first.ursamat")), writer));
 		done(documents->RequestOpen(std::move(first)));
 		documents->Current()->MarkDirty();
 		const auto secondId = ResourceId::Generate();
 		auto makeSecond = [&]
 		{
-			return Take(Editor::EditorDocument::Create(ResourceKind::material, secondId,
+			return Take(Editor::EditorDocument::Create(ResourceKind::Material, secondId,
 			                                           Take(VirtualPath::Parse("prj:second.ursamat")),
 			                                           [edited](const std::filesystem::path& path, ResourceId id)
 			                                           { return SaveMaterialResource(path, id, *edited, {}); }));
 		};
 		done(documents->RequestOpen(makeSecond()));
 		Expect(documents->PromptPending(), "Switching a dirty document did not request a choice");
-		done(documents->ResolvePrompt(Editor::UnsavedChoice::cancel));
+		done(documents->ResolvePrompt(Editor::UnsavedChoice::Cancel));
 		Expect(documents->Current() && documents->Current()->Id() == firstId && documents->Current()->Dirty(),
 		       "Cancel did not preserve the dirty document");
 		done(documents->RequestClose());
-		Expect(!documents->ResolvePrompt(Editor::UnsavedChoice::save), "Failed save was accepted");
+		Expect(!documents->ResolvePrompt(Editor::UnsavedChoice::Save), "Failed save was accepted");
 		Expect(documents->PromptPending() && documents->Current() && documents->Current()->Dirty(),
 		       "Failed save dropped pending changes");
 		Expect(bytes(firstPath) == oldBytes, "Failed save modified the existing file");
 		Expect(bytes(logPath).find("simulated material save failure") != std::string::npos,
 		       "Failed asset save did not record a diagnostic");
 		failWrite = false;
-		done(documents->ResolvePrompt(Editor::UnsavedChoice::cancel));
+		done(documents->ResolvePrompt(Editor::UnsavedChoice::Cancel));
 		done(documents->SaveCurrent());
 		Expect(!documents->Current()->Dirty() && documents->Current()->Id() == firstId,
 		       "Successful save changed the ID or left the document dirty");
@@ -109,7 +109,7 @@ int main()
 		       "Saved material did not reopen with edited values");
 		documents->Current()->MarkDirty();
 		done(documents->RequestOpen(makeSecond()));
-		done(documents->ResolvePrompt(Editor::UnsavedChoice::discard));
+		done(documents->ResolvePrompt(Editor::UnsavedChoice::Discard));
 		Expect(documents->Current() && documents->Current()->Id() == secondId &&
 		           !std::filesystem::exists(root / "Assets" / "second.ursamat"),
 		       "Discard did not switch documents without writing the old one");

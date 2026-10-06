@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Vfs/VirtualFileSystem.hpp>
 #include <Core/StringInterop.hpp>
 #include <algorithm>
@@ -139,24 +140,24 @@ Result<std::filesystem::path> VirtualFileSystem::ResolveExisting(const VirtualPa
 	return Result<std::filesystem::path>::Failure("Resource not found: " + path.ToString());
 }
 
-Result<Vector<uint8_t>> VirtualFileSystem::Read(const VirtualPath& path) const
+Result<Vector<Ursa::UInt8>> VirtualFileSystem::Read(const VirtualPath& path) const
 {
 	auto resolved = ResolveExisting(path);
 	if (!resolved)
 	{
-		return Result<Vector<uint8_t>>::Failure(resolved.error);
+		return Result<Vector<Ursa::UInt8>>::Failure(resolved.error);
 	}
 	std::ifstream input(resolved.value, std::ios::binary | std::ios::ate);
 	if (!input)
 	{
-		return Result<Vector<uint8_t>>::Failure("Cannot open " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure("Cannot open " + path.ToString());
 	}
 	const auto size = input.tellg();
 	if (size < 0)
 	{
-		return Result<Vector<uint8_t>>::Failure("Cannot size " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure("Cannot size " + path.ToString());
 	}
-	Vector<uint8_t> bytes(static_cast<size_t>(size));
+	Vector<Ursa::UInt8> bytes(static_cast<Ursa::Size>(size));
 	input.seekg(0);
 	if (!bytes.empty())
 	{
@@ -164,9 +165,9 @@ Result<Vector<uint8_t>> VirtualFileSystem::Read(const VirtualPath& path) const
 	}
 	if (!input)
 	{
-		return Result<Vector<uint8_t>>::Failure("Cannot read " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure("Cannot read " + path.ToString());
 	}
-	return Result<Vector<uint8_t>>::Success(std::move(bytes));
+	return Result<Vector<Ursa::UInt8>>::Success(std::move(bytes));
 }
 
 Result<String> VirtualFileSystem::ReadText(const VirtualPath& path) const
@@ -179,26 +180,26 @@ Result<String> VirtualFileSystem::ReadText(const VirtualPath& path) const
 	return Result<String>::Success(String(reinterpret_cast<const char*>(bytes.value.data()), bytes.value.size()));
 }
 
-Result<Vector<uint8_t>> VirtualFileSystem::ReadPrefix(const VirtualPath& path, uint64_t maxBytes) const
+Result<Vector<Ursa::UInt8>> VirtualFileSystem::ReadPrefix(const VirtualPath& path, Ursa::UInt64 maxBytes) const
 {
 	auto resolved = ResolveExisting(path);
 	if (!resolved)
 	{
-		return Result<Vector<uint8_t>>::Failure(resolved.error);
+		return Result<Vector<Ursa::UInt8>>::Failure(resolved.error);
 	}
 	std::ifstream input(resolved.value, std::ios::binary | std::ios::ate);
 	if (!input)
 	{
-		return Result<Vector<uint8_t>>::Failure("Cannot open " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure("Cannot open " + path.ToString());
 	}
 	const auto size = input.tellg();
 	if (size < 0)
 	{
-		return Result<Vector<uint8_t>>::Failure("Cannot size " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure("Cannot size " + path.ToString());
 	}
-	const uint64_t available = static_cast<uint64_t>(size);
-	const uint64_t wanted = available < maxBytes ? available : maxBytes;
-	Vector<uint8_t> bytes(static_cast<size_t>(wanted));
+	const Ursa::UInt64 available = static_cast<Ursa::UInt64>(size);
+	const Ursa::UInt64 wanted = available < maxBytes ? available : maxBytes;
+	Vector<Ursa::UInt8> bytes(static_cast<Ursa::Size>(wanted));
 	input.seekg(0);
 	if (!bytes.empty())
 	{
@@ -206,9 +207,9 @@ Result<Vector<uint8_t>> VirtualFileSystem::ReadPrefix(const VirtualPath& path, u
 	}
 	if (!input)
 	{
-		return Result<Vector<uint8_t>>::Failure("Cannot read " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure("Cannot read " + path.ToString());
 	}
-	return Result<Vector<uint8_t>>::Success(std::move(bytes));
+	return Result<Vector<Ursa::UInt8>>::Success(std::move(bytes));
 }
 
 Result<bool> VirtualFileSystem::Exists(const VirtualPath& path) const
@@ -235,21 +236,21 @@ Result<bool> VirtualFileSystem::Exists(const VirtualPath& path) const
 	return Result<bool>::Success(false);
 }
 
-Result<uint64_t> VirtualFileSystem::Size(const VirtualPath& path) const
+Result<Ursa::UInt64> VirtualFileSystem::Size(const VirtualPath& path) const
 {
 	auto resolved = ResolveExisting(path);
 	if (!resolved)
 	{
-		return Result<uint64_t>::Failure(resolved.error);
+		return Result<Ursa::UInt64>::Failure(resolved.error);
 	}
 	std::error_code error;
 	const auto bytes = std::filesystem::file_size(resolved.value, error);
 	if (error)
 	{
-		return Result<uint64_t>::Failure("Cannot read the size of " + path.ToString() + ": " +
-		                                 ToUrsaString(error.message()));
+		return Result<Ursa::UInt64>::Failure("Cannot read the size of " + path.ToString() + ": " +
+		                                     ToUrsaString(error.message()));
 	}
-	return Result<uint64_t>::Success(static_cast<uint64_t>(bytes));
+	return Result<Ursa::UInt64>::Success(static_cast<Ursa::UInt64>(bytes));
 }
 
 Result<std::filesystem::path> VirtualFileSystem::ResolveToDisk(const VirtualPath& path) const
@@ -265,14 +266,14 @@ Result<std::filesystem::path> VirtualFileSystem::ResolveForWrite(const VirtualPa
 		return Result<std::filesystem::path>::Failure("Resource scheme is not mounted: " + path.scheme);
 	}
 	const Root& root = mount->front();
-	if (root.access != MountAccess::readWrite)
+	if (root.access != MountAccess::ReadWrite)
 	{
 		return Result<std::filesystem::path>::Failure("Resource scheme is read-only: " + path.scheme);
 	}
 	return ResolveIn(root, path);
 }
 
-Result<void> VirtualFileSystem::Write(const VirtualPath& path, const Vector<uint8_t>& bytes, bool createDirectories)
+Result<void> VirtualFileSystem::Write(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes, bool createDirectories)
 {
 	const auto* mount = FindMount(path.scheme);
 	if (mount == nullptr || mount->empty())
@@ -280,7 +281,7 @@ Result<void> VirtualFileSystem::Write(const VirtualPath& path, const Vector<uint
 		return Result<void>::Failure("Resource scheme is not mounted: " + path.scheme);
 	}
 	const Root& root = mount->front();
-	if (root.access != MountAccess::readWrite)
+	if (root.access != MountAccess::ReadWrite)
 	{
 		return Result<void>::Failure("Resource scheme is read-only: " + path.scheme);
 	}

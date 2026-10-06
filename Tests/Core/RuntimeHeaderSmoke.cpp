@@ -1,10 +1,11 @@
+#include <Core/Types.hpp>
 #include <Core/Result.hpp>
 #include <Rhi/RHI.hpp>
 #include <Window/Window.hpp>
 
 int main()
 {
-	Ursa::Vector<uint8_t> code{1, 2, 3, 4};
+	Ursa::Vector<Ursa::UInt8> code{1, 2, 3, 4};
 	Ursa::Rhi::ShaderDesc documentedShader;
 	documentedShader.code = code;
 	documentedShader.entry = Ursa::String("main");

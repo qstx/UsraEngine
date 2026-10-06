@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Vfs/VirtualPath.hpp>
 
 namespace Ursa
@@ -28,25 +29,25 @@ Result<VirtualPath> VirtualPath::Parse(const String& text)
 		return Result<VirtualPath>::Failure("Resource path has an empty scheme: " + text);
 	}
 
-	String scheme = text.substr(0, colon);
-	if (scheme.size() == 1)
+	String parsedScheme = text.substr(0, colon);
+	if (parsedScheme.size() == 1)
 	{
 		return Result<VirtualPath>::Failure("Resource path scheme looks like a host drive letter: " + text);
 	}
-	if (!SchemeStart(scheme.front()))
+	if (!SchemeStart(parsedScheme.front()))
 	{
 		return Result<VirtualPath>::Failure("Resource path scheme must start with a letter: " + text);
 	}
-	for (size_t index = 0; index < scheme.size(); ++index)
+	for (Ursa::Size index = 0; index < parsedScheme.size(); ++index)
 	{
-		const char character = scheme[index];
+		const char character = parsedScheme[index];
 		if (!SchemeBody(character))
 		{
 			return Result<VirtualPath>::Failure("Resource path scheme has an invalid character: " + text);
 		}
 		if (character >= 'A' && character <= 'Z')
 		{
-			scheme[index] = static_cast<char>(character - 'A' + 'a');
+			parsedScheme[index] = static_cast<char>(character - 'A' + 'a');
 		}
 	}
 
@@ -68,11 +69,11 @@ Result<VirtualPath> VirtualPath::Parse(const String& text)
 	}
 
 	String normalized;
-	size_t cursor = 0;
+	Ursa::Size cursor = 0;
 	while (cursor < rest.size())
 	{
 		const auto slash = rest.find('/', cursor);
-		const size_t end = slash == String::npos ? rest.size() : slash;
+		const Ursa::Size end = slash == String::npos ? rest.size() : slash;
 		const String segment = rest.substr(cursor, end - cursor);
 		if (!segment.empty() && segment != ".")
 		{
@@ -102,7 +103,7 @@ Result<VirtualPath> VirtualPath::Parse(const String& text)
 	}
 
 	VirtualPath path;
-	path.scheme = std::move(scheme);
+	path.scheme = std::move(parsedScheme);
 	path.relative = std::move(normalized);
 	return Result<VirtualPath>::Success(std::move(path));
 }

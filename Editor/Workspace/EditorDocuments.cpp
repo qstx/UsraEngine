@@ -16,13 +16,13 @@ const char* ExtensionFor(ResourceKind kind)
 {
 	switch (kind)
 	{
-		case ResourceKind::texture:
+		case ResourceKind::Texture:
 			return ".ursatex";
-		case ResourceKind::material:
+		case ResourceKind::Material:
 			return ".ursamat";
-		case ResourceKind::scene:
+		case ResourceKind::Scene:
 			return ".ursascene";
-		case ResourceKind::prefab:
+		case ResourceKind::Prefab:
 			return ".ursaprefab";
 	}
 	return "";
@@ -53,26 +53,26 @@ Result<void> RestoreFile(const std::filesystem::path& path, bool existed, const 
 }
 } // namespace
 
-Result<std::unique_ptr<EditorDocument>> EditorDocument::Create(ResourceKind kind, ResourceId id, VirtualPath path,
-                                                               DocumentWriter writer)
+Result<std::unique_ptr<EditorDocument>> EditorDocument::Create(ResourceKind documentKind, ResourceId documentId,
+                                                               VirtualPath documentPath, DocumentWriter documentWriter)
 {
-	const auto matched = ResourceKindForPath(path);
-	if (!id || !writer || !matched || matched.value != kind)
+	const auto matched = ResourceKindForPath(documentPath);
+	if (!documentId || !documentWriter || !matched || matched.value != documentKind)
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure("Invalid Editor document ID, path, or writer");
 	}
-	return Result<std::unique_ptr<EditorDocument>>::Success(
-	    std::unique_ptr<EditorDocument>(new EditorDocument(kind, id, std::move(path), std::move(writer))));
+	return Result<std::unique_ptr<EditorDocument>>::Success(std::unique_ptr<EditorDocument>(
+	    new EditorDocument(documentKind, documentId, std::move(documentPath), std::move(documentWriter))));
 }
 
-Result<std::unique_ptr<EditorDocuments>> EditorDocuments::Create(ProjectWorkspace& workspace)
+Result<std::unique_ptr<EditorDocuments>> EditorDocuments::Create(ProjectWorkspace& projectWorkspace)
 {
-	auto session = ResourceSession::Open(workspace.Index().Mounts());
+	auto session = ResourceSession::Open(projectWorkspace.Index().Mounts());
 	if (!session)
 	{
 		return Result<std::unique_ptr<EditorDocuments>>::Failure(session.error);
 	}
-	auto documents = std::unique_ptr<EditorDocuments>(new EditorDocuments(workspace));
+	auto documents = std::unique_ptr<EditorDocuments>(new EditorDocuments(projectWorkspace));
 	documents->sessions.push_back(std::move(session.value));
 	return Result<std::unique_ptr<EditorDocuments>>::Success(std::move(documents));
 }
@@ -145,14 +145,14 @@ Result<void> EditorDocuments::ResolvePrompt(UnsavedChoice choice)
 	{
 		return Result<void>::Failure("No unsaved changes prompt is active");
 	}
-	if (choice == UnsavedChoice::cancel)
+	if (choice == UnsavedChoice::Cancel)
 	{
 		pending.reset();
 		pendingClose = false;
 		promptPending = false;
 		return {};
 	}
-	if (choice == UnsavedChoice::save)
+	if (choice == UnsavedChoice::Save)
 	{
 		auto saved = SaveCurrent();
 		if (!saved)
@@ -293,17 +293,17 @@ void EditorDocuments::DrawUnsavedPrompt()
 	}
 	if (ImGui::Button("Save"))
 	{
-		ResolvePrompt(UnsavedChoice::save);
+		ResolvePrompt(UnsavedChoice::Save);
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Discard"))
 	{
-		ResolvePrompt(UnsavedChoice::discard);
+		ResolvePrompt(UnsavedChoice::Discard);
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel"))
 	{
-		ResolvePrompt(UnsavedChoice::cancel);
+		ResolvePrompt(UnsavedChoice::Cancel);
 	}
 	ImGui::EndPopup();
 }

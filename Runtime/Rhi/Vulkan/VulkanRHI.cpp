@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Rhi/RHI.hpp>
 #include <Core/StringInterop.hpp>
 #include <Rhi/Vulkan/ValidationLog.hpp>
@@ -61,15 +62,15 @@ VkFormat ToVkFormat(Format format)
 {
 	switch (format)
 	{
-		case Format::rgbA8Unorm:
+		case Format::RgbA8Unorm:
 			return VK_FORMAT_R8G8B8A8_UNORM;
-		case Format::rgbA8Srgb:
+		case Format::RgbA8Srgb:
 			return VK_FORMAT_R8G8B8A8_SRGB;
-		case Format::bgrA8Unorm:
+		case Format::BgrA8Unorm:
 			return VK_FORMAT_B8G8R8A8_UNORM;
-		case Format::r32Uint:
+		case Format::R32Uint:
 			return VK_FORMAT_R32_UINT;
-		case Format::d32Float:
+		case Format::D32Float:
 			return VK_FORMAT_D32_SFLOAT;
 	}
 	throw std::runtime_error("Unknown texture format");
@@ -80,49 +81,49 @@ Format FromVkFormat(VkFormat format)
 	switch (format)
 	{
 		case VK_FORMAT_R8G8B8A8_UNORM:
-			return Format::rgbA8Unorm;
+			return Format::RgbA8Unorm;
 		case VK_FORMAT_R8G8B8A8_SRGB:
-			return Format::rgbA8Srgb;
+			return Format::RgbA8Srgb;
 		case VK_FORMAT_B8G8R8A8_UNORM:
-			return Format::bgrA8Unorm;
+			return Format::BgrA8Unorm;
 		case VK_FORMAT_R32_UINT:
-			return Format::r32Uint;
+			return Format::R32Uint;
 		case VK_FORMAT_D32_SFLOAT:
-			return Format::d32Float;
+			return Format::D32Float;
 		default:
 			throw std::runtime_error("Unsupported surface format");
 	}
 }
 
-uint32_t PixelSize(Format f)
+Ursa::UInt32 PixelSize(Format f)
 {
-	return f == Format::r32Uint ? 4 : 4;
+	return f == Format::R32Uint ? 4 : 4;
 }
 
 VkBufferUsageFlags VkBufferUsage(BufferUsage usage)
 {
 	VkBufferUsageFlags flags = 0;
-	if (Has(usage, BufferUsage::transferSource))
+	if (Has(usage, BufferUsage::TransferSource))
 	{
 		flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 	}
-	if (Has(usage, BufferUsage::transferDestination))
+	if (Has(usage, BufferUsage::TransferDestination))
 	{
 		flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	}
-	if (Has(usage, BufferUsage::vertex))
+	if (Has(usage, BufferUsage::Vertex))
 	{
 		flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 	}
-	if (Has(usage, BufferUsage::index))
+	if (Has(usage, BufferUsage::Index))
 	{
 		flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 	}
-	if (Has(usage, BufferUsage::uniform))
+	if (Has(usage, BufferUsage::Uniform))
 	{
 		flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 	}
-	if (Has(usage, BufferUsage::storage))
+	if (Has(usage, BufferUsage::Storage))
 	{
 		flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	}
@@ -132,34 +133,34 @@ VkBufferUsageFlags VkBufferUsage(BufferUsage usage)
 VkImageUsageFlags VkImageUsage(TextureUsage usage)
 {
 	VkImageUsageFlags flags = 0;
-	if (Has(usage, TextureUsage::transferSource))
+	if (Has(usage, TextureUsage::TransferSource))
 	{
 		flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
-	if (Has(usage, TextureUsage::transferDestination))
+	if (Has(usage, TextureUsage::TransferDestination))
 	{
 		flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	}
-	if (Has(usage, TextureUsage::sampled))
+	if (Has(usage, TextureUsage::Sampled))
 	{
 		flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
 	}
-	if (Has(usage, TextureUsage::storage))
+	if (Has(usage, TextureUsage::Storage))
 	{
 		flags |= VK_IMAGE_USAGE_STORAGE_BIT;
 	}
-	if (Has(usage, TextureUsage::colorAttachment))
+	if (Has(usage, TextureUsage::ColorAttachment))
 	{
 		flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	}
-	if (Has(usage, TextureUsage::depthAttachment))
+	if (Has(usage, TextureUsage::DepthAttachment))
 	{
 		flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 	}
 	return flags;
 }
 
-VkShaderStageFlags VkStages(uint32_t mask)
+VkShaderStageFlags VkStages(Ursa::UInt32 mask)
 {
 	VkShaderStageFlags flags = 0;
 	if (mask & 1)
@@ -181,11 +182,11 @@ VkShaderStageFlagBits VkStage(ShaderStage stage)
 {
 	switch (stage)
 	{
-		case ShaderStage::vertex:
+		case ShaderStage::Vertex:
 			return VK_SHADER_STAGE_VERTEX_BIT;
-		case ShaderStage::fragment:
+		case ShaderStage::Fragment:
 			return VK_SHADER_STAGE_FRAGMENT_BIT;
-		case ShaderStage::compute:
+		case ShaderStage::Compute:
 			return VK_SHADER_STAGE_COMPUTE_BIT;
 	}
 	throw std::runtime_error("Unknown shader stage");
@@ -195,17 +196,17 @@ VkDescriptorType VkDescriptor(BindingType type)
 {
 	switch (type)
 	{
-		case BindingType::uniformBuffer:
+		case BindingType::UniformBuffer:
 			return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		case BindingType::storageBuffer:
+		case BindingType::StorageBuffer:
 			return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		case BindingType::sampledTexture:
+		case BindingType::SampledTexture:
 			return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		case BindingType::storageTexture:
+		case BindingType::StorageTexture:
 			return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-		case BindingType::sampler:
+		case BindingType::Sampler:
 			return VK_DESCRIPTOR_TYPE_SAMPLER;
-		case BindingType::combinedImageSampler:
+		case BindingType::CombinedImageSampler:
 			return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	}
 	throw std::runtime_error("Unknown descriptor type");
@@ -222,38 +223,38 @@ Access Access(ResourceState state)
 {
 	switch (state)
 	{
-		case ResourceState::undefined:
+		case ResourceState::Undefined:
 			return {VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED};
-		case ResourceState::present:
+		case ResourceState::Present:
 			return {VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR};
-		case ResourceState::transferSource:
+		case ResourceState::TransferSource:
 			return {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL};
-		case ResourceState::transferDestination:
+		case ResourceState::TransferDestination:
 			return {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL};
-		case ResourceState::shaderRead:
+		case ResourceState::ShaderRead:
 			return {VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
 			            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 			        VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-		case ResourceState::shaderWrite:
+		case ResourceState::ShaderWrite:
 			return {VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			        VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL};
-		case ResourceState::colorAttachment:
+		case ResourceState::ColorAttachment:
 			return {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 			        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-		case ResourceState::depthAttachment:
+		case ResourceState::DepthAttachment:
 			return {VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
 			        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 			        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-		case ResourceState::vertexBuffer:
+		case ResourceState::VertexBuffer:
 			return {VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED};
-		case ResourceState::indexBuffer:
+		case ResourceState::IndexBuffer:
 			return {VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_INDEX_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED};
-		case ResourceState::uniformRead:
+		case ResourceState::UniformRead:
 			return {VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
 			            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 			        VK_ACCESS_UNIFORM_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED};
-		case ResourceState::storageReadWrite:
+		case ResourceState::StorageReadWrite:
 			return {VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
 			            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 			        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED};
@@ -269,11 +270,11 @@ struct Context
 	VkPhysicalDevice physical = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
 	VkQueue queue = VK_NULL_HANDLE;
-	uint32_t family = UINT32_MAX;
+	Ursa::UInt32 family = UINT32_MAX;
 	VmaAllocator allocator = VK_NULL_HANDLE;
 	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 	VkPhysicalDeviceProperties properties{};
-	std::atomic<uint32_t> validationErrors{0};
+	std::atomic<Ursa::UInt32> validationErrors{0};
 	std::shared_ptr<Window> window;
 	std::mutex queueMutex;
 
@@ -329,14 +330,14 @@ VKAPI_ATTR VkBool32 VKAPI_CALL ValidationCallback(VkDebugUtilsMessageSeverityFla
 
 std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 {
-	Require(desc.backend == Backend::vulkan, "Requested RHI backend is not implemented");
+	Require(desc.backend == Backend::Vulkan, "Requested RHI backend is not implemented");
 	auto ctx = std::make_shared<Context>();
 	ctx->window = desc.window;
 	Vector<const char*> extensions;
 	if (ctx->window)
 	{
 		Require(glfwVulkanSupported() == GLFW_TRUE, "GLFW reports no Vulkan loader or driver");
-		uint32_t count = 0;
+		Ursa::UInt32 count = 0;
 		const char** required = glfwGetRequiredInstanceExtensions(&count);
 		Require(required && count, "GLFW cannot provide Vulkan surface extensions");
 		extensions.assign(required, required + count);
@@ -344,7 +345,7 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 	Vector<const char*> layers;
 	if (desc.validation)
 	{
-		uint32_t count = 0;
+		Ursa::UInt32 count = 0;
 		Check(vkEnumerateInstanceLayerProperties(&count, nullptr), "Enumerating instance layers");
 		Vector<VkLayerProperties> available(count);
 		Check(vkEnumerateInstanceLayerProperties(&count, available.data()), "Enumerating instance layers");
@@ -359,9 +360,9 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 	app.apiVersion = VK_API_VERSION_1_2;
 	VkInstanceCreateInfo instanceInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
 	instanceInfo.pApplicationInfo = &app;
-	instanceInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+	instanceInfo.enabledExtensionCount = static_cast<Ursa::UInt32>(extensions.size());
 	instanceInfo.ppEnabledExtensionNames = extensions.data();
-	instanceInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
+	instanceInfo.enabledLayerCount = static_cast<Ursa::UInt32>(layers.size());
 	instanceInfo.ppEnabledLayerNames = layers.data();
 	Check(vkCreateInstance(&instanceInfo, nullptr, &ctx->instance), "Creating Vulkan instance");
 	if (desc.validation)
@@ -386,7 +387,7 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 		                              &ctx->surface),
 		      "Creating window surface");
 	}
-	uint32_t physicalCount = 0;
+	Ursa::UInt32 physicalCount = 0;
 	Check(vkEnumeratePhysicalDevices(ctx->instance, &physicalCount, nullptr), "Enumerating Vulkan devices");
 	Require(physicalCount, "No Vulkan physical device found");
 	Vector<VkPhysicalDevice> devices(physicalCount);
@@ -400,11 +401,11 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 		{
 			continue;
 		}
-		uint32_t familyCount = 0;
+		Ursa::UInt32 familyCount = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(physical, &familyCount, nullptr);
 		Vector<VkQueueFamilyProperties> families(familyCount);
 		vkGetPhysicalDeviceQueueFamilyProperties(physical, &familyCount, families.data());
-		for (uint32_t i = 0; i < familyCount; ++i)
+		for (Ursa::UInt32 i = 0; i < familyCount; ++i)
 		{
 			if ((families[i].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) !=
 			    (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))
@@ -421,7 +422,7 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 			{
 				continue;
 			}
-			uint32_t extensionCount = 0;
+			Ursa::UInt32 extensionCount = 0;
 			Check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &extensionCount, nullptr),
 			      "Enumerating device extensions");
 			Vector<VkExtensionProperties> available(extensionCount);
@@ -444,7 +445,7 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 		}
 	}
 	Require(ctx->physical != VK_NULL_HANDLE, "No Vulkan 1.2 graphics/compute device supports the requested surface");
-	float priority = 1.0f;
+	Ursa::Float32 priority = 1.0f;
 	VkDeviceQueueCreateInfo queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
 	queueInfo.queueFamilyIndex = ctx->family;
 	queueInfo.queueCount = 1;
@@ -477,7 +478,7 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 	VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
 	poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 	poolInfo.maxSets = 1024;
-	poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+	poolInfo.poolSizeCount = static_cast<Ursa::UInt32>(poolSizes.size());
 	poolInfo.pPoolSizes = poolSizes.data();
 	Check(vkCreateDescriptorPool(ctx->device, &poolInfo, nullptr, &ctx->descriptorPool), "Creating descriptor pool");
 	return ctx;
@@ -501,12 +502,12 @@ struct BufferImpl final : Buffer
 		}
 	}
 
-	Result<void> Write(size_t offset, const void* data, size_t size) override
+	Result<void> Write(Ursa::Size offset, const void* data, Ursa::Size size) override
 	{
 		return GuardedVoid(
 		    [&]
 		    {
-			    Require(desc.memory == Memory::upload, "Buffer is not CPU writable");
+			    Require(desc.memory == Memory::Upload, "Buffer is not CPU writable");
 			    Require(data && offset <= desc.size && size <= desc.size - offset, "Buffer write range invalid");
 			    void* mapped = nullptr;
 			    Check(vmaMapMemory(ctx->allocator, allocation, &mapped), "Mapping upload buffer");
@@ -519,17 +520,17 @@ struct BufferImpl final : Buffer
 					    vmaUnmapMemory(allocator, allocation);
 				    }
 			    } unmap{ctx->allocator, allocation};
-			    std::memcpy(static_cast<uint8_t*>(mapped) + offset, data, size);
+			    std::memcpy(static_cast<Ursa::UInt8*>(mapped) + offset, data, size);
 			    Check(vmaFlushAllocation(ctx->allocator, allocation, offset, size), "Flushing upload buffer");
 		    });
 	}
 
-	Result<void> Read(size_t offset, void* data, size_t size) override
+	Result<void> Read(Ursa::Size offset, void* data, Ursa::Size size) override
 	{
 		return GuardedVoid(
 		    [&]
 		    {
-			    Require(desc.memory == Memory::readback, "Buffer is not CPU readable");
+			    Require(desc.memory == Memory::Readback, "Buffer is not CPU readable");
 			    Require(data && offset <= desc.size && size <= desc.size - offset, "Buffer read range invalid");
 			    void* mapped = nullptr;
 			    Check(vmaMapMemory(ctx->allocator, allocation, &mapped), "Mapping readback buffer");
@@ -544,7 +545,7 @@ struct BufferImpl final : Buffer
 			    } unmap{ctx->allocator, allocation};
 			    Check(vmaInvalidateAllocation(ctx->allocator, allocation, offset, size),
 			          "Invalidating readback buffer");
-			    std::memcpy(data, static_cast<uint8_t*>(mapped) + offset, size);
+			    std::memcpy(data, static_cast<Ursa::UInt8*>(mapped) + offset, size);
 		    });
 	}
 };
@@ -557,7 +558,7 @@ struct SwapchainState
 	Vector<VkImage> images;
 	Vector<bool> presented;
 	VkExtent2D extent{};
-	Format format = Format::bgrA8Unorm;
+	Format format = Format::BgrA8Unorm;
 
 	~SwapchainState()
 	{
@@ -708,7 +709,7 @@ VkRenderPass MakeRenderPass(VkDevice device, Format colorFormat, bool depth, For
                             bool clearDepth)
 {
 	Array<VkAttachmentDescription, 2> attachments{};
-	attachments[0].format = VkFormat(colorFormat);
+	attachments[0].format = ToVkFormat(colorFormat);
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 	attachments[0].loadOp = clearColor ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -717,7 +718,7 @@ VkRenderPass MakeRenderPass(VkDevice device, Format colorFormat, bool depth, For
 	VkAttachmentReference depthRef{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
 	if (depth)
 	{
-		attachments[1].format = VkFormat(depthFormat);
+		attachments[1].format = ToVkFormat(depthFormat);
 		attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
 		attachments[1].loadOp = clearDepth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
 		attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -828,11 +829,11 @@ struct CommandImpl final : CommandList
 		    {
 			    Recording(true);
 			    auto t = checked<TextureImpl>(texture, ctx, "texture");
-			    Require(before != ResourceState::vertexBuffer && before != ResourceState::indexBuffer &&
-			                before != ResourceState::uniformRead && before != ResourceState::storageReadWrite,
+			    Require(before != ResourceState::VertexBuffer && before != ResourceState::IndexBuffer &&
+			                before != ResourceState::UniformRead && before != ResourceState::StorageReadWrite,
 			            "Invalid texture state");
-			    Require(after != ResourceState::vertexBuffer && after != ResourceState::indexBuffer &&
-			                after != ResourceState::uniformRead && after != ResourceState::storageReadWrite,
+			    Require(after != ResourceState::VertexBuffer && after != ResourceState::IndexBuffer &&
+			                after != ResourceState::UniformRead && after != ResourceState::StorageReadWrite,
 			            "Invalid texture state");
 			    const auto src = Access(before), dst = Access(after);
 			    VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -843,7 +844,7 @@ struct CommandImpl final : CommandList
 			    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			    b.image = t->image;
 			    b.subresourceRange.aspectMask =
-			        t->desc.format == Format::d32Float ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+			        t->desc.format == Format::D32Float ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 			    b.subresourceRange.levelCount = b.subresourceRange.layerCount = 1;
 			    vkCmdPipelineBarrier(command, src.stage, dst.stage, 0, 0, nullptr, 0, nullptr, 1, &b);
 			    keepAlive.push_back(t);
@@ -870,8 +871,8 @@ struct CommandImpl final : CommandList
 		    });
 	}
 
-	Result<void> CopyBuffer(const BufferPtr& source, const BufferPtr& destination, size_t size, size_t sourceOffset,
-	                        size_t destinationOffset) override
+	Result<void> CopyBuffer(const BufferPtr& source, const BufferPtr& destination, Ursa::Size size,
+	                        Ursa::Size sourceOffset, Ursa::Size destinationOffset) override
 	{
 		return GuardedVoid(
 		    [&]
@@ -879,8 +880,8 @@ struct CommandImpl final : CommandList
 			    Recording(true);
 			    auto src = checked<BufferImpl>(source, ctx, "source buffer");
 			    auto dst = checked<BufferImpl>(destination, ctx, "destination buffer");
-			    Require(Has(src->desc.usage, BufferUsage::transferSource) &&
-			                Has(dst->desc.usage, BufferUsage::transferDestination),
+			    Require(Has(src->desc.usage, BufferUsage::TransferSource) &&
+			                Has(dst->desc.usage, BufferUsage::TransferDestination),
 			            "Buffer transfer usage missing");
 			    Require(size && sourceOffset <= src->desc.size && size <= src->desc.size - sourceOffset &&
 			                destinationOffset <= dst->desc.size && size <= dst->desc.size - destinationOffset,
@@ -900,10 +901,10 @@ struct CommandImpl final : CommandList
 			    Recording(true);
 			    auto src = checked<BufferImpl>(source, ctx, "source buffer");
 			    auto dst = checked<TextureImpl>(destination, ctx, "destination texture");
-			    Require(Has(src->desc.usage, BufferUsage::transferSource) &&
-			                Has(dst->desc.usage, TextureUsage::transferDestination),
+			    Require(Has(src->desc.usage, BufferUsage::TransferSource) &&
+			                Has(dst->desc.usage, TextureUsage::TransferDestination),
 			            "Buffer-to-texture transfer usage missing");
-			    Require(src->desc.size >= size_t(dst->desc.width) * dst->desc.height * PixelSize(dst->desc.format),
+			    Require(src->desc.size >= Ursa::Size(dst->desc.width) * dst->desc.height * PixelSize(dst->desc.format),
 			            "Upload buffer too small");
 			    VkBufferImageCopy region{};
 			    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -924,10 +925,10 @@ struct CommandImpl final : CommandList
 			    Recording(true);
 			    auto src = checked<TextureImpl>(source, ctx, "source texture");
 			    auto dst = checked<BufferImpl>(destination, ctx, "destination buffer");
-			    Require(Has(src->desc.usage, TextureUsage::transferSource) &&
-			                Has(dst->desc.usage, BufferUsage::transferDestination),
+			    Require(Has(src->desc.usage, TextureUsage::TransferSource) &&
+			                Has(dst->desc.usage, BufferUsage::TransferDestination),
 			            "Texture-to-buffer transfer usage missing");
-			    Require(dst->desc.size >= size_t(src->desc.width) * src->desc.height * PixelSize(src->desc.format),
+			    Require(dst->desc.size >= Ursa::Size(src->desc.width) * src->desc.height * PixelSize(src->desc.format),
 			            "Readback buffer too small");
 			    VkBufferImageCopy region{};
 			    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -947,21 +948,21 @@ struct CommandImpl final : CommandList
 		    {
 			    Recording(true);
 			    auto color = checked<TextureImpl>(target.color, ctx, "color target");
-			    Require(Has(color->desc.usage, TextureUsage::colorAttachment), "Texture lacks color-attachment usage");
-			    Require(color->desc.format != Format::d32Float, "Depth format cannot be a color target");
+			    Require(Has(color->desc.usage, TextureUsage::ColorAttachment), "Texture lacks color-attachment usage");
+			    Require(color->desc.format != Format::D32Float, "Depth format cannot be a color target");
 			    std::shared_ptr<TextureImpl> depth;
 			    if (target.depth)
 			    {
 				    depth = checked<TextureImpl>(target.depth, ctx, "depth target");
-				    Require(depth->desc.format == Format::d32Float &&
-				                Has(depth->desc.usage, TextureUsage::depthAttachment),
+				    Require(depth->desc.format == Format::D32Float &&
+				                Has(depth->desc.usage, TextureUsage::DepthAttachment),
 				            "Invalid depth target");
 				    Require(depth->desc.width == color->desc.width && depth->desc.height == color->desc.height,
 				            "Attachment sizes differ");
 			    }
 			    VkRenderPass pass =
 			        MakeRenderPass(ctx->device, color->desc.format, !!depth,
-			                       depth ? depth->desc.format : Format::d32Float, target.colorValue, target.clearDepth);
+			                       depth ? depth->desc.format : Format::D32Float, target.colorValue, target.clearDepth);
 			    transientPasses.push_back(pass);
 			    VkImageView views[2]{color->view, depth ? depth->view : VK_NULL_HANDLE};
 			    VkFramebufferCreateInfo frameInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
@@ -1036,9 +1037,9 @@ struct CommandImpl final : CommandList
 			    if (rendering)
 			    {
 				    VkViewport viewport{0.0f,
-				                        static_cast<float>(extent.height),
-				                        static_cast<float>(extent.width),
-				                        -static_cast<float>(extent.height),
+				                        static_cast<Ursa::Float32>(extent.height),
+				                        static_cast<Ursa::Float32>(extent.width),
+				                        -static_cast<Ursa::Float32>(extent.height),
 				                        0.0f,
 				                        1.0f};
 				    VkRect2D scissor{{0, 0}, extent};
@@ -1073,7 +1074,7 @@ struct CommandImpl final : CommandList
 		    {
 			    Require(state == 1 && rendering, "Vertex buffer requires an active render pass");
 			    auto b = checked<BufferImpl>(buffer, ctx, "vertex buffer");
-			    Require(Has(b->desc.usage, BufferUsage::vertex), "Buffer lacks vertex usage");
+			    Require(Has(b->desc.usage, BufferUsage::Vertex), "Buffer lacks vertex usage");
 			    VkDeviceSize offset = 0;
 			    vkCmdBindVertexBuffers(command, 0, 1, &b->buffer, &offset);
 			    keepAlive.push_back(b);
@@ -1087,7 +1088,7 @@ struct CommandImpl final : CommandList
 		    {
 			    Require(state == 1 && rendering, "Index buffer requires an active render pass");
 			    auto b = checked<BufferImpl>(buffer, ctx, "index buffer");
-			    Require(Has(b->desc.usage, BufferUsage::index), "Buffer lacks index usage");
+			    Require(Has(b->desc.usage, BufferUsage::Index), "Buffer lacks index usage");
 			    vkCmdBindIndexBuffer(command, b->buffer, 0, VK_INDEX_TYPE_UINT32);
 			    boundIndexBuffer = b;
 			    keepAlive.push_back(b);
@@ -1102,15 +1103,15 @@ struct CommandImpl final : CommandList
 			    Require(state == 1 && rendering, "Scissor requires an active render pass");
 			    Require(rect.x >= 0 && rect.y >= 0 && rect.width && rect.height,
 			            "Scissor position and size must be positive");
-			    Require(static_cast<uint64_t>(rect.x) + rect.width <= extent.width &&
-			                static_cast<uint64_t>(rect.y) + rect.height <= extent.height,
+			    Require(static_cast<Ursa::UInt64>(rect.x) + rect.width <= extent.width &&
+			                static_cast<Ursa::UInt64>(rect.y) + rect.height <= extent.height,
 			            "Scissor exceeds render target");
 			    VkRect2D scissor{{rect.x, rect.y}, {rect.width, rect.height}};
 			    vkCmdSetScissor(command, 0, 1, &scissor);
 		    });
 	}
 
-	Result<void> Draw(uint32_t vertices, uint32_t instances) override
+	Result<void> Draw(Ursa::UInt32 vertices, Ursa::UInt32 instances) override
 	{
 		return GuardedVoid(
 		    [&]
@@ -1122,8 +1123,8 @@ struct CommandImpl final : CommandList
 		    });
 	}
 
-	Result<void> DrawIndexed(uint32_t indices, uint32_t instances, uint32_t firstInstance, uint32_t firstIndex,
-	                         int32_t vertexOffset) override
+	Result<void> DrawIndexed(Ursa::UInt32 indices, Ursa::UInt32 instances, Ursa::UInt32 firstInstance,
+	                         Ursa::UInt32 firstIndex, Ursa::Int32 vertexOffset) override
 	{
 		return GuardedVoid(
 		    [&]
@@ -1132,13 +1133,14 @@ struct CommandImpl final : CommandList
 			            "Indexed draw requires a graphics pipeline and render pass");
 			    Require(indices && instances, "Draw count must be positive");
 			    Require(bool(boundIndexBuffer), "Indexed draw requires an index buffer");
-			    Require(static_cast<uint64_t>(firstIndex) + indices <= boundIndexBuffer->desc.size / sizeof(uint32_t),
+			    Require(static_cast<Ursa::UInt64>(firstIndex) + indices <=
+			                boundIndexBuffer->desc.size / sizeof(Ursa::UInt32),
 			            "Indexed draw exceeds index buffer");
 			    vkCmdDrawIndexed(command, indices, instances, firstIndex, vertexOffset, firstInstance);
 		    });
 	}
 
-	Result<void> Dispatch(uint32_t x, uint32_t y, uint32_t z) override
+	Result<void> Dispatch(Ursa::UInt32 x, Ursa::UInt32 y, Ursa::UInt32 z) override
 	{
 		return GuardedVoid(
 		    [&]
@@ -1171,7 +1173,7 @@ struct FenceImpl final : Fence
 		}
 	}
 
-	Result<void> Wait(uint64_t timeout) override
+	Result<void> Wait(Ursa::UInt64 timeout) override
 	{
 		return GuardedVoid(
 		    [&]
@@ -1199,18 +1201,18 @@ struct SwapchainImpl final : Swapchain
 	std::shared_ptr<SwapchainState> state;
 	Vector<TexturePtr> textures;
 	Array<FencePtr, 2> slotFences;
-	uint32_t slot = 0, imageIndex = 0;
+	Ursa::UInt32 slot = 0, imageIndex = 0;
 	bool acquired = false, submitted = false, recreate = false;
 
 	Ursa::Rhi::Format Format() const override
 	{
-		return state ? state->format : Format::bgrA8Unorm;
+		return state ? state->format : Format::BgrA8Unorm;
 	}
 
 	void Rebuild()
 	{
 		Require(ctx->window && ctx->surface, "Swapchain requires a window surface");
-		const uint32_t width = ctx->window->FramebufferWidth(), height = ctx->window->FramebufferHeight();
+		const Ursa::UInt32 width = ctx->window->FramebufferWidth(), height = ctx->window->FramebufferHeight();
 		Require(width && height, "Cannot rebuild swapchain for zero-sized window");
 		Check(vkDeviceWaitIdle(ctx->device), "Waiting before swapchain rebuild");
 		slotFences = {};
@@ -1221,7 +1223,7 @@ struct SwapchainImpl final : Swapchain
 		VkSurfaceCapabilitiesKHR caps{};
 		Check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx->physical, ctx->surface, &caps),
 		      "Querying surface capabilities");
-		uint32_t formatCount = 0;
+		Ursa::UInt32 formatCount = 0;
 		Check(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->physical, ctx->surface, &formatCount, nullptr),
 		      "Querying surface formats");
 		Require(formatCount, "Surface has no formats");
@@ -1241,7 +1243,7 @@ struct SwapchainImpl final : Swapchain
 		Require(chosen.format == VK_FORMAT_B8G8R8A8_UNORM || chosen.format == VK_FORMAT_R8G8B8A8_UNORM,
 		        "Surface lacks an RGBA8/BGRA8 UNORM format");
 		next->format = FromVkFormat(chosen.format);
-		uint32_t modeCount = 0;
+		Ursa::UInt32 modeCount = 0;
 		Check(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physical, ctx->surface, &modeCount, nullptr),
 		      "Querying present modes");
 		Vector<VkPresentModeKHR> modes(modeCount);
@@ -1266,7 +1268,7 @@ struct SwapchainImpl final : Swapchain
 		                   ? VkExtent2D{std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width),
 		                                std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height)}
 		                   : caps.currentExtent;
-		uint32_t imageCount = std::max(2u, caps.minImageCount + 1);
+		Ursa::UInt32 imageCount = std::max(2u, caps.minImageCount + 1);
 		if (caps.maxImageCount)
 		{
 			imageCount = std::min(imageCount, caps.maxImageCount);
@@ -1288,20 +1290,20 @@ struct SwapchainImpl final : Swapchain
 		info.presentMode = mode;
 		info.clipped = VK_TRUE;
 		Check(vkCreateSwapchainKHR(ctx->device, &info, nullptr, &next->swapchain), "Creating swapchain");
-		uint32_t actualCount = 0;
+		Ursa::UInt32 actualCount = 0;
 		Check(vkGetSwapchainImagesKHR(ctx->device, next->swapchain, &actualCount, nullptr), "Getting swapchain images");
 		next->images.resize(actualCount);
 		Check(vkGetSwapchainImagesKHR(ctx->device, next->swapchain, &actualCount, next->images.data()),
 		      "Getting swapchain images");
 		next->presented.resize(actualCount, false);
 		VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-		for (uint32_t i = 0; i < 2; ++i)
+		for (Ursa::UInt32 i = 0; i < 2; ++i)
 		{
 			VkSemaphore s = VK_NULL_HANDLE;
 			Check(vkCreateSemaphore(ctx->device, &semaphoreInfo, nullptr, &s), "Creating acquire semaphore");
 			next->imageAvailable.push_back(s);
 		}
-		for (uint32_t i = 0; i < actualCount; ++i)
+		for (Ursa::UInt32 i = 0; i < actualCount; ++i)
 		{
 			VkSemaphore s = VK_NULL_HANDLE;
 			Check(vkCreateSemaphore(ctx->device, &semaphoreInfo, nullptr, &s), "Creating present semaphore");
@@ -1311,7 +1313,7 @@ struct SwapchainImpl final : Swapchain
 		for (auto image : next->images)
 		{
 			TextureDesc textureDesc{next->extent.width, next->extent.height, next->format,
-			                        TextureUsage::colorAttachment};
+			                        TextureUsage::ColorAttachment};
 			auto texture = std::make_shared<TextureImpl>(ctx, textureDesc);
 			texture->swapchainOwner = next;
 			texture->image = image;
@@ -1367,7 +1369,7 @@ struct SwapchainImpl final : Swapchain
 			    acquired = true;
 			    submitted = false;
 			    return AcquiredImage{textures[imageIndex],
-			                         state->presented[imageIndex] ? ResourceState::present : ResourceState::undefined};
+			                         state->presented[imageIndex] ? ResourceState::Present : ResourceState::Undefined};
 		    });
 	}
 
@@ -1429,7 +1431,7 @@ struct DeviceImpl final : Device
 		return Guarded<BufferPtr>(
 		    [&]
 		    {
-			    Require(desc.size && desc.usage != BufferUsage::none, "Buffer size and usage must be set");
+			    Require(desc.size && desc.usage != BufferUsage::None, "Buffer size and usage must be set");
 			    auto resource = std::make_shared<BufferImpl>(ctx, desc);
 			    VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
 			    info.size = desc.size;
@@ -1437,11 +1439,11 @@ struct DeviceImpl final : Device
 			    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 			    VmaAllocationCreateInfo alloc{};
 			    alloc.usage = VMA_MEMORY_USAGE_AUTO;
-			    if (desc.memory == Memory::upload)
+			    if (desc.memory == Memory::Upload)
 			    {
 				    alloc.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 			    }
-			    else if (desc.memory == Memory::readback)
+			    else if (desc.memory == Memory::Readback)
 			    {
 				    alloc.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
 			    }
@@ -1456,19 +1458,19 @@ struct DeviceImpl final : Device
 		return Guarded<TexturePtr>(
 		    [&]
 		    {
-			    Require(desc.width && desc.height && desc.usage != TextureUsage::none,
+			    Require(desc.width && desc.height && desc.usage != TextureUsage::None,
 			            "Texture dimensions and usage must be set");
 			    Require(desc.width <= ctx->properties.limits.maxImageDimension2D &&
 			                desc.height <= ctx->properties.limits.maxImageDimension2D,
 			            "Texture exceeds adapter limit");
-			    Require(desc.format != Format::d32Float || !Has(desc.usage, TextureUsage::colorAttachment),
+			    Require(desc.format != Format::D32Float || !Has(desc.usage, TextureUsage::ColorAttachment),
 			            "Depth texture cannot be a color attachment");
-			    Require(desc.format != Format::rgbA8Srgb || !Has(desc.usage, TextureUsage::storage),
+			    Require(desc.format != Format::RgbA8Srgb || !Has(desc.usage, TextureUsage::Storage),
 			            "sRGB texture cannot be a storage image");
 			    auto texture = std::make_shared<TextureImpl>(ctx, desc);
 			    VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
 			    info.imageType = VK_IMAGE_TYPE_2D;
-			    info.format = VkFormat(desc.format);
+			    info.format = ToVkFormat(desc.format);
 			    info.extent = {desc.width, desc.height, 1};
 			    info.mipLevels = 1;
 			    info.arrayLayers = 1;
@@ -1486,7 +1488,7 @@ struct DeviceImpl final : Device
 			    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
 			    view.format = info.format;
 			    view.subresourceRange.aspectMask =
-			        desc.format == Format::d32Float ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+			        desc.format == Format::D32Float ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 			    view.subresourceRange.levelCount = view.subresourceRange.layerCount = 1;
 			    Check(vkCreateImageView(ctx->device, &view, nullptr, &texture->view), "Creating texture view");
 			    return std::static_pointer_cast<Texture>(texture);
@@ -1517,11 +1519,11 @@ struct DeviceImpl final : Device
 		return Guarded<ShaderPtr>(
 		    [&]
 		    {
-			    Require(desc.format == ShaderFormat::spirv, "Vulkan backend requires SPIR-V shader data");
+			    Require(desc.format == ShaderFormat::Spirv, "Vulkan backend requires SPIR-V shader data");
 			    Require(desc.code.size() >= 4 && desc.code.size() % 4 == 0,
 			            "SPIR-V bytecode size must be a nonzero multiple of four");
 			    Require(!desc.entry.empty(), "Shader entry point is empty");
-			    Vector<uint32_t> aligned(desc.code.size() / 4);
+			    Vector<Ursa::UInt32> aligned(desc.code.size() / 4);
 			    std::memcpy(aligned.data(), desc.code.data(), desc.code.size());
 			    Require(aligned[0] == 0x07230203, "Shader data lacks SPIR-V magic");
 			    auto shader = std::make_shared<ShaderImpl>();
@@ -1560,7 +1562,7 @@ struct DeviceImpl final : Device
 				    vkBindings.push_back(b);
 			    }
 			    VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-			    info.bindingCount = static_cast<uint32_t>(vkBindings.size());
+			    info.bindingCount = static_cast<Ursa::UInt32>(vkBindings.size());
 			    info.pBindings = vkBindings.data();
 			    Check(vkCreateDescriptorSetLayout(ctx->device, &info, nullptr, &layout->layout),
 			          "Creating descriptor layout");
@@ -1601,11 +1603,11 @@ struct DeviceImpl final : Device
 				    write.dstBinding = binding.binding;
 				    write.descriptorCount = 1;
 				    write.descriptorType = VkDescriptor(binding.type);
-				    if (binding.type == BindingType::uniformBuffer || binding.type == BindingType::storageBuffer)
+				    if (binding.type == BindingType::UniformBuffer || binding.type == BindingType::StorageBuffer)
 				    {
 					    auto b = checked<BufferImpl>(it->buffer, ctx, "descriptor buffer");
-					    Require(Has(b->desc.usage, binding.type == BindingType::uniformBuffer ? BufferUsage::uniform
-					                                                                          : BufferUsage::storage),
+					    Require(Has(b->desc.usage, binding.type == BindingType::UniformBuffer ? BufferUsage::Uniform
+					                                                                          : BufferUsage::Storage),
 					            "Buffer lacks descriptor usage");
 					    bufferInfos.push_back({b->buffer, 0, b->desc.size});
 					    write.pBufferInfo = &bufferInfos.back();
@@ -1614,20 +1616,20 @@ struct DeviceImpl final : Device
 				    else
 				    {
 					    VkDescriptorImageInfo image{};
-					    if (binding.type != BindingType::sampler)
+					    if (binding.type != BindingType::Sampler)
 					    {
 						    auto t = checked<TextureImpl>(it->texture, ctx, "descriptor texture");
-						    Require(Has(t->desc.usage, binding.type == BindingType::storageTexture
-						                                   ? TextureUsage::storage
-						                                   : TextureUsage::sampled),
+						    Require(Has(t->desc.usage, binding.type == BindingType::StorageTexture
+						                                   ? TextureUsage::Storage
+						                                   : TextureUsage::Sampled),
 						            "Texture lacks descriptor usage");
 						    image.imageView = t->view;
-						    image.imageLayout = binding.type == BindingType::storageTexture
+						    image.imageLayout = binding.type == BindingType::StorageTexture
 						                            ? VK_IMAGE_LAYOUT_GENERAL
 						                            : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 						    group->keepAlive.push_back(t);
 					    }
-					    if (binding.type == BindingType::sampler || binding.type == BindingType::combinedImageSampler)
+					    if (binding.type == BindingType::Sampler || binding.type == BindingType::CombinedImageSampler)
 					    {
 						    auto s = checked<SamplerImpl>(it->sampler, ctx, "descriptor sampler");
 						    image.sampler = s->sampler;
@@ -1638,7 +1640,8 @@ struct DeviceImpl final : Device
 				    }
 				    writes.push_back(write);
 			    }
-			    vkUpdateDescriptorSets(ctx->device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+			    vkUpdateDescriptorSets(ctx->device, static_cast<Ursa::UInt32>(writes.size()), writes.data(), 0,
+			                           nullptr);
 			    return std::static_pointer_cast<BindGroup>(group);
 		    });
 	}
@@ -1650,12 +1653,12 @@ struct DeviceImpl final : Device
 		    {
 			    auto vertex = checked<ShaderImpl>(desc.vertex, ctx, "vertex shader");
 			    auto fragment = checked<ShaderImpl>(desc.fragment, ctx, "fragment shader");
-			    Require(vertex->stage == ShaderStage::vertex && fragment->stage == ShaderStage::fragment,
+			    Require(vertex->stage == ShaderStage::Vertex && fragment->stage == ShaderStage::Fragment,
 			            "Graphics pipeline shader stages are invalid");
-			    Require(desc.colorFormat != Format::d32Float, "Graphics pipeline needs a color format");
-			    Require(!desc.depthTest || desc.depthFormat == Format::d32Float,
+			    Require(desc.colorFormat != Format::D32Float, "Graphics pipeline needs a color format");
+			    Require(!desc.depthTest || desc.depthFormat == Format::D32Float,
 			            "Depth testing requires D32Float format");
-			    Require(!desc.blend || desc.colorFormat != Format::r32Uint,
+			    Require(!desc.blend || desc.colorFormat != Format::R32Uint,
 			            "Blending is invalid for integer color format");
 			    auto pipeline = std::make_shared<PipelineImpl>();
 			    pipeline->ctx = ctx;
@@ -1694,8 +1697,8 @@ struct DeviceImpl final : Device
 			    for (const auto& a : desc.attributes)
 			    {
 				    Require(desc.vertexStride && a.offset < desc.vertexStride, "Vertex attribute exceeds stride");
-				    VkFormat format = a.format == VertexFormat::float2   ? VK_FORMAT_R32G32_SFLOAT
-				                      : a.format == VertexFormat::float3 ? VK_FORMAT_R32G32B32_SFLOAT
+				    VkFormat format = a.format == VertexFormat::Float2   ? VK_FORMAT_R32G32_SFLOAT
+				                      : a.format == VertexFormat::Float3 ? VK_FORMAT_R32G32B32_SFLOAT
 				                                                         : VK_FORMAT_R32G32B32A32_SFLOAT;
 				    attributes.push_back({a.location, 0, format, a.offset});
 			    }
@@ -1706,7 +1709,7 @@ struct DeviceImpl final : Device
 				    vertexInput.vertexBindingDescriptionCount = 1;
 				    vertexInput.pVertexBindingDescriptions = &binding;
 			    }
-			    vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributes.size());
+			    vertexInput.vertexAttributeDescriptionCount = static_cast<Ursa::UInt32>(attributes.size());
 			    vertexInput.pVertexAttributeDescriptions = attributes.data();
 			    VkPipelineInputAssemblyStateCreateInfo assembly{
 			        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -1727,22 +1730,22 @@ struct DeviceImpl final : Device
 			    depth.depthWriteEnable = desc.depthTest && desc.depthWrite;
 			    switch (desc.depthCompare)
 			    {
-				    case Compare::never:
+				    case Compare::Never:
 					    depth.depthCompareOp = VK_COMPARE_OP_NEVER;
 					    break;
-				    case Compare::less:
+				    case Compare::Less:
 					    depth.depthCompareOp = VK_COMPARE_OP_LESS;
 					    break;
-				    case Compare::lessEqual:
+				    case Compare::LessEqual:
 					    depth.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 					    break;
-				    case Compare::equal:
+				    case Compare::Equal:
 					    depth.depthCompareOp = VK_COMPARE_OP_EQUAL;
 					    break;
-				    case Compare::greater:
+				    case Compare::Greater:
 					    depth.depthCompareOp = VK_COMPARE_OP_GREATER;
 					    break;
-				    case Compare::always:
+				    case Compare::Always:
 					    depth.depthCompareOp = VK_COMPARE_OP_ALWAYS;
 					    break;
 			    }
@@ -1789,7 +1792,7 @@ struct DeviceImpl final : Device
 		    [&]
 		    {
 			    auto shader = checked<ShaderImpl>(desc.compute, ctx, "compute shader");
-			    Require(shader->stage == ShaderStage::compute, "Compute pipeline requires a compute shader");
+			    Require(shader->stage == ShaderStage::Compute, "Compute pipeline requires a compute shader");
 			    auto pipeline = std::make_shared<PipelineImpl>();
 			    pipeline->ctx = ctx;
 			    pipeline->shaderA = shader;

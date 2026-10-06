@@ -43,7 +43,7 @@ int main()
 	try
 	{
 		std::filesystem::create_directories(root / "Assets");
-		auto material = std::make_shared<MaterialInstance>(MaterialType::unlit);
+		auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 		done(material->SetBaseColor({0.7f, 0.2f, 0.1f, 1.f}));
 		const auto materialId = ResourceId::Generate();
 		done(SaveMaterialResource(root / "Assets" / "box.ursamat", materialId, *material, {}));
@@ -53,15 +53,15 @@ int main()
 		done(RegisterBuiltinComponents(registry));
 		const auto scenePath = root / "Assets" / "level.ursascene";
 		auto sceneDocument = Take(Editor::NewSceneDocument(Take(VirtualPath::Parse("prj:level.ursascene")),
-		                                                   ResourceKind::scene, registry, documents->Session()));
+		                                                   ResourceKind::Scene, registry, documents->Session()));
 		const auto sceneId = sceneDocument->Id();
 		auto draft = sceneDocument->Payload<Editor::SceneDraft>();
 		Scene& scene = draft->GetScene();
-		const auto first = scene.RootNodes().front();
-		const auto child = Take(scene.CreateNode(first));
-		const auto last = Take(scene.CreateNode());
-		done(scene.SetNodeLabel(child, "Nested box"));
-		done(scene.SetNodeLabel(last, "Last"));
+		const auto first = scene.RootGameObjects().front();
+		const auto child = Take(scene.CreateGameObject(first));
+		const auto last = Take(scene.CreateGameObject());
+		done(scene.SetGameObjectName(child, "Nested box"));
+		done(scene.SetGameObjectName(last, "Last"));
 		done(scene.SetEnabled(child, false));
 		LocalTransform pose;
 		pose.position = {1, 2, 3};
@@ -69,20 +69,20 @@ int main()
 		Take(scene.AddComponent<BoxRenderComponent>(child));
 		Take(scene.AddComponent<DirectionalLightComponent>(last));
 		done(draft->AssignMaterial(child, materialId, documents->Session()));
-		const auto childId = Take(scene.NodePersistentId(child));
-		const auto lastId = Take(scene.NodePersistentId(last));
+		const auto childId = Take(scene.PersistentId(child));
+		const auto lastId = Take(scene.PersistentId(last));
 		done(documents->RequestOpen(std::move(sceneDocument)));
 		done(documents->SaveCurrent());
 		auto reopened = Take(Editor::OpenSceneDocument(Take(VirtualPath::Parse("prj:level.ursascene")),
-		                                               ResourceKind::scene, registry, documents->Session()));
+		                                               ResourceKind::Scene, registry, documents->Session()));
 		Expect(reopened->Id() == sceneId, "Scene resource ID changed after reopen");
 		auto loaded = reopened->Payload<Editor::SceneDraft>();
-		const auto loadedChild = Take(loaded->GetScene().NodeByPersistentId(childId));
-		Expect(Take(loaded->GetScene().NodeLabel(loadedChild)) == "Nested box" &&
+		const auto loadedChild = Take(loaded->GetScene().GameObjectById(childId));
+		Expect(Take(loaded->GetScene().GameObjectName(loadedChild)) == "Nested box" &&
 		           !Take(loaded->GetScene().IsEnabled(loadedChild)) &&
 		           Take(loaded->GetScene().GetLocalTransform(loadedChild)).position.x == 1.f,
 		       "Scene hierarchy or transform did not round-trip");
-		Expect(Take(loaded->GetScene().NodePersistentId(loaded->GetScene().RootNodes().back())) == lastId,
+		Expect(Take(loaded->GetScene().PersistentId(loaded->GetScene().RootGameObjects().back())) == lastId,
 		       "Scene root order or ID changed");
 		const auto* box = loaded->GetScene().FindComponent<BoxRenderComponent>(loadedChild);
 		Expect(box && box->material && box->material->Parameters().baseColor.red > 0.6f,
@@ -90,57 +90,69 @@ int main()
 
 		const auto prefabPath = root / "Assets" / "tile.ursaprefab";
 		auto prefabDocument = Take(Editor::NewSceneDocument(Take(VirtualPath::Parse("prj:tile.ursaprefab")),
-		                                                    ResourceKind::prefab, registry, documents->Session()));
+		                                                    ResourceKind::Prefab, registry, documents->Session()));
 		const auto prefabId = prefabDocument->Id();
 		auto prefabDraft = prefabDocument->Payload<Editor::SceneDraft>();
-		const auto prefabRoot = prefabDraft->GetScene().RootNodes().front();
-		const auto prefabChild = Take(prefabDraft->GetScene().CreateNode(prefabRoot));
-		done(prefabDraft->GetScene().SetNodeLabel(prefabChild, "Prefab child"));
-		Take(prefabDraft->GetScene().AddComponent<BoxRenderComponent>(prefabChild));
+		const auto prefabRoot = prefabDraft->GetPrefabAsset()->Root();
+		const auto previewRoot = prefabDraft->GetScene().RootGameObjects().front();
+		Expect(prefabRoot->Id() != previewRoot->Id() && !prefabRoot->Parent(),
+		       "Prefab editing graph was attached to its preview Scene");
+		Expect(Take(prefabDraft->PreviewGameObject(prefabRoot->Id())) == previewRoot,
+		       "Prefab preview did not retain a source GameObject mapping");
+		auto previewTransform = Take(previewRoot->GetLocalTransform());
+		previewTransform.position.x = 2.f;
+		done(previewRoot->SetLocalTransform(previewTransform));
+		done(prefabDraft->SyncPrefabTransform(prefabRoot->Id()));
+		Expect(Take(prefabRoot->GetLocalTransform()).position.x == 2.f,
+		       "Prefab viewport transform was not copied back to its detached GameObject");
+		const auto prefabChild = GameObject::Create("Prefab child");
+		done(prefabChild->SetParent(prefabRoot));
+		auto prefabBox = Take(prefabChild->AddComponent<BoxRenderComponent>());
+		Expect(prefabBox->TryGetScene() == nullptr, "Prefab component unexpectedly attached to its preview Scene");
 		done(prefabDraft->AssignMaterial(prefabChild, materialId, documents->Session()));
-		const auto prefabChildId = Take(prefabDraft->GetScene().NodePersistentId(prefabChild));
+		const auto prefabChildId = prefabChild->Id();
 		done(documents->RequestOpen(std::move(prefabDocument)));
 		done(documents->SaveCurrent());
 		auto reopenedPrefab = Take(Editor::OpenSceneDocument(Take(VirtualPath::Parse("prj:tile.ursaprefab")),
-		                                                     ResourceKind::prefab, registry, documents->Session()));
+		                                                     ResourceKind::Prefab, registry, documents->Session()));
 		Expect(reopenedPrefab->Id() == prefabId, "Prefab resource ID changed after reopen");
 		auto prefabLoaded = reopenedPrefab->Payload<Editor::SceneDraft>();
-		const auto loadedPrefabChild = Take(prefabLoaded->GetScene().NodeByPersistentId(prefabChildId));
-		Expect(Take(prefabLoaded->GetScene().NodeLabel(loadedPrefabChild)) == "Prefab child" &&
-		           prefabLoaded->GetScene().FindComponent<BoxRenderComponent>(loadedPrefabChild)->material,
+		const auto loadedPrefabRoot = prefabLoaded->GetPrefabAsset()->Root();
+		const auto loadedPrefabChild = loadedPrefabRoot->Children().front();
+		Expect(loadedPrefabChild->Id() == prefabChildId && Take(loadedPrefabChild->Name()) == "Prefab child" &&
+		           loadedPrefabChild->FindComponent<BoxRenderComponent>()->material,
 		       "Prefab subtree or material reference did not round-trip");
 		auto linkedDocument = Take(Editor::OpenSceneDocument(Take(VirtualPath::Parse("prj:level.ursascene")),
-		                                                     ResourceKind::scene, registry, documents->Session()));
+		                                                     ResourceKind::Scene, registry, documents->Session()));
 		auto linkedDraft = linkedDocument->Payload<Editor::SceneDraft>();
-		const auto parentNode = Take(linkedDraft->GetScene().NodeByPersistentId(childId));
-		const auto firstInstance = Take(linkedDraft->PlacePrefab(prefabId, parentNode, scenePath, sceneId));
-		const auto secondInstance = Take(linkedDraft->PlacePrefab(prefabId, parentNode, scenePath, sceneId));
+		const auto firstInstance = Take(linkedDraft->PlacePrefab(prefabId, childId, scenePath, sceneId));
+		const auto secondInstance = Take(linkedDraft->PlacePrefab(prefabId, childId, scenePath, sceneId));
 		const auto firstScoped = Take(ResourceId::Parse(
 		    linkedDraft->LinkedScene()->scopedIds.at(firstInstance.ToString()).at(prefabChildId.ToString())));
 		const auto secondScoped = Take(ResourceId::Parse(
 		    linkedDraft->LinkedScene()->scopedIds.at(secondInstance.ToString()).at(prefabChildId.ToString())));
-		const auto firstNode = Take(linkedDraft->GetScene().NodeByPersistentId(firstScoped));
-		const auto secondNode = Take(linkedDraft->GetScene().NodeByPersistentId(secondScoped));
-		done(linkedDraft->GetScene().SetNodeLabel(firstNode, "Instance override"));
-		Take(linkedDraft->GetScene().CreateNode(firstNode));
-		done(linkedDraft->SetInstanceProperty(firstInstance, prefabChildId, "/label", "Instance override"));
-		Expect(Take(linkedDraft->GetScene().NodeLabel(secondNode)) == "Prefab child",
+		const auto firstNode = Take(linkedDraft->GetScene().GameObjectById(firstScoped));
+		const auto secondNode = Take(linkedDraft->GetScene().GameObjectById(secondScoped));
+		done(linkedDraft->GetScene().SetGameObjectName(firstNode, "Instance override"));
+		Take(linkedDraft->GetScene().CreateGameObject(firstNode));
+		done(linkedDraft->SetInstanceProperty(firstInstance, prefabChildId, "/name", "Instance override"));
+		Expect(Take(linkedDraft->GetScene().GameObjectName(secondNode)) == "Prefab child",
 		       "Editing first placement changed the second placement");
-		const auto sourceBefore = Take(ReadJsonResource(prefabPath, ResourceKind::prefab));
+		const auto sourceBefore = Take(ReadJsonResource(prefabPath, ResourceKind::Prefab));
 		linkedDocument->MarkDirty();
 		done(documents->RequestOpen(std::move(linkedDocument)));
 		done(documents->Current()->Dirty() ? Result<void>{} : Result<void>::Failure("Expected dirty scene"));
 		done(documents->SaveCurrent());
 		auto linkedReopened = Take(Editor::OpenSceneDocument(Take(VirtualPath::Parse("prj:level.ursascene")),
-		                                                     ResourceKind::scene, registry, documents->Session()));
+		                                                     ResourceKind::Scene, registry, documents->Session()));
 		auto reloadedDraft = linkedReopened->Payload<Editor::SceneDraft>();
-		const auto reloadedFirst = Take(reloadedDraft->GetScene().NodeByPersistentId(firstScoped));
-		const auto reloadedSecond = Take(reloadedDraft->GetScene().NodeByPersistentId(secondScoped));
-		Expect(Take(reloadedDraft->GetScene().NodeLabel(reloadedFirst)) == "Instance override" &&
-		           Take(reloadedDraft->GetScene().NodeLabel(reloadedSecond)) == "Prefab child" &&
+		const auto reloadedFirst = Take(reloadedDraft->GetScene().GameObjectById(firstScoped));
+		const auto reloadedSecond = Take(reloadedDraft->GetScene().GameObjectById(secondScoped));
+		Expect(Take(reloadedDraft->GetScene().GameObjectName(reloadedFirst)) == "Instance override" &&
+		           Take(reloadedDraft->GetScene().GameObjectName(reloadedSecond)) == "Prefab child" &&
 		           Take(reloadedDraft->GetScene().ChildrenOf(reloadedFirst)).size() == 1,
 		       "Prefab property or structure overrides did not round-trip");
-		Expect(Take(ReadJsonResource(prefabPath, ResourceKind::prefab)) == sourceBefore,
+		Expect(Take(ReadJsonResource(prefabPath, ResourceKind::Prefab)) == sourceBefore,
 		       "Saving an instance modified the Prefab source");
 		std::filesystem::remove_all(root);
 		std::cout << "Editor scene and Prefab document test passed\n";

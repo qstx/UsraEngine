@@ -4,11 +4,12 @@
 
 namespace Ursa
 {
-Result<NodeId> ComponentLoadContext::Node(ResourceId id) const
+Result<GameObject::Ptr> ComponentLoadContext::GameObjectById(ResourceId id) const
 {
-	auto found = nodes.find(id.ToString());
-	return found == nodes.end() ? Result<NodeId>::Failure("Missing persistent node ID " + id.ToString())
-	                            : Result<NodeId>::Success(found->second);
+	auto found = gameObjects.find(id.ToString());
+	return found == gameObjects.end()
+	           ? Result<GameObject::Ptr>::Failure("Missing persistent GameObject ID " + id.ToString())
+	           : Result<GameObject::Ptr>::Success(found->second);
 }
 
 Result<ComponentId> ComponentLoadContext::Component(ResourceId id) const
@@ -18,11 +19,11 @@ Result<ComponentId> ComponentLoadContext::Component(ResourceId id) const
 	                                 : Result<ComponentId>::Success(found->second);
 }
 
-Result<void> ComponentLoadContext::MapNode(ResourceId id, NodeId node)
+Result<void> ComponentLoadContext::MapGameObject(ResourceId id, GameObject::Ptr object)
 {
-	if (!id || !node || !nodes.emplace(id.ToString(), node).second)
+	if (!id || !object || !gameObjects.emplace(id.ToString(), object).second)
 	{
-		return Result<void>::Failure("Duplicate or invalid persistent node ID " + id.ToString());
+		return Result<void>::Failure("Duplicate or invalid persistent GameObject ID " + id.ToString());
 	}
 	return {};
 }
@@ -36,15 +37,34 @@ Result<void> ComponentLoadContext::MapComponent(ResourceId id, ComponentId compo
 	return {};
 }
 
+Result<::Ursa::Component*> ComponentLoadContext::ComponentObjectById(ResourceId id) const
+{
+	auto found = componentObjects.find(id.ToString());
+	return found == componentObjects.end()
+	           ? Result<::Ursa::Component*>::Failure("Missing persistent component ID " + id.ToString())
+	           : Result<::Ursa::Component*>::Success(found->second);
+}
+
+Result<void> ComponentLoadContext::MapComponentObject(ResourceId id, ::Ursa::Component* component)
+{
+	if (!id || !component || !componentObjects.emplace(id.ToString(), component).second)
+	{
+		return Result<void>::Failure("Duplicate or invalid persistent component ID " + id.ToString());
+	}
+	return {};
+}
+
 void ComponentLoadContext::ClearMappings()
 {
-	nodes.clear();
+	gameObjects.clear();
 	components.clear();
+	componentObjects.clear();
 }
 
 Result<void> ComponentRegistry::RegisterCodec(ComponentCodec codec)
 {
-	if (codec.type.empty() || !codec.version || !codec.matches || !codec.save || !codec.create)
+	if (codec.type.empty() || !codec.version || !codec.matches || !codec.save ||
+	    (!codec.create && !codec.createDetached))
 	{
 		return Result<void>::Failure("Component codec needs a type, version, matcher, saver and factory");
 	}

@@ -3,9 +3,9 @@
 
 int main()
 {
-	auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::pbrMetallicRoughness);
-	auto pixels = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::srgb, {220, 80, 40, 255});
-	if (!pixels || !material->SetTexture(Ursa::MaterialTextureSlot::baseColor, pixels.value) ||
+	auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::PbrMetallicRoughness);
+	auto pixels = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::Srgb, {220, 80, 40, 255});
+	if (!pixels || !material->SetTexture(Ursa::MaterialTextureSlot::BaseColor, pixels.value) ||
 	    !material->SetMetallic(0.2f) || !material->SetRoughness(0.6f))
 	{
 		return 1;

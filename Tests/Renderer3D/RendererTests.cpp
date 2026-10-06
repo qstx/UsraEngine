@@ -1,11 +1,10 @@
+#include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 #include <Scene/Scene.hpp>
-#include <array>
 #include <iostream>
 #include <stdexcept>
-#include <vector>
 
 namespace
 {
@@ -35,38 +34,39 @@ void Expect(bool condition, const char* message)
 }
 
 template <class Draw>
-Ursa::Vector<uint8_t> ReadFrameWith(const Ursa::Rhi::DevicePtr& device, Draw draw, uint32_t width = 64,
-                                    uint32_t height = 64)
+Ursa::Vector<Ursa::UInt8> ReadFrameWith(const Ursa::Rhi::DevicePtr& device, Draw draw, Ursa::UInt32 width = 64,
+                                        Ursa::UInt32 height = 64)
 {
 	using namespace Ursa::Rhi;
 	auto color = Take(device->CreateTexture(
-	    {width, height, Format::rgbA8Unorm, TextureUsage::colorAttachment | TextureUsage::transferSource}));
+	    {width, height, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
 	done(Take(draw(color))->Wait());
 	auto readback = Take(device->CreateBuffer(
-	    {static_cast<size_t>(width) * height * 4, BufferUsage::transferDestination, Memory::readback}));
+	    {static_cast<Ursa::Size>(width) * height * 4, BufferUsage::TransferDestination, Memory::Readback}));
 	auto command = Take(device->CreateCommandList());
 	done(command->Begin());
-	done(command->Barrier(readback, ResourceState::undefined, ResourceState::transferDestination));
+	done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 	done(command->CopyTextureToBuffer(color, readback));
 	done(command->End());
 	done(Take(device->Submit(command))->Wait());
-	Ursa::Vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+	Ursa::Vector<Ursa::UInt8> pixels(static_cast<Ursa::Size>(width) * height * 4);
 	done(readback->Read(0, pixels.data(), pixels.size()));
 	return pixels;
 }
 
-Ursa::Vector<uint8_t> ReadFrame(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer,
-                                const Ursa::Camera& camera, const Ursa::Vector<Ursa::BoxInstance>& boxes,
-                                uint32_t width = 64, uint32_t height = 64)
+Ursa::Vector<Ursa::UInt8> ReadFrame(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer,
+                                    const Ursa::Camera& camera, const Ursa::Vector<Ursa::BoxInstance>& boxes,
+                                    Ursa::UInt32 width = 64, Ursa::UInt32 height = 64)
 {
 	return ReadFrameWith(
 	    device, [&](const Ursa::Rhi::TexturePtr& color) { return renderer.RenderOffscreen(color, camera, boxes); },
 	    width, height);
 }
 
-Ursa::Array<uint8_t, 4> pixel(const Ursa::Vector<uint8_t>& image, uint32_t width, uint32_t x, uint32_t y)
+Ursa::Array<Ursa::UInt8, 4> pixel(const Ursa::Vector<Ursa::UInt8>& image, Ursa::UInt32 width, Ursa::UInt32 x,
+                                  Ursa::UInt32 y)
 {
-	const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
+	const Ursa::Size offset = (static_cast<Ursa::Size>(y) * width + x) * 4;
 	return {image[offset], image[offset + 1], image[offset + 2], image[offset + 3]};
 }
 
@@ -141,17 +141,17 @@ void TestModelMatrices(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& ren
 void TestSceneCollection(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
 {
 	Ursa::Scene scene;
-	const auto cameraNode = Take(scene.CreateNode());
+	const auto cameraNode = Take(scene.CreateGameObject());
 	Ursa::LocalTransform cameraTransform;
 	cameraTransform.position = {0, 0, 4};
 	done(scene.SetLocalTransform(cameraNode, cameraTransform));
 	const auto camera = Take(scene.AddComponent<Ursa::CameraComponent>(cameraNode));
-	const auto parent = Take(scene.CreateNode());
+	const auto parent = Take(scene.CreateGameObject());
 	Ursa::LocalTransform parentTransform;
 	parentTransform.position = {1, 0, 0};
 	parentTransform.rotation = Ursa::Quat::FromAxisAngle({0, 1, 0}, 3.14159265f);
 	done(scene.SetLocalTransform(parent, parentTransform));
-	const auto child = Take(scene.CreateNode(parent));
+	const auto child = Take(scene.CreateGameObject(parent));
 	Ursa::LocalTransform childTransform;
 	childTransform.position = {1, 0, 0};
 	childTransform.scale = {0.7f, 0.7f, 0.7f};

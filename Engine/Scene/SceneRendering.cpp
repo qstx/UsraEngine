@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Scene/Scene.hpp>
 #include <Core/StringInterop.hpp>
 #include <cmath>
@@ -8,7 +9,7 @@ namespace Ursa
 {
 Result<void> Scene::SetActiveCamera(ComponentId id)
 {
-	if (id && (!ContainsComponent(id) || dynamic_cast<CameraComponent*>(components[id.index].object.get()) == nullptr))
+	if (id && (!ContainsComponent(id) || dynamic_cast<CameraComponent*>(components[id.index].object) == nullptr))
 	{
 		return Result<void>::Failure("Active camera must refer to a CameraComponent in this scene");
 	}
@@ -16,7 +17,7 @@ Result<void> Scene::SetActiveCamera(ComponentId id)
 	return {};
 }
 
-Result<void> Scene::SetAmbientLight(Color color, float intensity)
+Result<void> Scene::SetAmbientLight(Color color, Ursa::Float32 intensity)
 {
 	if (!ValidLightColor(color) || !std::isfinite(intensity) || intensity < 0.0f)
 	{
@@ -27,14 +28,14 @@ Result<void> Scene::SetAmbientLight(Color color, float intensity)
 	return {};
 }
 
-Result<SceneRenderData> Scene::CollectRenderData(float aspect) const
+Result<SceneRenderData> Scene::CollectRenderData(Ursa::Float32 aspect) const
 {
 	if (!ContainsComponent(activeCamera))
 	{
 		return Result<SceneRenderData>::Failure("Scene has no active camera");
 	}
 	const ComponentSlot& cameraSlot = components[activeCamera.index];
-	const auto* camera = dynamic_cast<const CameraComponent*>(cameraSlot.object.get());
+	const auto* camera = dynamic_cast<const CameraComponent*>(cameraSlot.object);
 	if (!camera || !IsComponentActive(activeCamera).value)
 	{
 		return Result<SceneRenderData>::Failure("Scene active camera is disabled or invalid");
@@ -43,8 +44,8 @@ Result<SceneRenderData> Scene::CollectRenderData(float aspect) const
 	{
 		const Mat4 projection =
 		    Mat4::Perspective(camera->verticalFovRadians, aspect, camera->nearPlane, camera->farPlane);
-		const Mat4 viewProjection = projection * ComputeWorld(cameraSlot.node).InverseAffine();
-		const Mat4 cameraWorld = ComputeWorld(cameraSlot.node);
+		const Mat4 cameraWorld = objects[cameraSlot.owner.index].object->WorldTransform().value;
+		const Mat4 viewProjection = projection * cameraWorld.InverseAffine();
 		return CollectWithCamera(viewProjection, {cameraWorld.At(0, 3), cameraWorld.At(1, 3), cameraWorld.At(2, 3)});
 	}
 	catch (const std::exception& error)
@@ -53,7 +54,7 @@ Result<SceneRenderData> Scene::CollectRenderData(float aspect) const
 	}
 }
 
-Result<SceneRenderData> Scene::CollectPreviewRenderData(const Camera& camera, float aspect) const
+Result<SceneRenderData> Scene::CollectPreviewRenderData(const Camera& camera, Ursa::Float32 aspect) const
 {
 	try
 	{
@@ -74,9 +75,9 @@ Result<SceneRenderData> Scene::CollectWithCamera(const Mat4& viewProjection, Vec
 		data.cameraPosition = cameraPosition;
 		data.lighting.ambientColor = ambientColor;
 		data.lighting.ambientIntensity = ambientIntensity;
-		for (NodeId root : RootNodes())
+		for (const GameObject::Ptr& root : RootGameObjects())
 		{
-			CollectRendering(root, data);
+			CollectRendering(HandleOf(root.get()), data);
 		}
 		if (data.lighting.point.size() > SceneLighting::maxPointLights)
 		{
@@ -98,40 +99,47 @@ Result<SceneRenderData> Scene::CollectWithCamera(const Mat4& viewProjection, Vec
 	}
 }
 
-void Scene::CollectRendering(NodeId node, SceneRenderData& out) const
+void Scene::CollectRendering(ObjectHandle node, SceneRenderData& out) const
 {
-	if (!IsActive(node).value)
+	if (!Contains(node))
 	{
 		return;
 	}
-	const NodeSlot& slot = nodes[node.index];
-	for (ComponentId id : slot.components)
+	GameObject* gameObject = objects[node.index].object;
+	for (GameObject* current = gameObject; current; current = current->parent)
 	{
+		if (!current->enabled)
+		{
+			return;
+		}
+	}
+	const Mat4 world = gameObject->WorldTransform().value;
+	for (const auto& component : gameObject->components)
+	{
+		const ComponentId id = component->id;
 		if (!ContainsComponent(id) || !IsComponentActive(id).value)
 		{
 			continue;
 		}
-		const auto& object = components[id.index].object;
-		if (const auto* box = dynamic_cast<const BoxRenderComponent*>(object.get()))
+		const auto* object = components[id.index].object;
+		if (const auto* box = dynamic_cast<const BoxRenderComponent*>(object))
 		{
-			out.boxes.push_back({ComputeWorld(node), box->color, box->material});
+			out.boxes.push_back({world, box->color, box->material});
 		}
-		if (const auto* light = dynamic_cast<const DirectionalLightComponent*>(object.get()))
+		if (const auto* light = dynamic_cast<const DirectionalLightComponent*>(object))
 		{
-			const Mat4 world = ComputeWorld(node);
 			out.lighting.directional.push_back(
 			    {Normalized({-world.At(0, 2), -world.At(1, 2), -world.At(2, 2)}), light->Color(), light->Intensity()});
 		}
-		if (const auto* light = dynamic_cast<const PointLightComponent*>(object.get()))
+		if (const auto* light = dynamic_cast<const PointLightComponent*>(object))
 		{
-			const Mat4 world = ComputeWorld(node);
 			out.lighting.point.push_back(
 			    {{world.At(0, 3), world.At(1, 3), world.At(2, 3)}, light->Color(), light->Intensity(), light->Range()});
 		}
 	}
-	for (NodeId child : slot.children)
+	for (const auto& child : gameObject->children)
 	{
-		CollectRendering(child, out);
+		CollectRendering(HandleOf(child.get()), out);
 	}
 }
 } // namespace Ursa

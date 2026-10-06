@@ -1,16 +1,17 @@
+#include <Core/Types.hpp>
 #include <Scene/EditorScenePreview.hpp>
 
 namespace Ursa::Editor
 {
 Result<std::unique_ptr<EditorScenePreview>> EditorScenePreview::Create(Rhi::DevicePtr device)
 {
-	auto renderer = Renderer3D::Create(std::move(device));
-	if (!renderer)
+	auto rendererResult = Renderer3D::Create(std::move(device));
+	if (!rendererResult)
 	{
-		return Result<std::unique_ptr<EditorScenePreview>>::Failure(renderer.error);
+		return Result<std::unique_ptr<EditorScenePreview>>::Failure(rendererResult.error);
 	}
 	return Result<std::unique_ptr<EditorScenePreview>>::Success(
-	    std::unique_ptr<EditorScenePreview>(new EditorScenePreview(std::move(renderer.value))));
+	    std::unique_ptr<EditorScenePreview>(new EditorScenePreview(std::move(rendererResult.value))));
 }
 
 Result<void> EditorScenePreview::Record(const Scene& scene, const Rhi::CommandListPtr& command,
@@ -21,7 +22,8 @@ Result<void> EditorScenePreview::Record(const Scene& scene, const Rhi::CommandLi
 	{
 		return Result<void>::Failure("Editor preview needs a nonzero color target");
 	}
-	const float aspect = static_cast<float>(color->desc.width) / static_cast<float>(color->desc.height);
+	const Ursa::Float32 aspect =
+	    static_cast<Ursa::Float32>(color->desc.width) / static_cast<Ursa::Float32>(color->desc.height);
 	auto frame = scene.CollectPreviewRenderData(camera, aspect);
 	if (!frame)
 	{
@@ -39,7 +41,8 @@ Result<void> EditorScenePreview::RecordGame(const Scene& scene, const Rhi::Comma
 	{
 		return Result<void>::Failure("Game preview needs a nonzero color target");
 	}
-	const float aspect = static_cast<float>(color->desc.width) / static_cast<float>(color->desc.height);
+	const Ursa::Float32 aspect =
+	    static_cast<Ursa::Float32>(color->desc.width) / static_cast<Ursa::Float32>(color->desc.height);
 	auto frame = scene.CollectRenderData(aspect);
 	if (!frame)
 	{

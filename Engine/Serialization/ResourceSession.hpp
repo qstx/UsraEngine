@@ -16,7 +16,7 @@ public:
 	// Convenience for a caller that owns a single directory of resources; the
 	// directory is mounted under the conventional project scheme.
 	static Result<std::unique_ptr<ResourceSession>> Open(const std::filesystem::path& root,
-	                                                     MountAccess access = MountAccess::readWrite);
+	                                                     MountAccess access = MountAccess::ReadWrite);
 
 	Result<std::unique_ptr<ResourceSession>> Refreshed() const;
 

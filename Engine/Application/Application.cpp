@@ -1,21 +1,23 @@
+#include <Core/Types.hpp>
 #include <Application/Application.hpp>
 #include <chrono>
 
 namespace Ursa
 {
-Result<void> Application::ConfigureFixedStep(float seconds, uint32_t maxSteps)
+Result<void> Application::ConfigureFixedStep(Ursa::Float32 seconds, Ursa::UInt32 maxSteps)
 {
 	return frameScheduler.Configure(seconds, maxSteps);
 }
 
-Result<void> Application::Run(uint32_t width, uint32_t height, const String& title, bool visible, uint32_t frameLimit)
+Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const String& title, bool visible,
+                              Ursa::UInt32 frameLimit)
 {
 	auto windowResult = Window::Create(width, height, title, visible);
 	if (!windowResult)
 	{
 		return Result<void>::Failure(windowResult.error);
 	}
-	auto window = std::move(windowResult.value);
+	window = std::move(windowResult.value);
 	Rhi::DeviceDesc deviceDesc;
 	deviceDesc.window = window;
 #ifndef NDEBUG
@@ -26,13 +28,13 @@ Result<void> Application::Run(uint32_t width, uint32_t height, const String& tit
 	{
 		return Result<void>::Failure(deviceResult.error);
 	}
-	auto device = std::move(deviceResult.value);
+	device = std::move(deviceResult.value);
 	auto swapchainResult = device->CreateSwapchain({});
 	if (!swapchainResult)
 	{
 		return Result<void>::Failure(swapchainResult.error);
 	}
-	auto swapchain = std::move(swapchainResult.value);
+	swapchain = std::move(swapchainResult.value);
 	auto started = OnStart();
 	if (!started)
 	{
@@ -62,9 +64,9 @@ Result<void> Application::Run(uint32_t width, uint32_t height, const String& tit
 	}
 	auto previous = std::chrono::steady_clock::now();
 	Result<void> result;
-	uint32_t frames = 0;
-	uint64_t frameIndex = 0;
-	double elapsedSeconds = 0.0;
+	Ursa::UInt32 frames = 0;
+	Ursa::UInt64 frameIndex = 0;
+	Ursa::Float64 elapsedSeconds = 0.0;
 	while (!window->ShouldClose())
 	{
 		window->PollEvents();
@@ -76,7 +78,7 @@ Result<void> Application::Run(uint32_t width, uint32_t height, const String& tit
 			continue;
 		}
 		const auto now = std::chrono::steady_clock::now();
-		const float dt = std::chrono::duration<float>(now - previous).count();
+		const Ursa::Float32 dt = std::chrono::duration<Ursa::Float32>(now - previous).count();
 		previous = now;
 		if (scene)
 		{
@@ -91,7 +93,7 @@ Result<void> Application::Run(uint32_t width, uint32_t height, const String& tit
 			context.input = FrameInput::Capture(*window);
 			scene->BeginFrame();
 			result = scene->Update(context);
-			for (uint32_t step = 0; result && step < schedule.fixedSteps; ++step)
+			for (Ursa::UInt32 step = 0; result && step < schedule.fixedSteps; ++step)
 			{
 				result = scene->FixedUpdate(context);
 			}
@@ -101,8 +103,8 @@ Result<void> Application::Run(uint32_t width, uint32_t height, const String& tit
 			}
 			if (result)
 			{
-				const float aspect =
-				    static_cast<float>(window->FramebufferWidth()) / static_cast<float>(window->FramebufferHeight());
+				const Ursa::Float32 aspect = static_cast<Ursa::Float32>(window->FramebufferWidth()) /
+				                             static_cast<Ursa::Float32>(window->FramebufferHeight());
 				auto data = scene->CollectRenderData(aspect);
 				if (!data)
 				{

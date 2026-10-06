@@ -14,12 +14,14 @@ using EditContextSetup = std::function<Result<void>(ComponentLoadContext&)>;
 class SceneDraft final
 {
 public:
-	static Result<std::shared_ptr<SceneDraft>> Create(ResourceKind kind, ComponentRegistry& registry,
-	                                                  ResourceSession& resources, const EditContextSetup& setup = {});
+	static Result<std::shared_ptr<SceneDraft>> Create(ResourceKind resourceKind, ComponentRegistry& componentRegistry,
+	                                                  ResourceSession& resourceSession,
+	                                                  const EditContextSetup& contextSetup = {});
 
-	static Result<std::shared_ptr<SceneDraft>> Load(const std::filesystem::path& path, ResourceKind kind,
-	                                                ComponentRegistry& registry, ResourceSession& resources,
-	                                                const EditContextSetup& setup = {});
+	static Result<std::shared_ptr<SceneDraft>> Load(const std::filesystem::path& path, ResourceKind resourceKind,
+	                                                ComponentRegistry& componentRegistry,
+	                                                ResourceSession& resourceSession,
+	                                                const EditContextSetup& contextSetup = {});
 
 	Result<void> Save(const std::filesystem::path& path, ResourceId id);
 
@@ -48,9 +50,20 @@ public:
 		return linked.get();
 	}
 
-	Result<void> AssignMaterial(NodeId node, ResourceId materialId, ResourceSession& resources);
+	PrefabAsset* GetPrefabAsset()
+	{
+		return prefabAsset.get();
+	}
 
-	Result<void> AssignMaterial(ComponentId component, ResourceId materialId, ResourceSession& resources);
+	Result<void> RefreshPrefabPreview();
+
+	Result<GameObject::Ptr> PreviewGameObject(ResourceId prefabObjectId) const;
+
+	Result<void> SyncPrefabTransform(ResourceId prefabObjectId);
+
+	Result<void> AssignMaterial(GameObject::Ptr node, ResourceId materialId, ResourceSession& resourceSession);
+
+	Result<void> AssignMaterial(ComponentId component, ResourceId materialId, ResourceSession& resourceSession);
 
 	Result<ResourceId> MaterialId(const std::shared_ptr<MaterialInstance>& material) const;
 
@@ -59,12 +72,13 @@ public:
 
 	Result<void> SetInstanceStructure(ResourceId instanceId, const String& operation, const nlohmann::json& value);
 
-	Result<ResourceId> PlacePrefab(ResourceId prefabId, NodeId parent, const std::filesystem::path& scenePath,
+	Result<ResourceId> PlacePrefab(ResourceId prefabId, ResourceId parentId, const std::filesystem::path& scenePath,
 	                               ResourceId sceneId);
 
 private:
-	SceneDraft(ResourceKind kind, ComponentRegistry& registry, ResourceSession& resources, EditContextSetup setup)
-	    : kind(kind), registry(registry), resources(resources), setup(std::move(setup))
+	SceneDraft(ResourceKind resourceKind, ComponentRegistry& componentRegistry, ResourceSession& resourceSession,
+	           EditContextSetup contextSetup)
+	    : kind(resourceKind), registry(componentRegistry), resources(resourceSession), setup(std::move(contextSetup))
 	{
 	}
 
@@ -74,6 +88,8 @@ private:
 	EditContextSetup setup;
 	std::unique_ptr<Scene> scene;
 	std::unique_ptr<LinkedSceneResource> linked;
+	std::unique_ptr<PrefabAsset> prefabAsset;
+	Map<String, GameObject::Ptr> previewObjects;
 	Map<const MaterialInstance*, ResourceId> assignedMaterials;
 };
 

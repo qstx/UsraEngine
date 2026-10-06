@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
 #include <Core/Log.hpp>
 #include <cstdlib>
@@ -9,7 +10,7 @@ int main(int argc, char** argv)
 	Ursa::LogSession logging;
 	URSA_LOG_INFO("Editor", "Starting UrsaEditor");
 	bool visible = true;
-	uint32_t frames = 0;
+	Ursa::UInt32 frames = 0;
 	std::filesystem::path projectRoot;
 	for (int index = 1; index < argc; ++index)
 	{
@@ -20,7 +21,7 @@ int main(int argc, char** argv)
 		}
 		else if (argument == "--frames" && index + 1 < argc)
 		{
-			frames = static_cast<uint32_t>(std::strtoul(argv[++index], nullptr, 10));
+			frames = static_cast<Ursa::UInt32>(std::strtoul(argv[++index], nullptr, 10));
 		}
 		else if (argument == "--project" && index + 1 < argc)
 		{

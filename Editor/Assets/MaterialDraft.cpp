@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/JsonInterop.hpp>
@@ -12,15 +13,15 @@ namespace
 constexpr Array<const char*, 5> slotNames{"Base Color", "Metallic Roughness", "Normal", "Occlusion", "Emissive"};
 constexpr Array<const char*, 5> fieldNames{"baseColor", "metallicRoughness", "normal", "occlusion", "emissive"};
 
-bool AllowedSlot(MaterialType type, size_t index)
+bool AllowedSlot(MaterialType type, Ursa::Size index)
 {
-	return type == MaterialType::pbrMetallicRoughness || index == 0;
+	return type == MaterialType::PbrMetallicRoughness || index == 0;
 }
 } // namespace
 
 Result<std::shared_ptr<MaterialDraft>> MaterialDraft::Load(const std::filesystem::path& path, ResourceSession& session)
 {
-	auto document = ReadJsonResource(path, ResourceKind::material);
+	auto document = ReadJsonResource(path, ResourceKind::Material);
 	if (!document)
 	{
 		return Result<std::shared_ptr<MaterialDraft>>::Failure(document.error);
@@ -34,7 +35,7 @@ Result<std::shared_ptr<MaterialDraft>> MaterialDraft::Load(const std::filesystem
 	draft->material = std::move(loaded.value.material);
 	if (document.value.contains("textures") && document.value["textures"].is_object())
 	{
-		for (size_t index = 0; index < fieldNames.size(); ++index)
+		for (Ursa::Size index = 0; index < fieldNames.size(); ++index)
 		{
 			if (document.value["textures"].contains(fieldNames[index]))
 			{
@@ -52,13 +53,13 @@ Result<std::shared_ptr<MaterialDraft>> MaterialDraft::Load(const std::filesystem
 
 ResourceId MaterialDraft::TextureId(MaterialTextureSlot slot) const
 {
-	const size_t index = static_cast<size_t>(slot);
+	const Ursa::Size index = static_cast<Ursa::Size>(slot);
 	return index < textureIds.size() ? textureIds[index] : ResourceId{};
 }
 
 Result<void> MaterialDraft::SetTextureId(MaterialTextureSlot slot, ResourceId id, ResourceSession& session)
 {
-	const size_t index = static_cast<size_t>(slot);
+	const Ursa::Size index = static_cast<Ursa::Size>(slot);
 	if (index >= textureIds.size() || !AllowedSlot(material->Type(), index))
 	{
 		return Result<void>::Failure("Texture slot is not valid for this material type");
@@ -77,7 +78,7 @@ Result<void> MaterialDraft::SetTextureId(MaterialTextureSlot slot, ResourceId id
 	{
 		return Result<void>::Failure(location.error);
 	}
-	if (location.value.kind != ResourceKind::texture)
+	if (location.value.kind != ResourceKind::Texture)
 	{
 		return Result<void>::Failure("Selected resource is not a texture");
 	}
@@ -96,7 +97,7 @@ Result<void> MaterialDraft::SetTextureId(MaterialTextureSlot slot, ResourceId id
 
 Result<void> MaterialDraft::Save(const std::filesystem::path& path, ResourceId id, const ResourceIndex& index) const
 {
-	for (size_t slot = 0; slot < textureIds.size(); ++slot)
+	for (Ursa::Size slot = 0; slot < textureIds.size(); ++slot)
 	{
 		if (textureIds[slot])
 		{
@@ -105,7 +106,7 @@ Result<void> MaterialDraft::Save(const std::filesystem::path& path, ResourceId i
 			{
 				return Result<void>::Failure(location.error);
 			}
-			if (location.value.kind != ResourceKind::texture)
+			if (location.value.kind != ResourceKind::Texture)
 			{
 				return Result<void>::Failure("Material texture ID resolves to a non-texture resource");
 			}
@@ -119,7 +120,7 @@ Result<void> MaterialDraft::Save(const std::filesystem::path& path, ResourceId i
 	return SaveMaterialResource(path, id, *material,
 	                            [this](MaterialTexturePtr texture)
 	                            {
-		                            for (size_t slot = 0; slot < textureIds.size(); ++slot)
+		                            for (Ursa::Size slot = 0; slot < textureIds.size(); ++slot)
 		                            {
 			                            if (material->Texture(static_cast<MaterialTextureSlot>(slot)) == texture &&
 			                                textureIds[slot])
@@ -135,7 +136,7 @@ Result<std::unique_ptr<EditorDocument>> NewMaterialDocument(const VirtualPath& p
                                                             ProjectWorkspace& workspace)
 {
 	auto draft = std::make_shared<MaterialDraft>(type);
-	auto document = EditorDocument::Create(ResourceKind::material, ResourceId::Generate(), path,
+	auto document = EditorDocument::Create(ResourceKind::Material, ResourceId::Generate(), path,
 	                                       [draft, &workspace](const std::filesystem::path& target, ResourceId id)
 	                                       { return draft->Save(target, id, workspace.Index()); });
 	if (document)
@@ -149,7 +150,7 @@ Result<std::unique_ptr<EditorDocument>> NewMaterialDocument(const VirtualPath& p
 Result<std::unique_ptr<EditorDocument>> OpenMaterialDocument(const VirtualPath& path, ResourceSession& session,
                                                              ProjectWorkspace& workspace)
 {
-	auto host = workspace.Index().Locate(ResourceLocation{ResourceKind::material, path});
+	auto host = workspace.Index().Locate(ResourceLocation{ResourceKind::Material, path});
 	if (!host)
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(host.error);
@@ -165,7 +166,7 @@ Result<std::unique_ptr<EditorDocument>> OpenMaterialDocument(const VirtualPath& 
 		return Result<std::unique_ptr<EditorDocument>>::Failure(draft.error);
 	}
 	auto document =
-	    EditorDocument::Create(ResourceKind::material, header.value.id, path,
+	    EditorDocument::Create(ResourceKind::Material, header.value.id, path,
 	                           [draft = draft.value, &workspace](const std::filesystem::path& target, ResourceId id)
 	                           { return draft->Save(target, id, workspace.Index()); });
 	if (document)
@@ -186,21 +187,21 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 	auto& material = draft->Material();
 	bool changed = false;
 	ImGui::Begin("Inspector");
-	ImGui::TextUnformatted(material.Type() == MaterialType::unlit ? "Unlit" : "PBR Metallic Roughness");
+	ImGui::TextUnformatted(material.Type() == MaterialType::Unlit ? "Unlit" : "PBR Metallic Roughness");
 	auto params = material.Parameters();
-	float color[4]{params.baseColor.red, params.baseColor.green, params.baseColor.blue, params.baseColor.alpha};
+	Ursa::Float32 color[4]{params.baseColor.red, params.baseColor.green, params.baseColor.blue, params.baseColor.alpha};
 	if (ImGui::ColorEdit4("Base color", color))
 	{
 		auto set = material.SetBaseColor({color[0], color[1], color[2], color[3]});
 		diagnostic = set ? String{} : set.error;
 		changed |= static_cast<bool>(set);
 	}
-	if (material.Type() == MaterialType::pbrMetallicRoughness)
+	if (material.Type() == MaterialType::PbrMetallicRoughness)
 	{
-		float metallic = params.metallic;
-		float roughness = params.roughness;
-		float normalScale = params.normalScale;
-		float occlusion = params.occlusionStrength;
+		Ursa::Float32 metallic = params.metallic;
+		Ursa::Float32 roughness = params.roughness;
+		Ursa::Float32 normalScale = params.normalScale;
+		Ursa::Float32 occlusion = params.occlusionStrength;
 		if (ImGui::SliderFloat("Metallic", &metallic, 0.f, 1.f))
 		{
 			auto set = material.SetMetallic(metallic);
@@ -225,7 +226,8 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 			diagnostic = set ? String{} : set.error;
 			changed |= static_cast<bool>(set);
 		}
-		float emissive[4]{params.emissive.red, params.emissive.green, params.emissive.blue, params.emissive.alpha};
+		Ursa::Float32 emissive[4]{params.emissive.red, params.emissive.green, params.emissive.blue,
+		                          params.emissive.alpha};
 		if (ImGui::ColorEdit4("Emissive", emissive))
 		{
 			auto set = material.SetEmissive({emissive[0], emissive[1], emissive[2], emissive[3]});
@@ -234,7 +236,7 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 		}
 	}
 	int mode = static_cast<int>(params.alphaMode);
-	float cutoff = params.alphaCutoff;
+	Ursa::Float32 cutoff = params.alphaCutoff;
 	if (ImGui::Combo("Alpha mode", &mode, "Opaque\0Mask\0Blend\0"))
 	{
 		auto set = material.SetAlphaMode(static_cast<AlphaMode>(mode), cutoff);
@@ -257,7 +259,7 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 		diagnostic = set ? String{} : set.error;
 		changed |= static_cast<bool>(set);
 	}
-	for (size_t slot = 0; slot < slotNames.size(); ++slot)
+	for (Ursa::Size slot = 0; slot < slotNames.size(); ++slot)
 	{
 		if (!AllowedSlot(material.Type(), slot))
 		{
@@ -276,7 +278,7 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 			}
 			for (const auto& entry : workspace.Resources())
 			{
-				if (entry.location.kind != ResourceKind::texture)
+				if (entry.location.kind != ResourceKind::Texture)
 				{
 					continue;
 				}

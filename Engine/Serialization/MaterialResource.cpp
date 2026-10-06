@@ -1,8 +1,9 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/MaterialResource.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -20,20 +21,20 @@ Json ColorJson(Color color)
 	return Json::array({color.red, color.green, color.blue, color.alpha});
 }
 
-Result<float> ReadNumber(const Json& object, const char* key, const String& context)
+Result<Ursa::Float32> ReadNumber(const Json& object, const char* key, const String& context)
 {
 	auto field = object.find(key);
 	if (field == object.end() || !field->is_number())
 	{
-		return Result<float>::Failure("Invalid or missing " + context + "." + key);
+		return Result<Ursa::Float32>::Failure("Invalid or missing " + context + "." + key);
 	}
-	const double value = field->get<double>();
-	if (!std::isfinite(value) || value < -std::numeric_limits<float>::max() ||
-	    value > std::numeric_limits<float>::max())
+	const Ursa::Float64 value = field->get<Ursa::Float64>();
+	if (!std::isfinite(value) || value < -std::numeric_limits<Ursa::Float32>::max() ||
+	    value > std::numeric_limits<Ursa::Float32>::max())
 	{
-		return Result<float>::Failure("Out-of-range " + context + "." + key);
+		return Result<Ursa::Float32>::Failure("Out-of-range " + context + "." + key);
 	}
-	return Result<float>::Success(static_cast<float>(value));
+	return Result<Ursa::Float32>::Success(static_cast<Ursa::Float32>(value));
 }
 
 Result<Color> ReadColor(const Json& object, const char* key, const String& context)
@@ -44,21 +45,21 @@ Result<Color> ReadColor(const Json& object, const char* key, const String& conte
 		return Result<Color>::Failure("Invalid or missing " + context + "." + key);
 	}
 	Color color;
-	Array<float*, 4> channels{&color.red, &color.green, &color.blue, &color.alpha};
-	for (size_t index = 0; index < channels.size(); ++index)
+	Array<Ursa::Float32*, 4> channels{&color.red, &color.green, &color.blue, &color.alpha};
+	for (Ursa::Size index = 0; index < channels.size(); ++index)
 	{
 		if (!(*field)[index].is_number())
 		{
 			return Result<Color>::Failure("Invalid " + context + "." + key + " channel " +
 			                              ToUrsaString(std::to_string(index)));
 		}
-		const double value = (*field)[index].get<double>();
-		if (!std::isfinite(value) || value < -std::numeric_limits<float>::max() ||
-		    value > std::numeric_limits<float>::max())
+		const Ursa::Float64 value = (*field)[index].get<Ursa::Float64>();
+		if (!std::isfinite(value) || value < -std::numeric_limits<Ursa::Float32>::max() ||
+		    value > std::numeric_limits<Ursa::Float32>::max())
 		{
 			return Result<Color>::Failure("Out-of-range " + context + "." + key);
 		}
-		*channels[index] = static_cast<float>(value);
+		*channels[index] = static_cast<Ursa::Float32>(value);
 	}
 	return Result<Color>::Success(color);
 }
@@ -104,15 +105,15 @@ Result<void> LoadParameters(const Json& fields, MaterialInstance& material, cons
 	const auto name = alpha->get<String>();
 	if (name == "Opaque")
 	{
-		mode = AlphaMode::opaque;
+		mode = AlphaMode::Opaque;
 	}
 	else if (name == "Mask")
 	{
-		mode = AlphaMode::mask;
+		mode = AlphaMode::Mask;
 	}
 	else if (name == "Blend")
 	{
-		mode = AlphaMode::blend;
+		mode = AlphaMode::Blend;
 	}
 	else
 	{
@@ -147,7 +148,7 @@ Result<void> LoadParameters(const Json& fields, MaterialInstance& material, cons
 	}
 
 	constexpr Array<const char*, 5> pbrKeys{"metallic", "roughness", "normalScale", "occlusionStrength", "emissive"};
-	if (material.Type() == MaterialType::unlit)
+	if (material.Type() == MaterialType::Unlit)
 	{
 		for (const char* key : pbrKeys)
 		{
@@ -176,7 +177,7 @@ Result<void> LoadParameters(const Json& fields, MaterialInstance& material, cons
 	                                     material.SetNormalScale(normalScale.value),
 	                                     material.SetOcclusionStrength(occlusion.value),
 	                                     material.SetEmissive(emissive.value)};
-	for (size_t index = 0; index < results.size(); ++index)
+	for (Ursa::Size index = 0; index < results.size(); ++index)
 	{
 		if (!results[index])
 		{
@@ -195,18 +196,18 @@ Result<void> SaveMaterialResource(const std::filesystem::path& path, ResourceId 
 		return Result<void>::Failure("Invalid material resource ID or .ursamat path: " + PathToUrsaString(path));
 	}
 	const auto type = material.Type();
-	if (type != MaterialType::unlit && type != MaterialType::pbrMetallicRoughness)
+	if (type != MaterialType::Unlit && type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Invalid material type at " + PathToUrsaString(path));
 	}
 	const auto& parameters = material.Parameters();
 	Json fields{{"baseColor", ColorJson(parameters.baseColor)},
-	            {"alphaMode", parameters.alphaMode == AlphaMode::opaque ? "Opaque"
-	                          : parameters.alphaMode == AlphaMode::mask ? "Mask"
+	            {"alphaMode", parameters.alphaMode == AlphaMode::Opaque ? "Opaque"
+	                          : parameters.alphaMode == AlphaMode::Mask ? "Mask"
 	                                                                    : "Blend"},
 	            {"alphaCutoff", parameters.alphaCutoff},
 	            {"sampler", {{"linear", parameters.sampler.linear}, {"repeat", parameters.sampler.repeat}}}};
-	if (type == MaterialType::pbrMetallicRoughness)
+	if (type == MaterialType::PbrMetallicRoughness)
 	{
 		fields["metallic"] = parameters.metallic;
 		fields["roughness"] = parameters.roughness;
@@ -215,7 +216,7 @@ Result<void> SaveMaterialResource(const std::filesystem::path& path, ResourceId 
 		fields["emissive"] = ColorJson(parameters.emissive);
 	}
 	Json textures = Json::object();
-	for (size_t index = 0; index < slotNames.size(); ++index)
+	for (Ursa::Size index = 0; index < slotNames.size(); ++index)
 	{
 		const auto selected = material.Texture(static_cast<MaterialTextureSlot>(index));
 		if (!selected)
@@ -237,7 +238,7 @@ Result<void> SaveMaterialResource(const std::filesystem::path& path, ResourceId 
 	const Json document{{"format", "UrsaMaterial"},
 	                    {"version", resourceFormatVersion},
 	                    {"id", id.ToString()},
-	                    {"type", type == MaterialType::unlit ? "Unlit" : "PbrMetallicRoughness"},
+	                    {"type", type == MaterialType::Unlit ? "Unlit" : "PbrMetallicRoughness"},
 	                    {"parameters", std::move(fields)},
 	                    {"textures", std::move(textures)}};
 	return WriteJsonResource(path, document);
@@ -246,7 +247,7 @@ Result<void> SaveMaterialResource(const std::filesystem::path& path, ResourceId 
 Result<LoadedMaterialResource> LoadMaterialResource(const std::filesystem::path& path,
                                                     const TextureResourceLoader& loadTexture)
 {
-	auto document = ReadJsonResource(path, ResourceKind::material);
+	auto document = ReadJsonResource(path, ResourceKind::Material);
 	if (!document)
 	{
 		return Result<LoadedMaterialResource>::Failure(document.error);
@@ -260,11 +261,11 @@ Result<LoadedMaterialResource> LoadMaterialResource(const std::filesystem::path&
 	MaterialType type;
 	if (typeName == "Unlit")
 	{
-		type = MaterialType::unlit;
+		type = MaterialType::Unlit;
 	}
 	else if (typeName == "PbrMetallicRoughness")
 	{
-		type = MaterialType::pbrMetallicRoughness;
+		type = MaterialType::PbrMetallicRoughness;
 	}
 	else
 	{
@@ -298,7 +299,7 @@ Result<LoadedMaterialResource> LoadMaterialResource(const std::filesystem::path&
 			                                               ToUrsaString(field.key()) + " at " + PathToUrsaString(path));
 		}
 		const auto slot = static_cast<MaterialTextureSlot>(std::distance(slotNames.begin(), matched));
-		if (type == MaterialType::unlit && slot != MaterialTextureSlot::baseColor)
+		if (type == MaterialType::Unlit && slot != MaterialTextureSlot::BaseColor)
 		{
 			return Result<LoadedMaterialResource>::Failure("Unlit material cannot use texture slot " +
 			                                               ToUrsaString(field.key()) + " at " + PathToUrsaString(path));

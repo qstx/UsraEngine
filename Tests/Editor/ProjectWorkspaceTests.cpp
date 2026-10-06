@@ -52,7 +52,7 @@ void WriteHeader(const std::filesystem::path& path, ResourceId id)
 Vector<ResourceMount> engineMounts(const std::filesystem::path& root)
 {
 	Vector<ResourceMount> mounts;
-	mounts.push_back(ResourceMount{engineScheme, root, MountAccess::readOnly});
+	mounts.push_back(ResourceMount{engineScheme, root, MountAccess::ReadOnly});
 	return mounts;
 }
 } // namespace

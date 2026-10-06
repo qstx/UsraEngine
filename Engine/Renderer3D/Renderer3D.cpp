@@ -1,15 +1,14 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <algorithm>
-#include <array>
 #include <cstring>
 #include <fstream>
 #include <functional>
-#include <map>
 #include <stdexcept>
 #include <tuple>
-#include <unordered_map>
 #include <utility>
 
 namespace Ursa
@@ -33,7 +32,7 @@ void done(Result<void> result)
 	}
 }
 
-Vector<uint8_t> LoadShader(const VirtualFileSystem& files, const char* name)
+Vector<Ursa::UInt8> LoadShader(const VirtualFileSystem& files, const char* name)
 {
 	auto path = VirtualPath::Parse(String(engineScheme) + ":Shaders/Renderer3D/" + name + ".spv");
 	if (!path)
@@ -54,29 +53,29 @@ Vector<uint8_t> LoadShader(const VirtualFileSystem& files, const char* name)
 
 struct Vertex
 {
-	float position[3];
-	float normal[3];
-	float uv[2];
-	float tangent[3];
+	Ursa::Float32 position[3];
+	Ursa::Float32 normal[3];
+	Ursa::Float32 uv[2];
+	Ursa::Float32 tangent[3];
 };
 
 struct CubeMesh
 {
 	Array<Vertex, 24> vertices{};
-	Array<uint32_t, 36> indices{};
+	Array<Ursa::UInt32, 36> indices{};
 };
 
 CubeMesh MakeCube()
 {
 	CubeMesh mesh;
-	size_t vertex = 0;
-	size_t index = 0;
+	Ursa::Size vertex = 0;
+	Ursa::Size index = 0;
 	const auto face = [&](Vec3 normal, const Array<Vec3, 4>& corners)
 	{
-		const uint32_t first = static_cast<uint32_t>(vertex);
+		const Ursa::UInt32 first = static_cast<Ursa::UInt32>(vertex);
 		const Vec3 tangent = Normalized(corners[1] - corners[0]);
-		constexpr float uvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-		for (size_t corner = 0; corner < corners.size(); ++corner)
+		constexpr Ursa::Float32 uvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+		for (Ursa::Size corner = 0; corner < corners.size(); ++corner)
 		{
 			const Vec3 p = corners[corner];
 			mesh.vertices[vertex++] = {{p.x, p.y, p.z},
@@ -84,12 +83,12 @@ CubeMesh MakeCube()
 			                           {uvs[corner][0], uvs[corner][1]},
 			                           {tangent.x, tangent.y, tangent.z}};
 		}
-		for (uint32_t corner : {0u, 2u, 1u, 0u, 3u, 2u})
+		for (Ursa::UInt32 corner : {0u, 2u, 1u, 0u, 3u, 2u})
 		{
 			mesh.indices[index++] = first + corner;
 		}
 	};
-	constexpr float h = 0.5f;
+	constexpr Ursa::Float32 h = 0.5f;
 	face({0, 0, 1}, {{{-h, -h, h}, {h, -h, h}, {h, h, h}, {-h, h, h}}});
 	face({0, 0, -1}, {{{h, -h, -h}, {-h, -h, -h}, {-h, h, -h}, {h, h, -h}}});
 	face({1, 0, 0}, {{{h, -h, h}, {h, -h, -h}, {h, h, -h}, {h, h, h}}});
@@ -101,45 +100,45 @@ CubeMesh MakeCube()
 
 struct GpuDirectionalLight
 {
-	float directionIntensity[4]{};
-	float color[4]{};
+	Ursa::Float32 directionIntensity[4]{};
+	Ursa::Float32 color[4]{};
 };
 
 struct GpuPointLight
 {
-	float positionRange[4]{};
-	float colorIntensity[4]{};
+	Ursa::Float32 positionRange[4]{};
+	Ursa::Float32 colorIntensity[4]{};
 };
 
 struct GpuFrameHeader
 {
-	float viewProjection[16]{};
-	float cameraPosition[4]{};
-	float ambient[4]{};
-	int32_t counts[4]{};
+	Ursa::Float32 viewProjection[16]{};
+	Ursa::Float32 cameraPosition[4]{};
+	Ursa::Float32 ambient[4]{};
+	Ursa::Int32 counts[4]{};
 	GpuDirectionalLight directional[SceneLighting::maxDirectionalLights]{};
 	GpuPointLight point[SceneLighting::maxPointLights]{};
 };
 
 struct GpuInstance
 {
-	float model[16]{};
-	float color[4]{};
+	Ursa::Float32 model[16]{};
+	Ursa::Float32 color[4]{};
 };
 
 struct GpuMaterial
 {
-	float baseColor[4]{};
-	float factors[4]{};
-	float emissive[4]{};
-	int32_t flags[4]{};
+	Ursa::Float32 baseColor[4]{};
+	Ursa::Float32 factors[4]{};
+	Ursa::Float32 emissive[4]{};
+	Ursa::Int32 flags[4]{};
 };
 
 static_assert(sizeof(GpuFrameHeader) == 496, "Unexpected frame layout");
 static_assert(sizeof(GpuInstance) == 80, "Unexpected instance layout");
 static_assert(sizeof(GpuMaterial) == 64, "Unexpected material layout");
 
-void WriteColor(float (&out)[4], Color color)
+void WriteColor(Ursa::Float32 (&out)[4], Color color)
 {
 	out[0] = color.red;
 	out[1] = color.green;
@@ -162,9 +161,9 @@ struct DrawItem
 {
 	const ModelBoxInstance* box = nullptr;
 	std::shared_ptr<MaterialInstance> material;
-	AlphaMode mode = AlphaMode::opaque;
-	float distanceSquared = 0.0f;
-	size_t ordinal = 0;
+	AlphaMode mode = AlphaMode::Opaque;
+	Ursa::Float32 distanceSquared = 0.0f;
+	Ursa::Size ordinal = 0;
 };
 
 Vector<DrawItem> OrderItems(const Vector<ModelBoxInstance>& boxes, const std::shared_ptr<MaterialInstance>& fallback,
@@ -172,7 +171,7 @@ Vector<DrawItem> OrderItems(const Vector<ModelBoxInstance>& boxes, const std::sh
 {
 	Vector<DrawItem> items;
 	items.reserve(boxes.size());
-	for (size_t i = 0; i < boxes.size(); ++i)
+	for (Ursa::Size i = 0; i < boxes.size(); ++i)
 	{
 		const auto& box = boxes[i];
 		const Vec3 delta{box.model.At(0, 3) - cameraPosition.x, box.model.At(1, 3) - cameraPosition.y,
@@ -187,7 +186,7 @@ Vector<DrawItem> OrderItems(const Vector<ModelBoxInstance>& boxes, const std::sh
 		                 {
 			                 return static_cast<int>(a.mode) < static_cast<int>(b.mode);
 		                 }
-		                 if (a.mode == AlphaMode::blend)
+		                 if (a.mode == AlphaMode::Blend)
 		                 {
 			                 return a.distanceSquared == b.distanceSquared ? a.ordinal < b.ordinal
 			                                                               : a.distanceSquared > b.distanceSquared;
@@ -202,7 +201,7 @@ struct Renderer3D::Impl
 {
 	explicit Impl(Rhi::DevicePtr selectedDevice) : device(std::move(selectedDevice))
 	{
-		fallback = std::make_shared<MaterialInstance>(MaterialType::unlit);
+		fallback = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 	}
 
 	~Impl()
@@ -217,18 +216,18 @@ struct Renderer3D::Impl
 	{
 		const CubeMesh cube = MakeCube();
 		vertexBuffer =
-		    Take(device->CreateBuffer({sizeof(cube.vertices), Rhi::BufferUsage::vertex, Rhi::Memory::upload}));
-		indexBuffer = Take(device->CreateBuffer({sizeof(cube.indices), Rhi::BufferUsage::index, Rhi::Memory::upload}));
+		    Take(device->CreateBuffer({sizeof(cube.vertices), Rhi::BufferUsage::Vertex, Rhi::Memory::Upload}));
+		indexBuffer = Take(device->CreateBuffer({sizeof(cube.indices), Rhi::BufferUsage::Index, Rhi::Memory::Upload}));
 		done(vertexBuffer->Write(0, cube.vertices.data(), sizeof(cube.vertices)));
 		done(indexBuffer->Write(0, cube.indices.data(), sizeof(cube.indices)));
 		layout = Take(device->CreateBindGroupLayout({
-		    {0, Rhi::BindingType::storageBuffer, 1, 3},
-		    {1, Rhi::BindingType::uniformBuffer, 1, 2},
-		    {2, Rhi::BindingType::combinedImageSampler, 1, 2},
-		    {3, Rhi::BindingType::combinedImageSampler, 1, 2},
-		    {4, Rhi::BindingType::combinedImageSampler, 1, 2},
-		    {5, Rhi::BindingType::combinedImageSampler, 1, 2},
-		    {6, Rhi::BindingType::combinedImageSampler, 1, 2},
+		    {0, Rhi::BindingType::StorageBuffer, 1, 3},
+		    {1, Rhi::BindingType::UniformBuffer, 1, 2},
+		    {2, Rhi::BindingType::CombinedImageSampler, 1, 2},
+		    {3, Rhi::BindingType::CombinedImageSampler, 1, 2},
+		    {4, Rhi::BindingType::CombinedImageSampler, 1, 2},
+		    {5, Rhi::BindingType::CombinedImageSampler, 1, 2},
+		    {6, Rhi::BindingType::CombinedImageSampler, 1, 2},
 		}));
 		auto engineFiles = OpenEngineFileSystem();
 		if (!engineFiles)
@@ -236,13 +235,13 @@ struct Renderer3D::Impl
 			throw std::runtime_error(ToStdString(engineFiles.error));
 		}
 		pbrVertexShader = Take(device->CreateShader(
-		    {Rhi::ShaderStage::vertex, Rhi::ShaderFormat::spirv, LoadShader(engineFiles.value, "Cube.vert")}));
+		    {Rhi::ShaderStage::Vertex, Rhi::ShaderFormat::Spirv, LoadShader(engineFiles.value, "Cube.vert")}));
 		unlitVertexShader = Take(device->CreateShader(
-		    {Rhi::ShaderStage::vertex, Rhi::ShaderFormat::spirv, LoadShader(engineFiles.value, "Unlit.vert")}));
+		    {Rhi::ShaderStage::Vertex, Rhi::ShaderFormat::Spirv, LoadShader(engineFiles.value, "Unlit.vert")}));
 		unlitShader = Take(device->CreateShader(
-		    {Rhi::ShaderStage::fragment, Rhi::ShaderFormat::spirv, LoadShader(engineFiles.value, "Cube.frag")}));
+		    {Rhi::ShaderStage::Fragment, Rhi::ShaderFormat::Spirv, LoadShader(engineFiles.value, "Cube.frag")}));
 		pbrShader = Take(device->CreateShader(
-		    {Rhi::ShaderStage::fragment, Rhi::ShaderFormat::spirv, LoadShader(engineFiles.value, "Pbr.frag")}));
+		    {Rhi::ShaderStage::Fragment, Rhi::ShaderFormat::Spirv, LoadShader(engineFiles.value, "Pbr.frag")}));
 	}
 
 	void WaitPrevious()
@@ -276,7 +275,7 @@ struct Renderer3D::Impl
 		}
 	}
 
-	void PrepareTarget(const Rhi::TexturePtr& color, size_t count)
+	void PrepareTarget(const Rhi::TexturePtr& color, Ursa::Size count)
 	{
 		if (!color)
 		{
@@ -285,17 +284,17 @@ struct Renderer3D::Impl
 		if (!depth || depth->desc.width != color->desc.width || depth->desc.height != color->desc.height)
 		{
 			depth = Take(device->CreateTexture(
-			    {color->desc.width, color->desc.height, Rhi::Format::d32Float, Rhi::TextureUsage::depthAttachment}));
+			    {color->desc.width, color->desc.height, Rhi::Format::D32Float, Rhi::TextureUsage::DepthAttachment}));
 		}
 		if (count > capacity || !sceneBuffer)
 		{
-			capacity = std::max<size_t>(64, capacity);
+			capacity = std::max<Ursa::Size>(64, capacity);
 			while (capacity < count)
 			{
 				capacity *= 2;
 			}
 			sceneBuffer = Take(device->CreateBuffer({sizeof(GpuFrameHeader) + capacity * sizeof(GpuInstance),
-			                                         Rhi::BufferUsage::storage, Rhi::Memory::upload}));
+			                                         Rhi::BufferUsage::Storage, Rhi::Memory::Upload}));
 			materialCache.clear();
 		}
 	}
@@ -308,25 +307,25 @@ struct Renderer3D::Impl
 		{
 			return found->second;
 		}
-		if (type != MaterialType::unlit && type != MaterialType::pbrMetallicRoughness)
+		if (type != MaterialType::Unlit && type != MaterialType::PbrMetallicRoughness)
 		{
 			throw std::runtime_error("Unsupported built-in material type");
 		}
 		Rhi::GraphicsPipelineDesc desc;
-		desc.vertex = type == MaterialType::unlit ? unlitVertexShader : pbrVertexShader;
-		desc.fragment = type == MaterialType::unlit ? unlitShader : pbrShader;
+		desc.vertex = type == MaterialType::Unlit ? unlitVertexShader : pbrVertexShader;
+		desc.fragment = type == MaterialType::Unlit ? unlitShader : pbrShader;
 		desc.layout = layout;
 		desc.colorFormat = format;
 		desc.depthTest = true;
-		desc.depthWrite = mode != AlphaMode::blend;
-		desc.blend = mode == AlphaMode::blend;
+		desc.depthWrite = mode != AlphaMode::Blend;
+		desc.blend = mode == AlphaMode::Blend;
 		desc.cullBack = true;
 		desc.vertexStride = sizeof(Vertex);
-		desc.attributes = {{0, 0, Rhi::VertexFormat::float3}, {2, offsetof(Vertex, uv), Rhi::VertexFormat::float2}};
-		if (type == MaterialType::pbrMetallicRoughness)
+		desc.attributes = {{0, 0, Rhi::VertexFormat::Float3}, {2, offsetof(Vertex, uv), Rhi::VertexFormat::Float2}};
+		if (type == MaterialType::PbrMetallicRoughness)
 		{
-			desc.attributes.push_back({1, offsetof(Vertex, normal), Rhi::VertexFormat::float3});
-			desc.attributes.push_back({3, offsetof(Vertex, tangent), Rhi::VertexFormat::float3});
+			desc.attributes.push_back({1, offsetof(Vertex, normal), Rhi::VertexFormat::Float3});
+			desc.attributes.push_back({3, offsetof(Vertex, tangent), Rhi::VertexFormat::Float3});
 		}
 		auto pipeline = Take(device->CreateGraphicsPipeline(desc));
 		pipelines.emplace(key, pipeline);
@@ -341,16 +340,16 @@ struct Renderer3D::Impl
 			return found->second.texture;
 		}
 		const auto bytes = source->GetPixels().size();
-		auto upload = Take(device->CreateBuffer({bytes, Rhi::BufferUsage::transferSource, Rhi::Memory::upload}));
+		auto upload = Take(device->CreateBuffer({bytes, Rhi::BufferUsage::TransferSource, Rhi::Memory::Upload}));
 		done(upload->Write(0, source->GetPixels().data(), bytes));
 		const auto format =
-		    source->GetColorSpace() == TextureColorSpace::srgb ? Rhi::Format::rgbA8Srgb : Rhi::Format::rgbA8Unorm;
+		    source->GetColorSpace() == TextureColorSpace::Srgb ? Rhi::Format::RgbA8Srgb : Rhi::Format::RgbA8Unorm;
 		auto texture =
 		    Take(device->CreateTexture({source->GetWidth(), source->GetHeight(), format,
-		                                Rhi::TextureUsage::sampled | Rhi::TextureUsage::transferDestination}));
-		done(command->Barrier(texture, Rhi::ResourceState::undefined, Rhi::ResourceState::transferDestination));
+		                                Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination}));
+		done(command->Barrier(texture, Rhi::ResourceState::Undefined, Rhi::ResourceState::TransferDestination));
 		done(command->CopyBufferToTexture(upload, texture));
-		done(command->Barrier(texture, Rhi::ResourceState::transferDestination, Rhi::ResourceState::shaderRead));
+		done(command->Barrier(texture, Rhi::ResourceState::TransferDestination, Rhi::ResourceState::ShaderRead));
 		textureCache.emplace(source.get(), GpuTexture{source, texture});
 		return texture;
 	}
@@ -371,15 +370,15 @@ struct Renderer3D::Impl
 		gpu.factors[3] = params.occlusionStrength;
 		WriteColor(gpu.emissive, params.emissive);
 		gpu.emissive[3] = params.alphaCutoff;
-		gpu.flags[0] = static_cast<int32_t>(material->Type());
-		gpu.flags[1] = static_cast<int32_t>(params.alphaMode);
+		gpu.flags[0] = static_cast<Ursa::Int32>(material->Type());
+		gpu.flags[1] = static_cast<Ursa::Int32>(params.alphaMode);
 		gpu.flags[2] = material == fallback ? 1 : 0;
-		auto uniform = Take(device->CreateBuffer({sizeof(gpu), Rhi::BufferUsage::uniform, Rhi::Memory::upload}));
+		auto uniform = Take(device->CreateBuffer({sizeof(gpu), Rhi::BufferUsage::Uniform, Rhi::Memory::Upload}));
 		done(uniform->Write(0, &gpu, sizeof(gpu)));
-		done(command->Barrier(uniform, Rhi::ResourceState::undefined, Rhi::ResourceState::uniformRead));
+		done(command->Barrier(uniform, Rhi::ResourceState::Undefined, Rhi::ResourceState::UniformRead));
 		auto sampler = Take(device->CreateSampler({params.sampler.linear, params.sampler.repeat}));
 		Vector<Rhi::BindingResource> resources{{0, sceneBuffer, {}, {}}, {1, uniform, {}, {}}};
-		for (uint32_t i = 0; i < 5; ++i)
+		for (Ursa::UInt32 i = 0; i < 5; ++i)
 		{
 			const auto slot = static_cast<MaterialTextureSlot>(i);
 			resources.push_back({i + 2, {}, TextureFor(material->ResolvedTexture(slot), command), sampler});
@@ -411,9 +410,9 @@ struct Renderer3D::Impl
 		frame.cameraPosition[2] = cameraPosition.z;
 		WriteColor(frame.ambient, lighting.ambientColor);
 		frame.ambient[3] = lighting.ambientIntensity;
-		frame.counts[0] = static_cast<int32_t>(lighting.directional.size());
-		frame.counts[1] = static_cast<int32_t>(lighting.point.size());
-		for (size_t i = 0; i < lighting.directional.size(); ++i)
+		frame.counts[0] = static_cast<Ursa::Int32>(lighting.directional.size());
+		frame.counts[1] = static_cast<Ursa::Int32>(lighting.point.size());
+		for (Ursa::Size i = 0; i < lighting.directional.size(); ++i)
 		{
 			const auto& light = lighting.directional[i];
 			frame.directional[i].directionIntensity[0] = light.direction.x;
@@ -422,7 +421,7 @@ struct Renderer3D::Impl
 			frame.directional[i].directionIntensity[3] = light.intensity;
 			WriteColor(frame.directional[i].color, light.color);
 		}
-		for (size_t i = 0; i < lighting.point.size(); ++i)
+		for (Ursa::Size i = 0; i < lighting.point.size(); ++i)
 		{
 			const auto& light = lighting.point[i];
 			frame.point[i].positionRange[0] = light.position.x;
@@ -447,9 +446,9 @@ struct Renderer3D::Impl
 			done(sceneBuffer->Write(sizeof(frame), instances.data(), instances.size() * sizeof(GpuInstance)));
 		}
 
-		done(command->Barrier(color, before, Rhi::ResourceState::colorAttachment));
-		done(command->Barrier(depth, Rhi::ResourceState::undefined, Rhi::ResourceState::depthAttachment));
-		done(command->Barrier(sceneBuffer, Rhi::ResourceState::undefined, Rhi::ResourceState::storageReadWrite));
+		done(command->Barrier(color, before, Rhi::ResourceState::ColorAttachment));
+		done(command->Barrier(depth, Rhi::ResourceState::Undefined, Rhi::ResourceState::DepthAttachment));
+		done(command->Barrier(sceneBuffer, Rhi::ResourceState::Undefined, Rhi::ResourceState::StorageReadWrite));
 		Vector<Rhi::BindGroupPtr> groups;
 		groups.reserve(items.size());
 		for (const auto& item : items)
@@ -465,10 +464,10 @@ struct Renderer3D::Impl
 		done(command->BeginRendering(target));
 		done(command->BindVertexBuffer(vertexBuffer));
 		done(command->BindIndexBuffer(indexBuffer));
-		for (size_t first = 0; first < items.size();)
+		for (Ursa::Size first = 0; first < items.size();)
 		{
-			size_t end = first + 1;
-			if (items[first].mode != AlphaMode::blend)
+			Ursa::Size end = first + 1;
+			if (items[first].mode != AlphaMode::Blend)
 			{
 				while (end < items.size() && items[end].material == items[first].material &&
 				       items[end].mode == items[first].mode)
@@ -479,11 +478,11 @@ struct Renderer3D::Impl
 			done(command->BindPipeline(
 			    PipelineFor(color->desc.format, items[first].material->Type(), items[first].mode)));
 			done(command->BindGroup(groups[first]));
-			done(command->DrawIndexed(36, static_cast<uint32_t>(end - first), static_cast<uint32_t>(first)));
+			done(command->DrawIndexed(36, static_cast<Ursa::UInt32>(end - first), static_cast<Ursa::UInt32>(first)));
 			first = end;
 		}
 		done(command->EndRendering());
-		done(command->Barrier(color, Rhi::ResourceState::colorAttachment, after));
+		done(command->Barrier(color, Rhi::ResourceState::ColorAttachment, after));
 	}
 
 	Rhi::FencePtr Draw(const Rhi::TexturePtr& color, Rhi::ResourceState before, Rhi::ResourceState after,
@@ -507,7 +506,7 @@ struct Renderer3D::Impl
 	struct GpuMaterialCache
 	{
 		std::weak_ptr<MaterialInstance> source;
-		uint64_t version = 0;
+		Ursa::UInt64 version = 0;
 		Rhi::BufferPtr uniform;
 		Rhi::BindGroupPtr group;
 	};
@@ -527,27 +526,27 @@ struct Renderer3D::Impl
 	Map<std::tuple<int, int, int>, Rhi::PipelinePtr> pipelines;
 	UnorderedMap<const MaterialTexture*, GpuTexture> textureCache;
 	UnorderedMap<const MaterialInstance*, GpuMaterialCache> materialCache;
-	size_t capacity = 0;
+	Ursa::Size capacity = 0;
 };
 
-Renderer3D::Renderer3D(std::unique_ptr<Impl> impl) : impl(std::move(impl))
+Renderer3D::Renderer3D(std::unique_ptr<Impl> implementation) : impl(std::move(implementation))
 {
 }
 
 Renderer3D::~Renderer3D() = default;
 
-Result<std::unique_ptr<Renderer3D>> Renderer3D::Create(Rhi::DevicePtr device)
+Result<std::unique_ptr<Renderer3D>> Renderer3D::Create(Rhi::DevicePtr selectedDevice)
 {
 	try
 	{
-		if (!device)
+		if (!selectedDevice)
 		{
 			throw std::runtime_error("3D renderer requires a device");
 		}
-		auto impl = std::make_unique<Impl>(std::move(device));
-		impl->Initialize();
+		auto implementation = std::make_unique<Impl>(std::move(selectedDevice));
+		implementation->Initialize();
 		return Result<std::unique_ptr<Renderer3D>>::Success(
-		    std::unique_ptr<Renderer3D>(new Renderer3D(std::move(impl))));
+		    std::unique_ptr<Renderer3D>(new Renderer3D(std::move(implementation))));
 	}
 	catch (const std::exception& error)
 	{
@@ -570,9 +569,9 @@ Result<void> Renderer3D::Render(const Rhi::SwapchainPtr& swapchain, const Camera
 		{
 			return {};
 		}
-		const float aspect =
-		    static_cast<float>(acquired.texture->desc.width) / static_cast<float>(acquired.texture->desc.height);
-		impl->Draw(acquired.texture, acquired.initialState, Rhi::ResourceState::present, camera.ViewProjection(aspect),
+		const Ursa::Float32 aspect = static_cast<Ursa::Float32>(acquired.texture->desc.width) /
+		                             static_cast<Ursa::Float32>(acquired.texture->desc.height);
+		impl->Draw(acquired.texture, acquired.initialState, Rhi::ResourceState::Present, camera.ViewProjection(aspect),
 		           ModelsFromBoxes(boxes), {}, camera.position, swapchain);
 		done(swapchain->Present());
 		return {};
@@ -599,7 +598,7 @@ Result<void> Renderer3D::RenderModels(const Rhi::SwapchainPtr& swapchain, const 
 		{
 			return {};
 		}
-		impl->Draw(acquired.texture, acquired.initialState, Rhi::ResourceState::present, viewProjection, boxes,
+		impl->Draw(acquired.texture, acquired.initialState, Rhi::ResourceState::Present, viewProjection, boxes,
 		           lighting, cameraPosition, swapchain);
 		done(swapchain->Present());
 		return {};
@@ -620,9 +619,10 @@ Result<Rhi::FencePtr> Renderer3D::RenderOffscreen(const Rhi::TexturePtr& color, 
 		{
 			throw std::runtime_error("3D renderer requires a color target");
 		}
-		const float aspect = static_cast<float>(color->desc.width) / static_cast<float>(color->desc.height);
+		const Ursa::Float32 aspect =
+		    static_cast<Ursa::Float32>(color->desc.width) / static_cast<Ursa::Float32>(color->desc.height);
 		return Result<Rhi::FencePtr>::Success(
-		    impl->Draw(color, Rhi::ResourceState::undefined, Rhi::ResourceState::transferSource,
+		    impl->Draw(color, Rhi::ResourceState::Undefined, Rhi::ResourceState::TransferSource,
 		               camera.ViewProjection(aspect), ModelsFromBoxes(boxes), {}, camera.position));
 	}
 	catch (const std::exception& error)
@@ -638,8 +638,8 @@ Result<Rhi::FencePtr> Renderer3D::RenderOffscreenModels(const Rhi::TexturePtr& c
 	try
 	{
 		impl->WaitPrevious();
-		return Result<Rhi::FencePtr>::Success(impl->Draw(color, Rhi::ResourceState::undefined,
-		                                                 Rhi::ResourceState::transferSource, viewProjection, boxes,
+		return Result<Rhi::FencePtr>::Success(impl->Draw(color, Rhi::ResourceState::Undefined,
+		                                                 Rhi::ResourceState::TransferSource, viewProjection, boxes,
 		                                                 lighting, cameraPosition));
 	}
 	catch (const std::exception& error)

@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Math/Vec3.hpp>
 #include <cmath>
 #include <stdexcept>
@@ -9,7 +10,7 @@ Vec3 operator-(Vec3 a, Vec3 b)
 	return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
-float Dot(Vec3 a, Vec3 b)
+Ursa::Float32 Dot(Vec3 a, Vec3 b)
 {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
@@ -21,7 +22,7 @@ Vec3 Cross(Vec3 a, Vec3 b)
 
 Vec3 Normalized(Vec3 value)
 {
-	const float length = std::sqrt(Dot(value, value));
+	const Ursa::Float32 length = std::sqrt(Dot(value, value));
 	if (length <= 0.000001f)
 	{
 		throw std::invalid_argument("Cannot normalize a zero-length vector");

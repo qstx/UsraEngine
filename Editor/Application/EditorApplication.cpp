@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Assets/TextureDraft.hpp>
@@ -44,7 +45,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root)
 	}
 	for (const std::filesystem::path& root : engineRoots.value)
 	{
-		engineMounts.push_back(ResourceMount{engineResourceScheme, root, MountAccess::readOnly});
+		engineMounts.push_back(ResourceMount{engineResourceScheme, root, MountAccess::ReadOnly});
 	}
 	auto openedResult = ProjectWorkspace::Open(root, engineMounts);
 	if (!openedResult)
@@ -71,7 +72,7 @@ Result<void> EditorApplication::OnGui()
 		ImGui::TextUnformatted("Ursa Editor");
 		ImGui::Separator();
 		const auto* current = documents ? documents->Current() : nullptr;
-		const bool canRun = current && current->Kind() == ResourceKind::scene && !documents->PromptPending();
+		const bool canRun = current && current->Kind() == ResourceKind::Scene && !documents->PromptPending();
 		ImGui::BeginDisabled(!play.Active() && !canRun);
 		if (ImGui::Button(play.Active() ? "Stop" : "Run"))
 		{
@@ -168,7 +169,7 @@ Result<void> EditorApplication::OnGui()
 			if (ImGui::Button("New Unlit"))
 			{
 				auto target = ProjectAssetPath(assetNameInput.data());
-				auto created = target ? NewMaterialDocument(target.value, MaterialType::unlit, *workspace)
+				auto created = target ? NewMaterialDocument(target.value, MaterialType::Unlit, *workspace)
 				                      : Result<std::unique_ptr<EditorDocument>>::Failure(target.error);
 				if (created)
 				{
@@ -185,7 +186,7 @@ Result<void> EditorApplication::OnGui()
 			{
 				auto target = ProjectAssetPath(assetNameInput.data());
 				auto created = target
-				                   ? NewMaterialDocument(target.value, MaterialType::pbrMetallicRoughness, *workspace)
+				                   ? NewMaterialDocument(target.value, MaterialType::PbrMetallicRoughness, *workspace)
 				                   : Result<std::unique_ptr<EditorDocument>>::Failure(target.error);
 				if (created)
 				{
@@ -203,7 +204,7 @@ Result<void> EditorApplication::OnGui()
 			const bool newPrefab = ImGui::Button("New Prefab");
 			if (newScene || newPrefab)
 			{
-				const ResourceKind kind = newScene ? ResourceKind::scene : ResourceKind::prefab;
+				const ResourceKind kind = newScene ? ResourceKind::Scene : ResourceKind::Prefab;
 				auto target = ProjectAssetPath(assetNameInput.data());
 				auto created = target ? NewSceneDocument(target.value, kind, project->components, documents->Session(),
 				                                         project->editContextSetup)
@@ -245,7 +246,7 @@ Result<void> EditorApplication::OnGui()
 			const auto name = entry.location.path.ToString();
 			if (ImGui::Selectable(name.c_str()) && writable && documents)
 			{
-				if (entry.location.kind == ResourceKind::texture)
+				if (entry.location.kind == ResourceKind::Texture)
 				{
 					auto opened = OpenTextureDocument(entry.location.path, workspace->Index());
 					if (opened)
@@ -258,7 +259,7 @@ Result<void> EditorApplication::OnGui()
 						workspaceError = opened.error;
 					}
 				}
-				else if (entry.location.kind == ResourceKind::material)
+				else if (entry.location.kind == ResourceKind::Material)
 				{
 					auto opened = OpenMaterialDocument(entry.location.path, documents->Session(), *workspace);
 					if (opened)
@@ -271,7 +272,7 @@ Result<void> EditorApplication::OnGui()
 						workspaceError = opened.error;
 					}
 				}
-				else if (entry.location.kind == ResourceKind::scene || entry.location.kind == ResourceKind::prefab)
+				else if (entry.location.kind == ResourceKind::Scene || entry.location.kind == ResourceKind::Prefab)
 				{
 					auto opened = OpenSceneDocument(entry.location.path, entry.location.kind, project->components,
 					                                documents->Session(), project->editContextSetup);
@@ -297,7 +298,7 @@ Result<void> EditorApplication::OnGui()
 	}
 	ImGui::EndDisabled();
 	ImGui::End();
-	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::texture)
+	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Texture)
 	{
 		auto inspected = DrawTextureInspector(*documents->Current(), inspectorError);
 		if (!inspected)
@@ -305,7 +306,7 @@ Result<void> EditorApplication::OnGui()
 			workspaceError = inspected.error;
 		}
 	}
-	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::material)
+	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Material)
 	{
 		auto inspected = DrawMaterialInspector(*documents->Current(), *documents, *workspace, inspectorError);
 		if (!inspected)
@@ -329,7 +330,7 @@ Result<void> EditorApplication::OnGui()
 		}
 	}
 	if (documents && documents->Current() &&
-	    (documents->Current()->Kind() == ResourceKind::scene || documents->Current()->Kind() == ResourceKind::prefab))
+	    (documents->Current()->Kind() == ResourceKind::Scene || documents->Current()->Kind() == ResourceKind::Prefab))
 	{
 		if (displayedSceneId != documents->Current()->Id())
 		{
@@ -342,17 +343,17 @@ Result<void> EditorApplication::OnGui()
 			ImGui::Begin("Viewport");
 			if (ImGui::Button("Translate"))
 			{
-				gizmoOperation = GizmoOperation::translate;
+				gizmoOperation = GizmoOperation::Translate;
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Rotate"))
 			{
-				gizmoOperation = GizmoOperation::rotate;
+				gizmoOperation = GizmoOperation::Rotate;
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Scale"))
 			{
-				gizmoOperation = GizmoOperation::scale;
+				gizmoOperation = GizmoOperation::Scale;
 			}
 			ImGui::End();
 			if (play.Active())
@@ -382,12 +383,12 @@ Result<void> EditorApplication::OnGui()
 			if (previewResult)
 			{
 				const auto initial =
-				    scenePreviewRendered ? Rhi::ResourceState::shaderRead : Rhi::ResourceState::undefined;
+				    scenePreviewRendered ? Rhi::ResourceState::ShaderRead : Rhi::ResourceState::Undefined;
 				previewResult = play.Active()
 				                    ? scenePreview->RecordGame(*play.GetScene(), command.value, scenePreviewColor,
-				                                               initial, Rhi::ResourceState::shaderRead)
+				                                               initial, Rhi::ResourceState::ShaderRead)
 				                    : scenePreview->Record(draft->GetScene(), command.value, scenePreviewColor, initial,
-				                                           Rhi::ResourceState::shaderRead);
+				                                           Rhi::ResourceState::ShaderRead);
 			}
 			if (previewResult)
 			{
@@ -410,18 +411,52 @@ Result<void> EditorApplication::OnGui()
 			if (previewResult)
 			{
 				const ImVec2 available = ImGui::GetContentRegionAvail();
-				const float imageSize = std::max(1.f, std::min(available.x, available.y));
+				const Ursa::Float32 imageSize = std::max(1.f, std::min(available.x, available.y));
 				const ImVec2 position = ImGui::GetCursorScreenPos();
 				ImGui::Image(scenePreviewId, ImVec2(imageSize, imageSize));
 				viewportFocused = play.Active() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
 				                  ImGui::IsItemHovered();
-				auto selected = hierarchy.SelectedNode(draft->GetScene());
-				if (selected && !play.Active())
+				GameObject::Ptr gizmoTarget;
+				ResourceId prefabObjectId;
+				if (draft->Kind() == ResourceKind::Prefab && draft->GetPrefabAsset())
 				{
-					auto manipulated = DrawGizmo(draft->GetScene(), selected.value, scenePreview->GetCamera(),
+					auto selectedAssetObject = hierarchy.SelectedGameObject(*draft->GetPrefabAsset());
+					if (selectedAssetObject)
+					{
+						prefabObjectId = selectedAssetObject.value->Id();
+						auto selectedPreviewObject = draft->PreviewGameObject(prefabObjectId);
+						if (selectedPreviewObject)
+						{
+							gizmoTarget = selectedPreviewObject.value;
+						}
+					}
+				}
+				else
+				{
+					auto selected = hierarchy.SelectedGameObject(draft->GetScene());
+					if (selected)
+					{
+						gizmoTarget = selected.value;
+					}
+				}
+				if (gizmoTarget && !play.Active())
+				{
+					auto manipulated = DrawGizmo(draft->GetScene(), gizmoTarget, scenePreview->GetCamera(),
 					                             {position.x, position.y, imageSize, imageSize}, gizmoOperation);
 					if (manipulated && manipulated.value)
 					{
+						if (prefabObjectId)
+						{
+							auto synced = draft->SyncPrefabTransform(prefabObjectId);
+							if (synced)
+							{
+								synced = draft->RefreshPrefabPreview();
+							}
+							if (!synced)
+							{
+								inspectorError = synced.error;
+							}
+						}
 						documents->Current()->MarkDirty();
 					}
 					else if (!manipulated)
@@ -439,7 +474,7 @@ Result<void> EditorApplication::OnGui()
 	}
 	const bool sceneOpen =
 	    documents && documents->Current() &&
-	    (documents->Current()->Kind() == ResourceKind::scene || documents->Current()->Kind() == ResourceKind::prefab);
+	    (documents->Current()->Kind() == ResourceKind::Scene || documents->Current()->Kind() == ResourceKind::Prefab);
 	if (!sceneOpen)
 	{
 		ImGui::Begin("Hierarchy");
@@ -450,8 +485,8 @@ Result<void> EditorApplication::OnGui()
 		ImGui::End();
 	}
 	const bool assetInspectorOpen = documents && documents->Current() &&
-	                                (documents->Current()->Kind() == ResourceKind::material ||
-	                                 documents->Current()->Kind() == ResourceKind::texture);
+	                                (documents->Current()->Kind() == ResourceKind::Material ||
+	                                 documents->Current()->Kind() == ResourceKind::Texture);
 	if (!sceneOpen && !assetInspectorOpen)
 	{
 		ImGui::Begin("Inspector");
@@ -465,8 +500,8 @@ Result<void> EditorApplication::OnGui()
 	return {};
 }
 
-Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const String& title, bool visible,
-                                    uint32_t frameLimit)
+Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, const String& title, bool visible,
+                                    Ursa::UInt32 frameLimit)
 {
 	if (!assetNameInput[0])
 	{
@@ -477,7 +512,7 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 	{
 		return Result<void>::Failure(windowResult.error);
 	}
-	auto window = std::move(windowResult.value);
+	window = std::move(windowResult.value);
 
 	Rhi::DeviceDesc deviceDesc;
 	deviceDesc.window = window;
@@ -490,7 +525,7 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		window.reset();
 		return Result<void>::Failure(deviceResult.error);
 	}
-	auto device = std::move(deviceResult.value);
+	device = std::move(deviceResult.value);
 
 	auto swapchainResult = device->CreateSwapchain({});
 	if (!swapchainResult)
@@ -499,7 +534,7 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		window.reset();
 		return Result<void>::Failure(swapchainResult.error);
 	}
-	auto swapchain = std::move(swapchainResult.value);
+	swapchain = std::move(swapchainResult.value);
 
 	auto guiResult = ImGuiBridge::Create(device, window);
 	if (!guiResult)
@@ -509,7 +544,7 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		window.reset();
 		return Result<void>::Failure(guiResult.error);
 	}
-	auto gui = std::move(guiResult.value);
+	gui = std::move(guiResult.value);
 	dockLayoutInitialized = false;
 	auto materialPreviewResult = MaterialPreview::Create(device, *gui);
 	if (!materialPreviewResult)
@@ -520,7 +555,7 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		window.reset();
 		return Result<void>::Failure(materialPreviewResult.error);
 	}
-	auto materialPreview = std::move(materialPreviewResult.value);
+	materialPreview = std::move(materialPreviewResult.value);
 	auto scenePreviewResult = EditorScenePreview::Create(device);
 	if (!scenePreviewResult)
 	{
@@ -531,9 +566,9 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		window.reset();
 		return Result<void>::Failure(scenePreviewResult.error);
 	}
-	auto scenePreview = std::move(scenePreviewResult.value);
+	scenePreview = std::move(scenePreviewResult.value);
 	auto sceneColorResult = device->CreateTexture(
-	    {512, 512, Rhi::Format::rgbA8Unorm, Rhi::TextureUsage::colorAttachment | Rhi::TextureUsage::sampled});
+	    {512, 512, Rhi::Format::RgbA8Unorm, Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled});
 	auto sceneSamplerResult = device->CreateSampler({true, false});
 	if (!sceneColorResult || !sceneSamplerResult)
 	{
@@ -575,7 +610,7 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		result = OnStart();
 	}
 	auto previous = std::chrono::steady_clock::now();
-	uint32_t frames = 0;
+	Ursa::UInt32 frames = 0;
 	while (result && !window->ShouldClose())
 	{
 		window->PollEvents();
@@ -614,7 +649,7 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		}
 
 		const auto now = std::chrono::steady_clock::now();
-		const float deltaSeconds = std::chrono::duration<float>(now - previous).count();
+		const Ursa::Float32 deltaSeconds = std::chrono::duration<Ursa::Float32>(now - previous).count();
 		previous = now;
 		result = gui->BeginFrame(deltaSeconds, window->FramebufferWidth(), window->FramebufferHeight());
 		if (result)
@@ -668,7 +703,7 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		if (result)
 		{
 			result = command.value->Barrier(acquired.value.texture, acquired.value.initialState,
-			                                Rhi::ResourceState::colorAttachment);
+			                                Rhi::ResourceState::ColorAttachment);
 		}
 		Rhi::RenderTarget target;
 		target.color = acquired.value.texture;
@@ -687,8 +722,8 @@ Result<void> EditorApplication::Run(uint32_t width, uint32_t height, const Strin
 		}
 		if (result)
 		{
-			result = command.value->Barrier(acquired.value.texture, Rhi::ResourceState::colorAttachment,
-			                                Rhi::ResourceState::present);
+			result = command.value->Barrier(acquired.value.texture, Rhi::ResourceState::ColorAttachment,
+			                                Rhi::ResourceState::Present);
 		}
 		if (result)
 		{

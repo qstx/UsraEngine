@@ -1,10 +1,10 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/PrefabResource.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/PrefabMerge.hpp>
 #include <Serialization/PrefabCapture.hpp>
-#include <map>
-#include <set>
 
 namespace Ursa
 {
@@ -30,7 +30,7 @@ Result<Json*> FindInstance(Json& document, ResourceId id)
 
 bool AllowedPropertyPath(const String& pointer)
 {
-	return pointer == "/enabled" || pointer == "/label" || pointer.rfind("/transform/", 0) == 0 ||
+	return pointer == "/enabled" || pointer == "/name" || pointer.rfind("/localTransform/", 0) == 0 ||
 	       pointer.rfind("/data/", 0) == 0;
 }
 
@@ -79,7 +79,7 @@ Result<ResourceId> ParseId(const Json& value, const String& location)
 ResourceId ScopedId(ResourceId instance, ResourceId local)
 {
 	ResourceId result;
-	for (size_t index = 0; index < result.bytes.size(); ++index)
+	for (Ursa::Size index = 0; index < result.bytes.size(); ++index)
 	{
 		result.bytes[index] = instance.bytes[index] ^ local.bytes[index];
 	}
@@ -92,17 +92,27 @@ ResourceId ScopedId(ResourceId instance, ResourceId local)
 
 Json SceneEnvelope(ResourceId id, Json nodes)
 {
-	return {
-	    {"format", "UrsaScene"},   {"version", resourceFormatVersion},
-	    {"id", id.ToString()},     {"ambient", {{"color", Json::array({1.0f, 1.0f, 1.0f, 1.0f})}, {"intensity", 0.1f}}},
-	    {"activeCamera", nullptr}, {"nodes", std::move(nodes)}};
+	return {{"format", "UrsaScene"},
+	        {"version", resourceFormatVersion},
+	        {"sceneGraphVersion", sceneGraphFormatVersion},
+	        {"id", id.ToString()},
+	        {"ambient", {{"color", Json::array({1.0f, 1.0f, 1.0f, 1.0f})}, {"intensity", 0.1f}}},
+	        {"activeCamera", nullptr},
+	        {"gameObjects", std::move(nodes)}};
 }
 
 Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json& source, ResourceSession& resources,
                              Map<String, Map<String, String>>& scopedIds)
 {
 	Json expanded = source;
-	if (!expanded.contains("nodes") || !expanded["nodes"].is_array())
+	auto graphVersion = source.find("sceneGraphVersion");
+	if (graphVersion == source.end() || !graphVersion->is_number_unsigned() ||
+	    graphVersion->get<Ursa::UInt32>() != sceneGraphFormatVersion)
+	{
+		return Result<Json>::Failure("Unsupported or missing GameObject Scene format version at " +
+		                             PathToUrsaString(scenePath));
+	}
+	if (!expanded.contains("gameObjects") || !expanded["gameObjects"].is_array())
 	{
 		return Result<Json>::Failure("Invalid scene nodes at " + PathToUrsaString(scenePath));
 	}
@@ -118,7 +128,7 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 	Set<String> instanceIds;
 	Set<String> objectIds;
 	Set<String> regularNodes;
-	for (const auto& node : expanded["nodes"])
+	for (const auto& node : expanded["gameObjects"])
 	{
 		if (!node.is_object() || !node.contains("id") || !node["id"].is_string())
 		{
@@ -137,12 +147,12 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 			}
 		}
 	}
-	for (size_t index = 0; index < instances->size(); ++index)
+	for (Ursa::Size index = 0; index < instances->size(); ++index)
 	{
 		const auto& instance = (*instances)[index];
 		const String location = PathToUrsaString(scenePath) + ".instances[" + ToUrsaString(std::to_string(index)) + "]";
 		if (!instance.is_object() || !instance.contains("id") || !instance.contains("prefab") ||
-		    !instance.contains("parent") || !instance.contains("overrides"))
+		    !instance.contains("parentId") || !instance.contains("overrides"))
 		{
 			return Result<Json>::Failure("Invalid prefab instance at " + location);
 		}
@@ -157,9 +167,9 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 			return Result<Json>::Failure("Duplicate prefab instance ID " + instanceId.value.ToString() + " at " +
 			                             location);
 		}
-		if (!instance["parent"].is_null())
+		if (!instance["parentId"].is_null())
 		{
-			auto externalParent = ParseId(instance["parent"], location + ".parent");
+			auto externalParent = ParseId(instance["parentId"], location + ".parent");
 			if (!externalParent)
 			{
 				return Result<Json>::Failure(externalParent.error);
@@ -179,7 +189,7 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 		{
 			return Result<Json>::Failure(resolved.error);
 		}
-		if (resolved.value.kind != ResourceKind::prefab)
+		if (resolved.value.kind != ResourceKind::Prefab)
 		{
 			return Result<Json>::Failure("Referenced resource is not a Prefab at " + location);
 		}
@@ -189,18 +199,18 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 		{
 			return Result<Json>::Failure(prefabPath.error);
 		}
-		auto prefab = ReadJsonResource(prefabPath.value, ResourceKind::prefab);
+		auto prefab = ReadJsonResource(prefabPath.value, ResourceKind::Prefab);
 		if (!prefab)
 		{
 			return Result<Json>::Failure(prefab.error);
 		}
-		if (!prefab.value.contains("nodes") || !prefab.value["nodes"].is_array() || prefab.value["nodes"].empty() ||
-		    prefab.value.contains("instances"))
+		if (!prefab.value.contains("gameObjects") || !prefab.value["gameObjects"].is_array() ||
+		    prefab.value["gameObjects"].empty() || prefab.value.contains("instances"))
 		{
 			return Result<Json>::Failure("Invalid or nested Prefab at " + prefabSource);
 		}
 		const auto& overrides = instance["overrides"];
-		auto merged = MergePrefabNodes(prefab.value["nodes"], overrides,
+		auto merged = MergePrefabNodes(prefab.value["gameObjects"], overrides,
 		                               "Prefab " + prefabId.value.ToString() + " instance " +
 		                                   instanceId.value.ToString() + " at " + location);
 		if (!merged)
@@ -245,7 +255,7 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 				}
 			}
 		}
-		if (merged.value.front().contains("parent") && !merged.value.front()["parent"].is_null())
+		if (merged.value.front().contains("parentId") && !merged.value.front()["parentId"].is_null())
 		{
 			return Result<Json>::Failure("Prefab root has a parent at " + prefabSource);
 		}
@@ -270,18 +280,18 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 				usedProperties.insert(localId);
 			}
 			node["id"] = scoped.at(localId);
-			if (original["parent"].is_null())
+			if (original["parentId"].is_null())
 			{
-				node["parent"] = instance["parent"];
+				node["parentId"] = instance["parentId"];
 			}
 			else
 			{
-				auto parent = scoped.find(original["parent"].get<String>());
+				auto parent = scoped.find(original["parentId"].get<String>());
 				if (parent == scoped.end())
 				{
 					return Result<Json>::Failure("Missing Prefab parent at " + location + ".node[" + localId + "]");
 				}
-				node["parent"] = parent->second;
+				node["parentId"] = parent->second;
 			}
 			for (auto& component : node["components"])
 			{
@@ -324,7 +334,7 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 				};
 				remap(component["data"]);
 			}
-			expanded["nodes"].push_back(std::move(node));
+			expanded["gameObjects"].push_back(std::move(node));
 		}
 		if (properties != overrides.end())
 		{
@@ -344,8 +354,9 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 }
 } // namespace
 
-Result<void> SavePrefabResource(const std::filesystem::path& path, ResourceId id, const Scene& scene, NodeId root,
-                                const ComponentRegistry& registry, const MaterialIdResolver& materialId)
+Result<void> SavePrefabResource(const std::filesystem::path& path, ResourceId id, const Scene& scene,
+                                GameObject::Ptr root, const ComponentRegistry& registry,
+                                const MaterialIdResolver& materialId)
 {
 	if (!id || path.extension() != ".ursaprefab" || !scene.Contains(root))
 	{
@@ -357,37 +368,47 @@ Result<void> SavePrefabResource(const std::filesystem::path& path, ResourceId id
 	{
 		return Result<void>::Failure(encoded.error);
 	}
-	Json nodes = std::move(encoded.value["nodes"]);
-	nodes[0]["parent"] = nullptr;
+	Json nodes = std::move(encoded.value["gameObjects"]);
+	nodes[0]["parentId"] = nullptr;
 	Json document{{"format", "UrsaPrefab"},
 	              {"version", resourceFormatVersion},
+	              {"prefabGraphVersion", prefabGraphFormatVersion},
 	              {"id", id.ToString()},
-	              {"nodes", std::move(nodes)}};
+	              {"gameObjects", std::move(nodes)}};
 	return WriteJsonResource(path, document);
 }
 
 Result<LoadedSceneResource> LoadPrefabResource(const std::filesystem::path& path, const ComponentRegistry& registry,
                                                ComponentLoadContext& context)
 {
-	auto prefab = ReadJsonResource(path, ResourceKind::prefab);
+	auto prefab = ReadJsonResource(path, ResourceKind::Prefab);
 	if (!prefab)
 	{
 		return Result<LoadedSceneResource>::Failure(prefab.error);
 	}
-	if (!prefab.value.contains("nodes") || !prefab.value["nodes"].is_array() || prefab.value["nodes"].empty())
+	const auto graphVersion = prefab.value.find("prefabGraphVersion");
+	if (graphVersion == prefab.value.end() || !graphVersion->is_number_unsigned() ||
+	    graphVersion->get<Ursa::UInt32>() != prefabGraphFormatVersion)
+	{
+		return Result<LoadedSceneResource>::Failure("Unsupported or missing GameObject Prefab format version at " +
+		                                            PathToUrsaString(path));
+	}
+	if (!prefab.value.contains("gameObjects") || !prefab.value["gameObjects"].is_array() ||
+	    prefab.value["gameObjects"].empty())
 	{
 		return Result<LoadedSceneResource>::Failure("Invalid Prefab nodes at " + PathToUrsaString(path));
 	}
-	size_t roots = 0;
-	for (const auto& node : prefab.value["nodes"])
+	Ursa::Size roots = 0;
+	for (const auto& node : prefab.value["gameObjects"])
 	{
-		if (node.is_object() && node.contains("parent") && node["parent"].is_null())
+		if (node.is_object() && node.contains("parentId") && node["parentId"].is_null())
 		{
 			++roots;
 		}
 	}
-	if (roots != 1 || !prefab.value["nodes"].front().is_object() || !prefab.value["nodes"].front().contains("parent") ||
-	    !prefab.value["nodes"].front()["parent"].is_null())
+	if (roots != 1 || !prefab.value["gameObjects"].front().is_object() ||
+	    !prefab.value["gameObjects"].front().contains("parentId") ||
+	    !prefab.value["gameObjects"].front()["parentId"].is_null())
 	{
 		return Result<LoadedSceneResource>::Failure("Prefab must contain one rooted subtree at " +
 		                                            PathToUrsaString(path));
@@ -397,7 +418,7 @@ Result<LoadedSceneResource> LoadPrefabResource(const std::filesystem::path& path
 	{
 		return Result<LoadedSceneResource>::Failure(id.error);
 	}
-	return DecodeSceneDocument(path, SceneEnvelope(id.value, prefab.value["nodes"]), registry, context);
+	return DecodeSceneDocument(path, SceneEnvelope(id.value, prefab.value["gameObjects"]), registry, context);
 }
 
 Result<void> AddPrefabInstance(Json& sceneDocument, ResourceId prefabId, ResourceId instanceId, ResourceId parentId)
@@ -423,7 +444,7 @@ Result<void> AddPrefabInstance(Json& sceneDocument, ResourceId prefabId, Resourc
 	}
 	sceneDocument["instances"].push_back({{"id", instanceId.ToString()},
 	                                      {"prefab", prefabId.ToString()},
-	                                      {"parent", parentId ? Json(parentId.ToString()) : Json(nullptr)},
+	                                      {"parentId", parentId ? Json(parentId.ToString()) : Json(nullptr)},
 	                                      {"overrides", Json::object()}});
 	return {};
 }
@@ -431,7 +452,7 @@ Result<void> AddPrefabInstance(Json& sceneDocument, ResourceId prefabId, Resourc
 Result<LinkedSceneResource> LoadLinkedSceneResource(const std::filesystem::path& path,
                                                     const ComponentRegistry& registry, ComponentLoadContext& context)
 {
-	auto document = ReadJsonResource(path, ResourceKind::scene);
+	auto document = ReadJsonResource(path, ResourceKind::Scene);
 	if (!document)
 	{
 		return Result<LinkedSceneResource>::Failure(document.error);
@@ -553,8 +574,8 @@ Result<void> ClearPrefabPropertyOverride(LinkedSceneResource& linked, ResourceId
 Result<void> SetPrefabStructureOverride(LinkedSceneResource& linked, ResourceId instanceId, const String& operation,
                                         const Json& value)
 {
-	static const Set<String> arrays{"deletedNodes", "addedNodes", "deletedComponents", "addedComponents"};
-	static const Set<String> objects{"nodeParents", "nodeOrders", "componentOwners", "componentOrders"};
+	static const Set<String> arrays{"deletedGameObjects", "addedGameObjects", "deletedComponents", "addedComponents"};
+	static const Set<String> objects{"gameObjectParents", "gameObjectOrders", "componentOwners", "componentOrders"};
 	if ((arrays.count(operation) && !value.is_array()) || (objects.count(operation) && !value.is_object()) ||
 	    (!arrays.count(operation) && !objects.count(operation)))
 	{

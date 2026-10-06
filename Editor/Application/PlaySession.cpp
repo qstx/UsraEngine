@@ -1,3 +1,4 @@
+#include <Core/Types.hpp>
 #include <Application/PlaySession.hpp>
 #include <Serialization/SceneResource.hpp>
 
@@ -15,7 +16,7 @@ Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, 
 	{
 		return Result<void>::Failure("Play mode is already active");
 	}
-	if (draft.Kind() != ResourceKind::scene)
+	if (draft.Kind() != ResourceKind::Scene)
 	{
 		return Result<void>::Failure("Play mode requires a scene document");
 	}
@@ -28,7 +29,7 @@ Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, 
 		return Result<void>::Failure("Cannot clone edit scene: " + encoded.error);
 	}
 	ComponentLoadContext context(resources);
-	std::shared_ptr<void> services;
+	std::shared_ptr<void> preparedServices;
 	if (setup)
 	{
 		auto prepared = setup(context);
@@ -36,14 +37,14 @@ Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, 
 		{
 			return Result<void>::Failure("Cannot create play services: " + prepared.error);
 		}
-		services = std::move(prepared.value);
+		preparedServices = std::move(prepared.value);
 	}
 	auto decoded = DecodeSceneDocument(virtualPath, encoded.value, registry, context);
 	if (!decoded)
 	{
 		return Result<void>::Failure("Cannot clone edit scene: " + decoded.error);
 	}
-	services = std::move(services);
+	services = std::move(preparedServices);
 	scene = std::move(decoded.value.scene);
 	scheduler.Reset();
 	frameIndex = 0;
@@ -51,7 +52,7 @@ Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, 
 	return {};
 }
 
-Result<void> PlaySession::Tick(float deltaSeconds, Window* window, FrameInput input)
+Result<void> PlaySession::Tick(Ursa::Float32 deltaSeconds, Window* window, FrameInput input)
 {
 	if (!scene)
 	{
@@ -68,7 +69,7 @@ Result<void> PlaySession::Tick(float deltaSeconds, Window* window, FrameInput in
 	context.input = input;
 	scene->BeginFrame();
 	auto result = scene->Update(context);
-	for (uint32_t step = 0; result && step < schedule.fixedSteps; ++step)
+	for (Ursa::UInt32 step = 0; result && step < schedule.fixedSteps; ++step)
 	{
 		result = scene->FixedUpdate(context);
 	}

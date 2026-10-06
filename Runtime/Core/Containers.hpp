@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Types.hpp>
 #include <EASTL/array.h>
 #include <EASTL/deque.h>
 #include <EASTL/map.h>
@@ -16,7 +17,7 @@ using String = eastl::string;
 
 template <class T> using Vector = eastl::vector<T>;
 
-template <class T, size_t size> using Array = eastl::array<T, size>;
+template <class T, Ursa::Size size> using Array = eastl::array<T, size>;
 
 template <class Key, class Value> using Map = eastl::map<Key, Value>;
 

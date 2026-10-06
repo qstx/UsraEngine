@@ -1,10 +1,13 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Serialization/SceneResource.hpp>
-#include <map>
+#include <Serialization/PrefabAsset.hpp>
 
 namespace Ursa
 {
+constexpr Ursa::UInt32 prefabGraphFormatVersion = 2;
+
 struct LinkedSceneResource
 {
 	ResourceId id;
@@ -15,8 +18,9 @@ struct LinkedSceneResource
 	ResourceSession* resources = nullptr;
 };
 
-Result<void> SavePrefabResource(const std::filesystem::path& path, ResourceId id, const Scene& scene, NodeId root,
-                                const ComponentRegistry& registry, const MaterialIdResolver& materialId = {});
+Result<void> SavePrefabResource(const std::filesystem::path& path, ResourceId id, const Scene& scene,
+                                GameObject::Ptr root, const ComponentRegistry& registry,
+                                const MaterialIdResolver& materialId = {});
 
 Result<LoadedSceneResource> LoadPrefabResource(const std::filesystem::path& path, const ComponentRegistry& registry,
                                                ComponentLoadContext& context);

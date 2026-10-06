@@ -1,29 +1,29 @@
 #pragma once
 
 #include <Core/Result.hpp>
+#include <Core/Types.hpp>
 #include <cstddef>
-#include <cstdint>
 #include <filesystem>
 
 namespace Ursa
 {
-enum class LogLevel : uint8_t
+enum class LogLevel : UInt8
 {
-	trace,
-	debug,
-	info,
-	warn,
-	error,
-	critical,
-	off
+	Trace,
+	Debug,
+	Info,
+	Warn,
+	Error,
+	Critical,
+	Off
 };
 
 struct LogConfig
 {
 	std::filesystem::path filePath;
 	LogLevel level;
-	size_t maxFileBytes = 5 * 1024 * 1024;
-	size_t maxFiles = 3;
+	Ursa::Size maxFileBytes = 5 * 1024 * 1024;
+	Ursa::Size maxFiles = 3;
 
 	LogConfig();
 };
@@ -77,9 +77,9 @@ private:
 			::Ursa::Log::Write(level, module, message);                                                                \
 	} while (false)
 
-#define URSA_LOG_TRACE(module, message) URSA_LOG_AT(::Ursa::LogLevel::trace, module, message)
-#define URSA_LOG_DEBUG(module, message) URSA_LOG_AT(::Ursa::LogLevel::debug, module, message)
-#define URSA_LOG_INFO(module, message) URSA_LOG_AT(::Ursa::LogLevel::info, module, message)
-#define URSA_LOG_WARN(module, message) URSA_LOG_AT(::Ursa::LogLevel::warn, module, message)
-#define URSA_LOG_ERROR(module, message) URSA_LOG_AT(::Ursa::LogLevel::error, module, message)
-#define URSA_LOG_CRITICAL(module, message) URSA_LOG_AT(::Ursa::LogLevel::critical, module, message)
+#define URSA_LOG_TRACE(module, message) URSA_LOG_AT(::Ursa::LogLevel::Trace, module, message)
+#define URSA_LOG_DEBUG(module, message) URSA_LOG_AT(::Ursa::LogLevel::Debug, module, message)
+#define URSA_LOG_INFO(module, message) URSA_LOG_AT(::Ursa::LogLevel::Info, module, message)
+#define URSA_LOG_WARN(module, message) URSA_LOG_AT(::Ursa::LogLevel::Warn, module, message)
+#define URSA_LOG_ERROR(module, message) URSA_LOG_AT(::Ursa::LogLevel::Error, module, message)
+#define URSA_LOG_CRITICAL(module, message) URSA_LOG_AT(::Ursa::LogLevel::Critical, module, message)

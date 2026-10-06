@@ -13,12 +13,12 @@ struct ResourceMount
 {
 	String scheme;
 	std::filesystem::path root;
-	MountAccess access = MountAccess::readOnly;
+	MountAccess access = MountAccess::ReadOnly;
 };
 
 struct ResourceLocation
 {
-	ResourceKind kind = ResourceKind::texture;
+	ResourceKind kind = ResourceKind::Texture;
 	VirtualPath path;
 };
 

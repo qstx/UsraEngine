@@ -200,9 +200,13 @@ if(URSA_BUILD_TESTS)
   target_link_libraries(UrsaMaterialHeaderSmoke PRIVATE Ursa::Engine)
   add_test(NAME UrsaMaterialHeaderSmoke COMMAND UrsaMaterialHeaderSmoke)
 
-  add_executable(UrsaSceneTests Tests/Scene/SceneTests.cpp)
-  target_link_libraries(UrsaSceneTests PRIVATE Ursa::Engine)
-  add_test(NAME UrsaSceneTests COMMAND UrsaSceneTests)
+  add_executable(UrsaSceneGraphTests Tests/Scene/SceneTests.cpp)
+  target_link_libraries(UrsaSceneGraphTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaSceneGraphTests COMMAND UrsaSceneGraphTests)
+
+  add_executable(UrsaGameObjectTests Tests/Scene/GameObjectTests.cpp)
+  target_link_libraries(UrsaGameObjectTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaGameObjectTests COMMAND UrsaGameObjectTests)
 
   add_executable(UrsaLightingTests Tests/Scene/LightingTests.cpp)
   target_link_libraries(UrsaLightingTests PRIVATE Ursa::Engine)

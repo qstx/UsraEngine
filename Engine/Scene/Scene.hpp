@@ -1,8 +1,9 @@
 #pragma once
+#include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
-#include <Scene/LocalTransform.hpp>
 #include <Scene/Component.hpp>
+#include <Scene/GameObject.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <Serialization/ResourceId.hpp>
 #include <cstddef>
@@ -12,31 +13,9 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace Ursa
 {
-struct NodeId
-{
-	uint32_t index = std::numeric_limits<uint32_t>::max();
-	uint32_t generation = 0;
-
-	explicit operator bool() const
-	{
-		return index != std::numeric_limits<uint32_t>::max();
-	}
-};
-
-inline bool operator==(NodeId a, NodeId b)
-{
-	return a.index == b.index && a.generation == b.generation;
-}
-
-inline bool operator!=(NodeId a, NodeId b)
-{
-	return !(a == b);
-}
-
 class Scene final
 {
 public:
@@ -48,83 +27,87 @@ public:
 
 	Scene& operator=(const Scene&) = delete;
 
-	Result<NodeId> CreateNode(NodeId parent = {});
+	Result<GameObject::Ptr> CreateGameObject(String name = {}, GameObject::Ptr parent = {});
 
-	Result<void> DestroyNode(NodeId node);
+	Result<GameObject::Ptr> CreateGameObject(GameObject::Ptr parent);
 
-	Result<void> SetParent(NodeId node, NodeId parent = {});
+	Result<void> AttachGameObject(const GameObject::Ptr& object, GameObject::Ptr parent = {});
 
-	bool Contains(NodeId node) const;
+	Result<void> DestroyGameObject(const GameObject::Ptr& object);
 
-	Result<NodeId> ParentOf(NodeId node) const;
+	bool Contains(const GameObject::Ptr& object) const;
 
-	Result<Vector<NodeId>> ChildrenOf(NodeId node) const;
+	Result<void> SetParent(const GameObject::Ptr& object, GameObject::Ptr parent = {});
 
-	Vector<NodeId> RootNodes() const;
+	Result<GameObject::Ptr> ParentOf(const GameObject::Ptr& object) const;
 
-	Result<ResourceId> NodePersistentId(NodeId node) const;
+	Result<Vector<GameObject::Ptr>> ChildrenOf(const GameObject::Ptr& object) const;
 
-	Result<String> NodeLabel(NodeId node) const;
+	Vector<GameObject::Ptr> RootGameObjects() const;
 
-	Result<void> SetNodeLabel(NodeId node, String label);
+	Result<void> AssignGameObjectId(const GameObject::Ptr& object, ResourceId id);
 
-	Result<void> AssignNodePersistentId(NodeId node, ResourceId id);
+	Result<ResourceId> PersistentId(const GameObject::Ptr& object) const;
 
-	Result<NodeId> NodeByPersistentId(ResourceId id) const;
+	Result<String> GameObjectName(const GameObject::Ptr& object) const;
 
-	Result<void> ReorderNode(NodeId node, size_t index);
+	Result<void> SetGameObjectName(const GameObject::Ptr& object, String name);
 
-	Result<void> SetLocalTransform(NodeId node, LocalTransform transform);
+	Result<GameObject::Ptr> GameObjectById(ResourceId id) const;
 
-	Result<LocalTransform> GetLocalTransform(NodeId node) const;
+	Result<void> ReorderGameObject(const GameObject::Ptr& object, Ursa::Size index);
 
-	Result<Mat4> WorldTransform(NodeId node) const;
+	Result<void> SetLocalTransform(const GameObject::Ptr& object, LocalTransform transform);
 
-	Result<void> SetEnabled(NodeId node, bool enabled);
+	Result<LocalTransform> GetLocalTransform(const GameObject::Ptr& object) const;
 
-	Result<bool> IsEnabled(NodeId node) const;
+	Result<Mat4> WorldTransform(const GameObject::Ptr& object) const;
 
-	Result<bool> IsActive(NodeId node) const;
+	Result<void> SetEnabled(const GameObject::Ptr& object, bool enabled);
 
-	template <class T, class... Args> Result<ComponentId> AddComponent(NodeId node, Args&&... args)
+	Result<bool> IsEnabled(const GameObject::Ptr& object) const;
+
+	Result<bool> IsActive(const GameObject::Ptr& object) const;
+
+	template <class T, class... Args> Result<ComponentId> AddComponent(const GameObject::Ptr& object, Args&&... args)
 	{
 		static_assert(std::is_base_of<Component, T>::value, "Scene components must derive from Component");
-		return AddComponentOwned(node, std::make_unique<T>(std::forward<Args>(args)...));
+		return AddComponentOwned(object, std::make_unique<T>(std::forward<Args>(args)...));
 	}
 
-	template <class T> T* FindComponent(NodeId node) const
+	template <class T> T* FindComponent(const GameObject::Ptr& object) const
 	{
-		if (!Contains(node))
+		if (!Contains(object))
 		{
 			return nullptr;
 		}
-		for (ComponentId id : nodes[node.index].components)
+		for (const auto& component : object->components)
 		{
-			if (ContainsComponent(id))
+			if (component && ContainsComponent(component->id) && !components[component->id.index].pendingAdd)
 			{
-				if (auto* component = dynamic_cast<T*>(components[id.index].object.get()))
+				if (auto* typed = dynamic_cast<T*>(component.get()))
 				{
-					return component;
+					return typed;
 				}
 			}
 		}
 		return nullptr;
 	}
 
-	template <class T> Vector<T*> FindComponents(NodeId node) const
+	template <class T> Vector<T*> FindComponents(const GameObject::Ptr& object) const
 	{
 		Vector<T*> found;
-		if (!Contains(node))
+		if (!Contains(object))
 		{
 			return found;
 		}
-		for (ComponentId id : nodes[node.index].components)
+		for (const auto& component : object->components)
 		{
-			if (ContainsComponent(id))
+			if (component && ContainsComponent(component->id) && !components[component->id.index].pendingAdd)
 			{
-				if (auto* component = dynamic_cast<T*>(components[id.index].object.get()))
+				if (auto* typed = dynamic_cast<T*>(component.get()))
 				{
-					found.push_back(component);
+					found.push_back(typed);
 				}
 			}
 		}
@@ -141,9 +124,9 @@ public:
 
 	Result<bool> IsComponentEnabled(ComponentId id) const;
 
-	Result<NodeId> ComponentNode(ComponentId id) const;
+	Result<GameObject::Ptr> ComponentOwner(ComponentId id) const;
 
-	Result<Vector<ComponentId>> ComponentsOf(NodeId node) const;
+	Result<Vector<ComponentId>> ComponentsOf(const GameObject::Ptr& object) const;
 
 	Component* GetComponent(ComponentId id) const;
 
@@ -153,9 +136,9 @@ public:
 
 	Result<ComponentId> ComponentByPersistentId(ResourceId id) const;
 
-	Result<void> SetComponentNode(ComponentId component, NodeId node);
+	Result<void> SetComponentOwner(ComponentId component, const GameObject::Ptr& object);
 
-	Result<void> ReorderComponent(ComponentId component, size_t index);
+	Result<void> ReorderComponent(ComponentId component, Ursa::Size index);
 
 	Result<void> SetActiveCamera(ComponentId id);
 
@@ -164,22 +147,22 @@ public:
 		return activeCamera;
 	}
 
-	Result<void> SetAmbientLight(Color color, float intensity);
+	Result<void> SetAmbientLight(Color color, Ursa::Float32 intensity);
 
 	Color AmbientLightColor() const
 	{
 		return ambientColor;
 	}
 
-	float AmbientLightIntensity() const
+	Ursa::Float32 AmbientLightIntensity() const
 	{
 		return ambientIntensity;
 	}
 
-	Result<SceneRenderData> CollectRenderData(float aspect) const;
+	Result<SceneRenderData> CollectRenderData(Ursa::Float32 aspect) const;
 
 	// Uses a caller-owned camera without invoking component lifecycle callbacks.
-	Result<SceneRenderData> CollectPreviewRenderData(const Camera& camera, float aspect) const;
+	Result<SceneRenderData> CollectPreviewRenderData(const Camera& camera, Ursa::Float32 aspect) const;
 
 	void BeginFrame();
 
@@ -194,79 +177,100 @@ public:
 	void Clear();
 
 private:
-	struct NodeSlot
+	friend class GameObject;
+
+	struct ObjectHandle
 	{
-		uint32_t generation = 1;
-		ResourceId persistentId;
-		String label;
+		Ursa::UInt32 index = std::numeric_limits<Ursa::UInt32>::max();
+		Ursa::UInt32 generation = 0;
+
+		explicit operator bool() const
+		{
+			return index != std::numeric_limits<Ursa::UInt32>::max();
+		}
+
+		bool operator==(const ObjectHandle& other) const
+		{
+			return index == other.index && generation == other.generation;
+		}
+
+		bool operator!=(const ObjectHandle& other) const
+		{
+			return !(*this == other);
+		}
+	};
+
+	struct ObjectSlot
+	{
+		Ursa::UInt32 generation = 1;
+		GameObject* object = nullptr;
 		bool alive = false;
 		bool pendingCreate = false;
 		bool pendingDestroy = false;
-		NodeId parent;
-		NodeId pendingParent;
+		ObjectHandle pendingParent;
 		bool hasPendingParent = false;
-		Vector<NodeId> children;
-		Vector<ComponentId> components;
-		LocalTransform local;
-		bool enabled = true;
-		mutable Mat4 world = Mat4::Identity();
-		mutable bool worldDirty = true;
 	};
 
 	struct ComponentSlot
 	{
-		uint32_t generation = 1;
+		Ursa::UInt32 generation = 1;
 		ResourceId persistentId;
-		NodeId node;
-		std::unique_ptr<Component> object;
+		ObjectHandle owner;
+		Component* object = nullptr;
 		bool enabled = true;
 		bool started = false;
 		bool pendingAdd = false;
 		bool pendingRemoval = false;
-		uint64_t availableFrame = 0;
+		Ursa::UInt64 availableFrame = 0;
 	};
 
 	enum class Phase
 	{
-		update,
-		fixed,
-		late
+		Update,
+		Fixed,
+		Late
 	};
 
-	Result<ComponentId> AddComponentOwned(NodeId node, std::unique_ptr<Component> object);
+	Result<ComponentId> AddComponentOwned(const GameObject::Ptr& object, std::unique_ptr<Component> component);
+
+	Result<Component*> AttachComponent(GameObject& owner, std::unique_ptr<Component> component);
+
+	ObjectHandle HandleOf(const GameObject* object) const;
+
+	Result<ObjectHandle> RegisterGameObject(const GameObject::Ptr& object, bool pendingCreate);
+
+	Result<void> AttachGameObjectNow(const GameObject::Ptr& object, GameObject::Ptr parent, bool deferred = false);
+
+	bool Contains(ObjectHandle object) const;
 
 	void RemoveComponentNow(ComponentId id);
 
-	void DestroyNodeNow(NodeId node);
+	void DestroyObjectNow(ObjectHandle object);
 
-	Result<void> SetParentNow(NodeId node, NodeId parent);
+	Result<void> SetParentNow(ObjectHandle object, ObjectHandle parent);
 
-	void MarkPendingDestroy(NodeId node);
+	void MarkPendingDestroy(ObjectHandle object);
 
 	Result<void> RunPhase(Phase phase, const FrameContext& context);
 
-	void CollectComponents(NodeId node, Vector<ComponentId>& out) const;
+	void CollectComponents(ObjectHandle object, Vector<ComponentId>& out) const;
 
-	void CollectRendering(NodeId node, SceneRenderData& out) const;
+	void CollectRendering(ObjectHandle object, SceneRenderData& out) const;
 
 	Result<SceneRenderData> CollectWithCamera(const Mat4& viewProjection, Vec3 cameraPosition) const;
 
-	void DestroySubtree(NodeId node);
+	void DestroySubtree(ObjectHandle object);
 
-	void MarkWorldDirty(NodeId node);
-
-	Mat4 ComputeWorld(NodeId node) const;
-
-	Vector<NodeSlot> nodes;
-	Vector<NodeId> rootOrder;
-	Vector<uint32_t> freeIndices;
+	Vector<ObjectSlot> objects;
+	Vector<GameObject::Ptr> rootObjects;
+	Vector<Ursa::UInt32> freeObjectIndices;
 	Vector<ComponentSlot> components;
-	Vector<uint32_t> freeComponentIndices;
-	uint64_t frameSerial = 0;
+	Vector<Ursa::UInt32> freeComponentIndices;
+	Ursa::UInt64 frameSerial = 0;
 	bool inPhase = false;
 	Vector<std::function<Result<void>()>> commands;
 	ComponentId activeCamera;
 	Color ambientColor{1.0f, 1.0f, 1.0f, 1.0f};
-	float ambientIntensity = 0.1f;
+	Ursa::Float32 ambientIntensity = 0.1f;
 };
 } // namespace Ursa

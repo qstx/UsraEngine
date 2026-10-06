@@ -1,30 +1,30 @@
+#include <Core/Containers.hpp>
+#include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/TextureResource.hpp>
 #include <Serialization/AtomicFile.hpp>
 #include <Serialization/ResourceFile.hpp>
-#include <array>
 #include <fstream>
 #include <limits>
-#include <vector>
 
 namespace Ursa
 {
 namespace
 {
-constexpr size_t textureHeaderBytes = 40;
+constexpr Ursa::Size textureHeaderBytes = 40;
 
-void EncodeUint32(Array<uint8_t, textureHeaderBytes>& bytes, size_t offset, uint32_t value)
+void EncodeUint32(Array<Ursa::UInt8, textureHeaderBytes>& bytes, Ursa::Size offset, Ursa::UInt32 value)
 {
-	for (size_t index = 0; index < 4; ++index)
+	for (Ursa::Size index = 0; index < 4; ++index)
 	{
-		bytes[offset + index] = static_cast<uint8_t>(value >> (index * 8));
+		bytes[offset + index] = static_cast<Ursa::UInt8>(value >> (index * 8));
 	}
 }
 
-uint32_t DecodeUint32(const Array<uint8_t, textureHeaderBytes>& bytes, size_t offset)
+Ursa::UInt32 DecodeUint32(const Array<Ursa::UInt8, textureHeaderBytes>& bytes, Ursa::Size offset)
 {
-	return static_cast<uint32_t>(bytes[offset]) | (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
-	       (static_cast<uint32_t>(bytes[offset + 2]) << 16) | (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+	return static_cast<Ursa::UInt32>(bytes[offset]) | (static_cast<Ursa::UInt32>(bytes[offset + 1]) << 8) |
+	       (static_cast<Ursa::UInt32>(bytes[offset + 2]) << 16) | (static_cast<Ursa::UInt32>(bytes[offset + 3]) << 24);
 }
 } // namespace
 
@@ -42,14 +42,14 @@ Result<void> SaveTextureResource(const std::filesystem::path& path, ResourceId i
 	{
 		return Result<void>::Failure("Texture resource exceeds size limit at " + PathToUrsaString(path));
 	}
-	Array<uint8_t, textureHeaderBytes> header{};
-	constexpr Array<uint8_t, 8> magic{'U', 'R', 'S', 'A', 'T', 'E', 'X', 0};
+	Array<Ursa::UInt8, textureHeaderBytes> header{};
+	constexpr Array<Ursa::UInt8, 8> magic{'U', 'R', 'S', 'A', 'T', 'E', 'X', 0};
 	std::copy(magic.begin(), magic.end(), header.begin());
 	EncodeUint32(header, 8, resourceFormatVersion);
 	std::copy(id.bytes.begin(), id.bytes.end(), header.begin() + 12);
 	EncodeUint32(header, 28, texture.GetWidth());
 	EncodeUint32(header, 32, texture.GetHeight());
-	header[36] = texture.GetColorSpace() == TextureColorSpace::srgb ? 1 : 0;
+	header[36] = texture.GetColorSpace() == TextureColorSpace::Srgb ? 1 : 0;
 	return WriteResourceAtomically(path,
 	                               [&](std::ostream& output)
 	                               {
@@ -69,7 +69,7 @@ Result<LoadedTextureResource> LoadTextureResource(const std::filesystem::path& p
 	{
 		return Result<LoadedTextureResource>::Failure(resource.error);
 	}
-	if (resource.value.kind != ResourceKind::texture)
+	if (resource.value.kind != ResourceKind::Texture)
 	{
 		return Result<LoadedTextureResource>::Failure("Expected a texture resource at " + PathToUrsaString(path));
 	}
@@ -81,18 +81,19 @@ Result<LoadedTextureResource> LoadTextureResource(const std::filesystem::path& p
 		return Result<LoadedTextureResource>::Failure("Truncated texture resource at " + PathToUrsaString(path));
 	}
 	std::ifstream input(path, std::ios::binary);
-	Array<uint8_t, textureHeaderBytes> header{};
+	Array<Ursa::UInt8, textureHeaderBytes> header{};
 	if (!input.read(reinterpret_cast<char*>(header.data()), header.size()))
 	{
 		return Result<LoadedTextureResource>::Failure("Truncated texture header at " + PathToUrsaString(path));
 	}
-	const uint32_t width = DecodeUint32(header, 28);
-	const uint32_t height = DecodeUint32(header, 32);
-	if (!width || !height || static_cast<uint64_t>(width) * height > (maxTextureResourceBytes - textureHeaderBytes) / 4)
+	const Ursa::UInt32 width = DecodeUint32(header, 28);
+	const Ursa::UInt32 height = DecodeUint32(header, 32);
+	if (!width || !height ||
+	    static_cast<Ursa::UInt64>(width) * height > (maxTextureResourceBytes - textureHeaderBytes) / 4)
 	{
 		return Result<LoadedTextureResource>::Failure("Invalid texture dimensions at " + PathToUrsaString(path));
 	}
-	const uint64_t expected = textureHeaderBytes + static_cast<uint64_t>(width) * height * 4;
+	const Ursa::UInt64 expected = textureHeaderBytes + static_cast<Ursa::UInt64>(width) * height * 4;
 	if (size != expected)
 	{
 		return Result<LoadedTextureResource>::Failure("Texture pixel byte count does not match dimensions at " +
@@ -103,13 +104,13 @@ Result<LoadedTextureResource> LoadTextureResource(const std::filesystem::path& p
 		return Result<LoadedTextureResource>::Failure("Invalid texture color space or reserved bytes at " +
 		                                              PathToUrsaString(path));
 	}
-	Vector<uint8_t> pixels(static_cast<size_t>(expected - textureHeaderBytes));
+	Vector<Ursa::UInt8> pixels(static_cast<Ursa::Size>(expected - textureHeaderBytes));
 	if (!input.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size())))
 	{
 		return Result<LoadedTextureResource>::Failure("Truncated texture pixel data at " + PathToUrsaString(path));
 	}
 	auto texture = MaterialTexture::Create(
-	    width, height, header[36] ? TextureColorSpace::srgb : TextureColorSpace::linear, std::move(pixels));
+	    width, height, header[36] ? TextureColorSpace::Srgb : TextureColorSpace::Linear, std::move(pixels));
 	if (!texture)
 	{
 		return Result<LoadedTextureResource>::Failure("Invalid texture resource at " + PathToUrsaString(path) + ": " +
