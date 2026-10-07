@@ -137,6 +137,10 @@ if(URSA_BUILD_TESTS)
     target_link_libraries(UrsaEditorDocumentsTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorDocumentsTests COMMAND UrsaEditorDocumentsTests)
 
+    add_executable(UrsaComponentEditorsTests Tests/Editor/ComponentEditorsTests.cpp)
+    target_link_libraries(UrsaComponentEditorsTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaComponentEditorsTests COMMAND UrsaComponentEditorsTests)
+
     add_executable(UrsaTextureDraftTests Tests/Editor/TextureDraftTests.cpp)
     target_link_libraries(UrsaTextureDraftTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaTextureDraftTests COMMAND UrsaTextureDraftTests)

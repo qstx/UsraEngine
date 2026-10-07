@@ -1,6 +1,7 @@
 #include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
 #include <Ui/ImGuiBridge.hpp>
+#include <Ui/ImGuiInspectorUI.hpp>
 #include <Assets/TextureDraft.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/SceneDraft.hpp>
@@ -89,6 +90,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(files.value));
 	documents = std::move(documentsResult.value);
 	workspace = std::move(openedWorkspace);
+	activeEditorTool.clear();
 	workspaceError.clear();
 	URSA_LOG_INFO("Editor", "Opened project " + PathToUrsaString(workspace->ProjectRoot()));
 	return {};
@@ -101,6 +103,86 @@ Result<void> EditorApplication::OnGui()
 		ImGui::TextUnformatted("Ursa Editor");
 		ImGui::Separator();
 		const auto* current = documents ? documents->Current() : nullptr;
+		auto makeToolContext = [&]()
+		{
+			EditorToolContext context;
+			context.document = const_cast<EditorDocument*>(current);
+			if (documents)
+			{
+				context.resources = &documents->Session();
+			}
+			if (!current)
+			{
+				return context;
+			}
+			auto draft = current->Payload<SceneDraft>();
+			if (!draft)
+			{
+				return context;
+			}
+			if (current->Kind() == ResourceKind::Prefab)
+			{
+				context.prefab = draft->GetPrefabAsset();
+				if (context.prefab)
+				{
+					auto selected = hierarchy.SelectedGameObject(*context.prefab);
+					if (selected)
+					{
+						context.selection.push_back(selected.value);
+					}
+				}
+			}
+			else if (current->Kind() == ResourceKind::Scene)
+			{
+				context.scene = &draft->GetScene();
+				auto selected = hierarchy.SelectedGameObject(*context.scene);
+				if (selected)
+				{
+					context.selection.push_back(selected.value);
+				}
+			}
+			return context;
+		};
+		if (ImGui::BeginMenu("Tools"))
+		{
+			auto context = makeToolContext();
+			auto registeredTools = project->tools.Tools();
+			std::sort(registeredTools.begin(), registeredTools.end(),
+			          [](const EditorToolDescriptor& left, const EditorToolDescriptor& right)
+			          {
+				          return left.category == right.category ? left.displayName < right.displayName
+				                                                 : left.category < right.category;
+			          });
+			String category;
+			for (const auto& tool : registeredTools)
+			{
+				if (tool.category != category)
+				{
+					if (!category.empty())
+					{
+						ImGui::EndMenu();
+					}
+					category = tool.category;
+					if (!ImGui::BeginMenu(category.c_str()))
+					{
+						category.clear();
+						continue;
+					}
+				}
+				auto available = project->tools.CanExecute(tool.id, context);
+				ImGui::BeginDisabled(play.Active() || !available);
+				if (ImGui::MenuItem(tool.displayName.c_str()))
+				{
+					activeEditorTool = tool.id;
+				}
+				ImGui::EndDisabled();
+			}
+			if (!category.empty())
+			{
+				ImGui::EndMenu();
+			}
+			ImGui::EndMenu();
+		}
 		const bool canRun = current && current->Kind() == ResourceKind::Scene && !documents->PromptPending();
 		ImGui::BeginDisabled(!play.Active() && !canRun);
 		if (ImGui::Button(play.Active() ? "Stop" : "Run"))
@@ -134,6 +216,72 @@ Result<void> EditorApplication::OnGui()
 			ImGui::Text("Project: %s", name.c_str());
 		}
 		ImGui::EndMainMenuBar();
+	}
+	if (!activeEditorTool.empty())
+	{
+		const auto* tool = project->tools.Find(activeEditorTool);
+		if (!tool)
+		{
+			activeEditorTool.clear();
+		}
+		else
+		{
+			bool open = true;
+			const String windowName = tool->displayName + "##" + tool->id;
+			if (ImGui::Begin(windowName.c_str(), &open))
+			{
+				auto context = [&]()
+				{
+					EditorToolContext result;
+					result.document = documents ? documents->Current() : nullptr;
+					if (documents)
+					{
+						result.resources = &documents->Session();
+					}
+					if (result.document)
+					{
+						auto draft = result.document->Payload<SceneDraft>();
+						if (draft && result.document->Kind() == ResourceKind::Prefab)
+						{
+							result.prefab = draft->GetPrefabAsset();
+							if (result.prefab)
+							{
+								auto selected = hierarchy.SelectedGameObject(*result.prefab);
+								if (selected)
+								{
+									result.selection.push_back(selected.value);
+								}
+							}
+						}
+						else if (draft && result.document->Kind() == ResourceKind::Scene)
+						{
+							result.scene = &draft->GetScene();
+							auto selected = hierarchy.SelectedGameObject(*result.scene);
+							if (selected)
+							{
+								result.selection.push_back(selected.value);
+							}
+						}
+					}
+					return result;
+				}();
+				ImGuiInspectorUI ui;
+				auto drawn = project->tools.Draw(activeEditorTool, context, ui);
+				if (!drawn)
+				{
+					inspectorError = drawn.error;
+				}
+				else if (drawn.value && context.document)
+				{
+					context.document->MarkDirty();
+				}
+			}
+			ImGui::End();
+			if (!open)
+			{
+				activeEditorTool.clear();
+			}
+		}
 	}
 	const ImGuiID dockspace = ImGui::DockSpaceOverViewport();
 	if (!dockLayoutInitialized)
@@ -394,7 +542,7 @@ Result<void> EditorApplication::OnGui()
 			if (play.Active())
 			{
 				ImGui::BeginDisabled();
-				auto hierarchyResult = hierarchy.Draw(*play.GetScene(), project->components);
+				auto hierarchyResult = hierarchy.Draw(*play.GetScene());
 				ImGui::EndDisabled();
 				if (!hierarchyResult)
 				{
@@ -637,9 +785,26 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 
 	project = std::make_unique<EditorProject>();
 	auto result = RegisterBuiltinComponents(project->components);
+	if (result)
+	{
+		result = RegisterBuiltinComponentEditors(project->componentEditors);
+	}
 	if (result && projectSetup)
 	{
 		result = projectSetup(*project);
+	}
+	if (result)
+	{
+		for (const auto& descriptor : project->componentEditors.Types())
+		{
+			const auto* codec = project->components.Find(descriptor.type);
+			if (!codec || codec->version != descriptor.version)
+			{
+				result = Result<void>::Failure("Component type descriptor has no matching persistence type/version: " +
+				                               descriptor.type);
+				break;
+			}
+		}
 	}
 	if (result)
 	{

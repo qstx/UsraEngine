@@ -13,6 +13,7 @@
 #include <Scene/EditorScenePreview.hpp>
 #include <Scene/EditorGizmo.hpp>
 #include <Scene/ComponentEditors.hpp>
+#include <Tools/EditorTools.hpp>
 #include <Application/PlaySession.hpp>
 #include <functional>
 
@@ -22,6 +23,7 @@ struct EditorProject
 {
 	ComponentRegistry components;
 	ComponentEditors componentEditors;
+	EditorTools tools;
 	std::function<Result<void>(ComponentLoadContext&)> editContextSetup;
 	PlayContextSetup playContextSetup;
 };
@@ -87,6 +89,7 @@ protected:
 private:
 	EditorProjectSetup projectSetup;
 	std::unique_ptr<EditorProject> project;
+	String activeEditorTool;
 	std::unique_ptr<ImGuiBridge> gui;
 	std::unique_ptr<MaterialPreview> materialPreview;
 	std::unique_ptr<EditorScenePreview> scenePreview;

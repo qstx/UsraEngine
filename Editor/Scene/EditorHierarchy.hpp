@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Serialization/ComponentRegistry.hpp>
+#include <Scene/Scene.hpp>
 #include <imgui.h>
 
 namespace Ursa
@@ -27,12 +27,12 @@ public:
 	}
 
 	// Returns true if a persistent scene property changed.
-	Result<bool> Draw(Scene& scene, const ComponentRegistry& registry);
+	Result<bool> Draw(Scene& scene);
 
-	Result<bool> Draw(PrefabAsset& asset, const ComponentRegistry& registry);
+	Result<bool> Draw(PrefabAsset& asset);
 
 private:
-	Result<bool> DrawGameObject(Scene& scene, GameObject::Ptr object, const ComponentRegistry& registry);
+	Result<bool> DrawGameObject(Scene& scene, GameObject::Ptr object);
 
 	ResourceId selected;
 };

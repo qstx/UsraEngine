@@ -1,8 +1,7 @@
 #include <Core/Types.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Serialization/PrefabAsset.hpp>
-#include <algorithm>
-#include <cstring>
+#include <functional>
 
 namespace Ursa::Editor
 {
@@ -58,13 +57,12 @@ Result<GameObject::Ptr> EditorHierarchy::SelectedGameObject(const PrefabAsset& a
 	              : Result<GameObject::Ptr>::Failure("Selected Prefab GameObject no longer exists");
 }
 
-Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, const ComponentRegistry& registry)
+Result<bool> EditorHierarchy::Draw(PrefabAsset& asset)
 {
 	if (!asset.Root())
 	{
 		return Result<bool>::Failure("PrefabAsset has no root GameObject");
 	}
-	bool changed = false;
 	ImGui::Begin("Hierarchy");
 	std::function<void(const GameObject::Ptr&)> draw = [&](const GameObject::Ptr& object)
 	{
@@ -73,15 +71,8 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, const ComponentRegistry& 
 		const auto name = object->Name();
 		const auto children = object->Children();
 		ImGui::PushID(key.c_str());
-		bool enabled = object->IsEnabled().value;
-		if (ImGui::Checkbox("##enabled", &enabled))
-		{
-			object->SetEnabled(enabled);
-			changed = true;
-		}
-		ImGui::SameLine();
 		const String label = name && !name.value.empty() ? name.value : String("GameObject ") + key.substr(0, 8);
-		const bool hasContent = !children.empty() || !object->Components().empty();
+		const bool hasContent = !children.empty();
 		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
 		if (!hasContent)
 		{
@@ -98,20 +89,6 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, const ComponentRegistry& 
 		}
 		if (open && hasContent)
 		{
-			for (Component* component : object->Components())
-			{
-				ImGui::PushID(component->PersistentId().ToString().c_str());
-				bool componentEnabled = component->IsEnabled();
-				if (ImGui::Checkbox("##componentEnabled", &componentEnabled))
-				{
-					component->SetEnabled(componentEnabled);
-					changed = true;
-				}
-				ImGui::SameLine();
-				auto codec = registry.FindFor(*component);
-				ImGui::TextUnformatted(codec ? codec.value->type.c_str() : "Unregistered component");
-				ImGui::PopID();
-			}
 			for (const auto& child : children)
 			{
 				draw(child);
@@ -126,37 +103,23 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, const ComponentRegistry& 
 	{
 		ClearSelection();
 	}
-	return Result<bool>::Success(changed);
+	return Result<bool>::Success(false);
 }
 
-Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node, const ComponentRegistry& registry)
+Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node)
 {
 	auto id = scene.PersistentId(node);
 	auto name = scene.GameObjectName(node);
 	auto enabled = scene.IsEnabled(node);
 	auto children = scene.ChildrenOf(node);
-	auto components = scene.ComponentsOf(node);
-	if (!id || !name || !enabled || !children || !components)
+	if (!id || !name || !enabled || !children)
 	{
 		return Result<bool>::Failure("Cannot inspect hierarchy node");
 	}
 	const auto key = id.value.ToString();
 	ImGui::PushID(key.c_str());
-	bool changed = false;
-	bool active = enabled.value;
-	if (ImGui::Checkbox("##enabled", &active))
-	{
-		auto set = scene.SetEnabled(node, active);
-		if (!set)
-		{
-			ImGui::PopID();
-			return Result<bool>::Failure(set.error);
-		}
-		changed = true;
-	}
-	ImGui::SameLine();
 	String display = name.value.empty() ? String("Node ") + key.substr(0, 8) : name.value;
-	const bool hasChildren = !children.value.empty() || !components.value.empty();
+	const bool hasChildren = !children.value.empty();
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
 	if (!hasChildren)
 	{
@@ -173,72 +136,33 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	}
 	if (open && hasChildren)
 	{
-		for (ComponentId componentId : components.value)
-		{
-			const auto* object = scene.GetComponent(componentId);
-			if (!object)
-			{
-				continue;
-			}
-			auto componentIdValue = scene.ComponentPersistentId(componentId);
-			if (!componentIdValue)
-			{
-				continue;
-			}
-			const String componentKey = componentIdValue.value.ToString();
-			ImGui::PushID(componentKey.c_str());
-			auto componentEnabled = scene.IsComponentEnabled(componentId);
-			if (componentEnabled)
-			{
-				bool value = componentEnabled.value;
-				if (ImGui::Checkbox("##componentEnabled", &value))
-				{
-					auto set = scene.SetComponentEnabled(componentId, value);
-					if (!set)
-					{
-						ImGui::PopID();
-						ImGui::TreePop();
-						ImGui::PopID();
-						return Result<bool>::Failure(set.error);
-					}
-					changed = true;
-				}
-				ImGui::SameLine();
-			}
-			const auto codec = registry.FindFor(*object);
-			ImGui::TextUnformatted(codec ? codec.value->type.c_str() : "Unregistered component");
-			ImGui::PopID();
-		}
 		for (GameObject::Ptr child : children.value)
 		{
-			auto drawn = DrawGameObject(scene, child, registry);
+			auto drawn = DrawGameObject(scene, child);
 			if (!drawn)
 			{
 				ImGui::TreePop();
 				ImGui::PopID();
 				return drawn;
 			}
-			changed |= drawn.value;
 		}
 		ImGui::TreePop();
 	}
 	ImGui::PopID();
-	return Result<bool>::Success(changed);
+	return Result<bool>::Success(false);
 }
 
-Result<bool> EditorHierarchy::Draw(Scene& scene, const ComponentRegistry& registry)
+Result<bool> EditorHierarchy::Draw(Scene& scene)
 {
-	bool changed = false;
 	ImGui::Begin("Hierarchy");
 	for (GameObject::Ptr root : scene.RootGameObjects())
 	{
-		auto drawn = DrawGameObject(scene, root, registry);
+		auto drawn = DrawGameObject(scene, root);
 		if (!drawn)
 		{
 			ImGui::End();
 			return drawn;
 		}
-		changed |= drawn.value;
 	}
 	ImGui::End();
 	if (selected)
@@ -248,29 +172,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, const ComponentRegistry& regist
 		{
 			ClearSelection();
 		}
-		else
-		{
-			auto label = scene.GameObjectName(selectedObject.value);
-			if (!label)
-			{
-				return Result<bool>::Failure(label.error);
-			}
-			char buffer[257]{};
-			std::memcpy(buffer, label.value.data(), std::min<Ursa::Size>(label.value.size(), sizeof(buffer) - 1));
-			ImGui::Begin("Inspector");
-			if (ImGui::InputText("Label", buffer, sizeof(buffer)))
-			{
-				auto set = scene.SetGameObjectName(selectedObject.value, String(buffer));
-				if (!set)
-				{
-					ImGui::End();
-					return Result<bool>::Failure(set.error);
-				}
-				changed = true;
-			}
-			ImGui::End();
-		}
 	}
-	return Result<bool>::Success(changed);
+	return Result<bool>::Success(false);
 }
 } // namespace Ursa::Editor

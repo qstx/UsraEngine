@@ -40,6 +40,11 @@ public:
 		return kind;
 	}
 
+	const EditContextSetup& ContextSetup() const
+	{
+		return setup;
+	}
+
 	bool Linked() const
 	{
 		return static_cast<bool>(linked);

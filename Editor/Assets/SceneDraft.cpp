@@ -1,6 +1,7 @@
 #include <Core/Types.hpp>
 #include <Assets/SceneDraft.hpp>
 #include <Core/StringInterop.hpp>
+#include <Ui/ImGuiInspectorUI.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/PrefabCapture.hpp>
 #include <imgui.h>
@@ -9,6 +10,63 @@
 
 namespace Ursa::Editor
 {
+namespace
+{
+bool DrawAddComponentBrowser(ComponentEditors& componentEditors, ComponentInspectorContext& context, String& diagnostic)
+{
+	if (ImGui::Button("Add Component"))
+	{
+		ImGui::OpenPopup("AddComponentPopup");
+	}
+	static ImGuiTextFilter filter;
+	ImGui::SetNextWindowSize(ImVec2(360, 420), ImGuiCond_Appearing);
+	bool changed = false;
+	if (ImGui::BeginPopup("AddComponentPopup"))
+	{
+		filter.Draw("Search");
+		auto descriptors = componentEditors.Types();
+		std::sort(descriptors.begin(), descriptors.end(),
+		          [](const ComponentTypeDescriptor& left, const ComponentTypeDescriptor& right)
+		          {
+			          return left.category == right.category ? left.displayName < right.displayName
+			                                                 : left.category < right.category;
+		          });
+		String currentCategory;
+		for (const ComponentTypeDescriptor& descriptor : descriptors)
+		{
+			if (!filter.PassFilter(descriptor.displayName.c_str()) && !filter.PassFilter(descriptor.category.c_str()))
+			{
+				continue;
+			}
+			if (descriptor.category != currentCategory)
+			{
+				currentCategory = descriptor.category;
+				ImGui::SeparatorText(currentCategory.c_str());
+			}
+			auto available = componentEditors.CanCreate(descriptor.type, context);
+			ImGui::BeginDisabled(!available);
+			if (ImGui::Selectable(descriptor.displayName.c_str()))
+			{
+				auto created = componentEditors.Create(descriptor.type, context);
+				diagnostic = created ? String{} : created.error;
+				changed = static_cast<bool>(created);
+				if (created)
+				{
+					ImGui::CloseCurrentPopup();
+				}
+			}
+			if (!available && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			{
+				ImGui::SetTooltip("%s", available.error.c_str());
+			}
+			ImGui::EndDisabled();
+		}
+		ImGui::EndPopup();
+	}
+	return changed;
+}
+} // namespace
+
 Result<std::shared_ptr<SceneDraft>> SceneDraft::Create(ResourceKind resourceKind, ComponentRegistry& componentRegistry,
                                                        ResourceSession& resourceSession,
                                                        const EditContextSetup& contextSetup)
@@ -471,7 +529,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		{
 			return Result<bool>::Failure("Prefab document has no detached PrefabAsset");
 		}
-		auto hierarchyChanged = hierarchy.Draw(*asset, registry);
+		auto hierarchyChanged = hierarchy.Draw(*asset);
 		if (!hierarchyChanged)
 		{
 			return hierarchyChanged;
@@ -486,6 +544,20 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		else
 		{
 			GameObject::Ptr object = selected.value;
+			ComponentLoadContext loadContext(documents.Session());
+			if (draft->ContextSetup())
+			{
+				auto prepared = draft->ContextSetup()(loadContext);
+				if (!prepared)
+				{
+					diagnostic = prepared.error;
+				}
+			}
+			ComponentInspectorContext inspectorContext;
+			inspectorContext.object = object;
+			inspectorContext.roots = {asset->Root()};
+			inspectorContext.prefab = asset;
+			inspectorContext.loadContext = &loadContext;
 			String name = object->Name().value;
 			char nameBuffer[257]{};
 			std::memcpy(nameBuffer, name.data(), std::min<Ursa::Size>(name.size(), sizeof(nameBuffer) - 1));
@@ -540,38 +612,21 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					changed |= static_cast<bool>(set);
 				}
 			}
-			if (ImGui::Button("Add Box"))
-			{
-				auto added = object->AddComponent<BoxRenderComponent>();
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Add Camera"))
-			{
-				auto added = object->AddComponent<CameraComponent>();
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Add Light"))
-			{
-				auto added = object->AddComponent<DirectionalLightComponent>();
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Add Point Light"))
-			{
-				auto added = object->AddComponent<PointLightComponent>();
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
 			for (Component* component : object->Components())
 			{
 				ImGui::PushID(component->PersistentId().ToString().c_str());
 				auto codec = registry.FindFor(*component);
-				ImGui::SeparatorText(codec ? codec.value->type.c_str() : "Component");
+				const auto* descriptor = codec ? componentEditors.FindType(codec.value->type) : nullptr;
+				ImGui::SeparatorText(descriptor ? descriptor->displayName.c_str()
+				                     : codec    ? codec.value->type.c_str()
+				                                : "Component");
+				bool componentEnabled = component->IsEnabled();
+				if (ImGui::Checkbox("Enabled", &componentEnabled))
+				{
+					component->SetEnabled(componentEnabled);
+					changed = true;
+				}
+				ImGui::SameLine();
 				if (auto* box = dynamic_cast<BoxRenderComponent*>(component))
 				{
 					Ursa::Float32 color[4]{box->color.red, box->color.green, box->color.blue, box->color.alpha};
@@ -641,9 +696,17 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						changed = true;
 					}
 				}
+				else if (codec && componentEditors.Find(codec.value->type))
+				{
+					ImGuiInspectorUI inspectorUi;
+					auto edited =
+					    (*componentEditors.Find(codec.value->type))(*component, inspectorContext, inspectorUi);
+					diagnostic = edited ? String{} : edited.error;
+					changed |= edited && edited.value;
+				}
 				else
 				{
-					ImGui::TextDisabled("This component has no detached Prefab inspector.");
+					ImGui::TextDisabled("No property editor registered; serialized data is preserved");
 				}
 				if (ImGui::Button("Remove component"))
 				{
@@ -653,6 +716,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				}
 				ImGui::PopID();
 			}
+			changed |= DrawAddComponentBrowser(componentEditors, inspectorContext, diagnostic);
 		}
 		if (!diagnostic.empty())
 		{
@@ -668,7 +732,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		return Result<bool>::Success(changed);
 	}
 	Scene& scene = draft->GetScene();
-	auto hierarchyChanged = hierarchy.Draw(scene, registry);
+	auto hierarchyChanged = hierarchy.Draw(scene);
 	if (!hierarchyChanged)
 	{
 		return hierarchyChanged;
@@ -676,11 +740,59 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 	bool changed = hierarchyChanged.value;
 	ResourceId prefabToPlace;
 	ResourceId placementParent;
-	ImGui::Begin("Inspector");
 	auto selected = hierarchy.SelectedGameObject(scene);
+	ComponentLoadContext loadContext(documents.Session());
+	if (selected && draft->ContextSetup())
+	{
+		auto prepared = draft->ContextSetup()(loadContext);
+		if (!prepared)
+		{
+			diagnostic = prepared.error;
+		}
+	}
+	ComponentInspectorContext inspectorContext;
+	if (selected)
+	{
+		inspectorContext.object = selected.value;
+		inspectorContext.roots = scene.RootGameObjects();
+		inspectorContext.scene = &scene;
+		inspectorContext.loadContext = &loadContext;
+	}
+	ImGui::Begin("Inspector");
 	if (!selected)
 	{
 		ImGui::TextDisabled("Select a node in Hierarchy to edit its properties.");
+	}
+	else
+	{
+		GameObject::Ptr node = selected.value;
+		auto name = scene.GameObjectName(node);
+		if (!name)
+		{
+			ImGui::End();
+			return Result<bool>::Failure(name.error);
+		}
+		char nameBuffer[257]{};
+		std::memcpy(nameBuffer, name.value.data(), std::min<Ursa::Size>(name.value.size(), sizeof(nameBuffer) - 1));
+		if (ImGui::InputText("Name", nameBuffer, sizeof(nameBuffer)))
+		{
+			auto renamed = scene.SetGameObjectName(node, String(nameBuffer));
+			diagnostic = renamed ? String{} : renamed.error;
+			changed |= static_cast<bool>(renamed);
+		}
+		auto enabledState = scene.IsEnabled(node);
+		if (!enabledState)
+		{
+			ImGui::End();
+			return Result<bool>::Failure(enabledState.error);
+		}
+		bool enabled = enabledState.value;
+		if (ImGui::Checkbox("Enabled", &enabled))
+		{
+			auto set = scene.SetEnabled(node, enabled);
+			diagnostic = set ? String{} : set.error;
+			changed |= static_cast<bool>(set);
+		}
 	}
 	if (draft->Kind() == ResourceKind::Scene && ImGui::BeginCombo("Place Prefab", "Select source"))
 	{
@@ -861,33 +973,6 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					}
 				}
 			}
-			if (ImGui::Button("Add Box"))
-			{
-				auto added = scene.AddComponent<BoxRenderComponent>(node);
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Add Camera"))
-			{
-				auto added = scene.AddComponent<CameraComponent>(node);
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Add Light"))
-			{
-				auto added = scene.AddComponent<DirectionalLightComponent>(node);
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Add Point Light"))
-			{
-				auto added = scene.AddComponent<PointLightComponent>(node);
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
 			auto components = scene.ComponentsOf(node);
 			if (!components)
 			{
@@ -915,7 +1000,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					ImGui::PopID();
 					continue;
 				}
-				ImGui::SeparatorText(codec.value->type.c_str());
+				const auto* descriptor = componentEditors.FindType(codec.value->type);
+				ImGui::SeparatorText(descriptor ? descriptor->displayName.c_str() : codec.value->type.c_str());
 				auto enabled = scene.IsComponentEnabled(componentId);
 				if (enabled)
 				{
@@ -1060,7 +1146,9 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				}
 				else if (const auto* editor = componentEditors.Find(codec.value->type))
 				{
-					auto edited = (*editor)(*object, scene, node);
+					inspectorContext.object = node;
+					ImGuiInspectorUI inspectorUi;
+					auto edited = (*editor)(*object, inspectorContext, inspectorUi);
 					diagnostic = edited ? String{} : edited.error;
 					changed |= edited && edited.value;
 				}
@@ -1070,6 +1158,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				}
 				ImGui::PopID();
 			}
+			changed |= DrawAddComponentBrowser(componentEditors, inspectorContext, diagnostic);
 		}
 	}
 	if (!diagnostic.empty())

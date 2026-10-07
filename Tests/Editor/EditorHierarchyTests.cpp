@@ -1,5 +1,6 @@
 #include <ResourceFixtures.hpp>
 #include <Scene/EditorHierarchy.hpp>
+#include <imgui_internal.h>
 #include <Serialization/SceneResource.hpp>
 #include <Serialization/PrefabResource.hpp>
 #include <Core/StringInterop.hpp>
@@ -94,8 +95,14 @@ int main()
 		ImGui::GetIO().BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
 		ImGui::GetIO().DisplaySize = ImVec2(640, 480);
 		ImGui::NewFrame();
-		const auto displayed = hierarchy.Draw(*loaded.scene, registry);
+		const auto displayed = hierarchy.Draw(*loaded.scene);
 		Expect(displayed && !displayed.value, "Hierarchy display changed scene data unexpectedly");
+		Expect(ImGui::FindWindowByName("Inspector") == nullptr, "Hierarchy opened a second Inspector window");
+		ImGui::Render();
+		done(loaded.scene->DestroyGameObject(reopenedChild));
+		ImGui::NewFrame();
+		auto cleared = hierarchy.Draw(*loaded.scene);
+		Expect(cleared && !hierarchy.SelectedId(), "Deleting the selected GameObject left a stale Inspector selection");
 		ImGui::Render();
 		ImGui::DestroyContext(imgui);
 		std::cout << "Editor hierarchy persistence test passed\n";
