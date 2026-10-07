@@ -1,0 +1,57 @@
+Shader "Ursa/Examples/Unlit"
+{
+	ID "c6f1e600-b5c6-4c56-a5e1-5bba91570111"
+	Version 1
+	Properties
+	{
+		_Tint ("Tint", Color) = (1, 1, 1, 1)
+		[NoScaleOffset] _MainTex ("Base Map", 2D) = "white" {}
+	}
+	HLSLINCLUDE
+#include "Common.hlsli"
+cbuffer UrsaPerObject : register(b0)
+{
+	float4x4 _UrsaViewProjection;
+	float4x4 _UrsaModel;
+}
+cbuffer MaterialData : register(b1)
+{
+	float4 _Tint;
+}
+Texture2D<float4> _MainTex : register(t0);
+SamplerState sampler_MainTex : register(s0);
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaForward" }
+		Pass
+		{
+			Name "Forward"
+			Tags { "LightMode" = "Forward" }
+			Cull Back
+			ZWrite On
+			ZTest LEqual
+			HLSLPROGRAM
+#pragma vertex VSMain
+#pragma fragment PSMain
+struct VertexOutput
+{
+	float4 position : SV_Position;
+	float2 uv : TEXCOORD0;
+};
+VertexOutput VSMain(float3 position : POSITION, float2 uv : TEXCOORD0)
+{
+	VertexOutput output;
+	output.position = mul(_UrsaViewProjection, mul(_UrsaModel, float4(position, 1.0)));
+	output.uv = uv;
+	return output;
+}
+float4 PSMain(VertexOutput input) : SV_Target0
+{
+	return ApplyTint(_MainTex.Sample(sampler_MainTex, input.uv), _Tint);
+}
+ENDHLSL
+		}
+	}
+	Fallback "Ursa/Error"
+}

@@ -53,6 +53,12 @@ foreach(URSA_DEPENDENCY IN ITEMS EASTL EABase glfw spdlog spdlog_header_only upd
 endforeach()
 
 find_package(Vulkan 1.2 REQUIRED COMPONENTS glslc)
+find_program(URSA_DXC_EXECUTABLE NAMES dxc HINTS "$ENV{VULKAN_SDK}/Bin")
+find_program(URSA_SPIRV_VAL_EXECUTABLE NAMES spirv-val HINTS "$ENV{VULKAN_SDK}/Bin")
+find_program(URSA_SPIRV_CROSS_EXECUTABLE NAMES spirv-cross HINTS "$ENV{VULKAN_SDK}/Bin")
+if(NOT URSA_DXC_EXECUTABLE OR NOT URSA_SPIRV_VAL_EXECUTABLE OR NOT URSA_SPIRV_CROSS_EXECUTABLE)
+  message(FATAL_ERROR "Shader import requires dxc, spirv-val, and spirv-cross from the Vulkan SDK")
+endif()
 
 # Generated engine assets (compiled shaders) are staged into the project's cache
 # directory. The engine source assets stay in the engine repository and are
@@ -72,7 +78,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   add_custom_target(UrsaEnginePackage
     COMMAND UrsaPak --engine "${PROJECT_SOURCE_DIR}/Assets"
       --engine-generated "${URSA_ASSET_MIRROR_DIR}" --output "${CMAKE_BINARY_DIR}/package/Content.pak"
-    DEPENDS UrsaPak UrsaEngine VERBATIM)
+    DEPENDS UrsaPak UrsaEngine UrsaEngineShaderAssets VERBATIM)
 endif()
 
 option(URSA_BUILD_EDITOR "Build the Ursa editor" ON)
@@ -136,6 +142,22 @@ if(URSA_BUILD_TESTS)
     add_executable(UrsaEditorDocumentsTests Tests/Editor/EditorDocumentsTests.cpp)
     target_link_libraries(UrsaEditorDocumentsTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorDocumentsTests COMMAND UrsaEditorDocumentsTests)
+
+    add_executable(UrsaEditorShaderImportTests Tests/Editor/ShaderImportViewTests.cpp)
+    target_link_libraries(UrsaEditorShaderImportTests PRIVATE Ursa::Editor)
+    target_compile_definitions(UrsaEditorShaderImportTests PRIVATE
+      URSA_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+      URSA_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+      URSA_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
+    add_test(NAME UrsaEditorShaderImportTests COMMAND UrsaEditorShaderImportTests)
+
+    add_executable(UrsaEditorMaterialInspectorTests Tests/Editor/MaterialInspectorsTests.cpp)
+    target_link_libraries(UrsaEditorMaterialInspectorTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaEditorMaterialInspectorTests COMMAND UrsaEditorMaterialInspectorTests)
+
+    add_executable(UrsaMaterialInspectorHeaderSmoke Tests/Editor/MaterialInspectorHeaderSmoke.cpp)
+    target_link_libraries(UrsaMaterialInspectorHeaderSmoke PRIVATE Ursa::Editor)
+    add_test(NAME UrsaMaterialInspectorHeaderSmoke COMMAND UrsaMaterialInspectorHeaderSmoke)
 
     add_executable(UrsaComponentEditorsTests Tests/Editor/ComponentEditorsTests.cpp)
     target_link_libraries(UrsaComponentEditorsTests PRIVATE Ursa::Editor)
@@ -203,6 +225,77 @@ if(URSA_BUILD_TESTS)
   add_executable(UrsaMaterialTests Tests/Material/MaterialTests.cpp)
   target_link_libraries(UrsaMaterialTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaMaterialTests COMMAND UrsaMaterialTests)
+
+  add_executable(UrsaShaderMaterialTests Tests/Material/ShaderMaterialTests.cpp)
+  target_link_libraries(UrsaShaderMaterialTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaShaderMaterialTests COMMAND UrsaShaderMaterialTests)
+
+  add_executable(UrsaMaterialMigrationTests Tests/Material/MaterialMigrationTests.cpp)
+  target_link_libraries(UrsaMaterialMigrationTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaMaterialMigrationTests COMMAND UrsaMaterialMigrationTests)
+
+  add_executable(UrsaShaderSourceTests Tests/Shader/ShaderSourceTests.cpp)
+  target_link_libraries(UrsaShaderSourceTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaShaderSourceTests COMMAND UrsaShaderSourceTests)
+
+  add_executable(UrsaShaderVariantTests Tests/Shader/ShaderVariantTests.cpp)
+  target_link_libraries(UrsaShaderVariantTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaShaderVariantTests COMMAND UrsaShaderVariantTests)
+
+  add_executable(UrsaShaderSourceLibraryTests Tests/Shader/ShaderSourceLibraryTests.cpp)
+  target_link_libraries(UrsaShaderSourceLibraryTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaShaderSourceLibraryTests COMMAND UrsaShaderSourceLibraryTests)
+
+  add_executable(UrsaShaderCompilerTests Tests/Shader/ShaderCompilerTests.cpp)
+  target_link_libraries(UrsaShaderCompilerTests PRIVATE Ursa::Engine)
+  target_compile_definitions(UrsaShaderCompilerTests PRIVATE
+    URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+    URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+    URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
+  add_test(NAME UrsaShaderCompilerTests COMMAND UrsaShaderCompilerTests)
+
+  add_executable(UrsaShaderCompileCacheTests Tests/Shader/ShaderCompileCacheTests.cpp)
+  target_link_libraries(UrsaShaderCompileCacheTests PRIVATE Ursa::Engine)
+  target_compile_definitions(UrsaShaderCompileCacheTests PRIVATE
+    URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+    URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+    URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
+  add_test(NAME UrsaShaderCompileCacheTests COMMAND UrsaShaderCompileCacheTests)
+
+  add_executable(UrsaShaderExampleImportTests Tests/Shader/ShaderExampleImportTests.cpp)
+  target_link_libraries(UrsaShaderExampleImportTests PRIVATE Ursa::Engine)
+  target_compile_definitions(UrsaShaderExampleImportTests PRIVATE
+    URSA_ENGINE_SHADER_ASSET_DIR="${CMAKE_CURRENT_LIST_DIR}/Assets"
+    URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+    URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+    URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
+  add_test(NAME UrsaShaderExampleImportTests COMMAND UrsaShaderExampleImportTests)
+
+  add_executable(UrsaShaderAssetTests Tests/Shader/ShaderAssetTests.cpp)
+  target_link_libraries(UrsaShaderAssetTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaShaderAssetTests COMMAND UrsaShaderAssetTests)
+
+  set(URSA_SHADER_TEST_PAK "${CMAKE_CURRENT_BINARY_DIR}/package/ShaderContent.pak")
+  add_test(NAME UrsaShaderPackageBuild
+    COMMAND ${CMAKE_COMMAND}
+      "-DURSA_PAK_EXECUTABLE=$<TARGET_FILE:UrsaPak>"
+      "-DURSA_ENGINE_ASSET_SOURCE=${PROJECT_SOURCE_DIR}/Assets"
+      "-DURSA_ENGINE_ASSET_MIRROR=${URSA_ASSET_MIRROR_DIR}"
+      "-DURSA_SHADER_PAK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/package"
+      "-DURSA_SHADER_PAK_PATH=${URSA_SHADER_TEST_PAK}"
+      -P "${PROJECT_SOURCE_DIR}/Tools/Pak/BuildShaderTestPak.cmake")
+  set_tests_properties(UrsaShaderPackageBuild PROPERTIES FIXTURES_SETUP UrsaShaderContentPak)
+
+  add_executable(UrsaShaderPackageTests Tests/Shader/ShaderPackageTests.cpp)
+  target_link_libraries(UrsaShaderPackageTests PRIVATE Ursa::Engine)
+  target_compile_definitions(UrsaShaderPackageTests PRIVATE URSA_ENGINE_SHADER_PAK="${URSA_SHADER_TEST_PAK}")
+  add_dependencies(UrsaShaderPackageTests UrsaEngineShaderAssets UrsaPak)
+  add_test(NAME UrsaShaderPackageTests COMMAND UrsaShaderPackageTests)
+  set_tests_properties(UrsaShaderPackageTests PROPERTIES FIXTURES_REQUIRED UrsaShaderContentPak)
+
+  add_executable(UrsaShaderReflectionTests Tests/Shader/ShaderReflectionTests.cpp)
+  target_link_libraries(UrsaShaderReflectionTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaShaderReflectionTests COMMAND UrsaShaderReflectionTests)
 
   add_executable(UrsaSerializationBaseTests Tests/Serialization/SerializationBaseTests.cpp Tests/Fixtures/AtomicFile.cpp)
   target_link_libraries(UrsaSerializationBaseTests PRIVATE Ursa::Engine)
@@ -298,6 +391,8 @@ if(URSA_BUILD_TESTS)
   ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestInstance.frag)
   ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestOffset.vert)
   ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestOffset.frag)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/State.vert)
+  ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/State.frag)
   add_test(NAME UrsaRhiTests COMMAND UrsaRhiTests)
 
   add_executable(UrsaVulkanValidationLogTests Tests/Rhi/VulkanValidationLogTests.cpp)
@@ -334,6 +429,14 @@ if(URSA_BUILD_TESTS)
   foreach(URSA_TEST_TARGET IN LISTS URSA_TEST_TARGETS)
     if(URSA_TEST_TARGET MATCHES "Tests$" OR URSA_TEST_TARGET MATCHES "Smoke$")
       set_target_properties(${URSA_TEST_TARGET} PROPERTIES FOLDER "Tests/Engine")
+    endif()
+  endforeach()
+
+  foreach(URSA_RENDERER_TEST IN ITEMS
+      UrsaMaterialDraftTests UrsaRendererTests UrsaMaterialRendererTests UrsaMaterialSceneSmoke
+      UrsaEditorPreviewTests UrsaEditorShaderImportTests UrsaShaderExampleImportTests)
+    if(TARGET ${URSA_RENDERER_TEST})
+      add_dependencies(${URSA_RENDERER_TEST} UrsaEngineShaderAssets)
     endif()
   endforeach()
 endif()

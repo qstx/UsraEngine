@@ -3,6 +3,7 @@
 #include <Core/Result.hpp>
 #include <Material/Material.hpp>
 #include <Serialization/ResourceIndex.hpp>
+#include <Shader/ShaderAsset.hpp>
 #include <memory>
 
 namespace Ursa
@@ -26,6 +27,8 @@ public:
 
 	Result<std::shared_ptr<MaterialInstance>> LoadMaterial(ResourceId id);
 
+	Result<std::shared_ptr<const Shader::ShaderAsset>> LoadShader(ResourceId id);
+
 	Result<ResourceId> IdentifyMaterial(const std::shared_ptr<MaterialInstance>& material) const;
 
 	const ResourceIndex& Index() const
@@ -39,8 +42,11 @@ public:
 	}
 
 private:
+	Result<std::shared_ptr<const Shader::ShaderAsset>> LoadShaderInternal(ResourceId id, Set<String>& active);
+
 	ResourceIndex index;
 	Map<String, MaterialTexturePtr> textures;
 	Map<String, std::shared_ptr<MaterialInstance>> materials;
+	Map<String, std::shared_ptr<const Shader::ShaderAsset>> shaders;
 };
 } // namespace Ursa

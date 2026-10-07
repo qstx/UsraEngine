@@ -14,7 +14,8 @@ enum class ResourceKind
 	Texture,
 	Material,
 	Scene,
-	Prefab
+	Prefab,
+	Shader
 };
 
 struct ResourceHeader
@@ -25,8 +26,10 @@ struct ResourceHeader
 };
 
 constexpr Ursa::UInt32 resourceFormatVersion = 1;
+constexpr Ursa::UInt32 materialResourceFormatVersion = 2;
 constexpr Ursa::UInt64 maxJsonResourceBytes = 16ull * 1024 * 1024;
 constexpr Ursa::UInt64 maxTextureResourceBytes = 256ull * 1024 * 1024;
+constexpr Ursa::UInt64 maxShaderResourceBytes = 256ull * 1024 * 1024;
 
 Result<ResourceKind> ResourceKindForPath(const VirtualPath& path);
 

@@ -2,6 +2,7 @@
 #include <Application/EditorApplication.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Ui/ImGuiInspectorUI.hpp>
+#include <Ui/ImGuiInspectorUI.hpp>
 #include <Assets/TextureDraft.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/SceneDraft.hpp>
@@ -478,9 +479,86 @@ Result<void> EditorApplication::OnGui()
 			ImGui::TextDisabled("%s", entry.id.ToString().c_str());
 			ImGui::PopID();
 		}
+		for (const String& scheme : {String(projectResourceScheme), String(engineResourceScheme)})
+		{
+			if (!workspace->Index().Filesystem().IsMounted(scheme))
+			{
+				continue;
+			}
+			auto files = workspace->Index().Filesystem().List(scheme);
+			if (!files)
+			{
+				workspaceError = files.error;
+				continue;
+			}
+			for (const VirtualFileEntry& file : files.value)
+			{
+				if (std::filesystem::u8path(ToStdString(file.path.relative)).extension() != ".ursashader")
+				{
+					continue;
+				}
+				const String pathText = file.path.ToString();
+				ImGui::PushID(pathText.c_str());
+				ImGui::TextUnformatted(file.path.scheme == projectResourceScheme ? "[Project Shader Source]"
+				                                                                 : "[Engine Shader Source]");
+				ImGui::SameLine();
+				if (ImGui::Selectable(pathText.c_str()))
+				{
+					auto opened = ShaderImportView::Open(workspace->Index().Filesystem(), file.path);
+					if (opened)
+					{
+						shaderImportView = std::move(opened.value);
+						inspectorError.clear();
+					}
+					else
+					{
+						workspaceError = opened.error;
+					}
+				}
+				ImGui::PopID();
+			}
+		}
 	}
 	ImGui::EndDisabled();
 	ImGui::End();
+	if (shaderImportView && workspace)
+	{
+		ImGui::Begin("Shader Import");
+		ImGui::TextUnformatted(shaderImportView->SourcePath().ToString().c_str());
+		ImGui::TextDisabled("%s", shaderImportView->SourceReadOnly() ? "Read-only source" : "Writable project source");
+		ImGui::BeginDisabled(play.Active());
+		if (ImGui::Button("Reimport Shader"))
+		{
+			auto imported = shaderImportView->Reimport(*workspace);
+			if (!imported)
+			{
+				inspectorError = imported.error;
+			}
+			else
+			{
+				inspectorError.clear();
+			}
+		}
+		ImGui::EndDisabled();
+		if (shaderImportView->Imported())
+		{
+			ImGui::SameLine();
+			ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.4f, 1.0f), "%s",
+			                   shaderImportView->SourceReadOnly() ? "Compiled in memory (read-only)" : "Imported");
+		}
+		for (const String& dependency : shaderImportView->Dependencies())
+		{
+			ImGui::TextDisabled("Include: %s", dependency.c_str());
+		}
+		if (!shaderImportView->Diagnostic().empty())
+		{
+			ImGui::TextWrapped("%s", shaderImportView->Diagnostic().c_str());
+		}
+		ImGui::BeginChild("ShaderSource", ImVec2(0, 0), ImGuiChildFlags_Borders);
+		ImGui::TextUnformatted(shaderImportView->SourceText().c_str());
+		ImGui::EndChild();
+		ImGui::End();
+	}
 	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Texture)
 	{
 		auto inspected = DrawTextureInspector(*documents->Current(), inspectorError);
@@ -491,7 +569,9 @@ Result<void> EditorApplication::OnGui()
 	}
 	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Material)
 	{
-		auto inspected = DrawMaterialInspector(*documents->Current(), *documents, *workspace, inspectorError);
+		ImGuiInspectorUI materialInspectorUi;
+		auto inspected = DrawMaterialInspector(*documents->Current(), *documents, *workspace, inspectorError,
+		                                       &project->materialInspectors, &materialInspectorUi);
 		if (!inspected)
 		{
 			workspaceError = inspected.error;

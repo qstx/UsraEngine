@@ -24,6 +24,8 @@ const char* ExtensionFor(ResourceKind kind)
 			return ".ursascene";
 		case ResourceKind::Prefab:
 			return ".ursaprefab";
+		case ResourceKind::Shader:
+			return ".ursashaderasset";
 	}
 	return "";
 }

@@ -29,6 +29,10 @@ set_target_properties(UrsaEditorCore PROPERTIES FOLDER "Engine")
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${URSA_EDITOR_SOURCES})
 target_include_directories(UrsaEditorCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(UrsaEditorCore PUBLIC Ursa::Engine UrsaImGui)
+target_compile_definitions(UrsaEditorCore PRIVATE
+  URSA_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+  URSA_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+  URSA_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
 
 foreach(shader IN ITEMS ImGui.vert ImGui.frag)
   set(input "${CMAKE_CURRENT_SOURCE_DIR}/Ui/Shaders/${shader}")
@@ -46,6 +50,7 @@ endforeach()
 add_executable(UrsaEditor Launcher/Main.cpp)
 set_target_properties(UrsaEditor PROPERTIES FOLDER "Engine")
 target_link_libraries(UrsaEditor PRIVATE Ursa::Editor)
+add_dependencies(UrsaEditor UrsaEngineShaderAssets)
 
 if(MSVC)
   target_compile_options(UrsaEditorCore PRIVATE /W4 /permissive-)

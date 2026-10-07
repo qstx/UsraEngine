@@ -4,6 +4,7 @@
 #include <Core/Result.hpp>
 #include <Material/Color.hpp>
 #include <Serialization/Serializable.hpp>
+#include <Shader/ShaderAsset.hpp>
 #include <cstdint>
 #include <memory>
 
@@ -90,6 +91,29 @@ private:
 
 using MaterialTexturePtr = std::shared_ptr<const MaterialTexture>;
 
+struct MaterialPropertyValue
+{
+	Shader::PropertyType type = Shader::PropertyType::Float;
+	Ursa::Float32 floatValue = 0.0f;
+	Ursa::Int32 intValue = 0;
+	Array<Ursa::Float32, 4> vectorValue{};
+	ResourceId textureId;
+	String textureDefault;
+	MaterialTexturePtr texture;
+
+	static MaterialPropertyValue Float(Ursa::Float32 value);
+
+	static MaterialPropertyValue Range(Ursa::Float32 value);
+
+	static MaterialPropertyValue Int(Ursa::Int32 value);
+
+	static MaterialPropertyValue ColorValue(Color value);
+
+	static MaterialPropertyValue VectorValue(Array<Ursa::Float32, 4> value);
+
+	static MaterialPropertyValue Texture2D(ResourceId id, MaterialTexturePtr value = {});
+};
+
 struct MaterialParameters
 {
 	Color baseColor{};
@@ -152,14 +176,71 @@ public:
 
 	MaterialTexturePtr Texture(MaterialTextureSlot slot) const;
 
+	ResourceId TextureResourceId(MaterialTextureSlot slot) const;
+
+	Result<void> SetTextureResourceId(MaterialTextureSlot slot, ResourceId id);
+
 	MaterialTexturePtr ResolvedTexture(MaterialTextureSlot slot) const;
+
+	bool IsShaderBacked() const
+	{
+		return static_cast<bool>(shaderId);
+	}
+
+	ResourceId ShaderId() const
+	{
+		return shaderId;
+	}
+
+	std::shared_ptr<const Shader::ShaderAsset> Shader() const
+	{
+		return shaderAsset;
+	}
+
+	Result<void> SetShader(ResourceId id);
+
+	Result<void> SetShaderAsset(std::shared_ptr<const Shader::ShaderAsset> asset);
+
+	Result<void> MigrateLegacyToShader(ResourceId id);
+
+	Result<void> SetPropertyValue(const String& identifier, const Shader::ShaderAsset& shader,
+	                              MaterialPropertyValue value);
+
+	Result<void> ValidateAgainstShader(const Shader::ShaderAsset& shader) const;
+
+	Result<MaterialPropertyValue> PropertyValue(const String& identifier, const Shader::ShaderAsset& shader) const;
+
+	Result<void> RemovePropertyOverride(const String& identifier);
+
+	const Map<String, MaterialPropertyValue>& PropertyOverrides() const
+	{
+		return propertyOverrides;
+	}
+
+	Result<void> SetKeywordEnabled(const String& keyword, bool enabled);
+
+	bool KeywordEnabled(const String& keyword) const;
+
+	const Vector<String>& Keywords() const
+	{
+		return keywords;
+	}
 
 	std::shared_ptr<MaterialInstance> Clone() const;
 
 private:
+	Result<void> DeserializeLegacy(const ArchiveReader& reader, SerializationContext& context);
+
+	void SynchronizeBuiltinProperties();
+
 	MaterialType type;
+	ResourceId shaderId;
+	std::shared_ptr<const Shader::ShaderAsset> shaderAsset;
 	MaterialParameters parameters;
 	Array<MaterialTexturePtr, 5> textures{};
+	Array<ResourceId, 5> textureResourceIds{};
+	Map<String, MaterialPropertyValue> propertyOverrides;
+	Vector<String> keywords;
 	Ursa::UInt64 version = 1;
 };
 

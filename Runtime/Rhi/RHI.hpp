@@ -21,7 +21,8 @@ enum class Format
 	RgbA8Srgb,
 	BgrA8Unorm,
 	R32Uint,
-	D32Float
+	D32Float,
+	D32FloatS8Uint
 };
 enum class ShaderFormat
 {
@@ -117,8 +118,101 @@ enum class Compare
 	Less,
 	LessEqual,
 	Equal,
+	NotEqual,
 	Greater,
+	GreaterEqual,
 	Always
+};
+
+enum class CullMode
+{
+	None,
+	Front,
+	Back
+};
+
+enum class BlendFactor
+{
+	Zero,
+	One,
+	SourceColor,
+	OneMinusSourceColor,
+	DestinationColor,
+	OneMinusDestinationColor,
+	SourceAlpha,
+	OneMinusSourceAlpha,
+	DestinationAlpha,
+	OneMinusDestinationAlpha
+};
+
+enum class BlendOperation
+{
+	Add,
+	Subtract,
+	ReverseSubtract,
+	Minimum,
+	Maximum
+};
+
+enum class StencilOperation
+{
+	Keep,
+	Zero,
+	Replace,
+	IncrementClamp,
+	DecrementClamp,
+	Invert,
+	IncrementWrap,
+	DecrementWrap
+};
+
+enum class ColorWriteMask : Ursa::UInt32
+{
+	None = 0,
+	Red = 1,
+	Green = 2,
+	Blue = 4,
+	Alpha = 8,
+	All = 15
+};
+
+inline ColorWriteMask operator|(ColorWriteMask left, ColorWriteMask right)
+{
+	return static_cast<ColorWriteMask>(static_cast<Ursa::UInt32>(left) | static_cast<Ursa::UInt32>(right));
+}
+
+inline bool Has(ColorWriteMask value, ColorWriteMask channel)
+{
+	return (static_cast<Ursa::UInt32>(value) & static_cast<Ursa::UInt32>(channel)) != 0;
+}
+
+struct BlendState
+{
+	bool enabled = false;
+	BlendFactor sourceColor = BlendFactor::SourceAlpha;
+	BlendFactor destinationColor = BlendFactor::OneMinusSourceAlpha;
+	BlendOperation colorOperation = BlendOperation::Add;
+	BlendFactor sourceAlpha = BlendFactor::One;
+	BlendFactor destinationAlpha = BlendFactor::Zero;
+	BlendOperation alphaOperation = BlendOperation::Add;
+};
+
+struct StencilFaceState
+{
+	Compare compare = Compare::Always;
+	StencilOperation failOperation = StencilOperation::Keep;
+	StencilOperation passOperation = StencilOperation::Keep;
+	StencilOperation depthFailOperation = StencilOperation::Keep;
+};
+
+struct StencilState
+{
+	bool enabled = false;
+	Ursa::UInt32 reference = 0;
+	Ursa::UInt32 readMask = 0xff;
+	Ursa::UInt32 writeMask = 0xff;
+	StencilFaceState front;
+	StencilFaceState back;
 };
 
 struct DeviceDesc
@@ -296,6 +390,12 @@ struct GraphicsPipelineDesc
 	bool depthWrite = true;
 	bool blend = false;
 	bool cullBack = false;
+	CullMode cullMode = CullMode::None;
+	BlendState blendState;
+	StencilState stencil;
+	ColorWriteMask colorWriteMask = ColorWriteMask::All;
+	Ursa::Int32 depthBiasConstant = 0;
+	Ursa::Float32 depthBiasSlope = 0.0f;
 	Ursa::UInt32 vertexStride = 0;
 	Vector<VertexAttribute> attributes;
 };
@@ -314,6 +414,8 @@ struct RenderTarget
 	Ursa::Float32 colorValue[4] = {0.02f, 0.03f, 0.06f, 1.0f};
 	bool clearDepth = true;
 	Ursa::Float32 depthValue = 1.0f;
+	bool clearStencil = true;
+	Ursa::UInt32 stencilValue = 0;
 };
 
 struct ScissorRect

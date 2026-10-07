@@ -3,6 +3,7 @@
 #include <Serialization/JsonArchiveInterop.hpp>
 #include <Serialization/SerializationContext.hpp>
 #include <Serialization/JsonInterop.hpp>
+#include <Shader/ShaderBuiltins.hpp>
 
 namespace Ursa
 {
@@ -13,6 +14,41 @@ Result<void> SaveMaterialResource(VirtualFileSystem& filesystem, const VirtualPa
 	if (!id || !kind || kind.value != ResourceKind::Material)
 	{
 		return Result<void>::Failure("Invalid material resource ID or .ursamat path: " + path.ToString());
+	}
+	auto serializedMaterial = material.Clone();
+	if (!serializedMaterial->IsShaderBacked())
+	{
+		for (Ursa::Size slot = 0; slot < 5; ++slot)
+		{
+			const auto textureSlot = static_cast<MaterialTextureSlot>(slot);
+			auto texture = serializedMaterial->Texture(textureSlot);
+			if (!texture)
+			{
+				continue;
+			}
+			if (!resolveTexture)
+			{
+				return Result<void>::Failure("Missing texture ID resolver for built-in Shader migration");
+			}
+			auto textureId = resolveTexture(texture);
+			if (!textureId)
+			{
+				return Result<void>::Failure(textureId.error);
+			}
+			auto assigned = serializedMaterial->SetTextureResourceId(textureSlot, textureId.value);
+			if (!assigned)
+			{
+				return assigned;
+			}
+		}
+		const ResourceId builtinShader = serializedMaterial->Type() == MaterialType::Unlit
+		                                     ? Shader::BuiltinUnlitShaderId()
+		                                     : Shader::BuiltinPbrShaderId();
+		auto migrated = serializedMaterial->MigrateLegacyToShader(builtinShader);
+		if (!migrated)
+		{
+			return Result<void>::Failure("Cannot migrate material to a built-in Shader: " + migrated.error);
+		}
 	}
 	SerializationContext context;
 	context.SetResourceIdResolver(
@@ -25,7 +61,7 @@ Result<void> SaveMaterialResource(VirtualFileSystem& filesystem, const VirtualPa
 	    });
 	ArchiveWriter writer;
 	writer.SetContext(&context);
-	auto saved = material.Serialize(writer);
+	auto saved = serializedMaterial->Serialize(writer);
 	if (!saved)
 	{
 		return Result<void>::Failure(path.ToString() + ": " + saved.error);
@@ -36,7 +72,7 @@ Result<void> SaveMaterialResource(VirtualFileSystem& filesystem, const VirtualPa
 		return Result<void>::Failure(document.error);
 	}
 	document.value["format"] = "UrsaMaterial";
-	document.value["version"] = resourceFormatVersion;
+	document.value["version"] = materialResourceFormatVersion;
 	document.value["id"] = id.ToString();
 	return WriteJsonResource(filesystem, path, document.value);
 }
@@ -48,6 +84,11 @@ Result<LoadedMaterialResource> LoadMaterialResource(const VirtualFileSystem& fil
 	if (!document)
 	{
 		return Result<LoadedMaterialResource>::Failure(document.error);
+	}
+	const Ursa::UInt32 resourceVersion = document.value.value("version", Ursa::UInt32{0});
+	if (resourceVersion != resourceFormatVersion && resourceVersion != materialResourceFormatVersion)
+	{
+		return Result<LoadedMaterialResource>::Failure("Unsupported material resource version at " + path.ToString());
 	}
 	auto reader = ArchiveFromJson(document.value);
 	if (!reader)
@@ -62,6 +103,16 @@ Result<LoadedMaterialResource> LoadMaterialResource(const VirtualFileSystem& fil
 	if (!loaded)
 	{
 		return Result<LoadedMaterialResource>::Failure(path.ToString() + ": " + loaded.error);
+	}
+	if (resourceVersion == resourceFormatVersion)
+	{
+		const ResourceId builtinId =
+		    material->Type() == MaterialType::Unlit ? Shader::BuiltinUnlitShaderId() : Shader::BuiltinPbrShaderId();
+		auto migrated = material->MigrateLegacyToShader(builtinId);
+		if (!migrated)
+		{
+			return Result<LoadedMaterialResource>::Failure(path.ToString() + ": " + migrated.error);
+		}
 	}
 	auto id = ResourceId::Parse(document.value["id"].get<String>());
 	return id ? Result<LoadedMaterialResource>::Success({id.value, std::move(material)})

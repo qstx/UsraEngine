@@ -4,6 +4,7 @@
 #include <Assets/MaterialPreview.hpp>
 #include <Serialization/TextureResource.hpp>
 #include <Core/StringInterop.hpp>
+#include <Vfs/AssetRoots.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -58,7 +59,12 @@ int main()
 		auto texture = Take(MaterialTexture::Create(
 		    2, 2, TextureColorSpace::Srgb, {255, 80, 20, 255, 255, 80, 20, 255, 255, 80, 20, 255, 255, 80, 20, 255}));
 		done(SaveTextureResource(root / "Assets" / "shared.ursatex", textureId, *texture));
-		auto workspace = Take(Editor::ProjectWorkspace::Open(root));
+		Vector<ResourceMount> engineMounts;
+		for (const auto& engineRoot : Take(ResolveEngineAssetRoots()))
+		{
+			engineMounts.push_back({engineScheme, engineRoot, MountAccess::ReadOnly});
+		}
+		auto workspace = Take(Editor::ProjectWorkspace::Open(root, engineMounts));
 		auto documents = Take(Editor::EditorDocuments::Create(*workspace));
 		const auto firstPath = root / "Assets" / "first.ursamat";
 		auto first = Take(Editor::NewMaterialDocument(Take(VirtualPath::Parse("prj:first.ursamat")),
@@ -82,10 +88,16 @@ int main()
 		auto secondDraft = second->Payload<Editor::MaterialDraft>();
 		done(secondDraft->SetTextureId(MaterialTextureSlot::BaseColor, textureId, documents->Session()));
 		done(secondDraft->Material().SetMetallic(0.7f));
-		done(secondDraft->Material().SetRoughness(0.3f));
+		auto pbrShader = secondDraft->Material().Shader();
+		done(secondDraft->SetPropertyValue("_Roughness", MaterialPropertyValue::Range(0.3f)));
+		done(secondDraft->SetTextureProperty("_EmissiveMap", textureId, *pbrShader, documents->Session()));
 		done(secondDraft->Material().SetAlphaMode(AlphaMode::Mask, 0.4f));
 		done(secondDraft->Material().SetSampler({false, true}));
 		done(documents->RequestOpen(std::move(second)));
+		done(documents->SaveCurrent());
+		done(Editor::SetShaderMaterialProperty(*documents->Current(), "_Roughness",
+		                                       MaterialPropertyValue::Range(0.45f)));
+		Expect(documents->Current()->Dirty(), "Shader-driven material Inspector edits did not dirty the document");
 		done(documents->SaveCurrent());
 		auto reopenedFirst = Take(Editor::OpenMaterialDocument(Take(VirtualPath::Parse("prj:first.ursamat")),
 		                                                       documents->Session(), *workspace));
@@ -101,7 +113,10 @@ int main()
 		Expect(firstLoaded->Material().Texture(MaterialTextureSlot::BaseColor) ==
 		           secondLoaded->Material().Texture(MaterialTextureSlot::BaseColor),
 		       "Shared texture did not resolve to the same resource-session object");
-		Expect(secondLoaded->Material().Parameters().roughness == 0.3f &&
+		auto roughness = secondLoaded->Material().PropertyValue("_Roughness", *secondLoaded->Material().Shader());
+		auto emissiveMap = secondLoaded->Material().PropertyValue("_EmissiveMap", *secondLoaded->Material().Shader());
+		Expect(roughness && roughness.value.floatValue == 0.45f && emissiveMap &&
+		           emissiveMap.value.textureId == textureId &&
 		           secondLoaded->Material().Parameters().sampler.linear == false &&
 		           secondLoaded->Material().Parameters().alphaMode == AlphaMode::Mask,
 		       "PBR parameters did not reopen");

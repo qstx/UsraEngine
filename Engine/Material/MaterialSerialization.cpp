@@ -9,7 +9,176 @@ namespace Ursa
 namespace
 {
 constexpr Array<const char*, 5> slotNames{"baseColor", "metallicRoughness", "normal", "occlusion", "emissive"};
+
+String PropertyTypeName(Shader::PropertyType type)
+{
+	switch (type)
+	{
+		case Shader::PropertyType::Float:
+			return "Float";
+		case Shader::PropertyType::Range:
+			return "Range";
+		case Shader::PropertyType::Int:
+			return "Int";
+		case Shader::PropertyType::Color:
+			return "Color";
+		case Shader::PropertyType::Vector:
+			return "Vector";
+		case Shader::PropertyType::Texture2D:
+			return "Texture2D";
+	}
+	return "Unknown";
 }
+
+Result<Shader::PropertyType> ParsePropertyType(const String& type)
+{
+	if (type == "Float")
+	{
+		return Result<Shader::PropertyType>::Success(Shader::PropertyType::Float);
+	}
+	if (type == "Range")
+	{
+		return Result<Shader::PropertyType>::Success(Shader::PropertyType::Range);
+	}
+	if (type == "Int")
+	{
+		return Result<Shader::PropertyType>::Success(Shader::PropertyType::Int);
+	}
+	if (type == "Color")
+	{
+		return Result<Shader::PropertyType>::Success(Shader::PropertyType::Color);
+	}
+	if (type == "Vector")
+	{
+		return Result<Shader::PropertyType>::Success(Shader::PropertyType::Vector);
+	}
+	if (type == "Texture2D")
+	{
+		return Result<Shader::PropertyType>::Success(Shader::PropertyType::Texture2D);
+	}
+	return Result<Shader::PropertyType>::Failure("Unknown material Shader property value type " + type);
+}
+
+Result<void> WritePropertyValue(ArchiveWriter& writer, const MaterialPropertyValue& value)
+{
+	auto result = writer.Write("type", PropertyTypeName(value.type));
+	if (!result)
+	{
+		return result;
+	}
+	switch (value.type)
+	{
+		case Shader::PropertyType::Float:
+		case Shader::PropertyType::Range:
+			return writer.Write("float", Float64(value.floatValue));
+		case Shader::PropertyType::Int:
+			return writer.Write("int", Int64(value.intValue));
+		case Shader::PropertyType::Color:
+		case Shader::PropertyType::Vector:
+			return WriteNumbers(
+			    writer, "vector",
+			    {value.vectorValue[0], value.vectorValue[1], value.vectorValue[2], value.vectorValue[3]});
+		case Shader::PropertyType::Texture2D:
+			if (!value.textureId)
+			{
+				if (!value.texture || !writer.Context())
+				{
+					return Result<void>::Failure("Texture property override requires a stable resource ID");
+				}
+				auto id = writer.Context()->Identify(*value.texture);
+				return id ? writer.Write("textureId", id.value.ToString()) : Result<void>::Failure(id.error);
+			}
+			return writer.Write("textureId", value.textureId.ToString());
+	}
+	return Result<void>::Failure("Unknown material Shader property value type");
+}
+
+Result<MaterialPropertyValue> ReadPropertyValue(const ArchiveReader& reader, SerializationContext& context)
+{
+	auto typeName = reader.Text("type");
+	if (!typeName)
+	{
+		return Result<MaterialPropertyValue>::Failure(typeName.error);
+	}
+	auto type = ParsePropertyType(typeName.value);
+	if (!type)
+	{
+		return Result<MaterialPropertyValue>::Failure(type.error);
+	}
+	MaterialPropertyValue value;
+	value.type = type.value;
+	switch (value.type)
+	{
+		case Shader::PropertyType::Float:
+		case Shader::PropertyType::Range:
+		{
+			auto number = reader.Number("float");
+			if (!number || !std::isfinite(number.value))
+			{
+				return Result<MaterialPropertyValue>::Failure("Invalid material Shader floating point override");
+			}
+			value.floatValue = Float32(number.value);
+			break;
+		}
+		case Shader::PropertyType::Int:
+		{
+			auto number = reader.Integer("int");
+			if (!number || number.value < INT32_MIN || number.value > INT32_MAX)
+			{
+				return Result<MaterialPropertyValue>::Failure("Invalid material Shader integer override");
+			}
+			value.intValue = Int32(number.value);
+			break;
+		}
+		case Shader::PropertyType::Color:
+		case Shader::PropertyType::Vector:
+		{
+			auto components = ReadNumbers(reader, "vector", 4);
+			if (!components)
+			{
+				return Result<MaterialPropertyValue>::Failure(components.error);
+			}
+			for (Size index = 0; index < value.vectorValue.size(); ++index)
+			{
+				if (!std::isfinite(components.value[index]))
+				{
+					return Result<MaterialPropertyValue>::Failure("Non-finite material Shader vector component");
+				}
+				value.vectorValue[index] = components.value[index];
+			}
+			break;
+		}
+		case Shader::PropertyType::Texture2D:
+		{
+			auto text = reader.Text("textureId");
+			if (!text)
+			{
+				return Result<MaterialPropertyValue>::Failure(text.error);
+			}
+			auto id = ResourceId::Parse(text.value);
+			if (!id)
+			{
+				return Result<MaterialPropertyValue>::Failure(id.error);
+			}
+			auto loader = context.Service<TextureResourceLoader>();
+			if (!context.ResourceLoader() && (!loader || !*loader.value))
+			{
+				return Result<MaterialPropertyValue>::Failure("Missing texture resource loader");
+			}
+			auto texture =
+			    context.ResourceLoader() ? context.ResourceLoader()->LoadTexture(id.value) : (*loader.value)(id.value);
+			if (!texture)
+			{
+				return Result<MaterialPropertyValue>::Failure(texture.error);
+			}
+			value.textureId = id.value;
+			value.texture = std::move(texture.value);
+			break;
+		}
+	}
+	return Result<MaterialPropertyValue>::Success(std::move(value));
+}
+} // namespace
 
 std::shared_ptr<MaterialTexture> MaterialTexture::CreateForDeserialization()
 {
@@ -62,6 +231,10 @@ Result<void> MaterialTexture::Deserialize(const ArchiveReader& reader, Serializa
 Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 {
 	auto result = writer.Write("type", String(type == MaterialType::Unlit ? "Unlit" : "PbrMetallicRoughness"));
+	if (result && IsShaderBacked())
+	{
+		result = writer.Write("shaderId", shaderId.ToString());
+	}
 	auto fields = writer.Object("parameters");
 	if (!fields)
 	{
@@ -138,15 +311,58 @@ Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 		{
 			return Result<void>::Failure("Missing texture ID resolver");
 		}
-		auto id = writer.Context()->Identify(*textures[i]);
+		ResourceId id = textureResourceIds[i];
+		if (!id && writer.Context())
+		{
+			auto identified = writer.Context()->Identify(*textures[i]);
+			if (!identified)
+			{
+				return Result<void>::Failure(identified.error);
+			}
+			id = identified.value;
+		}
 		if (!id)
 		{
-			return Result<void>::Failure(id.error);
+			return Result<void>::Failure("Material texture has no stable resource ID");
 		}
-		result = textureFields.value.Write(slotNames[i], id.value.ToString());
+		result = textureFields.value.Write(slotNames[i], id.ToString());
 		if (!result)
 		{
 			return result;
+		}
+	}
+	if (IsShaderBacked())
+	{
+		auto overrides = writer.Object("propertyOverrides");
+		if (!overrides)
+		{
+			return Result<void>::Failure(overrides.error);
+		}
+		for (const auto& entry : propertyOverrides)
+		{
+			auto value = overrides.value.Object(entry.first);
+			if (!value)
+			{
+				return Result<void>::Failure(value.error);
+			}
+			result = WritePropertyValue(value.value, entry.second);
+			if (!result)
+			{
+				return result;
+			}
+		}
+		auto keywordArray = writer.Array("keywords");
+		if (!keywordArray)
+		{
+			return Result<void>::Failure(keywordArray.error);
+		}
+		for (const String& keyword : keywords)
+		{
+			result = keywordArray.value.Append(keyword);
+			if (!result)
+			{
+				return result;
+			}
 		}
 	}
 	return {};
@@ -155,6 +371,80 @@ Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 Result<void> MaterialInstance::Deserialize(const ArchiveReader& reader, SerializationContext& context)
 {
 	auto loadedType = reader.Text("type");
+	if (!loadedType)
+	{
+		return Result<void>::Failure(loadedType.error);
+	}
+	if (!reader.Contains("shaderId"))
+	{
+		return DeserializeLegacy(reader, context);
+	}
+	auto shaderText = reader.Text("shaderId");
+	auto overrides = reader.Object("propertyOverrides");
+	auto keywordReaders = reader.Array("keywords");
+	if (!shaderText || !overrides || !keywordReaders)
+	{
+		return Result<void>::Failure(!shaderText  ? shaderText.error
+		                             : !overrides ? overrides.error
+		                                          : keywordReaders.error);
+	}
+	auto parsedShaderId = ResourceId::Parse(shaderText.value);
+	if (!parsedShaderId)
+	{
+		return Result<void>::Failure("Invalid material Shader ID: " + parsedShaderId.error);
+	}
+	MaterialInstance candidate(loadedType.value == "PbrMetallicRoughness" ? MaterialType::PbrMetallicRoughness
+	                                                                      : MaterialType::Unlit);
+	auto restoredLegacy = candidate.DeserializeLegacy(reader, context);
+	if (!restoredLegacy)
+	{
+		return restoredLegacy;
+	}
+	candidate.shaderId = parsedShaderId.value;
+	auto names = overrides.value.Fields();
+	if (!names)
+	{
+		return Result<void>::Failure(names.error);
+	}
+	for (const String& propertyName : names.value)
+	{
+		auto valueReader = overrides.value.Object(propertyName);
+		if (!valueReader)
+		{
+			return Result<void>::Failure(valueReader.error);
+		}
+		auto value = ReadPropertyValue(valueReader.value, context);
+		if (!value)
+		{
+			return Result<void>::Failure("Material property " + propertyName + ": " + value.error);
+		}
+		candidate.propertyOverrides.emplace(propertyName, std::move(value.value));
+	}
+	for (const ArchiveReader& keywordReader : keywordReaders.value)
+	{
+		auto keyword = keywordReader.TextValue();
+		if (!keyword)
+		{
+			return Result<void>::Failure(keyword.error);
+		}
+		auto enabled = candidate.SetKeywordEnabled(keyword.value, true);
+		if (!enabled)
+		{
+			return enabled;
+		}
+	}
+	*this = std::move(candidate);
+	++version;
+	return {};
+}
+
+Result<void> MaterialInstance::DeserializeLegacy(const ArchiveReader& reader, SerializationContext& context)
+{
+	auto loadedType = reader.Text("type");
+	if (!loadedType)
+	{
+		return Result<void>::Failure(loadedType.error);
+	}
 	auto fields = reader.Object("parameters");
 	if (!fields)
 	{
@@ -287,10 +577,12 @@ Result<void> MaterialInstance::Deserialize(const ArchiveReader& reader, Serializ
 		{
 			return result;
 		}
+		candidate.textureResourceIds[i] = id.value;
 	}
 	type = candidate.type;
 	parameters = candidate.parameters;
 	textures = std::move(candidate.textures);
+	textureResourceIds = std::move(candidate.textureResourceIds);
 	++version;
 	return {};
 }

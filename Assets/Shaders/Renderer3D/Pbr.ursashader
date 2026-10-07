@@ -1,0 +1,176 @@
+Shader "Ursa/PBR"
+{
+	ID "10000000-0000-4000-8000-000000000002"
+	Version 1
+	Properties
+	{
+		_BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+		_Metallic ("Metallic", Range(0, 1)) = 0
+		_Roughness ("Roughness", Range(0, 1)) = 1
+		_NormalScale ("Normal Scale", Float) = 1
+		_OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
+		[HDR] _Emissive ("Emissive", Color) = (0, 0, 0, 1)
+		_AlphaMode ("Alpha Mode", Int) = 0
+		_AlphaCutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
+		_BaseMap ("Base Map", 2D) = "white" {}
+		_MetallicRoughnessMap ("Metallic Roughness", 2D) = "white" {}
+		[Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
+		_OcclusionMap ("Occlusion", 2D) = "white" {}
+		_EmissiveMap ("Emissive Map", 2D) = "white" {}
+	}
+	HLSLINCLUDE
+struct DirectionalLight
+{
+	float4 directionIntensity;
+	float4 color;
+};
+struct PointLight
+{
+	float4 positionRange;
+	float4 colorIntensity;
+};
+cbuffer UrsaPerObject : register(b0)
+{
+	float4x4 _UrsaViewProjection;
+	float4x4 _UrsaModel;
+	float4x4 _UrsaNormal;
+}
+cbuffer UrsaScene : register(b1)
+{
+	float4 _UrsaCameraPosition;
+	float4 _UrsaAmbient;
+	int4 _UrsaCounts;
+	DirectionalLight _UrsaDirectional[4];
+	PointLight _UrsaPoint[8];
+}
+cbuffer MaterialData : register(b2)
+{
+	float4 _BaseColor;
+	float _Metallic;
+	float _Roughness;
+	float _NormalScale;
+	float _OcclusionStrength;
+	float4 _Emissive;
+	int _AlphaMode;
+	float _AlphaCutoff;
+}
+Texture2D<float4> _BaseMap : register(t0);
+SamplerState sampler_BaseMap : register(s0);
+Texture2D<float4> _MetallicRoughnessMap : register(t1);
+SamplerState sampler_MetallicRoughnessMap : register(s1);
+Texture2D<float4> _NormalMap : register(t2);
+SamplerState sampler_NormalMap : register(s2);
+Texture2D<float4> _OcclusionMap : register(t3);
+SamplerState sampler_OcclusionMap : register(s3);
+Texture2D<float4> _EmissiveMap : register(t4);
+SamplerState sampler_EmissiveMap : register(s4);
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaForward" }
+		Pass
+		{
+			Name "Forward"
+			Tags { "LightMode" = "Forward" }
+			Cull Back
+			ZWrite On
+			ZTest LEqual
+			HLSLPROGRAM
+#pragma vertex VSMain
+#pragma fragment PSMain
+struct VertexOutput
+{
+	float4 position : SV_Position;
+	float2 uv : TEXCOORD0;
+	float3 worldPosition : TEXCOORD1;
+	float3 worldNormal : TEXCOORD2;
+	float3 worldTangent : TEXCOORD3;
+};
+VertexOutput VSMain(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD0,
+	                float3 tangent : TANGENT)
+{
+	VertexOutput output;
+	float4 world = mul(_UrsaModel, float4(position, 1.0));
+	float3x3 model = (float3x3)_UrsaModel;
+	float3x3 normalMatrix = (float3x3)_UrsaNormal;
+	output.position = mul(_UrsaViewProjection, world);
+	output.worldPosition = world.xyz;
+	output.worldNormal = normalize(mul(normalMatrix, normal));
+	output.worldTangent = normalize(mul(model, tangent));
+	output.uv = uv;
+	return output;
+}
+float3 DirectBrdf(float3 normal, float3 viewDirection, float3 lightDirection, float3 baseColor,
+	               float metallic, float roughness)
+{
+	float3 halfway = normalize(viewDirection + lightDirection);
+	float normalDotLight = max(dot(normal, lightDirection), 0.0);
+	float normalDotView = max(dot(normal, viewDirection), 0.001);
+	float normalDotHalfway = max(dot(normal, halfway), 0.0);
+	float viewDotHalfway = max(dot(viewDirection, halfway), 0.0);
+	float alpha = max(roughness * roughness, 0.002);
+	float alphaSquared = alpha * alpha;
+	float denominator = normalDotHalfway * normalDotHalfway * (alphaSquared - 1.0) + 1.0;
+	float distribution = alphaSquared / max(3.14159265359 * denominator * denominator, 0.0001);
+	float k = pow(roughness + 1.0, 2.0) / 8.0;
+	float geometryView = normalDotView / (normalDotView * (1.0 - k) + k);
+	float geometryLight = normalDotLight / max(normalDotLight * (1.0 - k) + k, 0.0001);
+	float3 reflectance0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);
+	float3 fresnel = reflectance0 + (1.0 - reflectance0) * pow(1.0 - viewDotHalfway, 5.0);
+	float3 specular = distribution * geometryView * geometryLight * fresnel /
+	                  max(4.0 * normalDotView * normalDotLight, 0.001);
+	float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * baseColor / 3.14159265359;
+	return (diffuse + specular) * normalDotLight;
+}
+float4 PSMain(VertexOutput input) : SV_Target0
+{
+	float4 base = _BaseColor * _BaseMap.Sample(sampler_BaseMap, input.uv);
+	if (_AlphaMode == 1 && base.a < _AlphaCutoff)
+	{
+		discard;
+	}
+	float alpha = _AlphaMode == 2 ? base.a : 1.0;
+	float4 metallicRoughness = _MetallicRoughnessMap.Sample(sampler_MetallicRoughnessMap, input.uv);
+	float metallic = saturate(_Metallic * metallicRoughness.b);
+	float roughness = clamp(_Roughness * metallicRoughness.g, 0.04, 1.0);
+	float3 normal = normalize(input.worldNormal);
+	float3 tangent = normalize(input.worldTangent - normal * dot(normal, input.worldTangent));
+	float3 bitangent = normalize(cross(normal, tangent));
+	float3 mappedNormal = _NormalMap.Sample(sampler_NormalMap, input.uv).xyz * 2.0 - 1.0;
+	mappedNormal.xy *= _NormalScale;
+	normal = normalize(tangent * mappedNormal.x + bitangent * mappedNormal.y + normal * mappedNormal.z);
+	float3 viewDirection = normalize(_UrsaCameraPosition.xyz - input.worldPosition);
+	float3 radiance = 0.0;
+	for (int index = 0; index < _UrsaCounts.x; ++index)
+	{
+		float3 lightDirection = normalize(-_UrsaDirectional[index].directionIntensity.xyz);
+		radiance += DirectBrdf(normal, viewDirection, lightDirection, base.rgb, metallic, roughness) *
+		            _UrsaDirectional[index].color.rgb * _UrsaDirectional[index].directionIntensity.w;
+	}
+	for (int index = 0; index < _UrsaCounts.y; ++index)
+	{
+		float3 delta = _UrsaPoint[index].positionRange.xyz - input.worldPosition;
+		float distanceToLight = length(delta);
+		float range = _UrsaPoint[index].positionRange.w;
+		if (distanceToLight >= range)
+		{
+			continue;
+		}
+		float fade = max(1.0 - pow(distanceToLight / range, 4.0), 0.0);
+		float attenuation = fade * fade / (1.0 + distanceToLight * distanceToLight);
+		radiance += DirectBrdf(normal, viewDirection, delta / max(distanceToLight, 0.0001), base.rgb,
+		                       metallic, roughness) * _UrsaPoint[index].colorIntensity.rgb *
+		            _UrsaPoint[index].colorIntensity.w * attenuation;
+	}
+	float occlusion = lerp(1.0, _OcclusionMap.Sample(sampler_OcclusionMap, input.uv).r, _OcclusionStrength);
+	float3 reflectance0 = lerp(float3(0.04, 0.04, 0.04), base.rgb, metallic);
+	radiance += _UrsaAmbient.rgb * _UrsaAmbient.w *
+	            (base.rgb * (1.0 - metallic) + reflectance0 * (1.0 - roughness * 0.5)) * occlusion;
+	radiance += _Emissive.rgb * _EmissiveMap.Sample(sampler_EmissiveMap, input.uv).rgb;
+	float3 mapped = radiance / (radiance + 1.0);
+	return float4(pow(max(mapped, 0.0), 1.0 / 2.2), alpha);
+}
+ENDHLSL
+		}
+	}
+}

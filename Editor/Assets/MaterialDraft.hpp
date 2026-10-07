@@ -6,6 +6,9 @@
 
 namespace Ursa::Editor
 {
+class MaterialInspectors;
+class InspectorUI;
+
 class MaterialDraft final
 {
 public:
@@ -17,6 +20,11 @@ public:
 	                                                   ResourceSession& session);
 
 	Result<void> SetTextureId(MaterialTextureSlot slot, ResourceId id, ResourceSession& session);
+
+	Result<void> SetPropertyValue(const String& identifier, MaterialPropertyValue value);
+
+	Result<void> SetTextureProperty(const String& identifier, ResourceId id, const Shader::ShaderAsset& shader,
+	                                ResourceSession& session);
 
 	Result<void> Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id,
 	                  const ResourceIndex& index) const;
@@ -44,6 +52,13 @@ Result<std::unique_ptr<EditorDocument>> NewMaterialDocument(const VirtualPath& p
 Result<std::unique_ptr<EditorDocument>> OpenMaterialDocument(const VirtualPath& path, ResourceSession& session,
                                                              ProjectWorkspace& workspace);
 
+Result<void> SetShaderMaterialProperty(EditorDocument& document, const String& identifier, MaterialPropertyValue value);
+
+Result<void> SetShaderMaterialTexture(EditorDocument& document, const String& identifier, ResourceId textureId,
+                                      ResourceSession& session);
+
 Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& documents,
-                                   const ProjectWorkspace& workspace, String& diagnostic);
+                                   const ProjectWorkspace& workspace, String& diagnostic,
+                                   const MaterialInspectors* customInspectors = nullptr,
+                                   InspectorUI* inspectorUI = nullptr);
 } // namespace Ursa::Editor

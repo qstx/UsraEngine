@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace
@@ -298,6 +299,84 @@ void TestErrors(const DevicePtr& device)
 	Ursa::UInt32 value = 0;
 	Expect(!upload->Read(0, &value, sizeof(value)), "Reading upload-only buffer should fail");
 }
+
+void TestShaderLabPipelineStates(const DevicePtr& device)
+{
+	auto vertex = Take(device->CreateShader({ShaderStage::Vertex, ShaderFormat::Spirv, LoadShader("State.vert")}));
+	auto fragment = Take(device->CreateShader({ShaderStage::Fragment, ShaderFormat::Spirv, LoadShader("State.frag")}));
+	GraphicsPipelineDesc desc;
+	desc.vertex = vertex;
+	desc.fragment = fragment;
+	desc.depthTest = true;
+	desc.depthWrite = false;
+	desc.depthCompare = Compare::GreaterEqual;
+	desc.depthFormat = Format::D32FloatS8Uint;
+	desc.cullMode = CullMode::Front;
+	desc.blendState.enabled = true;
+	desc.blendState.sourceColor = BlendFactor::SourceAlpha;
+	desc.blendState.destinationColor = BlendFactor::OneMinusSourceAlpha;
+	desc.blendState.colorOperation = BlendOperation::ReverseSubtract;
+	desc.blendState.sourceAlpha = BlendFactor::One;
+	desc.blendState.destinationAlpha = BlendFactor::Zero;
+	desc.blendState.alphaOperation = BlendOperation::Maximum;
+	desc.stencil.enabled = true;
+	desc.stencil.reference = 3;
+	desc.stencil.readMask = 0x7f;
+	desc.stencil.writeMask = 0x3f;
+	desc.stencil.front.compare = Compare::LessEqual;
+	desc.stencil.front.failOperation = StencilOperation::Keep;
+	desc.stencil.front.passOperation = StencilOperation::Replace;
+	desc.stencil.front.depthFailOperation = StencilOperation::IncrementClamp;
+	desc.stencil.back.compare = Compare::NotEqual;
+	desc.stencil.back.failOperation = StencilOperation::Zero;
+	desc.stencil.back.passOperation = StencilOperation::Invert;
+	desc.stencil.back.depthFailOperation = StencilOperation::DecrementWrap;
+	desc.colorWriteMask = ColorWriteMask::Red | ColorWriteMask::Alpha;
+	desc.depthBiasConstant = 1;
+	desc.depthBiasSlope = 1.0f;
+	Take(device->CreateGraphicsPipeline(desc));
+
+	GraphicsPipelineDesc noStencilFormat = desc;
+	noStencilFormat.depthFormat = Format::D32Float;
+	auto rejectedStencil = device->CreateGraphicsPipeline(noStencilFormat);
+	Expect(!rejectedStencil && rejectedStencil.error.find("Stencil") != Ursa::String::npos,
+	       "Stencil state without a stencil-capable format lacked a diagnostic");
+
+	GraphicsPipelineDesc invalidMask = desc;
+	invalidMask.colorWriteMask = static_cast<ColorWriteMask>(0x10);
+	auto rejectedMask = device->CreateGraphicsPipeline(invalidMask);
+	Expect(!rejectedMask && rejectedMask.error.find("Color write mask") != Ursa::String::npos,
+	       "Invalid color write mask lacked a diagnostic");
+
+	GraphicsPipelineDesc invalidBlend = desc;
+	invalidBlend.colorFormat = Format::R32Uint;
+	auto rejectedBlend = device->CreateGraphicsPipeline(invalidBlend);
+	Expect(!rejectedBlend && rejectedBlend.error.find("integer") != Ursa::String::npos,
+	       "Integer target blending lacked a diagnostic");
+
+	GraphicsPipelineDesc invalidDepthBias = desc;
+	invalidDepthBias.depthBiasSlope = std::numeric_limits<Ursa::Float32>::quiet_NaN();
+	auto rejectedDepthBias = device->CreateGraphicsPipeline(invalidDepthBias);
+	Expect(!rejectedDepthBias && rejectedDepthBias.error.find("Depth bias") != Ursa::String::npos,
+	       "Non-finite depth bias lacked a diagnostic");
+
+	auto color = Take(device->CreateTexture(
+	    {4, 4, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
+	auto depthStencil = Take(device->CreateTexture({4, 4, Format::D32FloatS8Uint, TextureUsage::DepthAttachment}));
+	auto command = Take(device->CreateCommandList());
+	done(command->Begin());
+	done(command->Barrier(color, ResourceState::Undefined, ResourceState::ColorAttachment));
+	done(command->Barrier(depthStencil, ResourceState::Undefined, ResourceState::DepthAttachment));
+	RenderTarget target;
+	target.color = color;
+	target.depth = depthStencil;
+	target.clearStencil = true;
+	target.stencilValue = 3;
+	done(command->BeginRendering(target));
+	done(command->EndRendering());
+	done(command->End());
+	done(Take(device->Submit(command))->Wait());
+}
 } // namespace
 
 int main()
@@ -313,6 +392,7 @@ int main()
 		Expect(caps.graphics && caps.compute && caps.textureSampling && caps.storageImage && caps.offscreenRendering,
 		       "Required RHI capabilities unavailable");
 		TestErrors(device);
+		TestShaderLabPipelineStates(device);
 		TestCompute(device);
 		TestTextureAndOffscreen(device, false);
 		TestTextureAndOffscreen(device, true);

@@ -6,6 +6,7 @@
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -72,6 +73,8 @@ VkFormat ToVkFormat(Format format)
 			return VK_FORMAT_R32_UINT;
 		case Format::D32Float:
 			return VK_FORMAT_D32_SFLOAT;
+		case Format::D32FloatS8Uint:
+			return VK_FORMAT_D32_SFLOAT_S8_UINT;
 	}
 	throw std::runtime_error("Unknown texture format");
 }
@@ -90,14 +93,146 @@ Format FromVkFormat(VkFormat format)
 			return Format::R32Uint;
 		case VK_FORMAT_D32_SFLOAT:
 			return Format::D32Float;
+		case VK_FORMAT_D32_SFLOAT_S8_UINT:
+			return Format::D32FloatS8Uint;
 		default:
 			throw std::runtime_error("Unsupported surface format");
 	}
 }
 
+bool IsDepthFormat(Format format)
+{
+	return format == Format::D32Float || format == Format::D32FloatS8Uint;
+}
+
+VkImageAspectFlags ImageAspect(Format format)
+{
+	if (format == Format::D32FloatS8Uint)
+	{
+		return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	}
+	return format == Format::D32Float ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
+VkCompareOp ToVkCompare(Compare compare)
+{
+	switch (compare)
+	{
+		case Compare::Never:
+			return VK_COMPARE_OP_NEVER;
+		case Compare::Less:
+			return VK_COMPARE_OP_LESS;
+		case Compare::LessEqual:
+			return VK_COMPARE_OP_LESS_OR_EQUAL;
+		case Compare::Equal:
+			return VK_COMPARE_OP_EQUAL;
+		case Compare::NotEqual:
+			return VK_COMPARE_OP_NOT_EQUAL;
+		case Compare::Greater:
+			return VK_COMPARE_OP_GREATER;
+		case Compare::GreaterEqual:
+			return VK_COMPARE_OP_GREATER_OR_EQUAL;
+		case Compare::Always:
+			return VK_COMPARE_OP_ALWAYS;
+	}
+	throw std::runtime_error("Unknown comparison operation");
+}
+
+VkBlendFactor ToVkBlendFactor(BlendFactor factor)
+{
+	switch (factor)
+	{
+		case BlendFactor::Zero:
+			return VK_BLEND_FACTOR_ZERO;
+		case BlendFactor::One:
+			return VK_BLEND_FACTOR_ONE;
+		case BlendFactor::SourceColor:
+			return VK_BLEND_FACTOR_SRC_COLOR;
+		case BlendFactor::OneMinusSourceColor:
+			return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+		case BlendFactor::DestinationColor:
+			return VK_BLEND_FACTOR_DST_COLOR;
+		case BlendFactor::OneMinusDestinationColor:
+			return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+		case BlendFactor::SourceAlpha:
+			return VK_BLEND_FACTOR_SRC_ALPHA;
+		case BlendFactor::OneMinusSourceAlpha:
+			return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		case BlendFactor::DestinationAlpha:
+			return VK_BLEND_FACTOR_DST_ALPHA;
+		case BlendFactor::OneMinusDestinationAlpha:
+			return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+	}
+	throw std::runtime_error("Unknown blend factor");
+}
+
+VkBlendOp ToVkBlendOperation(BlendOperation operation)
+{
+	switch (operation)
+	{
+		case BlendOperation::Add:
+			return VK_BLEND_OP_ADD;
+		case BlendOperation::Subtract:
+			return VK_BLEND_OP_SUBTRACT;
+		case BlendOperation::ReverseSubtract:
+			return VK_BLEND_OP_REVERSE_SUBTRACT;
+		case BlendOperation::Minimum:
+			return VK_BLEND_OP_MIN;
+		case BlendOperation::Maximum:
+			return VK_BLEND_OP_MAX;
+	}
+	throw std::runtime_error("Unknown blend operation");
+}
+
+VkStencilOp ToVkStencilOperation(StencilOperation operation)
+{
+	switch (operation)
+	{
+		case StencilOperation::Keep:
+			return VK_STENCIL_OP_KEEP;
+		case StencilOperation::Zero:
+			return VK_STENCIL_OP_ZERO;
+		case StencilOperation::Replace:
+			return VK_STENCIL_OP_REPLACE;
+		case StencilOperation::IncrementClamp:
+			return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+		case StencilOperation::DecrementClamp:
+			return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+		case StencilOperation::Invert:
+			return VK_STENCIL_OP_INVERT;
+		case StencilOperation::IncrementWrap:
+			return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+		case StencilOperation::DecrementWrap:
+			return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+	}
+	throw std::runtime_error("Unknown stencil operation");
+}
+
+VkColorComponentFlags ToVkColorWriteMask(ColorWriteMask mask)
+{
+	VkColorComponentFlags flags = 0;
+	if (Has(mask, ColorWriteMask::Red))
+	{
+		flags |= VK_COLOR_COMPONENT_R_BIT;
+	}
+	if (Has(mask, ColorWriteMask::Green))
+	{
+		flags |= VK_COLOR_COMPONENT_G_BIT;
+	}
+	if (Has(mask, ColorWriteMask::Blue))
+	{
+		flags |= VK_COLOR_COMPONENT_B_BIT;
+	}
+	if (Has(mask, ColorWriteMask::Alpha))
+	{
+		flags |= VK_COLOR_COMPONENT_A_BIT;
+	}
+	return flags;
+}
+
 Ursa::UInt32 PixelSize(Format f)
 {
-	return f == Format::R32Uint ? 4 : 4;
+	return f == Format::D32FloatS8Uint ? 8 : 4;
 }
 
 VkBufferUsageFlags VkBufferUsage(BufferUsage usage)
@@ -706,7 +841,7 @@ std::shared_ptr<T> checked(const std::shared_ptr<B>& base, const std::shared_ptr
 }
 
 VkRenderPass MakeRenderPass(VkDevice device, Format colorFormat, bool depth, Format depthFormat, bool clearColor,
-                            bool clearDepth)
+                            bool clearDepth, bool clearStencil)
 {
 	Array<VkAttachmentDescription, 2> attachments{};
 	attachments[0].format = ToVkFormat(colorFormat);
@@ -722,6 +857,11 @@ VkRenderPass MakeRenderPass(VkDevice device, Format colorFormat, bool depth, For
 		attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
 		attachments[1].loadOp = clearDepth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
 		attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		const bool stencil = depthFormat == Format::D32FloatS8Uint;
+		attachments[1].stencilLoadOp = stencil
+		                                   ? (clearStencil ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD)
+		                                   : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachments[1].stencilStoreOp = stencil ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		attachments[1].initialLayout = attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 	}
 	VkSubpassDescription subpass{};
@@ -843,8 +983,7 @@ struct CommandImpl final : CommandList
 			    b.newLayout = dst.layout;
 			    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			    b.image = t->image;
-			    b.subresourceRange.aspectMask =
-			        t->desc.format == Format::D32Float ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+			    b.subresourceRange.aspectMask = ImageAspect(t->desc.format);
 			    b.subresourceRange.levelCount = b.subresourceRange.layerCount = 1;
 			    vkCmdPipelineBarrier(command, src.stage, dst.stage, 0, 0, nullptr, 0, nullptr, 1, &b);
 			    keepAlive.push_back(t);
@@ -901,6 +1040,7 @@ struct CommandImpl final : CommandList
 			    Recording(true);
 			    auto src = checked<BufferImpl>(source, ctx, "source buffer");
 			    auto dst = checked<TextureImpl>(destination, ctx, "destination texture");
+			    Require(!IsDepthFormat(dst->desc.format), "Buffer-to-texture copies do not support depth formats");
 			    Require(Has(src->desc.usage, BufferUsage::TransferSource) &&
 			                Has(dst->desc.usage, TextureUsage::TransferDestination),
 			            "Buffer-to-texture transfer usage missing");
@@ -925,6 +1065,7 @@ struct CommandImpl final : CommandList
 			    Recording(true);
 			    auto src = checked<TextureImpl>(source, ctx, "source texture");
 			    auto dst = checked<BufferImpl>(destination, ctx, "destination buffer");
+			    Require(!IsDepthFormat(src->desc.format), "Texture readback does not support depth formats");
 			    Require(Has(src->desc.usage, TextureUsage::TransferSource) &&
 			                Has(dst->desc.usage, BufferUsage::TransferDestination),
 			            "Texture-to-buffer transfer usage missing");
@@ -949,20 +1090,19 @@ struct CommandImpl final : CommandList
 			    Recording(true);
 			    auto color = checked<TextureImpl>(target.color, ctx, "color target");
 			    Require(Has(color->desc.usage, TextureUsage::ColorAttachment), "Texture lacks color-attachment usage");
-			    Require(color->desc.format != Format::D32Float, "Depth format cannot be a color target");
+			    Require(!IsDepthFormat(color->desc.format), "Depth format cannot be a color target");
 			    std::shared_ptr<TextureImpl> depth;
 			    if (target.depth)
 			    {
 				    depth = checked<TextureImpl>(target.depth, ctx, "depth target");
-				    Require(depth->desc.format == Format::D32Float &&
-				                Has(depth->desc.usage, TextureUsage::DepthAttachment),
+				    Require(IsDepthFormat(depth->desc.format) && Has(depth->desc.usage, TextureUsage::DepthAttachment),
 				            "Invalid depth target");
 				    Require(depth->desc.width == color->desc.width && depth->desc.height == color->desc.height,
 				            "Attachment sizes differ");
 			    }
-			    VkRenderPass pass =
-			        MakeRenderPass(ctx->device, color->desc.format, !!depth,
-			                       depth ? depth->desc.format : Format::D32Float, target.colorValue, target.clearDepth);
+			    VkRenderPass pass = MakeRenderPass(ctx->device, color->desc.format, !!depth,
+			                                       depth ? depth->desc.format : Format::D32Float, target.clearColor,
+			                                       target.clearDepth, target.clearStencil);
 			    transientPasses.push_back(pass);
 			    VkImageView views[2]{color->view, depth ? depth->view : VK_NULL_HANDLE};
 			    VkFramebufferCreateInfo frameInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
@@ -981,6 +1121,7 @@ struct CommandImpl final : CommandList
 				    clears[0].color.float32[i] = target.colorValue[i];
 			    }
 			    clears[1].depthStencil.depth = target.depthValue;
+			    clears[1].depthStencil.stencil = target.stencilValue;
 			    VkRenderPassBeginInfo beginInfo{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
 			    beginInfo.renderPass = pass;
 			    beginInfo.framebuffer = frame;
@@ -1463,7 +1604,7 @@ struct DeviceImpl final : Device
 			    Require(desc.width <= ctx->properties.limits.maxImageDimension2D &&
 			                desc.height <= ctx->properties.limits.maxImageDimension2D,
 			            "Texture exceeds adapter limit");
-			    Require(desc.format != Format::D32Float || !Has(desc.usage, TextureUsage::ColorAttachment),
+			    Require(!IsDepthFormat(desc.format) || !Has(desc.usage, TextureUsage::ColorAttachment),
 			            "Depth texture cannot be a color attachment");
 			    Require(desc.format != Format::RgbA8Srgb || !Has(desc.usage, TextureUsage::Storage),
 			            "sRGB texture cannot be a storage image");
@@ -1487,8 +1628,7 @@ struct DeviceImpl final : Device
 			    view.image = texture->image;
 			    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
 			    view.format = info.format;
-			    view.subresourceRange.aspectMask =
-			        desc.format == Format::D32Float ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+			    view.subresourceRange.aspectMask = ImageAspect(desc.format);
 			    view.subresourceRange.levelCount = view.subresourceRange.layerCount = 1;
 			    Check(vkCreateImageView(ctx->device, &view, nullptr, &texture->view), "Creating texture view");
 			    return std::static_pointer_cast<Texture>(texture);
@@ -1655,17 +1795,25 @@ struct DeviceImpl final : Device
 			    auto fragment = checked<ShaderImpl>(desc.fragment, ctx, "fragment shader");
 			    Require(vertex->stage == ShaderStage::Vertex && fragment->stage == ShaderStage::Fragment,
 			            "Graphics pipeline shader stages are invalid");
-			    Require(desc.colorFormat != Format::D32Float, "Graphics pipeline needs a color format");
-			    Require(!desc.depthTest || desc.depthFormat == Format::D32Float,
-			            "Depth testing requires D32Float format");
-			    Require(!desc.blend || desc.colorFormat != Format::R32Uint,
+			    Require(!IsDepthFormat(desc.colorFormat), "Graphics pipeline needs a color format");
+			    const bool useDepthStencil = desc.depthTest || desc.stencil.enabled;
+			    Require(!useDepthStencil || IsDepthFormat(desc.depthFormat),
+			            "Depth or stencil testing requires a depth-stencil format");
+			    Require(!desc.stencil.enabled || desc.depthFormat == Format::D32FloatS8Uint,
+			            "Stencil testing requires D32FloatS8Uint format");
+			    const bool blendingEnabled = desc.blend || desc.blendState.enabled;
+			    Require(!blendingEnabled || desc.colorFormat != Format::R32Uint,
 			            "Blending is invalid for integer color format");
+			    Require((static_cast<Ursa::UInt32>(desc.colorWriteMask) &
+			             ~static_cast<Ursa::UInt32>(ColorWriteMask::All)) == 0,
+			            "Color write mask contains unsupported channels");
+			    Require(std::isfinite(desc.depthBiasSlope), "Depth bias slope must be finite");
 			    auto pipeline = std::make_shared<PipelineImpl>();
 			    pipeline->ctx = ctx;
 			    pipeline->shaderA = vertex;
 			    pipeline->shaderB = fragment;
 			    pipeline->colorFormat = desc.colorFormat;
-			    pipeline->hasDepth = desc.depthTest;
+			    pipeline->hasDepth = useDepthStencil;
 			    pipeline->depthFormat = desc.depthFormat;
 			    if (desc.layout)
 			    {
@@ -1680,7 +1828,7 @@ struct DeviceImpl final : Device
 			    Check(vkCreatePipelineLayout(ctx->device, &layoutInfo, nullptr, &pipeline->layout),
 			          "Creating graphics pipeline layout");
 			    pipeline->renderPass =
-			        MakeRenderPass(ctx->device, desc.colorFormat, desc.depthTest, desc.depthFormat, true, true);
+			        MakeRenderPass(ctx->device, desc.colorFormat, useDepthStencil, desc.depthFormat, true, true, true);
 			    VkPipelineShaderStageCreateInfo stages[2]{};
 			    stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 			    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -1719,8 +1867,23 @@ struct DeviceImpl final : Device
 			    VkPipelineRasterizationStateCreateInfo raster{
 			        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
 			    raster.polygonMode = VK_POLYGON_MODE_FILL;
-			    raster.cullMode = desc.cullBack ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
+			    const CullMode cullMode = desc.cullBack ? CullMode::Back : desc.cullMode;
+			    switch (cullMode)
+			    {
+				    case CullMode::None:
+					    raster.cullMode = VK_CULL_MODE_NONE;
+					    break;
+				    case CullMode::Front:
+					    raster.cullMode = VK_CULL_MODE_FRONT_BIT;
+					    break;
+				    case CullMode::Back:
+					    raster.cullMode = VK_CULL_MODE_BACK_BIT;
+					    break;
+			    }
 			    raster.frontFace = VK_FRONT_FACE_CLOCKWISE;
+			    raster.depthBiasEnable = desc.depthBiasConstant != 0 || desc.depthBiasSlope != 0.0f;
+			    raster.depthBiasConstantFactor = static_cast<float>(desc.depthBiasConstant);
+			    raster.depthBiasSlopeFactor = desc.depthBiasSlope;
 			    raster.lineWidth = 1.0f;
 			    VkPipelineMultisampleStateCreateInfo multisample{
 			        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
@@ -1728,37 +1891,31 @@ struct DeviceImpl final : Device
 			    VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
 			    depth.depthTestEnable = desc.depthTest;
 			    depth.depthWriteEnable = desc.depthTest && desc.depthWrite;
-			    switch (desc.depthCompare)
+			    depth.depthCompareOp = ToVkCompare(desc.depthCompare);
+			    depth.stencilTestEnable = desc.stencil.enabled;
+			    const auto convertStencilFace = [&](const StencilFaceState& face)
 			    {
-				    case Compare::Never:
-					    depth.depthCompareOp = VK_COMPARE_OP_NEVER;
-					    break;
-				    case Compare::Less:
-					    depth.depthCompareOp = VK_COMPARE_OP_LESS;
-					    break;
-				    case Compare::LessEqual:
-					    depth.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-					    break;
-				    case Compare::Equal:
-					    depth.depthCompareOp = VK_COMPARE_OP_EQUAL;
-					    break;
-				    case Compare::Greater:
-					    depth.depthCompareOp = VK_COMPARE_OP_GREATER;
-					    break;
-				    case Compare::Always:
-					    depth.depthCompareOp = VK_COMPARE_OP_ALWAYS;
-					    break;
-			    }
+				    VkStencilOpState state{};
+				    state.failOp = ToVkStencilOperation(face.failOperation);
+				    state.passOp = ToVkStencilOperation(face.passOperation);
+				    state.depthFailOp = ToVkStencilOperation(face.depthFailOperation);
+				    state.compareOp = ToVkCompare(face.compare);
+				    state.compareMask = desc.stencil.readMask;
+				    state.writeMask = desc.stencil.writeMask;
+				    state.reference = desc.stencil.reference;
+				    return state;
+			    };
+			    depth.front = convertStencilFace(desc.stencil.front);
+			    depth.back = convertStencilFace(desc.stencil.back);
 			    VkPipelineColorBlendAttachmentState blend{};
-			    blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-			                           VK_COLOR_COMPONENT_A_BIT;
-			    blend.blendEnable = desc.blend;
-			    blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-			    blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-			    blend.colorBlendOp = VK_BLEND_OP_ADD;
-			    blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-			    blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-			    blend.alphaBlendOp = VK_BLEND_OP_ADD;
+			    blend.colorWriteMask = ToVkColorWriteMask(desc.colorWriteMask);
+			    blend.blendEnable = blendingEnabled;
+			    blend.srcColorBlendFactor = ToVkBlendFactor(desc.blendState.sourceColor);
+			    blend.dstColorBlendFactor = ToVkBlendFactor(desc.blendState.destinationColor);
+			    blend.colorBlendOp = ToVkBlendOperation(desc.blendState.colorOperation);
+			    blend.srcAlphaBlendFactor = ToVkBlendFactor(desc.blendState.sourceAlpha);
+			    blend.dstAlphaBlendFactor = ToVkBlendFactor(desc.blendState.destinationAlpha);
+			    blend.alphaBlendOp = ToVkBlendOperation(desc.blendState.alphaOperation);
 			    VkPipelineColorBlendStateCreateInfo blendState{
 			        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
 			    blendState.attachmentCount = 1;

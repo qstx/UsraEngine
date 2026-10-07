@@ -1,6 +1,7 @@
 #include <Serialization/SerializableRegistry.hpp>
 #include <Scene/Scene.hpp>
 #include <Serialization/PrefabAsset.hpp>
+#include <Shader/ShaderAsset.hpp>
 
 namespace Ursa
 {
@@ -34,6 +35,12 @@ Result<void> RegisterBuiltinSerializableTypes(SerializableRegistry& registry)
 		result = registry.Register(
 		    "ursa.Texture", 1, [](SerializationContext&)
 		    { return Result<std::shared_ptr<Serializable>>::Success(MaterialTexture::CreateForDeserialization()); });
+	}
+	if (result)
+	{
+		result = registry.Register(
+		    "ursa.Shader", 1, [](SerializationContext&)
+		    { return Result<std::shared_ptr<Serializable>>::Success(std::make_shared<Shader::ShaderAsset>()); });
 	}
 	return result;
 }

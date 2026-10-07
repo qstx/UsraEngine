@@ -9,6 +9,8 @@
 #include <Ui/ImGuiBridge.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Assets/MaterialPreview.hpp>
+#include <Assets/MaterialInspectors.hpp>
+#include <Assets/ShaderImportView.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Scene/EditorScenePreview.hpp>
 #include <Scene/EditorGizmo.hpp>
@@ -23,6 +25,7 @@ struct EditorProject
 {
 	ComponentRegistry components;
 	ComponentEditors componentEditors;
+	MaterialInspectors materialInspectors;
 	EditorTools tools;
 	std::function<Result<void>(ComponentLoadContext&)> editContextSetup;
 	PlayContextSetup playContextSetup;
@@ -92,6 +95,7 @@ private:
 	String activeEditorTool;
 	std::unique_ptr<ImGuiBridge> gui;
 	std::unique_ptr<MaterialPreview> materialPreview;
+	std::unique_ptr<ShaderImportView> shaderImportView;
 	std::unique_ptr<EditorScenePreview> scenePreview;
 	EditorHierarchy hierarchy;
 	Rhi::TexturePtr scenePreviewColor;

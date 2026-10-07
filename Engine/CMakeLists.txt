@@ -5,6 +5,8 @@ file(GLOB_RECURSE URSA_ENGINE_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/Math/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Material/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Material/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Shader/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Shader/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scene/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scene/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Renderer3D/*.cpp"
@@ -16,23 +18,6 @@ add_library(Ursa::Engine ALIAS UrsaEngine)
 set_target_properties(UrsaEngine PROPERTIES FOLDER "Engine")
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${URSA_ENGINE_SOURCES})
 
-file(GLOB URSA_ENGINE_SHADERS CONFIGURE_DEPENDS
-  "${PROJECT_SOURCE_DIR}/Assets/Shaders/Renderer3D/*.vert"
-  "${PROJECT_SOURCE_DIR}/Assets/Shaders/Renderer3D/*.frag")
-foreach(source IN LISTS URSA_ENGINE_SHADERS)
-  get_filename_component(shader "${source}" NAME)
-  set(output "${URSA_ASSET_MIRROR_DIR}/Shaders/Renderer3D/${shader}.spv")
-  add_custom_command(OUTPUT "${output}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${URSA_ASSET_MIRROR_DIR}/Shaders/Renderer3D"
-    COMMAND Vulkan::glslc "${source}" -o "${output}"
-    DEPENDS "${source}" VERBATIM)
-  target_sources(UrsaEngine PRIVATE "${source}" "${output}")
-  set_source_files_properties("${source}" PROPERTIES HEADER_FILE_ONLY TRUE)
-  set_source_files_properties("${output}" PROPERTIES GENERATED TRUE HEADER_FILE_ONLY TRUE)
-  source_group(TREE "${PROJECT_SOURCE_DIR}" FILES "${source}")
-  source_group("Generated Shaders" FILES "${output}")
-endforeach()
-
 target_include_directories(UrsaEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(UrsaEngine PUBLIC Ursa::Runtime nlohmann_json::nlohmann_json)
 
@@ -41,3 +26,30 @@ if(MSVC)
 else()
   target_compile_options(UrsaEngine PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+add_executable(UrsaShaderImporter "${PROJECT_SOURCE_DIR}/Tools/ShaderImporter/Main.cpp")
+target_link_libraries(UrsaShaderImporter PRIVATE Ursa::Engine)
+set_target_properties(UrsaShaderImporter PROPERTIES FOLDER "Tools")
+
+file(GLOB_RECURSE URSA_SHADER_SOURCE_FILES CONFIGURE_DEPENDS
+  "${PROJECT_SOURCE_DIR}/Assets/Shaders/*.ursashader"
+  "${PROJECT_SOURCE_DIR}/Assets/Shaders/*.hlsli"
+  "${PROJECT_SOURCE_DIR}/Assets/Shaders/*.hlsl"
+  "${PROJECT_SOURCE_DIR}/Assets/*.ursamat")
+set(URSA_SHADER_IMPORT_STAMP "${CMAKE_CURRENT_BINARY_DIR}/shader-import.stamp")
+set(URSA_SHADER_IMPORT_CACHE "${URSA_ASSET_CACHE_DIR}/ShaderImportCache")
+add_custom_command(OUTPUT "${URSA_SHADER_IMPORT_STAMP}"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${URSA_ASSET_MIRROR_DIR}"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${URSA_SHADER_IMPORT_CACHE}"
+  COMMAND $<TARGET_FILE:UrsaShaderImporter>
+    --source-root "${PROJECT_SOURCE_DIR}/Assets"
+    --output-root "${URSA_ASSET_MIRROR_DIR}"
+    --cache-root "${URSA_SHADER_IMPORT_CACHE}"
+    --dxc "${URSA_DXC_EXECUTABLE}"
+    --spirv-val "${URSA_SPIRV_VAL_EXECUTABLE}"
+    --spirv-cross "${URSA_SPIRV_CROSS_EXECUTABLE}"
+  COMMAND ${CMAKE_COMMAND} -E touch "${URSA_SHADER_IMPORT_STAMP}"
+  DEPENDS UrsaShaderImporter ${URSA_SHADER_SOURCE_FILES}
+  VERBATIM)
+add_custom_target(UrsaEngineShaderAssets ALL DEPENDS "${URSA_SHADER_IMPORT_STAMP}")
+set_target_properties(UrsaEngineShaderAssets PROPERTIES FOLDER "Assets")
