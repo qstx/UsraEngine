@@ -1,6 +1,7 @@
+#include <ResourceFixtures.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
-#include <Serialization/AtomicFile.hpp>
+#include <AtomicFile.hpp>
 #include <Serialization/ResourceFile.hpp>
 #include <Serialization/ResourceIndex.hpp>
 #include <fstream>

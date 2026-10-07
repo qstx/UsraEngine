@@ -3,6 +3,7 @@
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
 #include <Material/Color.hpp>
+#include <Serialization/Serializable.hpp>
 #include <cstdint>
 #include <memory>
 
@@ -39,9 +40,20 @@ struct MaterialSampler
 	bool repeat = true;
 };
 
-class MaterialTexture final
+class MaterialTexture final : public Serializable
 {
 public:
+	String SerializationType() const override
+	{
+		return "ursa.Texture";
+	}
+
+	Result<void> Serialize(ArchiveWriter& writer) const override;
+
+	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
+
+	static std::shared_ptr<MaterialTexture> CreateForDeserialization();
+
 	static Result<std::shared_ptr<const MaterialTexture>> Create(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight,
 	                                                             TextureColorSpace textureColorSpace,
 	                                                             Vector<Ursa::UInt8> rgba8);
@@ -91,9 +103,18 @@ struct MaterialParameters
 	MaterialSampler sampler{};
 };
 
-class MaterialInstance final
+class MaterialInstance final : public Serializable
 {
 public:
+	String SerializationType() const override
+	{
+		return "ursa.Material";
+	}
+
+	Result<void> Serialize(ArchiveWriter& writer) const override;
+
+	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
+
 	explicit MaterialInstance(MaterialType materialType);
 
 	MaterialType Type() const

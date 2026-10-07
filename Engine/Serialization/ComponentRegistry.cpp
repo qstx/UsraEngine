@@ -25,7 +25,7 @@ Result<void> ComponentLoadContext::MapGameObject(ResourceId id, GameObject::Ptr 
 	{
 		return Result<void>::Failure("Duplicate or invalid persistent GameObject ID " + id.ToString());
 	}
-	return {};
+	return RegisterObject(id, *object);
 }
 
 Result<void> ComponentLoadContext::MapComponent(ResourceId id, ComponentId component)
@@ -51,7 +51,7 @@ Result<void> ComponentLoadContext::MapComponentObject(ResourceId id, ::Ursa::Com
 	{
 		return Result<void>::Failure("Duplicate or invalid persistent component ID " + id.ToString());
 	}
-	return {};
+	return RegisterObject(id, *component);
 }
 
 void ComponentLoadContext::ClearMappings()
@@ -59,6 +59,7 @@ void ComponentLoadContext::ClearMappings()
 	gameObjects.clear();
 	components.clear();
 	componentObjects.clear();
+	ClearReferences();
 }
 
 Result<void> ComponentRegistry::RegisterCodec(ComponentCodec codec)

@@ -462,7 +462,7 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 }
 } // namespace
 
-Result<void> CaptureLinkedSceneChanges(const std::filesystem::path& path, LinkedSceneResource& linked,
+Result<void> CaptureLinkedSceneChanges(const String& path, LinkedSceneResource& linked,
                                        const ComponentRegistry& registry, const MaterialIdResolver& materialId)
 {
 	auto encoded = EncodeSceneDocument(path, linked.id, *linked.scene, registry, materialId);
@@ -470,8 +470,8 @@ Result<void> CaptureLinkedSceneChanges(const std::filesystem::path& path, Linked
 	{
 		return Result<void>::Failure(encoded.error);
 	}
-	auto baseline = Index(linked.snapshot, PathToUrsaString(path) + " previous snapshot");
-	auto current = Index(encoded.value, PathToUrsaString(path) + " current scene");
+	auto baseline = Index(linked.snapshot, path + " previous snapshot");
+	auto current = Index(encoded.value, path + " current scene");
 	if (!baseline || !current)
 	{
 		return Result<void>::Failure(!baseline ? baseline.error : current.error);
@@ -487,11 +487,10 @@ Result<void> CaptureLinkedSceneChanges(const std::filesystem::path& path, Linked
 		auto mapping = updatedScopes.find(id);
 		if (mapping == updatedScopes.end())
 		{
-			return Result<void>::Failure("Missing Prefab scope for instance " + id + " at " + PathToUrsaString(path));
+			return Result<void>::Failure("Missing Prefab scope for instance " + id + " at " + path);
 		}
 		auto result = CaptureInstance(id, mapping->second, baseline.value, current.value, instance["overrides"],
-		                              currentInstanceNodes, baselineInstanceNodes, currentInstanceComponents,
-		                              PathToUrsaString(path));
+		                              currentInstanceNodes, baselineInstanceNodes, currentInstanceComponents, path);
 		if (!result)
 		{
 			return result;

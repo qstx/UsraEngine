@@ -13,10 +13,19 @@
 
 namespace Ursa
 {
-class GameObject final : public std::enable_shared_from_this<GameObject>
+class GameObject final : public Serializable, public std::enable_shared_from_this<GameObject>
 {
 public:
 	using Ptr = std::shared_ptr<GameObject>;
+
+	String SerializationType() const override
+	{
+		return "ursa.GameObject";
+	}
+
+	Result<void> Serialize(ArchiveWriter& writer) const override;
+
+	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
 
 	static Ptr Create(String objectName = {});
 

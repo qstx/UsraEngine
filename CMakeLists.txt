@@ -65,6 +65,16 @@ set(URSA_ASSET_MIRROR_DIR "${URSA_ASSET_CACHE_DIR}/Assets" CACHE PATH
 add_subdirectory(Runtime)
 add_subdirectory(Engine)
 
+add_executable(UrsaPak Tools/Pak/Main.cpp)
+target_link_libraries(UrsaPak PRIVATE Ursa::Runtime)
+set_target_properties(UrsaPak PROPERTIES FOLDER "Tools")
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  add_custom_target(UrsaEnginePackage
+    COMMAND UrsaPak --engine "${PROJECT_SOURCE_DIR}/Assets"
+      --engine-generated "${URSA_ASSET_MIRROR_DIR}" --output "${CMAKE_BINARY_DIR}/package/Content.pak"
+    DEPENDS UrsaPak UrsaEngine VERBATIM)
+endif()
+
 option(URSA_BUILD_EDITOR "Build the Ursa editor" ON)
 if(URSA_BUILD_EDITOR)
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp" OR
@@ -72,6 +82,9 @@ if(URSA_BUILD_EDITOR)
     message(FATAL_ERROR "Editor submodules are missing. Run: git submodule update --init third_party/imgui third_party/imguizmo")
   endif()
   add_subdirectory(Editor)
+  if(TARGET UrsaEnginePackage)
+    add_dependencies(UrsaEnginePackage UrsaEditorCore)
+  endif()
 endif()
 
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
@@ -82,6 +95,13 @@ endif()
 option(URSA_BUILD_TESTS "Build the engine GPU tests" ${URSA_BUILD_TESTS_DEFAULT})
 
 if(URSA_BUILD_TESTS)
+  include_directories("${CMAKE_CURRENT_SOURCE_DIR}/Tests/Fixtures")
+  add_executable(UrsaResourceVfsTests Tests/Serialization/ResourceVfsTests.cpp)
+  target_link_libraries(UrsaResourceVfsTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaResourceVfsTests COMMAND UrsaResourceVfsTests)
+  add_executable(UrsaSerializableHeaderSmoke Tests/Serialization/SerializableHeaderSmoke.cpp)
+  target_link_libraries(UrsaSerializableHeaderSmoke PRIVATE Ursa::Engine)
+  add_test(NAME UrsaSerializableHeaderSmoke COMMAND UrsaSerializableHeaderSmoke)
   enable_testing()
 
   if(URSA_BUILD_EDITOR)
@@ -160,6 +180,10 @@ if(URSA_BUILD_TESTS)
   target_link_libraries(UrsaVirtualFileSystemTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaVirtualFileSystemTests COMMAND UrsaVirtualFileSystemTests)
 
+  add_executable(UrsaPakTests Tests/Vfs/PakTests.cpp)
+  target_link_libraries(UrsaPakTests PRIVATE Ursa::Runtime)
+  add_test(NAME UrsaPakTests COMMAND UrsaPakTests)
+
   add_executable(UrsaRuntimeHeaderSmoke Tests/Core/RuntimeHeaderSmoke.cpp)
   target_link_libraries(UrsaRuntimeHeaderSmoke PRIVATE Ursa::Runtime)
   add_test(NAME UrsaRuntimeHeaderSmoke COMMAND UrsaRuntimeHeaderSmoke)
@@ -176,9 +200,13 @@ if(URSA_BUILD_TESTS)
   target_link_libraries(UrsaMaterialTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaMaterialTests COMMAND UrsaMaterialTests)
 
-  add_executable(UrsaSerializationBaseTests Tests/Serialization/SerializationBaseTests.cpp)
+  add_executable(UrsaSerializationBaseTests Tests/Serialization/SerializationBaseTests.cpp Tests/Fixtures/AtomicFile.cpp)
   target_link_libraries(UrsaSerializationBaseTests PRIVATE Ursa::Engine)
   add_test(NAME UrsaSerializationBaseTests COMMAND UrsaSerializationBaseTests)
+
+  add_executable(UrsaArchiveTests Tests/Serialization/ArchiveTests.cpp)
+  target_link_libraries(UrsaArchiveTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaArchiveTests COMMAND UrsaArchiveTests)
 
   add_executable(UrsaAssetPersistenceTests Tests/Serialization/AssetPersistenceTests.cpp)
   target_link_libraries(UrsaAssetPersistenceTests PRIVATE Ursa::Engine)

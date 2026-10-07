@@ -1,3 +1,4 @@
+#include <ResourceFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>

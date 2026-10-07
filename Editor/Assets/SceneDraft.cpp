@@ -40,8 +40,8 @@ Result<std::shared_ptr<SceneDraft>> SceneDraft::Create(ResourceKind resourceKind
 	return Result<std::shared_ptr<SceneDraft>>::Success(std::move(draft));
 }
 
-Result<std::shared_ptr<SceneDraft>> SceneDraft::Load(const std::filesystem::path& path, ResourceKind resourceKind,
-                                                     ComponentRegistry& componentRegistry,
+Result<std::shared_ptr<SceneDraft>> SceneDraft::Load(const VirtualFileSystem& filesystem, const VirtualPath& path,
+                                                     ResourceKind resourceKind, ComponentRegistry& componentRegistry,
                                                      ResourceSession& resourceSession,
                                                      const EditContextSetup& contextSetup)
 {
@@ -62,7 +62,7 @@ Result<std::shared_ptr<SceneDraft>> SceneDraft::Load(const std::filesystem::path
 	    std::shared_ptr<SceneDraft>(new SceneDraft(resourceKind, componentRegistry, resourceSession, contextSetup));
 	if (resourceKind == ResourceKind::Prefab)
 	{
-		auto asset = LoadPrefabAssetResource(path, componentRegistry, context);
+		auto asset = LoadPrefabAssetResource(filesystem, path, componentRegistry, context);
 		if (!asset)
 		{
 			return Result<std::shared_ptr<SceneDraft>>::Failure(asset.error);
@@ -76,14 +76,14 @@ Result<std::shared_ptr<SceneDraft>> SceneDraft::Load(const std::filesystem::path
 	}
 	else
 	{
-		auto json = ReadJsonResource(path, ResourceKind::Scene);
+		auto json = ReadJsonResource(filesystem, path, ResourceKind::Scene);
 		if (!json)
 		{
 			return Result<std::shared_ptr<SceneDraft>>::Failure(json.error);
 		}
 		if (json.value.contains("instances"))
 		{
-			auto loaded = LoadLinkedSceneResource(path, componentRegistry, context);
+			auto loaded = LoadLinkedSceneResource(filesystem, path, componentRegistry, context);
 			if (!loaded)
 			{
 				return Result<std::shared_ptr<SceneDraft>>::Failure(loaded.error);
@@ -92,7 +92,7 @@ Result<std::shared_ptr<SceneDraft>> SceneDraft::Load(const std::filesystem::path
 		}
 		else
 		{
-			auto loaded = LoadSceneResource(path, componentRegistry, context);
+			auto loaded = LoadSceneResource(filesystem, path, componentRegistry, context);
 			if (!loaded)
 			{
 				return Result<std::shared_ptr<SceneDraft>>::Failure(loaded.error);
@@ -117,10 +117,19 @@ Result<ResourceId> SceneDraft::MaterialId(const std::shared_ptr<MaterialInstance
 	return resources.IdentifyMaterial(material);
 }
 
-Result<void> SceneDraft::Save(const std::filesystem::path& path, ResourceId id)
+Result<void> SceneDraft::Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id)
 {
 	const MaterialIdResolver resolver = [this](const std::shared_ptr<MaterialInstance>& material)
 	{ return MaterialId(material); };
+	ComponentLoadContext validation(resources);
+	if (setup)
+	{
+		auto prepared = setup(validation);
+		if (!prepared)
+		{
+			return prepared;
+		}
+	}
 	if (kind == ResourceKind::Prefab)
 	{
 		if (!prefabAsset || !prefabAsset->Root())
@@ -128,13 +137,31 @@ Result<void> SceneDraft::Save(const std::filesystem::path& path, ResourceId id)
 			return Result<void>::Failure("Prefab document has no detached asset graph");
 		}
 		PrefabAsset resource(id, prefabAsset->Root());
-		return SavePrefabAssetResource(path, resource, registry, resolver);
+		auto saved = SavePrefabAssetResource(filesystem, path, resource, registry, resolver);
+		if (!saved)
+		{
+			return saved;
+		}
+		auto loaded = LoadPrefabAssetResource(filesystem, path, registry, validation);
+		return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
 	}
 	if (linked)
 	{
-		return SaveLinkedSceneResource(path, *linked, registry, resolver);
+		auto saved = SaveLinkedSceneResource(filesystem, path, *linked, registry, resolver);
+		if (!saved)
+		{
+			return saved;
+		}
+		auto loaded = LoadLinkedSceneResource(filesystem, path, registry, validation);
+		return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
 	}
-	return SaveSceneResource(path, id, GetScene(), registry, resolver);
+	auto saved = SaveSceneResource(filesystem, path, id, GetScene(), registry, resolver);
+	if (!saved)
+	{
+		return saved;
+	}
+	auto loaded = LoadSceneResource(filesystem, path, registry, validation);
+	return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
 }
 
 Result<void> SceneDraft::RefreshPrefabPreview()
@@ -318,8 +345,8 @@ Result<void> SceneDraft::SetInstanceStructure(ResourceId instanceId, const Strin
 	return SetPrefabStructureOverride(*linked, instanceId, operation, value);
 }
 
-Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId parentId,
-                                           const std::filesystem::path& scenePath, ResourceId sceneId)
+Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId parentId, const VirtualPath& scenePath,
+                                           ResourceId sceneId)
 {
 	if (kind != ResourceKind::Scene)
 	{
@@ -333,7 +360,7 @@ Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId paren
 		const auto previousDocument = linked->document;
 		const auto previousSnapshot = linked->snapshot;
 		const auto previousScopes = linked->scopedIds;
-		auto captured = CaptureLinkedSceneChanges(scenePath, *linked, registry, resolver);
+		auto captured = CaptureLinkedSceneChanges(scenePath.ToString(), *linked, registry, resolver);
 		if (!captured)
 		{
 			return Result<ResourceId>::Failure(captured.error);
@@ -345,7 +372,7 @@ Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId paren
 	}
 	else
 	{
-		auto encoded = EncodeSceneDocument(scenePath, sceneId, *scene, registry, resolver);
+		auto encoded = EncodeSceneDocument(scenePath.ToString(), sceneId, *scene, registry, resolver);
 		if (!encoded)
 		{
 			return Result<ResourceId>::Failure(encoded.error);
@@ -367,7 +394,7 @@ Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId paren
 			return Result<ResourceId>::Failure(prepared.error);
 		}
 	}
-	auto loaded = DecodeLinkedSceneDocument(scenePath, std::move(document), registry, context);
+	auto loaded = DecodeLinkedSceneDocument(scenePath.ToString(), std::move(document), registry, context);
 	if (!loaded)
 	{
 		return Result<ResourceId>::Failure(loaded.error);
@@ -386,9 +413,10 @@ Result<std::unique_ptr<EditorDocument>> NewSceneDocument(const VirtualPath& path
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(draft.error);
 	}
-	auto document = EditorDocument::Create(kind, ResourceId::Generate(), path,
-	                                       [draft = draft.value](const std::filesystem::path& target, ResourceId id)
-	                                       { return draft->Save(target, id); });
+	auto document =
+	    EditorDocument::Create(kind, ResourceId::Generate(), path,
+	                           [draft = draft.value](VirtualFileSystem& filesystem, const VirtualPath& target,
+	                                                 ResourceId id) { return draft->Save(filesystem, target, id); });
 	if (document)
 	{
 		document.value->SetPayload(draft.value);
@@ -401,12 +429,8 @@ Result<std::unique_ptr<EditorDocument>> OpenSceneDocument(const VirtualPath& pat
                                                           ComponentRegistry& registry, ResourceSession& resources,
                                                           const EditContextSetup& setup)
 {
-	auto host = resources.Index().Locate(ResourceLocation{kind, path});
-	if (!host)
-	{
-		return Result<std::unique_ptr<EditorDocument>>::Failure(host.error);
-	}
-	auto header = ReadResourceHeader(host.value);
+
+	auto header = ReadResourceHeader(resources.Index().Filesystem(), path);
 	if (!header)
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(header.error);
@@ -415,14 +439,15 @@ Result<std::unique_ptr<EditorDocument>> OpenSceneDocument(const VirtualPath& pat
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure("Scene document kind does not match file");
 	}
-	auto draft = SceneDraft::Load(host.value, kind, registry, resources, setup);
+	auto draft = SceneDraft::Load(resources.Index().Filesystem(), path, kind, registry, resources, setup);
 	if (!draft)
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(draft.error);
 	}
-	auto document = EditorDocument::Create(kind, header.value.id, path,
-	                                       [draft = draft.value](const std::filesystem::path& target, ResourceId id)
-	                                       { return draft->Save(target, id); });
+	auto document =
+	    EditorDocument::Create(kind, header.value.id, path,
+	                           [draft = draft.value](VirtualFileSystem& filesystem, const VirtualPath& target,
+	                                                 ResourceId id) { return draft->Save(filesystem, target, id); });
 	if (document)
 	{
 		document.value->SetPayload(draft.value);
@@ -1054,17 +1079,9 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 	ImGui::End();
 	if (prefabToPlace)
 	{
-		auto sceneHost = workspace.Index().Locate(ResourceLocation{document.Kind(), document.Path()});
-		if (!sceneHost)
-		{
-			diagnostic = sceneHost.error;
-		}
-		else
-		{
-			auto placed = draft->PlacePrefab(prefabToPlace, placementParent, sceneHost.value, document.Id());
-			diagnostic = placed ? String{} : placed.error;
-			changed |= static_cast<bool>(placed);
-		}
+		auto placed = draft->PlacePrefab(prefabToPlace, placementParent, document.Path(), document.Id());
+		diagnostic = placed ? String{} : placed.error;
+		changed |= static_cast<bool>(placed);
 	}
 	if (changed)
 	{

@@ -6,10 +6,16 @@ namespace Ursa
 {
 Result<void> ResourceIndex::Mount(const ResourceMount& mount)
 {
-	auto added = filesystem.Mount(mount.scheme, mount.root, mount.access);
+	auto added = mount.provider ? filesystem.MountProvider(mount.scheme, mount.provider, mount.access)
+	                            : filesystem.Mount(mount.scheme, mount.root, mount.access);
 	if (!added)
 	{
 		return added;
+	}
+	if (mount.provider)
+	{
+		mounts.push_back(mount);
+		return {};
 	}
 	std::error_code error;
 	const auto canonical = std::filesystem::canonical(mount.root, error);
@@ -31,6 +37,10 @@ Result<void> ResourceIndex::Rebuild()
 	Map<String, ResourceLocation> candidate;
 	for (const String& scheme : filesystem.Schemes())
 	{
+		if (scheme == userDataScheme)
+		{
+			continue;
+		}
 		auto listed = filesystem.List(scheme);
 		if (!listed)
 		{
@@ -76,21 +86,6 @@ Result<ResourceLocation> ResourceIndex::Resolve(ResourceId id, const String& ref
 		                                         (referencedBy.empty() ? String{} : " referenced by " + referencedBy));
 	}
 	return Result<ResourceLocation>::Success(found->second);
-}
-
-Result<std::filesystem::path> ResourceIndex::Locate(const ResourceLocation& location) const
-{
-	auto resolved = filesystem.ResolveToDisk(location.path);
-	if (!resolved)
-	{
-		return Result<std::filesystem::path>::Failure(resolved.error);
-	}
-	return Result<std::filesystem::path>::Success(std::move(resolved.value));
-}
-
-Result<std::filesystem::path> ResourceIndex::WritablePath(const VirtualPath& path) const
-{
-	return filesystem.ResolveForWrite(path);
 }
 
 Vector<ResourceEntry> ResourceIndex::Entries() const

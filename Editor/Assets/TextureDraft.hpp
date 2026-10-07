@@ -14,7 +14,7 @@ public:
 	                                                    TextureColorSpace textureColorSpace,
 	                                                    Vector<Ursa::UInt8> texturePixels);
 
-	static Result<std::shared_ptr<TextureDraft>> Load(const std::filesystem::path& path);
+	static Result<std::shared_ptr<TextureDraft>> Load(const VirtualFileSystem& filesystem, const VirtualPath& path);
 
 	Result<void> ReplacePixels(Ursa::UInt32 newWidth, Ursa::UInt32 newHeight, TextureColorSpace newColorSpace,
 	                           Vector<Ursa::UInt8> newPixels);
@@ -28,7 +28,7 @@ public:
 	Result<void> GenerateChecker(Ursa::UInt32 cellSize, Ursa::Array<Ursa::UInt8, 4> first,
 	                             Ursa::Array<Ursa::UInt8, 4> second);
 
-	Result<void> Save(const std::filesystem::path& path, ResourceId id) const;
+	Result<void> Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id) const;
 
 	Ursa::UInt32 GetWidth() const
 	{

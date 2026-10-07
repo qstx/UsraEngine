@@ -16,9 +16,18 @@
 
 namespace Ursa
 {
-class Scene final
+class Scene final : public Serializable
 {
 public:
+	String SerializationType() const override
+	{
+		return "ursa.Scene";
+	}
+
+	Result<void> Serialize(ArchiveWriter& writer) const override;
+
+	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
+
 	Scene() = default;
 
 	~Scene();

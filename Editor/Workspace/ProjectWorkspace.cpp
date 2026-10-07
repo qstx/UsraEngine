@@ -95,17 +95,29 @@ Result<void> ProjectWorkspace::Refresh()
 	return index.Rebuild();
 }
 
-Result<std::filesystem::path> ProjectWorkspace::WritablePath(const VirtualPath& path) const
+Result<std::unique_ptr<ProjectWorkspace>>
+ProjectWorkspace::FromFilesystem(const std::filesystem::path& projectDirectory, const VirtualFileSystem& filesystem)
 {
-	if (path.scheme != projectResourceScheme)
+	auto workspace = std::unique_ptr<ProjectWorkspace>(new ProjectWorkspace());
+	workspace->projectRoot = projectDirectory;
+	workspace->assetsRoot = projectDirectory / "Assets";
+	for (const auto& mount : filesystem.Providers())
 	{
-		return Result<std::filesystem::path>::Failure("Only project resources are writable, not " + path.ToString());
+		auto added = workspace->index.Mount({mount.scheme, {}, mount.access, mount.provider});
+		if (!added)
+		{
+			return Result<std::unique_ptr<ProjectWorkspace>>::Failure(added.error);
+		}
 	}
-	auto resolved = index.WritablePath(path);
-	if (!resolved)
-	{
-		return Result<std::filesystem::path>::Failure(resolved.error);
-	}
-	return resolved;
+	auto rebuilt = workspace->Refresh();
+	return rebuilt ? Result<std::unique_ptr<ProjectWorkspace>>::Success(std::move(workspace))
+	               : Result<std::unique_ptr<ProjectWorkspace>>::Failure(rebuilt.error);
+}
+
+Result<void> ProjectWorkspace::CheckWritable(const VirtualPath& path) const
+{
+	return path.scheme == projectResourceScheme
+	           ? index.Filesystem().CheckWritable(path)
+	           : Result<void>::Failure("Only project resources are writable: " + path.ToString());
 }
 } // namespace Ursa::Editor

@@ -14,6 +14,7 @@ struct ResourceMount
 	String scheme;
 	std::filesystem::path root;
 	MountAccess access = MountAccess::ReadOnly;
+	std::shared_ptr<VirtualFileProvider> provider;
 };
 
 struct ResourceLocation
@@ -38,11 +39,12 @@ public:
 
 	Result<ResourceLocation> Resolve(ResourceId id, const String& referencedBy = {}) const;
 
-	Result<std::filesystem::path> Locate(const ResourceLocation& location) const;
-
-	Result<std::filesystem::path> WritablePath(const VirtualPath& path) const;
-
 	Vector<ResourceEntry> Entries() const;
+
+	VirtualFileSystem& Filesystem()
+	{
+		return filesystem;
+	}
 
 	const VirtualFileSystem& Filesystem() const
 	{

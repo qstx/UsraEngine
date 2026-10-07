@@ -5,6 +5,8 @@
 #include <Scene/Component.hpp>
 #include <Scene/Scene.hpp>
 #include <Serialization/ResourceSession.hpp>
+#include <Serialization/SerializationContext.hpp>
+#include <Serialization/JsonArchiveInterop.hpp>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -32,31 +34,17 @@ struct ComponentSaveContext
 	}
 };
 
-class ComponentLoadContext final
+class ComponentLoadContext final : public SerializationContext
 {
 public:
-	explicit ComponentLoadContext(ResourceSession& resourceSession) : resources(resourceSession)
+	explicit ComponentLoadContext(ResourceSession& resourceSession)
+	    : SerializationContext(&resourceSession), resources(resourceSession)
 	{
 	}
 
 	ResourceSession& Resources() const
 	{
 		return resources;
-	}
-
-	template <class T> void Provide(T& service)
-	{
-		services[std::type_index(typeid(T))] = &service;
-	}
-
-	template <class T> Result<T*> Service() const
-	{
-		auto found = services.find(std::type_index(typeid(T)));
-		if (found == services.end())
-		{
-			return Result<T*>::Failure("Missing runtime service " + String(typeid(T).name()));
-		}
-		return Result<T*>::Success(static_cast<T*>(found->second));
 	}
 
 	Result<GameObject::Ptr> GameObjectById(ResourceId id) const;
@@ -75,10 +63,37 @@ public:
 
 private:
 	ResourceSession& resources;
-	Map<std::type_index, void*> services;
+
 	Map<String, GameObject::Ptr> gameObjects;
 	Map<String, ComponentId> components;
 	Map<String, ::Ursa::Component*> componentObjects;
+};
+
+// Clear candidate reference maps on failure so callers cannot observe a partial graph.
+class ComponentMappingScope final
+{
+public:
+	explicit ComponentMappingScope(ComponentLoadContext& context) : context(context)
+	{
+		context.ClearMappings();
+	}
+
+	~ComponentMappingScope()
+	{
+		if (!committed)
+		{
+			context.ClearMappings();
+		}
+	}
+
+	void Commit()
+	{
+		committed = true;
+	}
+
+private:
+	ComponentLoadContext& context;
+	bool committed = false;
 };
 
 struct ComponentCodec
@@ -99,6 +114,57 @@ class ComponentRegistry final
 {
 public:
 	Result<void> RegisterCodec(ComponentCodec codec);
+
+	template <class T, class F> Result<void> RegisterSerializable(String type, UInt32 version, F factory)
+	{
+		ComponentCodec codec;
+		codec.type = std::move(type);
+		codec.version = version;
+		codec.matches = [](const Component& value) { return dynamic_cast<const T*>(&value) != nullptr; };
+		codec.save = [](const Component& component, const ComponentSaveContext& context)
+		{
+			SerializationContext saveContext;
+			saveContext.SetResourceIdResolver(
+			    [&context](const Serializable& value) -> Result<ResourceId>
+			    {
+				    auto* material = dynamic_cast<const MaterialInstance*>(&value);
+				    if (!material || !context.materialId)
+				    {
+					    return Result<ResourceId>::Failure("No material ID resolver for BoxRenderComponent");
+				    }
+				    return context.materialId(std::shared_ptr<MaterialInstance>(const_cast<MaterialInstance*>(material),
+				                                                                [](MaterialInstance*) {}));
+			    });
+			ArchiveWriter writer;
+			writer.SetContext(&saveContext);
+			auto saved = component.Serialize(writer);
+			return saved ? ArchiveToJson(writer) : Result<nlohmann::json>::Failure(saved.error);
+		};
+		codec.createDetached = [factory](const GameObject::Ptr& owner, const nlohmann::json& data,
+		                                 ComponentLoadContext& context) -> Result<Component*>
+		{
+			auto reader = ArchiveFromJson(data);
+			if (!reader)
+			{
+				return Result<Component*>::Failure(reader.error);
+			}
+			auto created = factory(owner, context);
+			if (!created)
+			{
+				return Result<Component*>::Failure(created.error);
+			}
+			auto loaded = created.value->Deserialize(reader.value, context);
+			return loaded ? Result<Component*>::Success(created.value) : Result<Component*>::Failure(loaded.error);
+		};
+		codec.create = [create = codec.createDetached](Scene&, const GameObject::Ptr& owner, const nlohmann::json& data,
+		                                               ComponentLoadContext& context)
+		{
+			auto result = create(owner, data, context);
+			return result ? Result<ComponentId>::Success(result.value->Id())
+			              : Result<ComponentId>::Failure(result.error);
+		};
+		return RegisterCodec(std::move(codec));
+	}
 
 	Result<const ComponentCodec*> FindFor(const Component& component) const;
 

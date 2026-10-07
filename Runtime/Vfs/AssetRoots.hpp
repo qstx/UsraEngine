@@ -30,6 +30,9 @@ Result<Vector<std::filesystem::path>> ResolveEngineAssetRoots(const std::filesys
 // scheme, so callers can read "ursa:..." paths.
 Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& explicitRoot = {});
 
+// Startup-only override shared by renderers and UI shader consumers.
+void ConfigureEngineFileSystem(std::shared_ptr<const VirtualFileSystem> filesystem);
+
 // The path of the running executable, or an empty path when it cannot be read.
 std::filesystem::path CurrentExecutablePath();
 } // namespace Ursa

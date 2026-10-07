@@ -9,7 +9,7 @@
 
 namespace Ursa::Editor
 {
-using DocumentWriter = std::function<Result<void>(const std::filesystem::path&, ResourceId)>;
+using DocumentWriter = std::function<Result<void>(VirtualFileSystem&, const VirtualPath&, ResourceId)>;
 
 class EditorDocument final
 {
@@ -96,6 +96,8 @@ public:
 	Result<void> ResolvePrompt(UnsavedChoice choice);
 
 	Result<void> SaveCurrent();
+
+	Result<void> RenameCurrent(const VirtualPath& path);
 
 	void SetSaveBlocked(bool blocked)
 	{

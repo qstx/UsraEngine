@@ -20,23 +20,15 @@ CMake discovers `.cpp` and `.hpp` files within the listed module directories and
 
 ## Logging
 
-Include `<Core/Log.hpp>` to record messages from Runtime, Engine, Editor, or a game without using spdlog types in public code. `LogSession` initializes before a window or GPU device and flushes at scope exit:
+`LogSession` initializes the spdlog-backed logger and flushes on shutdown. Levels are
+Trace, Debug, Info, Warn, Error, Critical and Off. Debug builds default to Debug;
+Release defaults to Info. Use `URSA_LOG_INFO("Engine", message)` and the corresponding
+level macros. Logging before initialization or after shutdown falls back to stderr.
 
-```cpp
-#include <Core/Log.hpp>
-
-int main() {
-    Ursa::LogSession log;
-    if (!log.status())
-        return 1;
-    URSA_LOG_INFO("Example", "Logging ready");
-    return 0;
-}
-```
-
-The levels, from least to most important, are Trace, Debug, Info, Warn, Error, and Critical; `Off` disables output. Debug builds default to Debug and Release builds to Info. Call `Log::setLevel` to change the minimum level while running. The `URSA_LOG_*` macros check the level before evaluating the message expression. A Critical message labels a failure but does not terminate the process; `Result` remains the way an operation reports failure to its caller.
-
-Each accepted message includes a timestamp, level, module name, and UTF-8 body. The synchronous thread-safe sinks write to the colored console and to `logs/<program>.log` beside the executable, with a default 5 MiB file and three rotated backups. `LogConfig` can override the level, path, size, and backup count. Warn and higher flush immediately; shutdown flushes the rest. A file initialization failure returns a diagnostic and writes to `stderr`, so a launcher may continue without file logging. Build and run `UrsaLogHeaderSmoke` to check the example; `UrsaLogTests` covers levels, filtering, rotation, fallback, and concurrent writes.
+Default rotating files live at `user:Logs/<executable>.log`, under the platform user
+data directory. `Log::Initialize(sharedFilesystem, virtualPath, config)` binds an
+explicit `user:` mount. `LogConfig::filePath` is a bootstrap override for fixtures
+and portable layouts; file operations still go through a directory provider.
 
 ## Public container types
 
@@ -93,7 +85,7 @@ To edit a scene, enter `level.ursascene` in **New asset**, click **New Scene**, 
 
 For a linked instance, first save its Prefab source. Open a scene, select a regular parent node, and choose that Prefab from **Place Prefab**; each placement receives its own instance ID. Editing an instance node or its components changes only that placement. **Pin label override** records an explicit property override; hierarchy, component, and transform changes are captured as property or structure overrides on save. Open the `.ursaprefab` itself to edit the shared source. The next explicit scene reload merges source changes with saved instance overrides. A missing override target or invalid merge is reported, and the active scene and saved patch remain available. `UrsaSceneDraftTests` checks two placements, source isolation, and round-trip structure; `UrsaPrefabTests` checks source merges and conflict preservation.
 
-Project components need both a `ComponentCodec` in `EditorProject::components` and, for editable fields, a callback in `EditorProject::componentEditors`. Register them in the launcher setup passed to `EditorApplication`. The callback receives the live component, scene, and node and returns whether a persistent field changed; the Editor then marks the document dirty. A codec without a property editor remains visible and its serialized fields are preserved on save. If decoding needs project services, configure `editContextSetup` to provide them and keep those services alive. Demo's `Editor/Main.cpp` and `Editor/SnakeEditors.cpp` show the Snake registration.
+Project components need a Serializable factory registered with `RegisterSerializable` in `EditorProject::components` and, for editable fields, a callback in `EditorProject::componentEditors`. Register them in the launcher setup passed to `EditorApplication`. The callback receives the live component, scene, and node and returns whether a persistent field changed; the Editor then marks the document dirty. A Serializable component without a property editor remains visible and its serialized fields are preserved on save. If decoding needs project services, configure `editContextSetup` to provide them and keep those services alive. Demo's `Editor/Main.cpp` and `Editor/SnakeEditors.cpp` show the Snake registration.
 
 Click **Run** on a scene to clone the current effective edit scene in memory, including unsaved edits. The copy receives fresh project runtime services from `playContextSetup`; a missing service reports an error and leaves Edit mode intact. Engine `FrameScheduler` drives Update, fixed updates, and Late Update on the copy. The game uses the scene's active camera; focus the viewport image to send keyboard input to the game. Input sent to other Editor panels stays with the UI. **Save** and document switching are disabled during Play. Click **Stop** to destroy the play copy; the edit scene, dirty flag, and asset files remain as they were before Run. `UrsaPlaySessionTests` covers clone isolation, lifecycle order, service failure, save blocking, and cleanup.
 
@@ -127,221 +119,81 @@ Code uses the repository's `.clang-format` rules, including one blank line betwe
 
 ## Virtual file system
 
-`<Vfs/VirtualFileSystem.hpp>` addresses resources with `scheme:relative/path` strings instead of host paths. A scheme names an ordered list of host roots: lookup returns the first root that contains the relative path, so an engine root and a generated-assets root can share one layout. Each root is mounted read-only or read-write, and a write only ever lands on the first root of a read-write scheme. `VirtualPath::parse` rejects host drive letters, absolute paths, and any `..` segment, and every resolved file is checked to stay inside its mount root, including through reparse points such as Windows junctions.
+`<Vfs/VirtualFileSystem.hpp>` addresses runtime content through `scheme:relative/path` virtual paths. The directory provider is used in Editor and loose development runs; a Pak provider serves packaged content. Reads, range reads, listing, atomic writes, and appends all pass through the VFS provider interface. `VirtualPath::Parse` rejects host drive letters, absolute paths, and any `..` segment. The directory provider checks canonical paths against its mount root, including Windows junctions.
 
 ```text
-ursa:Shaders/Renderer3D/Cube.vert      -> <engine>/Assets/Shaders/Renderer3D/Cube.vert
-ursa:Shaders/Renderer3D/Cube.vert.spv  -> <project>/cache/Assets/Shaders/Renderer3D/Cube.vert.spv
-prj:Snake/Snake.ursascene              -> <project>/Assets/Snake/Snake.ursascene
+ursa:Shaders/Renderer3D/Cube.vert      -> Engine source asset directory
+ursa:Shaders/Renderer3D/Cube.vert.spv  -> generated Engine asset directory
+prj:Snake/Snake.ursascene              -> selected project's Assets directory
+user:Logs/UrsaDemoEditor.log            -> per-user application data directory
 ```
 
 ```cpp
-#include <Vfs/AssetRoots.hpp>
+#include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/VirtualFileSystem.hpp>
 
-Ursa::Result<void> openResources(const std::filesystem::path &engineRoot,
-                                 const std::filesystem::path &engineMirror,
-                                 const std::filesystem::path &projectAssets) {
-    Ursa::VirtualFileSystem vfs;
-    if (!vfs.mount("ursa", engineRoot, Ursa::MountAccess::ReadOnly) ||
-        !vfs.mount("ursa", engineMirror, Ursa::MountAccess::ReadOnly) ||
-        !vfs.mount("prj", projectAssets, Ursa::MountAccess::ReadWrite))
-        return Ursa::Result<void>::failure("Cannot mount resource roots");
-    auto shader = Ursa::VirtualPath::parse("ursa:Shaders/Renderer3D/Cube.vert.spv");
+Ursa::Result<void> OpenEditorResources(const std::filesystem::path &engineAssets,
+                                       const std::filesystem::path &generatedAssets,
+                                       const std::filesystem::path &projectAssets,
+                                       const std::filesystem::path &userData) {
+    Ursa::RuntimeMountProfileConfig profile;
+    profile.mode = Ursa::RuntimeMountMode::Editor;
+    profile.applicationId = "UrsaEditor";
+    profile.engineDirectories = {engineAssets, generatedAssets};
+    profile.projectAssetsDirectory = projectAssets;
+    profile.userDataDirectoryOverride = userData;
+    auto vfs = Ursa::OpenRuntimeFileSystem(profile);
+    if (!vfs)
+        return Ursa::Result<void>::Failure(vfs.error);
+
+    auto shader = Ursa::VirtualPath::Parse("ursa:Shaders/Renderer3D/Cube.vert.spv");
     if (!shader)
-        return Ursa::Result<void>::failure(shader.error);
-    auto bytes = vfs.read(shader.value);
+        return Ursa::Result<void>::Failure(shader.error);
+    auto bytes = vfs.value.Read(shader.value);
     if (!bytes)
-        return Ursa::Result<void>::failure(bytes.error);
-    return {};
+        return Ursa::Result<void>::Failure(bytes.error);
+
+    auto assetPath = Ursa::VirtualPath::Parse("prj:Generated/ShaderCopy.bin");
+    if (!assetPath)
+        return Ursa::Result<void>::Failure(assetPath.error);
+    auto saved = vfs.value.WriteAtomic(assetPath.value, bytes.value);
+    if (!saved)
+        return saved;
+
+    auto logPath = Ursa::VirtualPath::Parse("user:Logs/UrsaEditor.log");
+    if (!logPath)
+        return Ursa::Result<void>::Failure(logPath.error);
+    const Ursa::Vector<Ursa::UInt8> message{'o', 'k', '\n'};
+    return vfs.value.Append(logPath.value, message);
 }
 ```
 
-`resolveEngineAssetRoots` and `openEngineFileSystem` select the engine roots in the order explicit override, `Assets/` beside the executable (a packaged layout), then the engine source assets followed by the generated mirror, which overlay into one `ursa:` view. The mirror defaults to `<project>/cache/Assets` and is produced at build time; set `URSA_ASSET_CACHE_DIR` at configure time to move it. `list(scheme)` walks every root, keeps the first occurrence of each relative path, and reports host locations that later roots shadow. The scheme names are a convention, not a built-in: an application registers `ursa` for the engine and `prj` for the writable project. `UrsaVirtualFileSystemTests` covers parsing, mount permissions, overlays, executable-relative resolution, and mount-root isolation.
+`RuntimeMountMode::Editor` makes `ursa:` read-only, `prj:` read-write, and `user:` writable. `LooseRuntime` makes `ursa:` and `prj:` read-only while keeping `user:` writable. `PackagedRuntime` mounts read-only providers for both `ursa:` and `prj:` from the package and keeps writes in `user:`. Pass the package's scheme-specific provider views in `RuntimeMountProfileConfig::packagedProviders`.
 
-## Resource files and IDs
+Multiple providers for one scheme form an ordered overlay: the first provider containing a virtual path wins. Writes use the first provider and require it to be read-write. `Write` is an atomic replacement, `WriteAtomic` names that behavior explicitly, and `Append` is available for append-only streams such as logs. VFS diagnostics identify virtual paths and provider labels rather than making host paths part of resource identity. `UrsaVirtualFileSystemTests` covers parsing, permissions, overlays, range reads, atomic replacement, append, mount profiles, and mount-root isolation.
 
-Resources can be stored under multiple registered roots, such as `Engine/Assets` and a sibling project's `Demo/Assets`. The resource index recognizes `.ursatex` (RGBA8 texture), `.ursamat` (material), `.ursascene` (scene), and `.ursaprefab` (node subtree). Each file carries a format version and a stable 128-bit resource ID. References use this ID rather than a path: after moving or renaming a file within a registered root, call `rebuild()` before resolving it again. A copied file must receive a new ID; indexing two files with the same ID reports both paths as an error.
+## Resource files, scenes and Prefabs
 
-```cpp
-#include <Serialization/ResourceIndex.hpp>
+See [resource I/O and deployment](Docs/Resources.md) for virtual-path APIs, Editor
+transactions, stable IDs, dependency loading, user data and single-file packages.
+See [persistent serialization](Docs/Serialization.md) for Serializable model methods,
+component factories, JSON/binary archives and deferred references.
 
-void inspectResources() {
-Ursa::ResourceIndex resources;
-auto added = resources.addRoot("Assets");
-if (!added)
-    return;
-auto scanned = resources.rebuild();
-if (!scanned)
-    return;
-auto id = Ursa::ResourceId::parse("de305d54-75b4-431b-adb2-eb6b9e546014");
-if (!id)
-    return;
-auto location = resources.resolve(id.value, "example scene");
-if (!location)
-    return;
-}
+`UrsaResourceVfsTests` exercises texture/material/Scene/PrefabAsset loads from both
+directories and Pak, binary Scene serialization, reusable Prefab instances, and
+failed writes/reloads. `UrsaPrefabTests` covers property/structure overrides, source
+updates and explicit reload. Linked scenes retain source and instance IDs; use
+`SetPrefabPropertyOverride`, `ClearPrefabPropertyOverride` and
+`SetPrefabStructureOverride` before saving through the VFS.
+
+### Build a package
+
+```powershell
+cmake --build build --config Debug --target UrsaEnginePackage
 ```
 
-Header parsing rejects unsupported versions, malformed IDs, and files above configured size limits. The index skips filesystem links and reports missing IDs with the referring asset name supplied by the caller. `UrsaSerializationBaseTests` covers ID parsing, header validation, move/rename, duplicate IDs, and failure-safe file replacement.
-
-Procedural RGBA8 pixels can be saved directly as a `.ursatex` file. A `.ursamat` file stores validated material parameters and the IDs of its bound textures. The example below needs no window or GPU:
-
-```cpp
-#include <Serialization/MaterialResource.hpp>
-#include <Serialization/ResourceSession.hpp>
-#include <Serialization/TextureResource.hpp>
-
-void saveAndLoadMaterial(const std::filesystem::path &assetRoot) {
-    auto pixels = Ursa::MaterialTexture::create(1, 1, Ursa::TextureColorSpace::Srgb,
-                                                {220, 80, 40, 255});
-    if (!pixels)
-        return;
-    const auto textureId = Ursa::ResourceId::generate();
-    if (!Ursa::saveTextureResource(assetRoot / "swatch.ursatex", textureId, *pixels.value))
-        return;
-
-    Ursa::MaterialInstance material(Ursa::MaterialType::Unlit);
-    if (!material.setTexture(Ursa::MaterialTextureSlot::BaseColor, pixels.value))
-        return;
-    const auto materialId = Ursa::ResourceId::generate();
-    if (!Ursa::saveMaterialResource(assetRoot / "swatch.ursamat", materialId, material,
-                                    [textureId](Ursa::MaterialTexturePtr) {
-                                        return Ursa::Result<Ursa::ResourceId>::success(textureId);
-                                    }))
-        return;
-
-    auto session = Ursa::ResourceSession::open({assetRoot});
-    if (!session)
-        return;
-    auto loaded = session.value->loadMaterial(materialId);
-    if (!loaded)
-        return;
-}
-```
-
-Call `refreshed()` to create a new indexed loading session after files change. Existing material and texture objects stay alive for scenes that still reference them. `UrsaAssetPersistenceTests` runs the same save/load path and checks both exact pixel recovery and cache identity.
-
-## Saving and loading scenes
-
-Register the component codecs used by the Scene before saving or loading. The new `.ursascene` schema uses `sceneGraphVersion: 2` and a `gameObjects` array containing object IDs, names, parent IDs, local transforms, enabled flags, and component data. Ambient light and active camera remain Scene-level fields. Files without the supported schema version fail with an explicit diagnostic; old Scene files are not migrated. Resource references in component fields are IDs resolved through `ResourceSession`.
-
-```cpp
-#include <Serialization/SceneResource.hpp>
-
-void roundTripScene(const std::filesystem::path &path,
-                    Ursa::ResourceSession &resources) {
-    Ursa::ComponentRegistry registry;
-    if (!Ursa::RegisterBuiltinComponents(registry))
-        return;
-    Ursa::Scene source;
-    auto camera = Ursa::GameObject::Create("Camera");
-    if (!camera->AddComponent<Ursa::CameraComponent>() || !source.AttachGameObject(camera))
-        return;
-    if (!Ursa::SaveSceneResource(path, Ursa::ResourceId::Generate(), source, registry))
-        return;
-    Ursa::ComponentLoadContext context(resources);
-    auto loaded = Ursa::LoadSceneResource(path, registry, context);
-    if (!loaded)
-        return;
-    std::unique_ptr<Ursa::Scene> active = std::move(loaded.value.scene);
-    auto reloaded = Ursa::ReloadSceneResource(path, registry, context, active);
-}
-```
-
-`GameObject::Id()` and `Component::PersistentId()` return IDs stored in the file. A `GameObject::Ptr` refers to a GameObject instance; serialization uses persistent IDs rather than pointer values to restore references after load. `ReloadSceneResource` builds and binds a candidate before replacing `active`. On failure the old Scene remains alive. Loaded components begin their lifecycle during the next normal frame, not while parsing. Use a newly `Refreshed()` resource session to pick up changed texture and material files. `UrsaScenePersistenceTests` exercises save, load, and reload.
-
-For project components, register a stable type name and data version before either operation. Save only persistent fields; use `ComponentLoadContext::Service<T>()` for references to project-owned runtime objects. `create` can read fields and attach the component, while `bind` runs after all GameObjects and components exist and can resolve saved IDs through `context.GameObjectById(id)` and `context.Component(id)`. A minimal registration looks like this:
-
-```cpp
-#include <Serialization/ComponentRegistry.hpp>
-
-struct CounterComponent : Ursa::Component {
-    CounterComponent(int &total, int step) : total(total), step(step) {}
-    int &total;
-    int step;
-};
-
-Ursa::Result<void> RegisterCounter(Ursa::ComponentRegistry &registry) {
-    Ursa::ComponentCodec codec;
-    codec.type = "game.Counter";
-    codec.version = 1;
-    codec.matches = [](const Ursa::Component &value) {
-        return dynamic_cast<const CounterComponent *>(&value) != nullptr;
-    };
-    codec.save = [](const Ursa::Component &value, const Ursa::ComponentSaveContext &) {
-        return Ursa::Result<nlohmann::json>::Success(
-            {{"step", static_cast<const CounterComponent &>(value).step}});
-    };
-    codec.create = [](Ursa::Scene &scene, const Ursa::GameObject::Ptr &object, const nlohmann::json &data,
-                      Ursa::ComponentLoadContext &context) {
-        if (!data.is_object() || !data.contains("step") || !data["step"].is_number_integer())
-            return Ursa::Result<Ursa::ComponentId>::Failure("Invalid Counter step");
-        auto total = context.Service<int>();
-        if (!total)
-            return Ursa::Result<Ursa::ComponentId>::Failure(total.error);
-        return scene.AddComponent<CounterComponent>(object, *total.value, data["step"].get<int>());
-    };
-    return registry.RegisterCodec(std::move(codec));
-}
-```
-
-Call `context.Provide(total)` before loading and keep `total` alive as long as the loaded Scene. The type name and version belong to the file format; changing either requires a deliberate format change. An unknown type or version fails with a file and GameObject location. `UrsaCustomComponentTests` compiles this registration shape and checks cross-object binding and error paths.
-
-## Prefab files and linked scenes
-
-`SavePrefabAssetResource` writes a `PrefabAsset` containing one independent GameObject tree to a `.ursaprefab` file using `prefabGraphVersion: 2` and the GameObject graph schema. `LoadPrefabAssetResource` creates detached GameObjects and components without creating or attaching them to a runtime Scene; their GameObject and component IDs are preserved when saved again. `PrefabAsset::Instantiate` clones that graph into a Scene with fresh runtime identities. The Editor keeps a preview Scene for its viewport and stores a detached PrefabAsset graph for persistence. A linked `.ursascene` keeps each placement's Prefab resource ID, independent instance ID, optional parent GameObject ID, and overrides. Files with missing or unsupported `prefabGraphVersion` fail with an explicit diagnostic; legacy Prefab data is not migrated. The following calls form the path exercised by `UrsaPrefabTests`:
-
-Use `LoadLinkedSceneResource` for a Scene containing Prefab instances. The plain `LoadSceneResource` entry reports an error on that file so it cannot silently omit the instances.
-
-```cpp
-#include <Serialization/PrefabResource.hpp>
-#include <Serialization/JsonResource.hpp>
-
-void placePrefab(const std::filesystem::path &root, Ursa::Scene &source,
-                 const Ursa::GameObject::Ptr &subtree) {
-    Ursa::ComponentRegistry registry;
-    if (!Ursa::RegisterBuiltinComponents(registry))
-        return;
-    const auto prefabId = Ursa::ResourceId::Generate();
-    if (!Ursa::SavePrefabResource(root / "tile.ursaprefab", prefabId, source, subtree, registry))
-        return;
-    Ursa::Scene empty;
-    const auto scenePath = root / "level.ursascene";
-    auto document = Ursa::EncodeSceneDocument(scenePath, Ursa::ResourceId::Generate(), empty, registry);
-    if (!document)
-        return;
-    const auto instanceId = Ursa::ResourceId::Generate();
-    if (!Ursa::AddPrefabInstance(document.value, prefabId, instanceId) ||
-        !Ursa::WriteJsonResource(scenePath, document.value))
-        return;
-    auto resources = Ursa::ResourceSession::Open({root});
-    if (!resources)
-        return;
-    Ursa::ComponentLoadContext context(*resources.value);
-    auto linked = Ursa::LoadLinkedSceneResource(scenePath, registry, context);
-    if (!linked)
-        return;
-    auto sourceId = source.PersistentId(subtree);
-    if (!sourceId || !Ursa::SetPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
-                                                       "/localTransform/position/0", 2.0f) ||
-        !Ursa::SaveLinkedSceneResource(scenePath, linked.value, registry))
-        return;
-    auto refreshed = resources.value->Refreshed();
-    if (!refreshed)
-        return;
-    Ursa::ComponentLoadContext reloadContext(*refreshed.value);
-    if (!Ursa::ReloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value))
-        return;
-    if (!Ursa::ClearPrefabPropertyOverride(linked.value, instanceId, sourceId.value,
-                                            "/localTransform/position/0") ||
-        !Ursa::SaveLinkedSceneResource(scenePath, linked.value, registry))
-        return;
-    Ursa::ReloadLinkedSceneResource(scenePath, registry, reloadContext, linked.value);
-}
-```
-
-Property paths use JSON Pointer syntax. GameObject paths include `/localTransform/position/0`, `/enabled`, and `/name`; component paths include `/data/material` and registered persistent fields under `/data/`. Calling `SetPrefabPropertyOverride` records explicit intent even if the value currently equals the source. Calling `ClearPrefabPropertyOverride` removes that intent; reload then inherits the current source value. `SetPrefabStructureOverride` accepts `deletedGameObjects`, `addedGameObjects`, `gameObjectParents`, `gameObjectOrders`, `deletedComponents`, `addedComponents`, `componentOwners`, and `componentOrders`. IDs in these operations are local to the Prefab instance; an order list fixes the named objects first and leaves newly added source objects in source order afterward. Save compares the current Scene to its loaded snapshot, so direct edits to persistent fields and structure are captured as overrides. Keep the resource session alive for `LinkedSceneResource`, and pass a material ID resolver to `SaveLinkedSceneResource` when assigning a material object that was not loaded by that session. An invalid merge reports the Prefab, instance, object and operation and leaves the active Scene and saved file intact.
+The Engine-only package is `build/package/Content.pak`. Demo's `UrsaDemoPackage`
+target includes project content in the same file and supports runtime `--pak` startup.
 
 ## Runtime materials
 
@@ -535,3 +387,7 @@ $env:PATH = $savedPath
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 ```
+
+## Unified serialization
+
+See [persistent serialization](Docs/Serialization.md) for Serializable authoring, archive formats, component factories, schema versions and deferred references.

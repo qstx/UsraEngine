@@ -37,6 +37,15 @@ struct SceneLighting
 class DirectionalLightComponent final : public Component
 {
 public:
+	String SerializationType() const override
+	{
+		return "ursa.DirectionalLight";
+	}
+
+	Result<void> Serialize(ArchiveWriter& writer) const override;
+
+	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
+
 	Result<void> SetColor(Ursa::Color lightColor);
 
 	Result<void> SetIntensity(Ursa::Float32 lightIntensity);
@@ -59,6 +68,15 @@ private:
 class PointLightComponent final : public Component
 {
 public:
+	String SerializationType() const override
+	{
+		return "ursa.PointLight";
+	}
+
+	Result<void> Serialize(ArchiveWriter& writer) const override;
+
+	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
+
 	Result<void> SetColor(Ursa::Color lightColor);
 
 	Result<void> SetIntensity(Ursa::Float32 lightIntensity);

@@ -1,3 +1,4 @@
+#include <ResourceFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/MaterialPreview.hpp>

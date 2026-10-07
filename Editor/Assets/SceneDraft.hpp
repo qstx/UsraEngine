@@ -18,12 +18,12 @@ public:
 	                                                  ResourceSession& resourceSession,
 	                                                  const EditContextSetup& contextSetup = {});
 
-	static Result<std::shared_ptr<SceneDraft>> Load(const std::filesystem::path& path, ResourceKind resourceKind,
-	                                                ComponentRegistry& componentRegistry,
+	static Result<std::shared_ptr<SceneDraft>> Load(const VirtualFileSystem& filesystem, const VirtualPath& path,
+	                                                ResourceKind resourceKind, ComponentRegistry& componentRegistry,
 	                                                ResourceSession& resourceSession,
 	                                                const EditContextSetup& contextSetup = {});
 
-	Result<void> Save(const std::filesystem::path& path, ResourceId id);
+	Result<void> Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id);
 
 	Scene& GetScene()
 	{
@@ -72,7 +72,7 @@ public:
 
 	Result<void> SetInstanceStructure(ResourceId instanceId, const String& operation, const nlohmann::json& value);
 
-	Result<ResourceId> PlacePrefab(ResourceId prefabId, ResourceId parentId, const std::filesystem::path& scenePath,
+	Result<ResourceId> PlacePrefab(ResourceId prefabId, ResourceId parentId, const VirtualPath& scenePath,
 	                               ResourceId sceneId);
 
 private:

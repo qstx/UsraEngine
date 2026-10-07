@@ -1,3 +1,4 @@
+#include <ResourceFixtures.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Serialization/SceneResource.hpp>
@@ -45,32 +46,42 @@ struct CounterComponent : Ursa::Component
 
 	int& total;
 	int step;
+
+	Ursa::String SerializationType() const override
+	{
+		return "game.Counter";
+	}
+
+	Ursa::Result<void> Serialize(Ursa::ArchiveWriter& writer) const override
+	{
+		return writer.Write("step", Ursa::Int64(step));
+	}
+
+	Ursa::Result<void> Deserialize(const Ursa::ArchiveReader& reader, Ursa::SerializationContext&) override
+	{
+		auto value = reader.Integer("step");
+		if (!value || value.value < INT_MIN || value.value > INT_MAX)
+		{
+			return Ursa::Result<void>::Failure("Invalid Counter step");
+		}
+		step = int(value.value);
+		return {};
+	}
 };
 
 Ursa::Result<void> RegisterCounter(Ursa::ComponentRegistry& registry)
 {
-	Ursa::ComponentCodec codec;
-	codec.type = "game.Counter";
-	codec.version = 1;
-	codec.matches = [](const Ursa::Component& value)
-	{ return dynamic_cast<const CounterComponent*>(&value) != nullptr; };
-	codec.save = [](const Ursa::Component& value, const Ursa::ComponentSaveContext&)
-	{ return Ursa::Result<nlohmann::json>::Success({{"step", static_cast<const CounterComponent&>(value).step}}); };
-	codec.create = [](Ursa::Scene& scene, Ursa::GameObject::Ptr node, const nlohmann::json& data,
-	                  Ursa::ComponentLoadContext& context)
-	{
-		if (!data.is_object() || !data.contains("step") || !data["step"].is_number_integer())
-		{
-			return Ursa::Result<Ursa::ComponentId>::Failure("Invalid Counter step");
-		}
-		auto total = context.Service<int>();
-		if (!total)
-		{
-			return Ursa::Result<Ursa::ComponentId>::Failure(total.error);
-		}
-		return scene.AddComponent<CounterComponent>(node, *total.value, data["step"].get<int>());
-	};
-	return registry.RegisterCodec(std::move(codec));
+	return registry.RegisterSerializable<CounterComponent>(
+	    "game.Counter", 1,
+	    [](const Ursa::GameObject::Ptr& node, Ursa::ComponentLoadContext& context) -> Ursa::Result<CounterComponent*>
+	    {
+		    auto total = context.Service<int>();
+		    if (!total)
+		    {
+			    return Ursa::Result<CounterComponent*>::Failure(total.error);
+		    }
+		    return node->AddComponent<CounterComponent>(*total.value, 0);
+	    });
 }
 
 class LinkComponent final : public Ursa::Component
@@ -215,7 +226,8 @@ void TestCustomComponents(const std::filesystem::path& root)
 	Ursa::ComponentRegistry emptyRegistry;
 	Ursa::ComponentLoadContext missingTypeContext(*session);
 	auto missingType = Ursa::LoadSceneResource(path, emptyRegistry, missingTypeContext);
-	Expect(!missingType && missingType.error.find(Ursa::PathToUrsaString(path)) != Ursa::String::npos &&
+	Expect(!missingType &&
+	           missingType.error.find("fixture:" + Ursa::PathToUrsaString(path.filename())) != Ursa::String::npos &&
 	           missingType.error.find(firstPersistent.ToString()) != Ursa::String::npos &&
 	           missingType.error.find("test.Link") != Ursa::String::npos,
 	       "Unregistered type error lacks file, node, or type");
@@ -240,7 +252,9 @@ void TestCustomComponents(const std::filesystem::path& root)
 	Ursa::ComponentLoadContext versionContext(*session);
 	versionContext.Provide(service);
 	auto badVersion = Ursa::LoadSceneResource(unsupported, registry, versionContext);
-	Expect(!badVersion && badVersion.error.find(Ursa::PathToUrsaString(unsupported)) != Ursa::String::npos &&
+	Expect(!badVersion &&
+	           badVersion.error.find("fixture:" + Ursa::PathToUrsaString(unsupported.filename())) !=
+	               Ursa::String::npos &&
 	           badVersion.error.find(firstPersistent.ToString()) != Ursa::String::npos &&
 	           badVersion.error.find("version") != Ursa::String::npos,
 	       "Unsupported version error lacks file or node");

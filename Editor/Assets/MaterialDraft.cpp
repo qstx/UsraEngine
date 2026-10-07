@@ -19,14 +19,15 @@ bool AllowedSlot(MaterialType type, Ursa::Size index)
 }
 } // namespace
 
-Result<std::shared_ptr<MaterialDraft>> MaterialDraft::Load(const std::filesystem::path& path, ResourceSession& session)
+Result<std::shared_ptr<MaterialDraft>> MaterialDraft::Load(const VirtualFileSystem& filesystem, const VirtualPath& path,
+                                                           ResourceSession& session)
 {
-	auto document = ReadJsonResource(path, ResourceKind::Material);
+	auto document = ReadJsonResource(filesystem, path, ResourceKind::Material);
 	if (!document)
 	{
 		return Result<std::shared_ptr<MaterialDraft>>::Failure(document.error);
 	}
-	auto loaded = LoadMaterialResource(path, [&session](ResourceId id) { return session.LoadTexture(id); });
+	auto loaded = LoadMaterialResource(filesystem, path, [&session](ResourceId id) { return session.LoadTexture(id); });
 	if (!loaded)
 	{
 		return Result<std::shared_ptr<MaterialDraft>>::Failure(loaded.error);
@@ -95,7 +96,8 @@ Result<void> MaterialDraft::SetTextureId(MaterialTextureSlot slot, ResourceId id
 	return assigned;
 }
 
-Result<void> MaterialDraft::Save(const std::filesystem::path& path, ResourceId id, const ResourceIndex& index) const
+Result<void> MaterialDraft::Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id,
+                                 const ResourceIndex& index) const
 {
 	for (Ursa::Size slot = 0; slot < textureIds.size(); ++slot)
 	{
@@ -117,7 +119,7 @@ Result<void> MaterialDraft::Save(const std::filesystem::path& path, ResourceId i
 			}
 		}
 	}
-	return SaveMaterialResource(path, id, *material,
+	return SaveMaterialResource(filesystem, path, id, *material,
 	                            [this](MaterialTexturePtr texture)
 	                            {
 		                            for (Ursa::Size slot = 0; slot < textureIds.size(); ++slot)
@@ -136,9 +138,10 @@ Result<std::unique_ptr<EditorDocument>> NewMaterialDocument(const VirtualPath& p
                                                             ProjectWorkspace& workspace)
 {
 	auto draft = std::make_shared<MaterialDraft>(type);
-	auto document = EditorDocument::Create(ResourceKind::Material, ResourceId::Generate(), path,
-	                                       [draft, &workspace](const std::filesystem::path& target, ResourceId id)
-	                                       { return draft->Save(target, id, workspace.Index()); });
+	auto document = EditorDocument::Create(
+	    ResourceKind::Material, ResourceId::Generate(), path,
+	    [draft, &workspace](VirtualFileSystem& filesystem, const VirtualPath& target, ResourceId id)
+	    { return draft->Save(filesystem, target, id, workspace.Index()); });
 	if (document)
 	{
 		document.value->SetPayload(draft);
@@ -150,25 +153,21 @@ Result<std::unique_ptr<EditorDocument>> NewMaterialDocument(const VirtualPath& p
 Result<std::unique_ptr<EditorDocument>> OpenMaterialDocument(const VirtualPath& path, ResourceSession& session,
                                                              ProjectWorkspace& workspace)
 {
-	auto host = workspace.Index().Locate(ResourceLocation{ResourceKind::Material, path});
-	if (!host)
-	{
-		return Result<std::unique_ptr<EditorDocument>>::Failure(host.error);
-	}
-	auto header = ReadResourceHeader(host.value);
+
+	auto header = ReadResourceHeader(session.Index().Filesystem(), path);
 	if (!header)
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(header.error);
 	}
-	auto draft = MaterialDraft::Load(host.value, session);
+	auto draft = MaterialDraft::Load(workspace.Index().Filesystem(), path, session);
 	if (!draft)
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(draft.error);
 	}
-	auto document =
-	    EditorDocument::Create(ResourceKind::Material, header.value.id, path,
-	                           [draft = draft.value, &workspace](const std::filesystem::path& target, ResourceId id)
-	                           { return draft->Save(target, id, workspace.Index()); });
+	auto document = EditorDocument::Create(
+	    ResourceKind::Material, header.value.id, path,
+	    [draft = draft.value, &workspace](VirtualFileSystem& filesystem, const VirtualPath& target, ResourceId id)
+	    { return draft->Save(filesystem, target, id, workspace.Index()); });
 	if (document)
 	{
 		document.value->SetPayload(draft.value);

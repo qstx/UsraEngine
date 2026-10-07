@@ -1,7 +1,9 @@
 #include <Core/Containers.hpp>
 #include <Core/Log.hpp>
 #include <spdlog/logger.h>
-#include <spdlog/sinks/rotating_file_sink.h>
+#include <Core/VfsLogSink.hpp>
+#include <Vfs/RuntimeMountProfile.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <atomic>
 #include <cstdio>
@@ -93,36 +95,64 @@ LogLevel Log::DefaultLevel() noexcept
 
 Result<void> Log::Initialize(const std::filesystem::path& executable, const LogConfig& config)
 {
-	if (executable.empty() || !valid(config.level) || config.maxFileBytes == 0 || config.maxFiles == 0)
+	if (executable.empty())
 	{
-		return Result<void>::Failure("Invalid logging executable path, level or rotation settings");
+		return Result<void>::Failure("Invalid logging executable path");
+	}
+	auto root = ResolveUserDataDirectory(PathToUrsaString(executable.stem()), config.userDataDirectoryOverride);
+	std::filesystem::path name = std::filesystem::path("Logs") / executable.filename();
+	name.replace_extension(".log");
+	if (!config.filePath.empty())
+	{
+		std::error_code error;
+		const auto overridePath = std::filesystem::absolute(config.filePath, error);
+		if (error)
+		{
+			return Result<void>::Failure("Invalid log bootstrap path");
+		}
+		root = Result<std::filesystem::path>::Success(overridePath.parent_path());
+		name = overridePath.filename();
+	}
+	if (!root)
+	{
+		fallback(LogLevel::Error, "Log", root.error);
+		return Result<void>::Failure(root.error);
+	}
+	auto provider = DirectoryFileProvider::Open(root.value, true);
+	if (!provider)
+	{
+		const String error = "Cannot mount log user directory " + PathToUrsaString(root.value) + ": " + provider.error;
+		fallback(LogLevel::Error, "Log", error);
+		return Result<void>::Failure(error);
+	}
+	auto filesystem = std::make_shared<VirtualFileSystem>();
+	auto mounted = filesystem->MountProvider(userDataScheme, provider.value, MountAccess::ReadWrite);
+	auto path = VirtualPath::Parse("user:" + ToUrsaString(name.generic_u8string()));
+	if (!mounted || !path)
+	{
+		return Result<void>::Failure(!mounted ? mounted.error : path.error);
+	}
+	return Initialize(std::move(filesystem), path.value, config);
+}
+
+Result<void> Log::Initialize(std::shared_ptr<VirtualFileSystem> filesystem, const VirtualPath& path,
+                             const LogConfig& config)
+{
+	if (!filesystem || path.scheme != userDataScheme || !valid(config.level) || config.maxFileBytes == 0 ||
+	    config.maxFiles == 0)
+	{
+		return Result<void>::Failure("Invalid user: logging path, level or rotation settings");
 	}
 	std::lock_guard<std::mutex> lock(logMutex);
 	if (logger)
 	{
 		return Result<void>::Failure("Logging is already initialized");
 	}
-	std::filesystem::path path;
 	try
 	{
-		const auto absoluteExecutable = std::filesystem::absolute(executable);
-		path = config.filePath.empty()
-		           ? absoluteExecutable.parent_path() / "logs" / (absoluteExecutable.stem().string() + ".log")
-		           : std::filesystem::absolute(config.filePath);
-		std::error_code error;
-		std::filesystem::create_directories(path.parent_path(), error);
-		if (error)
-		{
-			const String diagnostic = "Cannot create log directory " + String(path.u8string().c_str()) + ": " +
-			                          String(error.message().c_str());
-			fallback(LogLevel::Error, "Log", diagnostic);
-			return Result<void>::Failure(diagnostic);
-		}
-
 		auto console = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-		auto file =
-		    std::make_shared<spdlog::sinks::rotating_file_sink_mt>(path.string(), config.maxFileBytes, config.maxFiles);
-		Ursa::Vector<spdlog::sink_ptr> sinks{console, file};
+		auto file = std::make_shared<VfsLogSink>(std::move(filesystem), path, config.maxFileBytes, config.maxFiles);
+		Vector<spdlog::sink_ptr> sinks{console, file};
 		auto created = std::make_shared<spdlog::logger>("Ursa", sinks.begin(), sinks.end());
 		created->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
 		created->set_level(NativeLevel(config.level));
@@ -139,8 +169,7 @@ Result<void> Log::Initialize(const std::filesystem::path& executable, const LogC
 	}
 	catch (const std::exception& error)
 	{
-		const String diagnostic =
-		    "Cannot initialize log file " + String(path.u8string().c_str()) + ": " + String(error.what());
+		const String diagnostic = "Cannot initialize log " + path.ToString() + ": " + error.what();
 		fallback(LogLevel::Error, "Log", diagnostic);
 		return Result<void>::Failure(diagnostic);
 	}

@@ -4,6 +4,7 @@
 #include <Core/Result.hpp>
 #include <Window/Window.hpp>
 #include <Serialization/ResourceId.hpp>
+#include <Serialization/Serializable.hpp>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -66,7 +67,7 @@ struct FrameContext
 	FrameInput input;
 };
 
-class Component
+class Component : public Serializable
 {
 public:
 	virtual ~Component() = default;

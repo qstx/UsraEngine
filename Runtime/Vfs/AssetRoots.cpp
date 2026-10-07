@@ -2,6 +2,9 @@
 #include <Core/Types.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Core/StringInterop.hpp>
+#include <Vfs/PakArchive.hpp>
+#include <Vfs/RuntimeMountProfile.hpp>
+#include <mutex>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -14,6 +17,9 @@ namespace Ursa
 {
 namespace
 {
+std::mutex engineFilesMutex;
+std::shared_ptr<const VirtualFileSystem> configuredEngineFiles;
+
 bool IsReadableDirectory(const std::filesystem::path& path)
 {
 	if (path.empty())
@@ -119,6 +125,32 @@ Result<Vector<std::filesystem::path>> ResolveEngineAssetRoots(const std::filesys
 
 Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& explicitRoot)
 {
+	if (explicitRoot.empty())
+	{
+		std::lock_guard<std::mutex> lock(engineFilesMutex);
+		if (configuredEngineFiles)
+		{
+			return Result<VirtualFileSystem>::Success(*configuredEngineFiles);
+		}
+		const auto package = CurrentExecutablePath().parent_path() / "Content.pak";
+		std::error_code error;
+		if (std::filesystem::is_regular_file(package, error) && !error)
+		{
+			return OpenEngineFileSystem(package);
+		}
+	}
+	if (explicitRoot.extension() == ".pak")
+	{
+		auto archive = PakArchive::Open(explicitRoot);
+		if (!archive)
+		{
+			return Result<VirtualFileSystem>::Failure(archive.error);
+		}
+		VirtualFileSystem files;
+		auto mounted = archive.value->Mount(files);
+		return mounted ? Result<VirtualFileSystem>::Success(std::move(files))
+		               : Result<VirtualFileSystem>::Failure(mounted.error);
+	}
 	auto roots = ResolveEngineAssetRoots(explicitRoot);
 	if (!roots)
 	{
@@ -134,6 +166,12 @@ Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& expl
 		}
 	}
 	return Result<VirtualFileSystem>::Success(std::move(files));
+}
+
+void ConfigureEngineFileSystem(std::shared_ptr<const VirtualFileSystem> filesystem)
+{
+	std::lock_guard<std::mutex> lock(engineFilesMutex);
+	configuredEngineFiles = std::move(filesystem);
 }
 
 std::filesystem::path CurrentExecutablePath()

@@ -3,6 +3,7 @@
 #include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
+#include <Vfs/VirtualFileProvider.hpp>
 #include <Vfs/VirtualPath.hpp>
 #include <cstdint>
 #include <filesystem>
@@ -15,26 +16,37 @@ enum class MountAccess
 	ReadWrite
 };
 
-// One file reported by VirtualFileSystem::list(). The path resolves to the
-// first root that contains it; shadowedHostPaths names host locations in later
-// roots that the winning entry masks.
+// One file reported by VirtualFileSystem::List(). The path resolves to the
+// first provider that contains it; shadowedSources names later providers that
+// contain the same virtual path.
 struct VirtualFileEntry
 {
 	VirtualPath path;
-	Vector<std::filesystem::path> shadowedHostPaths;
+	Vector<String> shadowedSources;
 };
 
-// Addresses resources as "<scheme>:<relative-path>" over an ordered list of
-// host directories. It owns path validation and access policy only; it does not
-// know about resource kinds or identities.
+struct VirtualMount
+{
+	String scheme;
+	std::shared_ptr<VirtualFileProvider> provider;
+	MountAccess access;
+};
+
+// Addresses resources as "<scheme>:<relative-path>" over ordered storage
+// providers. The VFS owns path validation and access policy, not resource kinds
+// or resource identities.
 class VirtualFileSystem final
 {
 public:
 	Result<void> Mount(const String& scheme, const std::filesystem::path& root, MountAccess access);
 
+	Result<void> MountProvider(const String& scheme, std::shared_ptr<VirtualFileProvider> provider, MountAccess access);
+
 	bool IsMounted(const String& scheme) const;
 
 	Vector<String> Schemes() const;
+
+	Vector<VirtualMount> Providers() const;
 
 	Result<Vector<std::filesystem::path>> Roots(const String& scheme) const;
 
@@ -42,35 +54,41 @@ public:
 
 	Result<Vector<Ursa::UInt8>> ReadPrefix(const VirtualPath& path, Ursa::UInt64 maxBytes) const;
 
+	Result<Vector<Ursa::UInt8>> ReadRange(const VirtualPath& path, Ursa::UInt64 offset, Ursa::UInt64 size) const;
+
 	Result<String> ReadText(const VirtualPath& path) const;
 
 	Result<bool> Exists(const VirtualPath& path) const;
 
 	Result<Ursa::UInt64> Size(const VirtualPath& path) const;
 
-	Result<std::filesystem::path> ResolveToDisk(const VirtualPath& path) const;
-
-	// The host path a write would target. The first root of the scheme must be
-	// writable; the file itself does not have to exist yet.
-	Result<std::filesystem::path> ResolveForWrite(const VirtualPath& path) const;
-
 	Result<void> Write(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes, bool createDirectories = true);
+
+	Result<void> WriteAtomic(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes, bool createDirectories = true);
+
+	Result<void> Append(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes, bool createDirectories = true);
+
+	Result<void> Remove(const VirtualPath& path);
+
+	Result<void> Rename(const VirtualPath& source, const VirtualPath& destination);
+
+	Result<void> CheckWritable(const VirtualPath& path) const;
 
 	Result<Vector<VirtualFileEntry>> List(const String& scheme) const;
 
 private:
-	struct Root
+	struct MountedProvider
 	{
-		std::filesystem::path path;
+		std::shared_ptr<VirtualFileProvider> provider;
 		MountAccess access;
 	};
 
-	const Vector<Root>* FindMount(const String& scheme) const;
+	const Vector<MountedProvider>* FindMount(const String& scheme) const;
 
-	Result<std::filesystem::path> ResolveIn(const Root& root, const VirtualPath& path) const;
+	Result<const MountedProvider*> ResolveExisting(const VirtualPath& path) const;
 
-	Result<std::filesystem::path> ResolveExisting(const VirtualPath& path) const;
+	Result<const MountedProvider*> ResolveWriteProvider(const VirtualPath& path) const;
 
-	Map<String, Vector<Root>> mounts;
+	Map<String, Vector<MountedProvider>> mounts;
 };
 } // namespace Ursa

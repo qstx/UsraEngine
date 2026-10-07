@@ -1,3 +1,4 @@
+#include <ResourceFixtures.hpp>
 #include <Assets/SceneDraft.hpp>
 #include <Serialization/MaterialResource.hpp>
 #include <Serialization/JsonResource.hpp>
@@ -125,8 +126,10 @@ int main()
 		auto linkedDocument = Take(Editor::OpenSceneDocument(Take(VirtualPath::Parse("prj:level.ursascene")),
 		                                                     ResourceKind::Scene, registry, documents->Session()));
 		auto linkedDraft = linkedDocument->Payload<Editor::SceneDraft>();
-		const auto firstInstance = Take(linkedDraft->PlacePrefab(prefabId, childId, scenePath, sceneId));
-		const auto secondInstance = Take(linkedDraft->PlacePrefab(prefabId, childId, scenePath, sceneId));
+		const auto firstInstance =
+		    Take(linkedDraft->PlacePrefab(prefabId, childId, Take(VirtualPath::Parse("prj:Scene.ursascene")), sceneId));
+		const auto secondInstance =
+		    Take(linkedDraft->PlacePrefab(prefabId, childId, Take(VirtualPath::Parse("prj:Scene.ursascene")), sceneId));
 		const auto firstScoped = Take(ResourceId::Parse(
 		    linkedDraft->LinkedScene()->scopedIds.at(firstInstance.ToString()).at(prefabChildId.ToString())));
 		const auto secondScoped = Take(ResourceId::Parse(

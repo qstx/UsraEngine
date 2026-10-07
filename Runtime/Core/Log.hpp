@@ -4,6 +4,7 @@
 #include <Core/Types.hpp>
 #include <cstddef>
 #include <filesystem>
+#include <Vfs/VirtualFileSystem.hpp>
 
 namespace Ursa
 {
@@ -21,6 +22,7 @@ enum class LogLevel : UInt8
 struct LogConfig
 {
 	std::filesystem::path filePath;
+	std::filesystem::path userDataDirectoryOverride;
 	LogLevel level;
 	Ursa::Size maxFileBytes = 5 * 1024 * 1024;
 	Ursa::Size maxFiles = 3;
@@ -34,6 +36,9 @@ public:
 	static LogLevel DefaultLevel() noexcept;
 
 	static Result<void> Initialize(const std::filesystem::path& executable, const LogConfig& config = {});
+
+	static Result<void> Initialize(std::shared_ptr<VirtualFileSystem> filesystem, const VirtualPath& path,
+	                               const LogConfig& config = {});
 
 	static Result<void> InitializeForCurrentProcess(const LogConfig& config = {});
 

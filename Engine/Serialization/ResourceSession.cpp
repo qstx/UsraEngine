@@ -6,6 +6,16 @@
 
 namespace Ursa
 {
+Result<std::unique_ptr<ResourceSession>> ResourceSession::Open(const VirtualFileSystem& filesystem)
+{
+	Vector<ResourceMount> mounts;
+	for (const auto& mount : filesystem.Providers())
+	{
+		mounts.push_back({mount.scheme, {}, mount.access, mount.provider});
+	}
+	return Open(mounts);
+}
+
 Result<std::unique_ptr<ResourceSession>> ResourceSession::Open(const Vector<ResourceMount>& mounts)
 {
 	auto session = std::unique_ptr<ResourceSession>(new ResourceSession);
@@ -55,12 +65,8 @@ Result<MaterialTexturePtr> ResourceSession::LoadTexture(ResourceId id)
 		return Result<MaterialTexturePtr>::Failure("Resource " + key +
 		                                           " is not a texture: " + location.value.path.ToString());
 	}
-	auto resolved = index.Locate(location.value);
-	if (!resolved)
-	{
-		return Result<MaterialTexturePtr>::Failure(resolved.error);
-	}
-	auto loaded = LoadTextureResource(resolved.value);
+
+	auto loaded = LoadTextureResource(index.Filesystem(), location.value.path);
 	if (!loaded)
 	{
 		return Result<MaterialTexturePtr>::Failure(loaded.error);
@@ -93,12 +99,9 @@ Result<std::shared_ptr<MaterialInstance>> ResourceSession::LoadMaterial(Resource
 		return Result<std::shared_ptr<MaterialInstance>>::Failure(
 		    "Resource " + key + " is not a material: " + location.value.path.ToString());
 	}
-	auto resolved = index.Locate(location.value);
-	if (!resolved)
-	{
-		return Result<std::shared_ptr<MaterialInstance>>::Failure(resolved.error);
-	}
-	auto loaded = LoadMaterialResource(resolved.value, [this](ResourceId textureId) { return LoadTexture(textureId); });
+
+	auto loaded = LoadMaterialResource(index.Filesystem(), location.value.path,
+	                                   [this](ResourceId textureId) { return LoadTexture(textureId); });
 	if (!loaded)
 	{
 		return Result<std::shared_ptr<MaterialInstance>>::Failure(loaded.error);

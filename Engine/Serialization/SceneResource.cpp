@@ -76,6 +76,7 @@ struct GameObjectRecord
 	LocalTransform local;
 	bool enabled = true;
 	Json components;
+	Json persistentData;
 };
 
 Result<GameObjectRecord> ParseGameObject(const Json& item, const String& context)
@@ -149,21 +150,27 @@ Result<GameObjectRecord> ParseGameObject(const Json& item, const String& context
 		return Result<GameObjectRecord>::Failure("Invalid " + context + ".components");
 	}
 	record.components = *components;
+	record.persistentData = item;
+	if (!record.persistentData.contains("name"))
+	{
+		record.persistentData["name"] = "";
+	}
 	return Result<GameObjectRecord>::Success(std::move(record));
 }
 } // namespace
 
-Result<Json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId id, const Scene& scene,
+Result<Json> EncodeSceneDocument(const String& path, ResourceId id, const Scene& scene,
                                  const ComponentRegistry& registry, const MaterialIdResolver& materialId,
                                  const GameObject::Ptr& subtree)
 {
-	if (!id || path.extension() != ".ursascene")
+	const String label = path;
+	if (!id || label.size() < 10 || label.substr(label.size() - 10) != ".ursascene")
 	{
-		return Result<Json>::Failure("Invalid scene resource ID or .ursascene path: " + PathToUrsaString(path));
+		return Result<Json>::Failure("Invalid scene resource ID or .ursascene path: " + path);
 	}
 	if (subtree && !scene.Contains(subtree))
 	{
-		return Result<Json>::Failure("Invalid scene subtree root at " + PathToUrsaString(path));
+		return Result<Json>::Failure("Invalid scene subtree root at " + path);
 	}
 	Json gameObjects = Json::array();
 	const ComponentSaveContext context{&scene, materialId};
@@ -171,7 +178,7 @@ Result<Json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId i
 	{
 		if (gameObjects.size() >= maxSceneGameObjects)
 		{
-			return Result<void>::Failure("Scene node limit exceeded at " + PathToUrsaString(path));
+			return Result<void>::Failure("Scene node limit exceeded at " + path);
 		}
 		const ResourceId objectId = object->Id();
 		const GameObject::Ptr parentObject = object->Parent();
@@ -181,7 +188,7 @@ Result<Json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId i
 		const auto components = scene.ComponentsOf(object);
 		if (!objectId || !local || !name || !enabled || !components)
 		{
-			return Result<void>::Failure("Cannot inspect GameObject at " + PathToUrsaString(path));
+			return Result<void>::Failure("Cannot inspect GameObject at " + path);
 		}
 		Json componentData = Json::array();
 		for (ComponentId componentId : components.value)
@@ -190,13 +197,13 @@ Result<Json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId i
 			if (!codec)
 			{
 				return Result<void>::Failure("Cannot save component on GameObject " + objectId.ToString() + " in " +
-				                             PathToUrsaString(path) + ": " + codec.error);
+				                             path + ": " + codec.error);
 			}
 			auto data = codec.value->save(*scene.GetComponent(componentId), context);
 			if (!data)
 			{
 				return Result<void>::Failure("Cannot save component " + codec.value->type + " on GameObject " +
-				                             objectId.ToString() + " in " + PathToUrsaString(path) + ": " + data.error);
+				                             objectId.ToString() + " in " + path + ": " + data.error);
 			}
 			const auto persistent = scene.ComponentPersistentId(componentId);
 			const auto active = scene.IsComponentEnabled(componentId);
@@ -210,12 +217,20 @@ Result<Json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId i
 			                         {"enabled", active.value},
 			                         {"data", std::move(data.value)}});
 		}
-		gameObjects.push_back({{"id", objectId.ToString()},
-		                       {"name", name.value},
-		                       {"parentId", parentObject ? Json(parentObject->Id().ToString()) : Json(nullptr)},
-		                       {"localTransform", TransformJson(local.value)},
-		                       {"enabled", enabled.value},
-		                       {"components", std::move(componentData)}});
+		ArchiveWriter writer;
+		auto saved = object->Serialize(writer);
+		if (!saved)
+		{
+			return saved;
+		}
+		auto fields = ArchiveToJson(writer);
+		if (!fields)
+		{
+			return Result<void>::Failure(fields.error);
+		}
+		fields.value["parentId"] = parentObject ? Json(parentObject->Id().ToString()) : Json(nullptr);
+		fields.value["components"] = std::move(componentData);
+		gameObjects.push_back(std::move(fields.value));
 		for (const GameObject::Ptr& child : object->Children())
 		{
 			auto result = append(child);
@@ -241,7 +256,7 @@ Result<Json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId i
 		auto cameraId = scene.ComponentPersistentId(scene.ActiveCamera());
 		if (!cameraId)
 		{
-			return Result<Json>::Failure("Invalid active camera in " + PathToUrsaString(path) + ": " + cameraId.error);
+			return Result<Json>::Failure("Invalid active camera in " + path + ": " + cameraId.error);
 		}
 		activeCamera = cameraId.value.ToString();
 	}
@@ -256,28 +271,29 @@ Result<Json> EncodeSceneDocument(const std::filesystem::path& path, ResourceId i
 	return Result<Json>::Success(document);
 }
 
-Result<void> SaveSceneResource(const std::filesystem::path& path, ResourceId id, const Scene& scene,
-                               const ComponentRegistry& registry, const MaterialIdResolver& materialId)
+Result<void> SaveSceneResource(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id,
+                               const Scene& scene, const ComponentRegistry& registry,
+                               const MaterialIdResolver& materialId)
 {
-	auto document = EncodeSceneDocument(path, id, scene, registry, materialId);
-	return document ? WriteJsonResource(path, document.value) : Result<void>::Failure(document.error);
+	auto document = EncodeSceneDocument(path.ToString(), id, scene, registry, materialId);
+	return document ? WriteJsonResource(filesystem, path, document.value) : Result<void>::Failure(document.error);
 }
 
-Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& path, const Json& document,
+Result<LoadedSceneResource> DecodeSceneDocument(const String& path, const Json& document,
                                                 const ComponentRegistry& registry, ComponentLoadContext& context)
 {
-	context.ClearMappings();
+	ComponentMappingScope mappings(context);
 	const auto sceneGraphVersion = document.find("sceneGraphVersion");
 	if (sceneGraphVersion == document.end() || !sceneGraphVersion->is_number_unsigned() ||
 	    sceneGraphVersion->get<Ursa::UInt32>() != sceneGraphFormatVersion)
 	{
 		return Result<LoadedSceneResource>::Failure("Unsupported or missing GameObject Scene format version at " +
-		                                            PathToUrsaString(path));
+		                                            path);
 	}
 	auto gameObjects = document.find("gameObjects");
 	if (gameObjects == document.end() || !gameObjects->is_array() || gameObjects->size() > maxSceneGameObjects)
 	{
-		return Result<LoadedSceneResource>::Failure("Invalid GameObject list at " + PathToUrsaString(path));
+		return Result<LoadedSceneResource>::Failure("Invalid GameObject list at " + path);
 	}
 	Vector<GameObjectRecord> records;
 	Set<String> nodeIds;
@@ -285,8 +301,8 @@ Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& pat
 	Ursa::Size componentCount = 0;
 	for (Ursa::Size index = 0; index < gameObjects->size(); ++index)
 	{
-		auto record = ParseGameObject((*gameObjects)[index], PathToUrsaString(path) + ".gameObjects[" +
-		                                                         ToUrsaString(std::to_string(index)) + "]");
+		auto record =
+		    ParseGameObject((*gameObjects)[index], path + ".gameObjects[" + ToUrsaString(std::to_string(index)) + "]");
 		if (!record)
 		{
 			return Result<LoadedSceneResource>::Failure(record.error);
@@ -294,12 +310,12 @@ Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& pat
 		if (!nodeIds.insert(record.value.id.ToString()).second)
 		{
 			return Result<LoadedSceneResource>::Failure("Duplicate GameObject ID " + record.value.id.ToString() +
-			                                            " in " + PathToUrsaString(path));
+			                                            " in " + path);
 		}
 		componentCount += record.value.components.size();
 		if (componentCount > maxSceneComponents)
 		{
-			return Result<LoadedSceneResource>::Failure("Scene component limit exceeded at " + PathToUrsaString(path));
+			return Result<LoadedSceneResource>::Failure("Scene component limit exceeded at " + path);
 		}
 		records.push_back(std::move(record.value));
 	}
@@ -307,30 +323,26 @@ Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& pat
 	auto scene = std::make_unique<Scene>();
 	for (const auto& record : records)
 	{
-		auto created = scene->CreateGameObject(record.name);
-		if (!created)
+		auto object = GameObject::Create();
+		auto reader = ArchiveFromJson(record.persistentData);
+		if (!reader)
 		{
-			return Result<LoadedSceneResource>::Failure(created.error);
+			return Result<LoadedSceneResource>::Failure(reader.error);
 		}
-		auto assigned = scene->AssignGameObjectId(created.value, record.id);
-		if (!assigned)
+		auto deserialized = object->Deserialize(reader.value, context);
+		if (!deserialized)
 		{
-			return Result<LoadedSceneResource>::Failure(assigned.error);
+			return Result<LoadedSceneResource>::Failure(deserialized.error);
 		}
-		auto mapped = context.MapGameObject(record.id, created.value);
+		auto attached = scene->AttachGameObject(object);
+		if (!attached)
+		{
+			return Result<LoadedSceneResource>::Failure(attached.error);
+		}
+		auto mapped = context.MapGameObject(record.id, object);
 		if (!mapped)
 		{
-			return Result<LoadedSceneResource>::Failure(mapped.error + " in " + PathToUrsaString(path));
-		}
-		auto placed = created.value->SetLocalTransform(record.local);
-		if (!placed)
-		{
-			return Result<LoadedSceneResource>::Failure(placed.error);
-		}
-		auto enabled = created.value->SetEnabled(record.enabled);
-		if (!enabled)
-		{
-			return Result<LoadedSceneResource>::Failure(enabled.error);
+			return Result<LoadedSceneResource>::Failure(mapped.error + " in " + path);
 		}
 	}
 	for (const auto& record : records)
@@ -344,14 +356,13 @@ Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& pat
 		if (!parentId)
 		{
 			return Result<LoadedSceneResource>::Failure("Missing parentId " + record.parentId.ToString() +
-			                                            " for GameObject " + record.id.ToString() + " in " +
-			                                            PathToUrsaString(path));
+			                                            " for GameObject " + record.id.ToString() + " in " + path);
 		}
 		auto reparented = scene->SetParent(node.value, parentId.value);
 		if (!reparented)
 		{
 			return Result<LoadedSceneResource>::Failure("Invalid parentId for GameObject " + record.id.ToString() +
-			                                            " in " + PathToUrsaString(path) + ": " + reparented.error);
+			                                            " in " + path + ": " + reparented.error);
 		}
 	}
 
@@ -370,8 +381,8 @@ Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& pat
 		for (Ursa::Size index = 0; index < record.components.size(); ++index)
 		{
 			const auto& item = record.components[index];
-			const auto location = PathToUrsaString(path) + ".node[" + record.id.ToString() + "].components[" +
-			                      ToUrsaString(std::to_string(index)) + "]";
+			const auto location =
+			    path + ".node[" + record.id.ToString() + "].components[" + ToUrsaString(std::to_string(index)) + "]";
 			if (!item.is_object())
 			{
 				return Result<LoadedSceneResource>::Failure("Invalid component at " + location);
@@ -422,6 +433,11 @@ Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& pat
 			{
 				return Result<LoadedSceneResource>::Failure(mapped.error + " at " + location);
 			}
+			auto mappedObject = context.MapComponentObject(id.value, scene->GetComponent(created.value));
+			if (!mappedObject)
+			{
+				return Result<LoadedSceneResource>::Failure(mappedObject.error + " at " + location);
+			}
 			auto changed = scene->SetComponentEnabled(created.value, enabled->get<bool>());
 			if (!changed)
 			{
@@ -443,36 +459,41 @@ Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& pat
 		}
 	}
 
+	auto references = context.ResolveReferences();
+	if (!references)
+	{
+		return Result<LoadedSceneResource>::Failure(references.error + " at " + path);
+	}
 	auto ambient = document.find("ambient");
 	if (ambient == document.end() || !ambient->is_object())
 	{
-		return Result<LoadedSceneResource>::Failure("Invalid scene ambient light at " + PathToUrsaString(path));
+		return Result<LoadedSceneResource>::Failure("Invalid scene ambient light at " + path);
 	}
-	const auto color = ReadFloatArray(*ambient, "color", 4, PathToUrsaString(path) + ".ambient");
+	const auto color = ReadFloatArray(*ambient, "color", 4, path + ".ambient");
 	auto intensity = ambient->find("intensity");
 	if (!color || intensity == ambient->end() || !intensity->is_number())
 	{
-		return Result<LoadedSceneResource>::Failure("Invalid scene ambient light at " + PathToUrsaString(path));
+		return Result<LoadedSceneResource>::Failure("Invalid scene ambient light at " + path);
 	}
 	const Ursa::Float64 light = intensity->get<Ursa::Float64>();
 	if (!std::isfinite(light) || light < 0.0 || light > std::numeric_limits<Ursa::Float32>::max())
 	{
-		return Result<LoadedSceneResource>::Failure("Invalid scene ambient intensity at " + PathToUrsaString(path));
+		return Result<LoadedSceneResource>::Failure("Invalid scene ambient intensity at " + path);
 	}
 	auto lit = scene->SetAmbientLight({color.value[0], color.value[1], color.value[2], color.value[3]},
 	                                  static_cast<Ursa::Float32>(light));
 	if (!lit)
 	{
-		return Result<LoadedSceneResource>::Failure(lit.error + " at " + PathToUrsaString(path));
+		return Result<LoadedSceneResource>::Failure(lit.error + " at " + path);
 	}
 	auto activeCamera = document.find("activeCamera");
 	if (activeCamera == document.end())
 	{
-		return Result<LoadedSceneResource>::Failure("Missing scene activeCamera at " + PathToUrsaString(path));
+		return Result<LoadedSceneResource>::Failure("Missing scene activeCamera at " + path);
 	}
 	if (!activeCamera->is_null())
 	{
-		auto cameraId = ReadId(document, "activeCamera", PathToUrsaString(path));
+		auto cameraId = ReadId(document, "activeCamera", path);
 		if (!cameraId)
 		{
 			return Result<LoadedSceneResource>::Failure(cameraId.error);
@@ -481,42 +502,44 @@ Result<LoadedSceneResource> DecodeSceneDocument(const std::filesystem::path& pat
 		if (!camera)
 		{
 			return Result<LoadedSceneResource>::Failure("Missing active camera component " + cameraId.value.ToString() +
-			                                            " at " + PathToUrsaString(path));
+			                                            " at " + path);
 		}
 		auto selected = scene->SetActiveCamera(camera.value);
 		if (!selected)
 		{
-			return Result<LoadedSceneResource>::Failure(selected.error + " at " + PathToUrsaString(path));
+			return Result<LoadedSceneResource>::Failure(selected.error + " at " + path);
 		}
 	}
-	auto id = ReadId(document, "id", PathToUrsaString(path));
+	auto id = ReadId(document, "id", path);
 	if (!id)
 	{
 		return Result<LoadedSceneResource>::Failure(id.error);
 	}
+	mappings.Commit();
 	return Result<LoadedSceneResource>::Success({id.value, std::move(scene)});
 }
 
-Result<LoadedSceneResource> LoadSceneResource(const std::filesystem::path& path, const ComponentRegistry& registry,
-                                              ComponentLoadContext& context)
+Result<LoadedSceneResource> LoadSceneResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
+                                              const ComponentRegistry& registry, ComponentLoadContext& context)
 {
-	auto document = ReadJsonResource(path, ResourceKind::Scene);
+	auto document = ReadJsonResource(filesystem, path, ResourceKind::Scene);
 	if (!document)
 	{
 		return Result<LoadedSceneResource>::Failure(document.error);
 	}
 	if (document.value.contains("instances"))
 	{
-		return Result<LoadedSceneResource>::Failure("Linked scene at " + PathToUrsaString(path) +
+		return Result<LoadedSceneResource>::Failure("Linked scene at " + path.ToString() +
 		                                            " must be loaded with loadLinkedSceneResource");
 	}
-	return DecodeSceneDocument(path, document.value, registry, context);
+	return DecodeSceneDocument(path.ToString(), document.value, registry, context);
 }
 
-Result<void> ReloadSceneResource(const std::filesystem::path& path, const ComponentRegistry& registry,
-                                 ComponentLoadContext& context, std::unique_ptr<Scene>& activeScene)
+Result<void> ReloadSceneResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
+                                 const ComponentRegistry& registry, ComponentLoadContext& context,
+                                 std::unique_ptr<Scene>& activeScene)
 {
-	auto candidate = LoadSceneResource(path, registry, context);
+	auto candidate = LoadSceneResource(filesystem, path, registry, context);
 	if (!candidate)
 	{
 		return Result<void>::Failure(candidate.error);
@@ -524,4 +547,5 @@ Result<void> ReloadSceneResource(const std::filesystem::path& path, const Compon
 	activeScene = std::move(candidate.value.scene);
 	return {};
 }
+
 } // namespace Ursa

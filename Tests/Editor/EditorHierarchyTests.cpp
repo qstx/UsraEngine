@@ -1,3 +1,4 @@
+#include <ResourceFixtures.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Serialization/SceneResource.hpp>
 #include <Serialization/PrefabResource.hpp>

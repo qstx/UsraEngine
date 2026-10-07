@@ -123,11 +123,16 @@ int main()
 			return scene.AddComponent<TestComponent>(node, *service.value, data.at("value").get<int>());
 		};
 		done(registry.RegisterCodec(std::move(codec)));
+		TestService editService;
 		auto document = Take(Editor::NewSceneDocument(Take(VirtualPath::Parse("prj:play.ursascene")),
-		                                              ResourceKind::Scene, registry, documents->Session()));
+		                                              ResourceKind::Scene, registry, documents->Session(),
+		                                              [&editService](ComponentLoadContext& context)
+		                                              {
+			                                              context.Provide(editService);
+			                                              return Result<void>{};
+		                                              }));
 		auto draft = document->Payload<Editor::SceneDraft>();
 		const auto rootNode = draft->GetScene().RootGameObjects().front();
-		TestService editService;
 		Take(draft->GetScene().AddComponent<TestComponent>(rootNode, editService, 12));
 		document->MarkDirty();
 		const auto documentId = document->Id();

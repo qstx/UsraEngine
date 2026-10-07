@@ -1,6 +1,7 @@
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
 #include <Core/Log.hpp>
+#include <Vfs/MemoryFileProvider.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -38,7 +39,7 @@ void Run(const std::filesystem::path& root)
 #ifndef NDEBUG
 	Expect(Log::DefaultLevel() == LogLevel::Debug, "Debug default level is wrong");
 #else
-	expect(Log::defaultLevel() == LogLevel::Info, "Release default level is wrong");
+	Expect(Log::DefaultLevel() == LogLevel::Info, "Release default level is wrong");
 #endif
 	Log::Write(LogLevel::Error, "Bootstrap", "message before initialization");
 
@@ -132,12 +133,22 @@ void Run(const std::filesystem::path& root)
 		}
 	}
 
-	Expect(static_cast<bool>(Log::Initialize(root / "bin" / "LogTests.exe")), "Default log init failed");
+	LogConfig defaultConfig;
+	defaultConfig.userDataDirectoryOverride = root / "User";
+	Expect(static_cast<bool>(Log::Initialize(root / "bin" / "LogTests.exe", defaultConfig)), "Default log init failed");
 	URSA_LOG_ERROR("Runtime", "default path message");
 	Log::Shutdown();
-	Expect(ReadFile(root / "bin" / "logs" / "LogTests.log").find("default path message") != std::string::npos,
-	       "Default log path is not beside the executable");
+	Expect(ReadFile(root / "User" / "Logs" / "LogTests.log").find("default path message") != std::string::npos,
+	       "Default log path is not in the user data mount");
 	Log::Write(LogLevel::Error, "Bootstrap", "message after shutdown");
+	auto virtualFiles = std::make_shared<VirtualFileSystem>();
+	auto virtualPath = VirtualPath::Parse("user:Logs/Test.log").value;
+	Expect(!Log::Initialize(virtualFiles, virtualPath), "Missing user mount was accepted for logging");
+	Expect(static_cast<bool>(virtualFiles->MountProvider(userDataScheme, std::make_shared<MemoryFileProvider>(),
+	                                                     MountAccess::ReadOnly)),
+	       "Cannot mount read-only user fixture");
+	Expect(!Log::Initialize(virtualFiles, virtualPath) && !Log::Initialized(), "Read-only log mount was accepted");
+	Log::Write(LogLevel::Error, "Bootstrap", "fallback after VFS log failure");
 }
 } // namespace
 

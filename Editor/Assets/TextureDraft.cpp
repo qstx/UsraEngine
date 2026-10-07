@@ -34,9 +34,9 @@ Result<std::shared_ptr<TextureDraft>> TextureDraft::Create(Ursa::UInt32 textureW
 	    new TextureDraft(textureWidth, textureHeight, textureColorSpace, std::move(texturePixels))));
 }
 
-Result<std::shared_ptr<TextureDraft>> TextureDraft::Load(const std::filesystem::path& path)
+Result<std::shared_ptr<TextureDraft>> TextureDraft::Load(const VirtualFileSystem& filesystem, const VirtualPath& path)
 {
-	auto loaded = LoadTextureResource(path);
+	auto loaded = LoadTextureResource(filesystem, path);
 	if (!loaded)
 	{
 		return Result<std::shared_ptr<TextureDraft>>::Failure(loaded.error);
@@ -129,14 +129,14 @@ Result<void> TextureDraft::GenerateChecker(Ursa::UInt32 cellSize, Ursa::Array<Ur
 	return {};
 }
 
-Result<void> TextureDraft::Save(const std::filesystem::path& path, ResourceId id) const
+Result<void> TextureDraft::Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id) const
 {
 	auto texture = MaterialTexture::Create(width, height, colorSpace, pixels);
 	if (!texture)
 	{
 		return Result<void>::Failure(texture.error);
 	}
-	return SaveTextureResource(path, id, *texture.value);
+	return SaveTextureResource(filesystem, path, id, *texture.value);
 }
 
 Result<std::unique_ptr<EditorDocument>> NewTextureDocument(const VirtualPath& path)
@@ -152,9 +152,10 @@ Result<std::unique_ptr<EditorDocument>> NewTextureDocument(const VirtualPath& pa
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(checker.error);
 	}
-	auto document = EditorDocument::Create(ResourceKind::Texture, ResourceId::Generate(), path,
-	                                       [draft = draft.value](const std::filesystem::path& target, ResourceId id)
-	                                       { return draft->Save(target, id); });
+	auto document =
+	    EditorDocument::Create(ResourceKind::Texture, ResourceId::Generate(), path,
+	                           [draft = draft.value](VirtualFileSystem& filesystem, const VirtualPath& target,
+	                                                 ResourceId id) { return draft->Save(filesystem, target, id); });
 	if (document)
 	{
 		document.value->SetPayload(draft.value);
@@ -165,12 +166,8 @@ Result<std::unique_ptr<EditorDocument>> NewTextureDocument(const VirtualPath& pa
 
 Result<std::unique_ptr<EditorDocument>> OpenTextureDocument(const VirtualPath& path, const ResourceIndex& index)
 {
-	auto host = index.Locate(ResourceLocation{ResourceKind::Texture, path});
-	if (!host)
-	{
-		return Result<std::unique_ptr<EditorDocument>>::Failure(host.error);
-	}
-	auto loaded = LoadTextureResource(host.value);
+
+	auto loaded = LoadTextureResource(index.Filesystem(), path);
 	if (!loaded)
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(loaded.error);
@@ -181,9 +178,10 @@ Result<std::unique_ptr<EditorDocument>> OpenTextureDocument(const VirtualPath& p
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(draft.error);
 	}
-	auto document = EditorDocument::Create(ResourceKind::Texture, loaded.value.id, path,
-	                                       [draft = draft.value](const std::filesystem::path& target, ResourceId id)
-	                                       { return draft->Save(target, id); });
+	auto document =
+	    EditorDocument::Create(ResourceKind::Texture, loaded.value.id, path,
+	                           [draft = draft.value](VirtualFileSystem& filesystem, const VirtualPath& target,
+	                                                 ResourceId id) { return draft->Save(filesystem, target, id); });
 	if (document)
 	{
 		document.value->SetPayload(draft.value);

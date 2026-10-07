@@ -7,6 +7,8 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
 #include <Vfs/AssetRoots.hpp>
+#include <Vfs/RuntimeMountProfile.hpp>
+#include <Vfs/PakArchive.hpp>
 #include <imgui_internal.h>
 #include <algorithm>
 #include <chrono>
@@ -27,7 +29,7 @@ Result<VirtualPath> ProjectAssetPath(const char* input)
 }
 } // namespace
 
-Result<void> EditorApplication::OpenProject(const std::filesystem::path& root)
+Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, const std::filesystem::path& package)
 {
 	if (play.Active())
 	{
@@ -37,17 +39,43 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root)
 	{
 		return Result<void>::Failure("Close or save the dirty document before changing projects");
 	}
-	Vector<ResourceMount> engineMounts;
-	auto engineRoots = ResolveEngineAssetRoots();
-	if (!engineRoots)
+
+	RuntimeMountProfileConfig profile;
+	profile.mode = package.empty() ? RuntimeMountMode::Editor : RuntimeMountMode::PackagedRuntime;
+	profile.applicationId = PathToUrsaString(CurrentExecutablePath().stem());
+	profile.projectAssetsDirectory = root / "Assets";
+	if (package.empty())
 	{
-		return Result<void>::Failure(engineRoots.error);
+		auto roots = ResolveEngineAssetRoots();
+		if (!roots)
+		{
+			return Result<void>::Failure(roots.error);
+		}
+		profile.engineDirectories = std::move(roots.value);
 	}
-	for (const std::filesystem::path& root : engineRoots.value)
+	else
 	{
-		engineMounts.push_back(ResourceMount{engineResourceScheme, root, MountAccess::ReadOnly});
+		auto archive = PakArchive::Open(package);
+		if (!archive)
+		{
+			return Result<void>::Failure(archive.error);
+		}
+		for (const String scheme : {String(engineScheme), String(projectScheme)})
+		{
+			auto view = archive.value->View(scheme);
+			if (!view)
+			{
+				return Result<void>::Failure(view.error);
+			}
+			profile.packagedProviders.push_back({scheme, view.value});
+		}
 	}
-	auto openedResult = ProjectWorkspace::Open(root, engineMounts);
+	auto files = OpenRuntimeFileSystem(profile);
+	if (!files)
+	{
+		return Result<void>::Failure(files.error);
+	}
+	auto openedResult = ProjectWorkspace::FromFilesystem(root, files.value);
 	if (!openedResult)
 	{
 		return Result<void>::Failure(openedResult.error);
@@ -58,6 +86,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root)
 	{
 		return Result<void>::Failure(documentsResult.error);
 	}
+	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(files.value));
 	documents = std::move(documentsResult.value);
 	workspace = std::move(openedWorkspace);
 	workspaceError.clear();
@@ -149,7 +178,13 @@ Result<void> EditorApplication::OnGui()
 		}
 		if (documents)
 		{
-			ImGui::InputText("New asset", assetNameInput.data(), assetNameInput.size());
+			ImGui::InputText("Asset path", assetNameInput.data(), assetNameInput.size());
+			if (documents->Current() && ImGui::Button("Rename current asset"))
+			{
+				auto path = ProjectAssetPath(assetNameInput.data());
+				auto renamed = path ? documents->RenameCurrent(path.value) : Result<void>::Failure(path.error);
+				workspaceError = renamed ? String{} : renamed.error;
+			}
 			if (ImGui::Button("New texture"))
 			{
 				auto target = ProjectAssetPath(assetNameInput.data());
@@ -239,12 +274,12 @@ Result<void> EditorApplication::OnGui()
 		}
 		for (const auto& entry : workspace->Resources())
 		{
-			const bool writable = static_cast<bool>(workspace->WritablePath(entry.location.path));
+			const bool writable = static_cast<bool>(workspace->Index().Filesystem().CheckWritable(entry.location.path));
 			ImGui::PushID(entry.id.ToString().c_str());
 			ImGui::TextUnformatted(writable ? "[Project]" : "[Engine]");
 			ImGui::SameLine();
 			const auto name = entry.location.path.ToString();
-			if (ImGui::Selectable(name.c_str()) && writable && documents)
+			if (ImGui::Selectable(name.c_str()) && documents)
 			{
 				if (entry.location.kind == ResourceKind::Texture)
 				{
@@ -545,6 +580,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		return Result<void>::Failure(guiResult.error);
 	}
 	gui = std::move(guiResult.value);
+	dockLayoutInitialized = gui->HasSavedLayout();
 	dockLayoutInitialized = false;
 	auto materialPreviewResult = MaterialPreview::Create(device, *gui);
 	if (!materialPreviewResult)

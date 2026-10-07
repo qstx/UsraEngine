@@ -2,9 +2,9 @@
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/TextureResource.hpp>
-#include <Serialization/AtomicFile.hpp>
 #include <Serialization/ResourceFile.hpp>
-#include <fstream>
+#include <Serialization/JsonArchiveInterop.hpp>
+#include <Serialization/SerializationContext.hpp>
 #include <limits>
 
 namespace Ursa
@@ -28,94 +28,124 @@ Ursa::UInt32 DecodeUint32(const Array<Ursa::UInt8, textureHeaderBytes>& bytes, U
 }
 } // namespace
 
-Result<void> SaveTextureResource(const std::filesystem::path& path, ResourceId id, const MaterialTexture& texture)
+Result<void> SaveTextureResource(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id,
+                                 const MaterialTexture& texture)
 {
 	if (!id)
 	{
-		return Result<void>::Failure("Cannot save texture with a zero resource ID at " + PathToUrsaString(path));
+		return Result<void>::Failure("Cannot save texture with a zero resource ID at " + path.ToString());
 	}
-	if (path.extension() != ".ursatex")
+	if (std::filesystem::path(ToStdString(path.relative)).extension() != ".ursatex")
 	{
-		return Result<void>::Failure("Texture resource needs .ursatex extension: " + PathToUrsaString(path));
+		return Result<void>::Failure("Texture resource needs .ursatex extension: " + path.ToString());
 	}
 	if (texture.GetPixels().size() > maxTextureResourceBytes - textureHeaderBytes)
 	{
-		return Result<void>::Failure("Texture resource exceeds size limit at " + PathToUrsaString(path));
+		return Result<void>::Failure("Texture resource exceeds size limit at " + path.ToString());
+	}
+	ArchiveWriter writer;
+	auto saved = texture.Serialize(writer);
+	if (!saved)
+	{
+		return saved;
+	}
+	auto reader = ArchiveSnapshot(writer);
+	if (!reader)
+	{
+		return Result<void>::Failure(reader.error);
+	}
+	auto width = reader.value.Unsigned("width");
+	auto height = reader.value.Unsigned("height");
+	auto space = reader.value.Text("colorSpace");
+	auto pixels = reader.value.Bytes("pixels");
+	if (!width || !height || !space || !pixels)
+	{
+		return Result<void>::Failure("Invalid serialized texture fields");
 	}
 	Array<Ursa::UInt8, textureHeaderBytes> header{};
 	constexpr Array<Ursa::UInt8, 8> magic{'U', 'R', 'S', 'A', 'T', 'E', 'X', 0};
 	std::copy(magic.begin(), magic.end(), header.begin());
 	EncodeUint32(header, 8, resourceFormatVersion);
 	std::copy(id.bytes.begin(), id.bytes.end(), header.begin() + 12);
-	EncodeUint32(header, 28, texture.GetWidth());
-	EncodeUint32(header, 32, texture.GetHeight());
-	header[36] = texture.GetColorSpace() == TextureColorSpace::Srgb ? 1 : 0;
-	return WriteResourceAtomically(path,
-	                               [&](std::ostream& output)
-	                               {
-		                               output.write(reinterpret_cast<const char*>(header.data()), header.size());
-		                               output.write(reinterpret_cast<const char*>(texture.GetPixels().data()),
-		                                            static_cast<std::streamsize>(texture.GetPixels().size()));
-		                               return output ? Result<void>{}
-		                                             : Result<void>::Failure("Cannot write texture resource " +
-		                                                                     PathToUrsaString(path));
-	                               });
+	EncodeUint32(header, 28, UInt32(width.value));
+	EncodeUint32(header, 32, UInt32(height.value));
+	header[36] = space.value == "Srgb" ? 1 : 0;
+	Vector<UInt8> bytes(header.begin(), header.end());
+	bytes.insert(bytes.end(), pixels.value.begin(), pixels.value.end());
+	return filesystem.WriteAtomic(path, bytes);
 }
 
-Result<LoadedTextureResource> LoadTextureResource(const std::filesystem::path& path)
+Result<LoadedTextureResource> LoadTextureResource(const VirtualFileSystem& filesystem, const VirtualPath& path)
 {
-	auto resource = ReadResourceHeader(path);
+	auto resource = ReadResourceHeader(filesystem, path);
 	if (!resource)
 	{
 		return Result<LoadedTextureResource>::Failure(resource.error);
 	}
 	if (resource.value.kind != ResourceKind::Texture)
 	{
-		return Result<LoadedTextureResource>::Failure("Expected a texture resource at " + PathToUrsaString(path));
+		return Result<LoadedTextureResource>::Failure("Expected a texture resource at " + path.ToString());
 	}
 
-	std::error_code error;
-	const auto size = std::filesystem::file_size(path, error);
-	if (error || size < textureHeaderBytes)
+	auto data = filesystem.Read(path);
+	if (!data || data.value.size() < textureHeaderBytes)
 	{
-		return Result<LoadedTextureResource>::Failure("Truncated texture resource at " + PathToUrsaString(path));
+		return Result<LoadedTextureResource>::Failure("Truncated texture resource at " + path.ToString());
 	}
-	std::ifstream input(path, std::ios::binary);
-	Array<Ursa::UInt8, textureHeaderBytes> header{};
-	if (!input.read(reinterpret_cast<char*>(header.data()), header.size()))
-	{
-		return Result<LoadedTextureResource>::Failure("Truncated texture header at " + PathToUrsaString(path));
-	}
+	const auto size = data.value.size();
+	Array<UInt8, textureHeaderBytes> header{};
+	std::copy(data.value.begin(), data.value.begin() + textureHeaderBytes, header.begin());
 	const Ursa::UInt32 width = DecodeUint32(header, 28);
 	const Ursa::UInt32 height = DecodeUint32(header, 32);
 	if (!width || !height ||
 	    static_cast<Ursa::UInt64>(width) * height > (maxTextureResourceBytes - textureHeaderBytes) / 4)
 	{
-		return Result<LoadedTextureResource>::Failure("Invalid texture dimensions at " + PathToUrsaString(path));
+		return Result<LoadedTextureResource>::Failure("Invalid texture dimensions at " + path.ToString());
 	}
 	const Ursa::UInt64 expected = textureHeaderBytes + static_cast<Ursa::UInt64>(width) * height * 4;
 	if (size != expected)
 	{
 		return Result<LoadedTextureResource>::Failure("Texture pixel byte count does not match dimensions at " +
-		                                              PathToUrsaString(path));
+		                                              path.ToString());
 	}
 	if (header[36] > 1 || header[37] || header[38] || header[39])
 	{
 		return Result<LoadedTextureResource>::Failure("Invalid texture color space or reserved bytes at " +
-		                                              PathToUrsaString(path));
+		                                              path.ToString());
 	}
-	Vector<Ursa::UInt8> pixels(static_cast<Ursa::Size>(expected - textureHeaderBytes));
-	if (!input.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size())))
+	Vector<UInt8> pixels(data.value.begin() + textureHeaderBytes, data.value.end());
+	ArchiveWriter writer;
+	auto fields = writer.Write("width", UInt64(width));
+	if (fields)
 	{
-		return Result<LoadedTextureResource>::Failure("Truncated texture pixel data at " + PathToUrsaString(path));
+		fields = writer.Write("height", UInt64(height));
 	}
-	auto texture = MaterialTexture::Create(
-	    width, height, header[36] ? TextureColorSpace::Srgb : TextureColorSpace::Linear, std::move(pixels));
-	if (!texture)
+	if (fields)
 	{
-		return Result<LoadedTextureResource>::Failure("Invalid texture resource at " + PathToUrsaString(path) + ": " +
-		                                              texture.error);
+		fields = writer.Write("colorSpace", String(header[36] ? "Srgb" : "Linear"));
 	}
-	return Result<LoadedTextureResource>::Success({resource.value.id, std::move(texture.value)});
+	if (fields)
+	{
+		fields = writer.WriteBytes("pixels", pixels);
+	}
+	if (!fields)
+	{
+		return Result<LoadedTextureResource>::Failure(fields.error);
+	}
+	auto reader = ArchiveSnapshot(writer);
+	if (!reader)
+	{
+		return Result<LoadedTextureResource>::Failure(reader.error);
+	}
+	auto texture = MaterialTexture::CreateForDeserialization();
+	SerializationContext context;
+	auto loaded = texture->Deserialize(reader.value, context);
+	if (!loaded)
+	{
+		return Result<LoadedTextureResource>::Failure("Invalid texture resource at " + path.ToString() + ": " +
+		                                              loaded.error);
+	}
+	return Result<LoadedTextureResource>::Success({resource.value.id, std::move(texture)});
 }
+
 } // namespace Ursa

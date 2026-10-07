@@ -4,7 +4,6 @@
 #include <Serialization/ResourceFile.hpp>
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -147,56 +146,6 @@ Result<ResourceKind> ResourceKindForPath(const VirtualPath& path)
 		return Result<ResourceKind>::Failure("Unsupported resource file extension: " + path.ToString());
 	}
 	return KindFromExtension(path.relative.substr(dot), path.ToString());
-}
-
-Result<ResourceHeader> ReadResourceHeader(const std::filesystem::path& path)
-{
-	const String where = PathToUrsaString(path);
-	auto kind = KindFromExtension(PathToUrsaString(path.extension()), where);
-	if (!kind)
-	{
-		return Result<ResourceHeader>::Failure(kind.error);
-	}
-
-	std::error_code error;
-	const uintmax_t size = std::filesystem::file_size(path, error);
-	if (error)
-	{
-		return Result<ResourceHeader>::Failure("Cannot read resource size at " + where + ": " +
-		                                       ToUrsaString(error.message()));
-	}
-	if (size > SizeLimitFor(kind.value))
-	{
-		return Result<ResourceHeader>::Failure("Resource exceeds size limit at " + where);
-	}
-
-	std::ifstream input(path, std::ios::binary);
-	if (!input)
-	{
-		return Result<ResourceHeader>::Failure("Cannot open resource at " + where);
-	}
-	if (kind.value == ResourceKind::Texture)
-	{
-		Array<Ursa::UInt8, textureHeaderBytes> header{};
-		if (size < header.size() || !input.read(reinterpret_cast<char*>(header.data()), header.size()))
-		{
-			return Result<ResourceHeader>::Failure("Truncated texture header at " + where);
-		}
-		Vector<Ursa::UInt8> bytes;
-		bytes.reserve(header.size());
-		for (Ursa::UInt8 byte : header)
-		{
-			bytes.push_back(byte);
-		}
-		return ParseTextureHeader(bytes, where);
-	}
-	Vector<Ursa::UInt8> bytes(static_cast<Ursa::Size>(size));
-	if (!bytes.empty() &&
-	    !input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
-	{
-		return Result<ResourceHeader>::Failure("Truncated JSON resource at " + where);
-	}
-	return ParseJsonHeader(bytes, where, kind.value);
 }
 
 Result<ResourceHeader> ReadResourceHeader(const VirtualFileSystem& filesystem, const VirtualPath& path)

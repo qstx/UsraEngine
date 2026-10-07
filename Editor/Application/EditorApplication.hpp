@@ -40,7 +40,7 @@ public:
 	Result<void> Run(Ursa::UInt32 width = 1280, Ursa::UInt32 height = 720, const String& title = "Ursa Editor",
 	                 bool visible = true, Ursa::UInt32 frameLimit = 0);
 
-	Result<void> OpenProject(const std::filesystem::path& root);
+	Result<void> OpenProject(const std::filesystem::path& root, const std::filesystem::path& package = {});
 
 protected:
 	virtual Result<void> OnStart()

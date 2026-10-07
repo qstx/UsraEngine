@@ -78,10 +78,10 @@ int main()
 		Expect(workspace->Resources().size() == 1 && workspace->Resources()[0].id == id &&
 		           workspace->Resources()[0].location.path.ToString() == "prj:original.ursamat",
 		       "Project resource enumeration lost the stable ID or virtual path");
-		Expect(Take(workspace->WritablePath(Asset("new.ursatex"))) == assets / "new.ursatex",
+		Expect(static_cast<bool>(workspace->CheckWritable(Asset("new.ursatex"))),
 		       "Project write path resolution failed");
 		Expect(!VirtualPath::Parse("prj:../Engine/builtin.ursamat"), "Parent escape parsed as a virtual path");
-		Expect(!workspace->WritablePath(Take(VirtualPath::Parse("ursa:builtin.ursamat"))),
+		Expect(!workspace->CheckWritable(Take(VirtualPath::Parse("ursa:builtin.ursamat"))),
 		       "Engine asset was accepted as writable");
 		std::filesystem::create_directories(assets / "builtin");
 		Expect(!Editor::ProjectWorkspace::Open(project, engineMounts(assets / "builtin")),
@@ -122,7 +122,7 @@ int main()
 #endif
 		if (linked)
 		{
-			Expect(!workspace->WritablePath(Asset("linked/escape.ursatex")),
+			Expect(!workspace->CheckWritable(Asset("linked/escape.ursatex")),
 			       "Link path escaped the project assets root");
 		}
 		std::filesystem::remove_all(base);

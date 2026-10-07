@@ -14,14 +14,16 @@ inline constexpr const char* engineResourceScheme = engineScheme;
 class ProjectWorkspace final
 {
 public:
+	static Result<std::unique_ptr<ProjectWorkspace>> FromFilesystem(const std::filesystem::path& projectDirectory,
+	                                                                const VirtualFileSystem& filesystem);
+
 	static Result<std::unique_ptr<ProjectWorkspace>> Open(const std::filesystem::path& projectDirectory,
 	                                                      const Vector<ResourceMount>& builtinMounts = {});
 
 	Result<void> Refresh();
 
-	// Host path a save would target. The virtual path must resolve inside the
-	// writable project mount.
-	Result<std::filesystem::path> WritablePath(const VirtualPath& path) const;
+	// Verify that a virtual path belongs to the writable project mount.
+	Result<void> CheckWritable(const VirtualPath& path) const;
 
 	Vector<ResourceEntry> Resources() const
 	{
@@ -29,6 +31,11 @@ public:
 	}
 
 	const ResourceIndex& Index() const
+	{
+		return index;
+	}
+
+	ResourceIndex& Index()
 	{
 		return index;
 	}

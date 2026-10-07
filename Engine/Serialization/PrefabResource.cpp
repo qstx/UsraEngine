@@ -101,7 +101,7 @@ Json SceneEnvelope(ResourceId id, Json nodes)
 	        {"gameObjects", std::move(nodes)}};
 }
 
-Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json& source, ResourceSession& resources,
+Result<Json> ExpandInstances(const String& scenePath, const Json& source, ResourceSession& resources,
                              Map<String, Map<String, String>>& scopedIds)
 {
 	Json expanded = source;
@@ -109,12 +109,11 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 	if (graphVersion == source.end() || !graphVersion->is_number_unsigned() ||
 	    graphVersion->get<Ursa::UInt32>() != sceneGraphFormatVersion)
 	{
-		return Result<Json>::Failure("Unsupported or missing GameObject Scene format version at " +
-		                             PathToUrsaString(scenePath));
+		return Result<Json>::Failure("Unsupported or missing GameObject Scene format version at " + scenePath);
 	}
 	if (!expanded.contains("gameObjects") || !expanded["gameObjects"].is_array())
 	{
-		return Result<Json>::Failure("Invalid scene nodes at " + PathToUrsaString(scenePath));
+		return Result<Json>::Failure("Invalid scene nodes at " + scenePath);
 	}
 	auto instances = source.find("instances");
 	if (instances == source.end())
@@ -123,7 +122,7 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 	}
 	if (!instances->is_array() || instances->size() > 100000)
 	{
-		return Result<Json>::Failure("Invalid prefab instances at " + PathToUrsaString(scenePath));
+		return Result<Json>::Failure("Invalid prefab instances at " + scenePath);
 	}
 	Set<String> instanceIds;
 	Set<String> objectIds;
@@ -132,7 +131,7 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 	{
 		if (!node.is_object() || !node.contains("id") || !node["id"].is_string())
 		{
-			return Result<Json>::Failure("Invalid regular scene node at " + PathToUrsaString(scenePath));
+			return Result<Json>::Failure("Invalid regular scene node at " + scenePath);
 		}
 		objectIds.insert(node["id"].get<String>());
 		regularNodes.insert(node["id"].get<String>());
@@ -150,7 +149,7 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 	for (Ursa::Size index = 0; index < instances->size(); ++index)
 	{
 		const auto& instance = (*instances)[index];
-		const String location = PathToUrsaString(scenePath) + ".instances[" + ToUrsaString(std::to_string(index)) + "]";
+		const String location = scenePath + ".instances[" + ToUrsaString(std::to_string(index)) + "]";
 		if (!instance.is_object() || !instance.contains("id") || !instance.contains("prefab") ||
 		    !instance.contains("parentId") || !instance.contains("overrides"))
 		{
@@ -194,12 +193,7 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 			return Result<Json>::Failure("Referenced resource is not a Prefab at " + location);
 		}
 		const String prefabSource = resolved.value.path.ToString();
-		auto prefabPath = resources.Index().Locate(resolved.value);
-		if (!prefabPath)
-		{
-			return Result<Json>::Failure(prefabPath.error);
-		}
-		auto prefab = ReadJsonResource(prefabPath.value, ResourceKind::Prefab);
+		auto prefab = ReadJsonResource(resources.Index().Filesystem(), resolved.value.path, ResourceKind::Prefab);
 		if (!prefab)
 		{
 			return Result<Json>::Failure(prefab.error);
@@ -354,16 +348,15 @@ Result<Json> ExpandInstances(const std::filesystem::path& scenePath, const Json&
 }
 } // namespace
 
-Result<void> SavePrefabResource(const std::filesystem::path& path, ResourceId id, const Scene& scene,
-                                GameObject::Ptr root, const ComponentRegistry& registry,
+Result<void> SavePrefabResource(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id,
+                                const Scene& scene, GameObject::Ptr root, const ComponentRegistry& registry,
                                 const MaterialIdResolver& materialId)
 {
-	if (!id || path.extension() != ".ursaprefab" || !scene.Contains(root))
+	if (!id || std::filesystem::path(ToStdString(path.relative)).extension() != ".ursaprefab" || !scene.Contains(root))
 	{
-		return Result<void>::Failure("Invalid Prefab path, ID or root at " + PathToUrsaString(path));
+		return Result<void>::Failure("Invalid Prefab path, ID or root at " + path.ToString());
 	}
-	auto encoded =
-	    EncodeSceneDocument(path.parent_path() / "prefab-source.ursascene", id, scene, registry, materialId, root);
+	auto encoded = EncodeSceneDocument(path.ToString() + ".ursascene", id, scene, registry, materialId, root);
 	if (!encoded)
 	{
 		return Result<void>::Failure(encoded.error);
@@ -375,13 +368,13 @@ Result<void> SavePrefabResource(const std::filesystem::path& path, ResourceId id
 	              {"prefabGraphVersion", prefabGraphFormatVersion},
 	              {"id", id.ToString()},
 	              {"gameObjects", std::move(nodes)}};
-	return WriteJsonResource(path, document);
+	return WriteJsonResource(filesystem, path, document);
 }
 
-Result<LoadedSceneResource> LoadPrefabResource(const std::filesystem::path& path, const ComponentRegistry& registry,
-                                               ComponentLoadContext& context)
+Result<LoadedSceneResource> LoadPrefabResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
+                                               const ComponentRegistry& registry, ComponentLoadContext& context)
 {
-	auto prefab = ReadJsonResource(path, ResourceKind::Prefab);
+	auto prefab = ReadJsonResource(filesystem, path, ResourceKind::Prefab);
 	if (!prefab)
 	{
 		return Result<LoadedSceneResource>::Failure(prefab.error);
@@ -391,12 +384,12 @@ Result<LoadedSceneResource> LoadPrefabResource(const std::filesystem::path& path
 	    graphVersion->get<Ursa::UInt32>() != prefabGraphFormatVersion)
 	{
 		return Result<LoadedSceneResource>::Failure("Unsupported or missing GameObject Prefab format version at " +
-		                                            PathToUrsaString(path));
+		                                            path.ToString());
 	}
 	if (!prefab.value.contains("gameObjects") || !prefab.value["gameObjects"].is_array() ||
 	    prefab.value["gameObjects"].empty())
 	{
-		return Result<LoadedSceneResource>::Failure("Invalid Prefab nodes at " + PathToUrsaString(path));
+		return Result<LoadedSceneResource>::Failure("Invalid Prefab nodes at " + path.ToString());
 	}
 	Ursa::Size roots = 0;
 	for (const auto& node : prefab.value["gameObjects"])
@@ -410,15 +403,15 @@ Result<LoadedSceneResource> LoadPrefabResource(const std::filesystem::path& path
 	    !prefab.value["gameObjects"].front().contains("parentId") ||
 	    !prefab.value["gameObjects"].front()["parentId"].is_null())
 	{
-		return Result<LoadedSceneResource>::Failure("Prefab must contain one rooted subtree at " +
-		                                            PathToUrsaString(path));
+		return Result<LoadedSceneResource>::Failure("Prefab must contain one rooted subtree at " + path.ToString());
 	}
-	auto id = ParseId(prefab.value["id"], PathToUrsaString(path) + ".id");
+	auto id = ParseId(prefab.value["id"], path.ToString() + ".id");
 	if (!id)
 	{
 		return Result<LoadedSceneResource>::Failure(id.error);
 	}
-	return DecodeSceneDocument(path, SceneEnvelope(id.value, prefab.value["gameObjects"]), registry, context);
+	return DecodeSceneDocument(path.ToString(), SceneEnvelope(id.value, prefab.value["gameObjects"]), registry,
+	                           context);
 }
 
 Result<void> AddPrefabInstance(Json& sceneDocument, ResourceId prefabId, ResourceId instanceId, ResourceId parentId)
@@ -449,18 +442,18 @@ Result<void> AddPrefabInstance(Json& sceneDocument, ResourceId prefabId, Resourc
 	return {};
 }
 
-Result<LinkedSceneResource> LoadLinkedSceneResource(const std::filesystem::path& path,
+Result<LinkedSceneResource> LoadLinkedSceneResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
                                                     const ComponentRegistry& registry, ComponentLoadContext& context)
 {
-	auto document = ReadJsonResource(path, ResourceKind::Scene);
+	auto document = ReadJsonResource(filesystem, path, ResourceKind::Scene);
 	if (!document)
 	{
 		return Result<LinkedSceneResource>::Failure(document.error);
 	}
-	return DecodeLinkedSceneDocument(path, std::move(document.value), registry, context);
+	return DecodeLinkedSceneDocument(path.ToString(), std::move(document.value), registry, context);
 }
 
-Result<LinkedSceneResource> DecodeLinkedSceneDocument(const std::filesystem::path& path, Json document,
+Result<LinkedSceneResource> DecodeLinkedSceneDocument(const String& path, Json document,
                                                       const ComponentRegistry& registry, ComponentLoadContext& context)
 {
 	try
@@ -482,18 +475,18 @@ Result<LinkedSceneResource> DecodeLinkedSceneDocument(const std::filesystem::pat
 	}
 	catch (const Json::exception& error)
 	{
-		return Result<LinkedSceneResource>::Failure("Invalid linked scene at " + PathToUrsaString(path) + ": " +
-		                                            error.what());
+		return Result<LinkedSceneResource>::Failure("Invalid linked scene at " + path + ": " + error.what());
 	}
 }
 
-Result<void> SaveLinkedSceneResource(const std::filesystem::path& path, LinkedSceneResource& linked,
-                                     const ComponentRegistry& registry, const MaterialIdResolver& materialId)
+Result<void> SaveLinkedSceneResource(VirtualFileSystem& filesystem, const VirtualPath& path,
+                                     LinkedSceneResource& linked, const ComponentRegistry& registry,
+                                     const MaterialIdResolver& materialId)
 {
-	if (path.extension() != ".ursascene" || !linked.id || !linked.document.is_object() ||
-	    linked.document.value("id", String{}) != linked.id.ToString())
+	if (std::filesystem::path(ToStdString(path.relative)).extension() != ".ursascene" || !linked.id ||
+	    !linked.document.is_object() || linked.document.value("id", String{}) != linked.id.ToString())
 	{
-		return Result<void>::Failure("Invalid linked scene document at " + PathToUrsaString(path));
+		return Result<void>::Failure("Invalid linked scene document at " + path.ToString());
 	}
 	const MaterialIdResolver resolver = materialId ? materialId
 	                                               : [&linked](const std::shared_ptr<MaterialInstance>& material)
@@ -503,19 +496,20 @@ Result<void> SaveLinkedSceneResource(const std::filesystem::path& path, LinkedSc
 	};
 	try
 	{
-		auto captured = CaptureLinkedSceneChanges(path, linked, registry, resolver);
-		return captured ? WriteJsonResource(path, linked.document) : captured;
+		auto captured = CaptureLinkedSceneChanges(path.ToString(), linked, registry, resolver);
+		return captured ? WriteJsonResource(filesystem, path, linked.document) : captured;
 	}
 	catch (const Json::exception& error)
 	{
-		return Result<void>::Failure("Cannot save linked scene at " + PathToUrsaString(path) + ": " + error.what());
+		return Result<void>::Failure("Cannot save linked scene at " + path.ToString() + ": " + error.what());
 	}
 }
 
-Result<void> ReloadLinkedSceneResource(const std::filesystem::path& path, const ComponentRegistry& registry,
-                                       ComponentLoadContext& context, LinkedSceneResource& active)
+Result<void> ReloadLinkedSceneResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
+                                       const ComponentRegistry& registry, ComponentLoadContext& context,
+                                       LinkedSceneResource& active)
 {
-	auto candidate = LoadLinkedSceneResource(path, registry, context);
+	auto candidate = LoadLinkedSceneResource(filesystem, path, registry, context);
 	if (!candidate)
 	{
 		return Result<void>::Failure(candidate.error);
@@ -589,4 +583,5 @@ Result<void> SetPrefabStructureOverride(LinkedSceneResource& linked, ResourceId 
 	(*instance.value)["overrides"][ToStdString(operation)] = value;
 	return {};
 }
+
 } // namespace Ursa

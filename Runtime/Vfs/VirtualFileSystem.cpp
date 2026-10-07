@@ -1,65 +1,40 @@
 #include <Core/Types.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
 #include <Vfs/VirtualFileSystem.hpp>
-#include <Core/StringInterop.hpp>
 #include <algorithm>
-#include <cwctype>
-#include <fstream>
 
 namespace Ursa
 {
-namespace
-{
-bool SamePart(const std::filesystem::path& left, const std::filesystem::path& right)
-{
-#ifdef _WIN32
-	const auto a = left.wstring();
-	const auto b = right.wstring();
-	return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](wchar_t x, wchar_t y)
-	                                          { return std::towlower(x) == std::towlower(y); });
-#else
-	return left == right;
-#endif
-}
-
-bool ContainedIn(const std::filesystem::path& root, const std::filesystem::path& candidate)
-{
-	auto part = root.begin();
-	auto entry = candidate.begin();
-	for (; part != root.end(); ++part, ++entry)
-	{
-		if (entry == candidate.end() || !SamePart(*part, *entry))
-		{
-			return false;
-		}
-	}
-	return true;
-}
-
-String VirtualRelative(const std::filesystem::path& root, const std::filesystem::path& path)
-{
-	return PathToUrsaString(path.lexically_relative(root).generic_u8string());
-}
-} // namespace
-
 Result<void> VirtualFileSystem::Mount(const String& scheme, const std::filesystem::path& root, MountAccess access)
+{
+	auto provider = DirectoryFileProvider::Open(root);
+	if (!provider)
+	{
+		return Result<void>::Failure(provider.error);
+	}
+	return MountProvider(scheme, std::move(provider.value), access);
+}
+
+Result<void> VirtualFileSystem::MountProvider(const String& scheme, std::shared_ptr<VirtualFileProvider> provider,
+                                              MountAccess access)
 {
 	if (scheme.empty())
 	{
 		return Result<void>::Failure("Resource scheme name is empty");
 	}
-	std::error_code error;
-	const auto canonical = std::filesystem::canonical(root, error);
-	if (error || !std::filesystem::is_directory(canonical))
+	if (!provider)
 	{
-		return Result<void>::Failure("Resource mount is not a readable directory: " + PathToUrsaString(root));
+		return Result<void>::Failure("Cannot mount an empty VFS provider");
 	}
-	auto& list = mounts[scheme];
-	if (std::find_if(list.begin(), list.end(), [&](const Root& candidate) { return candidate.path == canonical; }) !=
-	    list.end())
+	auto& mounted = mounts[scheme];
+	const String identity = provider->Identity();
+	const bool alreadyMounted = std::any_of(mounted.begin(), mounted.end(), [&](const MountedProvider& entry)
+	                                        { return entry.provider->Identity() == identity; });
+	if (alreadyMounted)
 	{
 		return {};
 	}
-	list.push_back(Root{canonical, access});
+	mounted.push_back({std::move(provider), access});
 	return {};
 }
 
@@ -81,93 +56,119 @@ Vector<String> VirtualFileSystem::Schemes() const
 
 Result<Vector<std::filesystem::path>> VirtualFileSystem::Roots(const String& scheme) const
 {
-	const auto* mount = FindMount(scheme);
-	if (mount == nullptr)
+	const auto* mounted = FindMount(scheme);
+	if (mounted == nullptr)
 	{
 		return Result<Vector<std::filesystem::path>>::Failure("Resource scheme is not mounted: " + scheme);
 	}
 	Vector<std::filesystem::path> result;
-	result.reserve(mount->size());
-	for (const Root& root : *mount)
+	for (const MountedProvider& entry : *mounted)
 	{
-		result.push_back(root.path);
+		const auto root = entry.provider->DirectoryRoot();
+		if (!root.empty())
+		{
+			result.push_back(root);
+		}
 	}
 	return Result<Vector<std::filesystem::path>>::Success(std::move(result));
 }
 
-const Vector<VirtualFileSystem::Root>* VirtualFileSystem::FindMount(const String& scheme) const
+const Vector<VirtualFileSystem::MountedProvider>* VirtualFileSystem::FindMount(const String& scheme) const
 {
 	const auto found = mounts.find(scheme);
 	return found == mounts.end() ? nullptr : &found->second;
 }
 
-Result<std::filesystem::path> VirtualFileSystem::ResolveIn(const Root& root, const VirtualPath& path) const
+Result<const VirtualFileSystem::MountedProvider*> VirtualFileSystem::ResolveExisting(const VirtualPath& path) const
 {
-	std::error_code error;
-	const auto candidate = std::filesystem::weakly_canonical(root.path / PathFromUrsaString(path.relative), error);
-	if (error)
+	const auto* mounted = FindMount(path.scheme);
+	if (mounted == nullptr)
 	{
-		return Result<std::filesystem::path>::Failure("Cannot resolve " + path.ToString() + ": " +
-		                                              ToUrsaString(error.message()));
+		return Result<const MountedProvider*>::Failure("Resource scheme is not mounted: " + path.scheme);
 	}
-	if (!ContainedIn(root.path, candidate))
+	for (const MountedProvider& entry : *mounted)
 	{
-		return Result<std::filesystem::path>::Failure("Resource path escapes its mount root: " + path.ToString());
+		auto exists = entry.provider->Exists(path.relative);
+		if (!exists)
+		{
+			return Result<const MountedProvider*>::Failure(exists.error + " at " + path.ToString());
+		}
+		if (exists.value)
+		{
+			return Result<const MountedProvider*>::Success(&entry);
+		}
 	}
-	return Result<std::filesystem::path>::Success(candidate);
+	return Result<const MountedProvider*>::Failure("Resource not found: " + path.ToString());
 }
 
-Result<std::filesystem::path> VirtualFileSystem::ResolveExisting(const VirtualPath& path) const
+Result<const VirtualFileSystem::MountedProvider*> VirtualFileSystem::ResolveWriteProvider(const VirtualPath& path) const
 {
-	const auto* mount = FindMount(path.scheme);
-	if (mount == nullptr)
+	const auto* mounted = FindMount(path.scheme);
+	if (mounted == nullptr || mounted->empty())
 	{
-		return Result<std::filesystem::path>::Failure("Resource scheme is not mounted: " + path.scheme);
+		return Result<const MountedProvider*>::Failure("Resource scheme is not mounted: " + path.scheme);
 	}
-	for (const Root& root : *mount)
+	const MountedProvider& entry = mounted->front();
+	if (entry.access != MountAccess::ReadWrite)
 	{
-		auto candidate = ResolveIn(root, path);
-		if (!candidate)
-		{
-			continue;
-		}
-		std::error_code error;
-		if (std::filesystem::is_regular_file(candidate.value, error) && !error)
-		{
-			return Result<std::filesystem::path>::Success(candidate.value);
-		}
+		return Result<const MountedProvider*>::Failure("Resource scheme is read-only: " + path.scheme);
 	}
-	return Result<std::filesystem::path>::Failure("Resource not found: " + path.ToString());
+	return Result<const MountedProvider*>::Success(&entry);
 }
 
 Result<Vector<Ursa::UInt8>> VirtualFileSystem::Read(const VirtualPath& path) const
 {
-	auto resolved = ResolveExisting(path);
-	if (!resolved)
+	const auto entry = ResolveExisting(path);
+	if (!entry)
 	{
-		return Result<Vector<Ursa::UInt8>>::Failure(resolved.error);
+		return Result<Vector<Ursa::UInt8>>::Failure(entry.error);
 	}
-	std::ifstream input(resolved.value, std::ios::binary | std::ios::ate);
-	if (!input)
+	auto size = entry.value->provider->Size(path.relative);
+	if (!size)
 	{
-		return Result<Vector<Ursa::UInt8>>::Failure("Cannot open " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure(size.error + " at " + path.ToString());
 	}
-	const auto size = input.tellg();
-	if (size < 0)
+	return entry.value->provider->ReadRange(path.relative, 0, size.value);
+}
+
+Result<Vector<Ursa::UInt8>> VirtualFileSystem::ReadPrefix(const VirtualPath& path, Ursa::UInt64 maxBytes) const
+{
+	auto size = Size(path);
+	if (!size)
 	{
-		return Result<Vector<Ursa::UInt8>>::Failure("Cannot size " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure(size.error);
 	}
-	Vector<Ursa::UInt8> bytes(static_cast<Ursa::Size>(size));
-	input.seekg(0);
-	if (!bytes.empty())
+	const Ursa::UInt64 count = std::min(size.value, maxBytes);
+	return ReadRange(path, 0, count);
+}
+
+Result<Vector<Ursa::UInt8>> VirtualFileSystem::ReadRange(const VirtualPath& path, Ursa::UInt64 offset,
+                                                         Ursa::UInt64 size) const
+{
+	const auto entry = ResolveExisting(path);
+	if (!entry)
 	{
-		input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		return Result<Vector<Ursa::UInt8>>::Failure(entry.error);
 	}
-	if (!input)
+	auto fileSize = entry.value->provider->Size(path.relative);
+	if (!fileSize)
 	{
-		return Result<Vector<Ursa::UInt8>>::Failure("Cannot read " + path.ToString());
+		return Result<Vector<Ursa::UInt8>>::Failure(fileSize.error + " at " + path.ToString());
 	}
-	return Result<Vector<Ursa::UInt8>>::Success(std::move(bytes));
+	if (offset > fileSize.value || size > fileSize.value - offset)
+	{
+		return Result<Vector<Ursa::UInt8>>::Failure("Requested byte range is outside the resource: " + path.ToString());
+	}
+	auto bytes = entry.value->provider->ReadRange(path.relative, offset, size);
+	if (!bytes)
+	{
+		return Result<Vector<Ursa::UInt8>>::Failure(bytes.error + " at " + path.ToString());
+	}
+	if (bytes.value.size() != size)
+	{
+		return Result<Vector<Ursa::UInt8>>::Failure("Provider returned a short range for " + path.ToString());
+	}
+	return bytes;
 }
 
 Result<String> VirtualFileSystem::ReadText(const VirtualPath& path) const
@@ -180,55 +181,21 @@ Result<String> VirtualFileSystem::ReadText(const VirtualPath& path) const
 	return Result<String>::Success(String(reinterpret_cast<const char*>(bytes.value.data()), bytes.value.size()));
 }
 
-Result<Vector<Ursa::UInt8>> VirtualFileSystem::ReadPrefix(const VirtualPath& path, Ursa::UInt64 maxBytes) const
-{
-	auto resolved = ResolveExisting(path);
-	if (!resolved)
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure(resolved.error);
-	}
-	std::ifstream input(resolved.value, std::ios::binary | std::ios::ate);
-	if (!input)
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure("Cannot open " + path.ToString());
-	}
-	const auto size = input.tellg();
-	if (size < 0)
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure("Cannot size " + path.ToString());
-	}
-	const Ursa::UInt64 available = static_cast<Ursa::UInt64>(size);
-	const Ursa::UInt64 wanted = available < maxBytes ? available : maxBytes;
-	Vector<Ursa::UInt8> bytes(static_cast<Ursa::Size>(wanted));
-	input.seekg(0);
-	if (!bytes.empty())
-	{
-		input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-	}
-	if (!input)
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure("Cannot read " + path.ToString());
-	}
-	return Result<Vector<Ursa::UInt8>>::Success(std::move(bytes));
-}
-
 Result<bool> VirtualFileSystem::Exists(const VirtualPath& path) const
 {
-	const auto* mount = FindMount(path.scheme);
-	if (mount == nullptr)
+	const auto* mounted = FindMount(path.scheme);
+	if (mounted == nullptr)
 	{
 		return Result<bool>::Failure("Resource scheme is not mounted: " + path.scheme);
 	}
-	for (const Root& root : *mount)
+	for (const MountedProvider& entry : *mounted)
 	{
-		auto candidate = ResolveIn(root, path);
-		if (!candidate)
+		auto exists = entry.provider->Exists(path.relative);
+		if (!exists)
 		{
-			continue;
+			return Result<bool>::Failure(exists.error + " at " + path.ToString());
 		}
-		std::error_code error;
-		const bool file = std::filesystem::is_regular_file(candidate.value, error) && !error;
-		if (file)
+		if (exists.value)
 		{
 			return Result<bool>::Success(true);
 		}
@@ -238,171 +205,76 @@ Result<bool> VirtualFileSystem::Exists(const VirtualPath& path) const
 
 Result<Ursa::UInt64> VirtualFileSystem::Size(const VirtualPath& path) const
 {
-	auto resolved = ResolveExisting(path);
-	if (!resolved)
+	const auto entry = ResolveExisting(path);
+	if (!entry)
 	{
-		return Result<Ursa::UInt64>::Failure(resolved.error);
+		return Result<Ursa::UInt64>::Failure(entry.error);
 	}
-	std::error_code error;
-	const auto bytes = std::filesystem::file_size(resolved.value, error);
-	if (error)
-	{
-		return Result<Ursa::UInt64>::Failure("Cannot read the size of " + path.ToString() + ": " +
-		                                     ToUrsaString(error.message()));
-	}
-	return Result<Ursa::UInt64>::Success(static_cast<Ursa::UInt64>(bytes));
-}
-
-Result<std::filesystem::path> VirtualFileSystem::ResolveToDisk(const VirtualPath& path) const
-{
-	return ResolveExisting(path);
-}
-
-Result<std::filesystem::path> VirtualFileSystem::ResolveForWrite(const VirtualPath& path) const
-{
-	const auto* mount = FindMount(path.scheme);
-	if (mount == nullptr || mount->empty())
-	{
-		return Result<std::filesystem::path>::Failure("Resource scheme is not mounted: " + path.scheme);
-	}
-	const Root& root = mount->front();
-	if (root.access != MountAccess::ReadWrite)
-	{
-		return Result<std::filesystem::path>::Failure("Resource scheme is read-only: " + path.scheme);
-	}
-	return ResolveIn(root, path);
+	auto size = entry.value->provider->Size(path.relative);
+	return size ? size : Result<Ursa::UInt64>::Failure(size.error + " at " + path.ToString());
 }
 
 Result<void> VirtualFileSystem::Write(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes, bool createDirectories)
 {
-	const auto* mount = FindMount(path.scheme);
-	if (mount == nullptr || mount->empty())
+	return WriteAtomic(path, bytes, createDirectories);
+}
+
+Result<void> VirtualFileSystem::WriteAtomic(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes,
+                                            bool createDirectories)
+{
+	const auto entry = ResolveWriteProvider(path);
+	if (!entry)
 	{
-		return Result<void>::Failure("Resource scheme is not mounted: " + path.scheme);
+		return Result<void>::Failure(entry.error);
 	}
-	const Root& root = mount->front();
-	if (root.access != MountAccess::ReadWrite)
+	return entry.value->provider->WriteAtomic(path.relative, bytes, createDirectories);
+}
+
+Result<void> VirtualFileSystem::Append(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes,
+                                       bool createDirectories)
+{
+	const auto entry = ResolveWriteProvider(path);
+	if (!entry)
 	{
-		return Result<void>::Failure("Resource scheme is read-only: " + path.scheme);
+		return Result<void>::Failure(entry.error);
 	}
-	auto target = ResolveIn(root, path);
-	if (!target)
-	{
-		return Result<void>::Failure(target.error);
-	}
-	std::error_code error;
-	if (createDirectories)
-	{
-		std::filesystem::create_directories(target.value.parent_path(), error);
-		if (error)
-		{
-			return Result<void>::Failure("Cannot create the directory for " + path.ToString() + ": " +
-			                             ToUrsaString(error.message()));
-		}
-	}
-	if (std::filesystem::is_directory(target.value, error) && !error)
-	{
-		return Result<void>::Failure("Resource path is a directory: " + path.ToString());
-	}
-	std::ofstream output(target.value, std::ios::binary | std::ios::trunc);
-	if (!output)
-	{
-		return Result<void>::Failure("Cannot open " + path.ToString() + " for writing");
-	}
-	if (!bytes.empty())
-	{
-		output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-	}
-	if (!output)
-	{
-		return Result<void>::Failure("Cannot write " + path.ToString());
-	}
-	return {};
+	return entry.value->provider->Append(path.relative, bytes, createDirectories);
 }
 
 Result<Vector<VirtualFileEntry>> VirtualFileSystem::List(const String& scheme) const
 {
-	const auto* mount = FindMount(scheme);
-	if (mount == nullptr)
+	const auto* mounted = FindMount(scheme);
+	if (mounted == nullptr)
 	{
 		return Result<Vector<VirtualFileEntry>>::Failure("Resource scheme is not mounted: " + scheme);
 	}
-
 	Map<String, VirtualFileEntry> entries;
-	for (const Root& root : *mount)
+	for (const MountedProvider& source : *mounted)
 	{
-		std::error_code error;
-		std::filesystem::recursive_directory_iterator entry(
-		    root.path, std::filesystem::directory_options::skip_permission_denied, error);
-		const std::filesystem::recursive_directory_iterator end;
-		if (error)
+		auto paths = source.provider->List();
+		if (!paths)
 		{
-			return Result<Vector<VirtualFileEntry>>::Failure("Cannot scan mount " + PathToUrsaString(root.path) + ": " +
-			                                                 ToUrsaString(error.message()));
+			return Result<Vector<VirtualFileEntry>>::Failure(paths.error + " in scheme " + scheme);
 		}
-		while (entry != end)
+		for (const String& relativePath : paths.value)
 		{
-			const auto path = entry->path();
-			const bool link = entry->is_symlink(error);
-			if (error)
+			auto parsed = VirtualPath::Parse(scheme + ":" + relativePath);
+			if (!parsed || parsed.value.relative != relativePath)
 			{
-				return Result<Vector<VirtualFileEntry>>::Failure("Cannot inspect " + PathToUrsaString(path) + ": " +
-				                                                 ToUrsaString(error.message()));
+				return Result<Vector<VirtualFileEntry>>::Failure("Provider returned an invalid virtual path: " +
+				                                                 relativePath);
 			}
-			const bool directory = entry->is_directory(error);
-			if (error)
+			auto found = entries.find(relativePath);
+			if (found == entries.end())
 			{
-				return Result<Vector<VirtualFileEntry>>::Failure("Cannot inspect " + PathToUrsaString(path) + ": " +
-				                                                 ToUrsaString(error.message()));
+				entries.emplace(relativePath, VirtualFileEntry{std::move(parsed.value), {}});
 			}
-			if (link && directory)
+			else
 			{
-				entry.disable_recursion_pending();
-			}
-			if (!link && directory)
-			{
-				entry.increment(error);
-				if (error)
-				{
-					return Result<Vector<VirtualFileEntry>>::Failure("Cannot continue the scan at " +
-					                                                 PathToUrsaString(root.path) + ": " +
-					                                                 ToUrsaString(error.message()));
-				}
-				continue;
-			}
-			const bool file = !link && entry->is_regular_file(error);
-			if (error)
-			{
-				return Result<Vector<VirtualFileEntry>>::Failure("Cannot inspect " + PathToUrsaString(path) + ": " +
-				                                                 ToUrsaString(error.message()));
-			}
-			if (file)
-			{
-				const auto canonical = std::filesystem::canonical(path, error);
-				if (!error && ContainedIn(root.path, canonical))
-				{
-					const auto key = VirtualRelative(root.path, canonical);
-					const auto found = entries.find(key);
-					if (found == entries.end())
-					{
-						entries.emplace(key, VirtualFileEntry{VirtualPath{scheme, key}, {}});
-					}
-					else
-					{
-						found->second.shadowedHostPaths.push_back(canonical);
-					}
-				}
-			}
-			entry.increment(error);
-			if (error)
-			{
-				return Result<Vector<VirtualFileEntry>>::Failure("Cannot continue the scan at " +
-				                                                 PathToUrsaString(root.path) + ": " +
-				                                                 ToUrsaString(error.message()));
+				found->second.shadowedSources.push_back(source.provider->SourceLabel());
 			}
 		}
 	}
-
 	Vector<VirtualFileEntry> result;
 	result.reserve(entries.size());
 	for (auto& entry : entries)
@@ -410,5 +282,49 @@ Result<Vector<VirtualFileEntry>> VirtualFileSystem::List(const String& scheme) c
 		result.push_back(std::move(entry.second));
 	}
 	return Result<Vector<VirtualFileEntry>>::Success(std::move(result));
+}
+
+Result<void> VirtualFileSystem::CheckWritable(const VirtualPath& path) const
+{
+	auto target = ResolveWriteProvider(path);
+	return target ? target.value->provider->CheckWritable(path.relative) : Result<void>::Failure(target.error);
+}
+
+Vector<VirtualMount> VirtualFileSystem::Providers() const
+{
+	Vector<VirtualMount> providers;
+	for (const auto& scheme : mounts)
+	{
+		for (const auto& mount : scheme.second)
+		{
+			providers.push_back({scheme.first, mount.provider, mount.access});
+		}
+	}
+	return providers;
+}
+
+Result<void> VirtualFileSystem::Remove(const VirtualPath& path)
+{
+	auto target = ResolveWriteProvider(path);
+	return target ? target.value->provider->Remove(path.relative) : Result<void>::Failure(target.error);
+}
+
+Result<void> VirtualFileSystem::Rename(const VirtualPath& source, const VirtualPath& destination)
+{
+	if (source.scheme != destination.scheme)
+	{
+		return Result<void>::Failure("Rename requires the same VFS scheme");
+	}
+	auto from = ResolveWriteProvider(source);
+	auto to = ResolveWriteProvider(destination);
+	if (!from || !to)
+	{
+		return Result<void>::Failure(!from ? from.error : to.error);
+	}
+	if (from.value->provider != to.value->provider)
+	{
+		return Result<void>::Failure("Rename requires the same provider");
+	}
+	return from.value->provider->Rename(source.relative, destination.relative);
 }
 } // namespace Ursa

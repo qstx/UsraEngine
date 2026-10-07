@@ -1,3 +1,4 @@
+#include <ResourceFixtures.hpp>
 #include <Assets/TextureDraft.hpp>
 #include <Core/StringInterop.hpp>
 #include <filesystem>
@@ -66,7 +67,9 @@ int main()
 		done(draft->SetPixel(1, 0, {201, 202, 203, 204}));
 		const auto path = root / "Assets" / "checker.ursatex";
 		const auto id = ResourceId::Generate();
-		done(draft->Save(path, id));
+		VirtualFileSystem filesystem;
+		done(filesystem.Mount(projectScheme, root / "Assets", MountAccess::ReadWrite));
+		done(draft->Save(filesystem, Take(VirtualPath::Parse("prj:checker.ursatex")), id));
 		auto loaded = Take(LoadTextureResource(path));
 		Expect(loaded.id == id && loaded.texture->GetWidth() == 2 && loaded.texture->GetHeight() == 2 &&
 		           loaded.texture->GetColorSpace() == TextureColorSpace::Srgb &&

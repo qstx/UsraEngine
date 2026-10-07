@@ -13,6 +13,8 @@ class ResourceSession final
 public:
 	static Result<std::unique_ptr<ResourceSession>> Open(const Vector<ResourceMount>& mounts);
 
+	static Result<std::unique_ptr<ResourceSession>> Open(const VirtualFileSystem& filesystem);
+
 	// Convenience for a caller that owns a single directory of resources; the
 	// directory is mounted under the conventional project scheme.
 	static Result<std::unique_ptr<ResourceSession>> Open(const std::filesystem::path& root,
@@ -27,6 +29,11 @@ public:
 	Result<ResourceId> IdentifyMaterial(const std::shared_ptr<MaterialInstance>& material) const;
 
 	const ResourceIndex& Index() const
+	{
+		return index;
+	}
+
+	ResourceIndex& Index()
 	{
 		return index;
 	}

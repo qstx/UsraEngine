@@ -13,11 +13,13 @@ public:
 	{
 	}
 
-	static Result<std::shared_ptr<MaterialDraft>> Load(const std::filesystem::path& path, ResourceSession& session);
+	static Result<std::shared_ptr<MaterialDraft>> Load(const VirtualFileSystem& filesystem, const VirtualPath& path,
+	                                                   ResourceSession& session);
 
 	Result<void> SetTextureId(MaterialTextureSlot slot, ResourceId id, ResourceSession& session);
 
-	Result<void> Save(const std::filesystem::path& path, ResourceId id, const ResourceIndex& index) const;
+	Result<void> Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id,
+	                  const ResourceIndex& index) const;
 
 	MaterialInstance& Material()
 	{

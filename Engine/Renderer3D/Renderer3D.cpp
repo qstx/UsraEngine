@@ -5,7 +5,6 @@
 #include <Vfs/AssetRoots.hpp>
 #include <algorithm>
 #include <cstring>
-#include <fstream>
 #include <functional>
 #include <stdexcept>
 #include <tuple>

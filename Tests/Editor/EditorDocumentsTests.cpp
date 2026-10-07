@@ -1,7 +1,10 @@
+#include <ResourceFixtures.hpp>
 #include <Workspace/EditorDocuments.hpp>
+#include <Assets/MaterialDraft.hpp>
 #include <Serialization/MaterialResource.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
+#include <Vfs/MemoryFileProvider.hpp>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -65,13 +68,14 @@ int main()
 		auto edited = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 		done(edited->SetBaseColor({0.2f, 0.7f, 0.3f, 1.f}));
 		bool failWrite = true;
-		const Editor::DocumentWriter writer = [edited, &failWrite](const std::filesystem::path& path, ResourceId id)
+		const Editor::DocumentWriter writer =
+		    [edited, &failWrite](VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id)
 		{
 			if (failWrite)
 			{
 				return Result<void>::Failure("simulated material save failure");
 			}
-			return SaveMaterialResource(path, id, *edited, {});
+			return SaveMaterialResource(filesystem, path, id, *edited, {});
 		};
 		auto first = Take(Editor::EditorDocument::Create(ResourceKind::Material, firstId,
 		                                                 Take(VirtualPath::Parse("prj:first.ursamat")), writer));
@@ -80,10 +84,10 @@ int main()
 		const auto secondId = ResourceId::Generate();
 		auto makeSecond = [&]
 		{
-			return Take(Editor::EditorDocument::Create(ResourceKind::Material, secondId,
-			                                           Take(VirtualPath::Parse("prj:second.ursamat")),
-			                                           [edited](const std::filesystem::path& path, ResourceId id)
-			                                           { return SaveMaterialResource(path, id, *edited, {}); }));
+			return Take(Editor::EditorDocument::Create(
+			    ResourceKind::Material, secondId, Take(VirtualPath::Parse("prj:second.ursamat")),
+			    [edited](VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id)
+			    { return SaveMaterialResource(filesystem, path, id, *edited, {}); }));
 		};
 		done(documents->RequestOpen(makeSecond()));
 		Expect(documents->PromptPending(), "Switching a dirty document did not request a choice");
@@ -115,6 +119,26 @@ int main()
 		       "Discard did not switch documents without writing the old one");
 		done(documents->SaveCurrent());
 		Expect(static_cast<bool>(documents->Session().Index().Resolve(secondId)), "New document ID was not indexed");
+		const auto renamedPath = Take(VirtualPath::Parse("prj:renamed.ursamat"));
+		done(documents->RenameCurrent(renamedPath));
+		Expect(documents->Current()->Path() == renamedPath &&
+		           documents->Session().Index().Resolve(secondId).value.path == renamedPath &&
+		           !std::filesystem::exists(root / "Assets" / "second.ursamat"),
+		       "Rename lost the stable resource ID or old path");
+		auto provider = std::make_shared<MemoryFileProvider>();
+		done(provider->WriteAtomic("renamed.ursamat", Take(workspace->Index().Filesystem().Read(renamedPath)), true));
+		VirtualFileSystem readOnly;
+		done(readOnly.MountProvider(projectScheme, provider, MountAccess::ReadOnly));
+		auto readOnlyWorkspace = Take(Editor::ProjectWorkspace::FromFilesystem(root, readOnly));
+		auto readOnlyDocuments = Take(Editor::EditorDocuments::Create(*readOnlyWorkspace));
+		auto openedReadOnly =
+		    Take(Editor::OpenMaterialDocument(renamedPath, readOnlyDocuments->Session(), *readOnlyWorkspace));
+		done(readOnlyDocuments->RequestOpen(std::move(openedReadOnly)));
+		readOnlyDocuments->Current()->MarkDirty();
+		const auto before = Take(readOnly.Read(renamedPath));
+		Expect(!readOnlyDocuments->SaveCurrent() && readOnlyDocuments->Current()->Dirty() &&
+		           Take(readOnly.Read(renamedPath)) == before,
+		       "Read-only save damaged content or discarded dirty state");
 		Log::Shutdown();
 		Expect(bytes(logPath).find("Saved asset") != std::string::npos,
 		       "Successful asset save did not record its path");

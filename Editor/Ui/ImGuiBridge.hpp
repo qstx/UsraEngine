@@ -2,6 +2,7 @@
 
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
+#include <Vfs/VirtualFileSystem.hpp>
 #include <Rhi/RHI.hpp>
 #include <imgui.h>
 #include <memory>
@@ -38,6 +39,11 @@ public:
 		return context;
 	}
 
+	bool HasSavedLayout() const
+	{
+		return savedLayout;
+	}
+
 private:
 	explicit ImGuiBridge(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow);
 
@@ -56,6 +62,8 @@ private:
 	Ursa::UInt64 subscription = 0;
 	ImGuiContext* context = nullptr;
 	String clipboardText;
+	VirtualFileSystem settingsFiles;
+	bool savedLayout = false;
 	bool leftControl = false;
 	bool rightControl = false;
 	bool leftShift = false;

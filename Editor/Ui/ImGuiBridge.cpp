@@ -3,10 +3,13 @@
 #include <Ui/ImGuiBridge.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
+#include <Vfs/RuntimeMountProfile.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
+#include <Vfs/UserDataStore.hpp>
+#include <Core/Log.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <limits>
 
 namespace Ursa::Editor
@@ -184,6 +187,41 @@ Result<void> ImGuiBridge::Initialize()
 	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	io.IniFilename = nullptr;
+	io.LogFilename = nullptr;
+	if (window)
+	{
+		auto root = ResolveUserDataDirectory(PathToUrsaString(CurrentExecutablePath().stem()));
+		if (!root)
+		{
+			return Result<void>::Failure(root.error);
+		}
+		auto provider = DirectoryFileProvider::Open(root.value, true);
+		if (!provider)
+		{
+			return Result<void>::Failure(provider.error);
+		}
+		auto mounted = settingsFiles.MountProvider(userDataScheme, provider.value, MountAccess::ReadWrite);
+		if (!mounted)
+		{
+			return mounted;
+		}
+		auto path = VirtualPath::Parse("user:Settings/EditorLayout.ini").value;
+		auto exists = settingsFiles.Exists(path);
+		if (!exists)
+		{
+			return Result<void>::Failure(exists.error);
+		}
+		if (exists.value)
+		{
+			auto bytes = settingsFiles.Read(path);
+			if (!bytes)
+			{
+				return Result<void>::Failure(bytes.error);
+			}
+			ImGui::LoadIniSettingsFromMemory(reinterpret_cast<const char*>(bytes.value.data()), bytes.value.size());
+			savedLayout = true;
+		}
+	}
 	if (window)
 	{
 		auto& platform = ImGui::GetPlatformIO();
@@ -384,6 +422,17 @@ Result<void> ImGuiBridge::EndFrame()
 {
 	ImGui::SetCurrentContext(context);
 	ImGui::Render();
+	if (window && ImGui::GetIO().WantSaveIniSettings)
+	{
+		size_t length = 0;
+		const auto* text = reinterpret_cast<const UInt8*>(ImGui::SaveIniSettingsToMemory(&length));
+		auto saved = UserDataStore(settingsFiles).SaveSettings("EditorLayout.ini", Vector<UInt8>(text, text + length));
+		if (!saved)
+		{
+			return saved;
+		}
+		ImGui::GetIO().WantSaveIniSettings = false;
+	}
 	return UpdateAtlas();
 }
 

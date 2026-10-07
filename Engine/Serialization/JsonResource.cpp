@@ -1,58 +1,46 @@
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/JsonResource.hpp>
-#include <Serialization/AtomicFile.hpp>
-#include <fstream>
-#include <iterator>
 
 namespace Ursa
 {
-Result<nlohmann::json> ReadJsonResource(const std::filesystem::path& path, ResourceKind expectedKind)
+Result<nlohmann::json> ReadJsonResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
+                                        ResourceKind expectedKind)
 {
-	const auto header = ReadResourceHeader(path);
+	auto header = ReadResourceHeader(filesystem, path);
 	if (!header)
 	{
 		return Result<nlohmann::json>::Failure(header.error);
 	}
 	if (header.value.kind != expectedKind)
 	{
-		return Result<nlohmann::json>::Failure("Unexpected resource kind at " + PathToUrsaString(path));
+		return Result<nlohmann::json>::Failure("Unexpected resource kind at " + path.ToString());
 	}
-	std::ifstream input(path, std::ios::binary);
-	if (!input)
+	auto bytes = filesystem.Read(path);
+	if (!bytes)
 	{
-		return Result<nlohmann::json>::Failure("Cannot open JSON resource at " + PathToUrsaString(path));
+		return Result<nlohmann::json>::Failure(bytes.error);
 	}
-	const std::string content(std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{});
-	const auto document = nlohmann::json::parse(content, nullptr, false);
-	if (document.is_discarded() || !document.is_object())
-	{
-		return Result<nlohmann::json>::Failure("Invalid JSON resource at " + PathToUrsaString(path));
-	}
-	return Result<nlohmann::json>::Success(document);
+	auto document = nlohmann::json::parse(bytes.value.begin(), bytes.value.end(), nullptr, false);
+	return document.is_object() ? Result<nlohmann::json>::Success(std::move(document))
+	                            : Result<nlohmann::json>::Failure("Invalid JSON resource at " + path.ToString());
 }
 
-Result<void> WriteJsonResource(const std::filesystem::path& path, const nlohmann::json& document)
+Result<void> WriteJsonResource(VirtualFileSystem& filesystem, const VirtualPath& path, const nlohmann::json& document)
 {
-	std::string content;
 	try
 	{
-		content = document.dump(2);
+		auto content = document.dump(2);
+		if (content.size() > maxJsonResourceBytes)
+		{
+			return Result<void>::Failure("JSON resource exceeds size limit at " + path.ToString());
+		}
+		const auto* begin = reinterpret_cast<const UInt8*>(content.data());
+		return filesystem.WriteAtomic(path, Vector<UInt8>(begin, begin + content.size()));
 	}
 	catch (const nlohmann::json::exception& error)
 	{
-		return Result<void>::Failure("Cannot encode JSON resource " + PathToUrsaString(path) + ": " + error.what());
+		return Result<void>::Failure("Cannot encode JSON resource " + path.ToString() + ": " + error.what());
 	}
-	if (content.size() > maxJsonResourceBytes)
-	{
-		return Result<void>::Failure("JSON resource exceeds size limit at " + PathToUrsaString(path));
-	}
-	return WriteResourceAtomically(path,
-	                               [&](std::ostream& output)
-	                               {
-		                               output.write(content.data(), static_cast<std::streamsize>(content.size()));
-		                               return output ? Result<void>{}
-		                                             : Result<void>::Failure("Cannot write JSON resource " +
-		                                                                     PathToUrsaString(path));
-	                               });
 }
+
 } // namespace Ursa

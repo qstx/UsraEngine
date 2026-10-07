@@ -22,7 +22,7 @@ Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, 
 	}
 	const MaterialIdResolver resolveMaterial = [&draft](const std::shared_ptr<MaterialInstance>& material)
 	{ return draft.MaterialId(material); };
-	const std::filesystem::path virtualPath = "play-clone.ursascene";
+	const String virtualPath = "play-clone.ursascene";
 	auto encoded = EncodeSceneDocument(virtualPath, documentId, draft.GetScene(), registry, resolveMaterial);
 	if (!encoded)
 	{

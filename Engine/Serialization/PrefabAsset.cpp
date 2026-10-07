@@ -66,14 +66,14 @@ Result<LocalTransform> ReadTransform(const Json& value, const String& location)
 }
 } // namespace
 
-Result<void>
-SavePrefabAssetResource(const std::filesystem::path& path, const PrefabAsset& asset, const ComponentRegistry& registry,
-                        const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId)
+Result<Json>
+EncodePrefabAssetDocument(const String& label, const PrefabAsset& asset, const ComponentRegistry& registry,
+                          const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId)
 {
-	if (path.extension() != ".ursaprefab" || !asset.Id() || !asset.Root() || asset.Root()->Parent())
+	if (std::filesystem::path(ToStdString(label)).extension() != ".ursaprefab" || !asset.Id() || !asset.Root() ||
+	    asset.Root()->Parent())
 	{
-		return Result<void>::Failure("PrefabAsset requires a valid ID and one detached root at " +
-		                             PathToUrsaString(path));
+		return Result<Json>::Failure("PrefabAsset requires a valid ID and one detached root at " + label);
 	}
 	Json objects = Json::array();
 	const ComponentSaveContext context{nullptr, materialId};
@@ -114,12 +114,22 @@ SavePrefabAssetResource(const std::filesystem::path& path, const PrefabAsset& as
 			                      {"enabled", component->IsEnabled()},
 			                      {"data", std::move(data.value)}});
 		}
-		objects.push_back({{"id", ToStdString(object->Id().ToString())},
-		                   {"name", ToStdString(name.value)},
-		                   {"parentId", parent ? Json(ToStdString(parent.ToString())) : Json(nullptr)},
-		                   {"localTransform", TransformJson(local.value)},
-		                   {"enabled", enabled.value},
-		                   {"components", std::move(components)}});
+		ArchiveWriter writer;
+		auto saved = object->Serialize(writer);
+		if (!saved)
+		{
+			error = saved.error;
+			return;
+		}
+		auto fields = ArchiveToJson(writer);
+		if (!fields)
+		{
+			error = fields.error;
+			return;
+		}
+		fields.value["parentId"] = parent ? Json(ToStdString(parent.ToString())) : Json(nullptr);
+		fields.value["components"] = std::move(components);
+		objects.push_back(std::move(fields.value));
 		for (const auto& child : object->Children())
 		{
 			visit(child, object->Id());
@@ -128,41 +138,44 @@ SavePrefabAssetResource(const std::filesystem::path& path, const PrefabAsset& as
 	visit(asset.Root(), {});
 	if (!error.empty())
 	{
-		return Result<void>::Failure("Cannot save PrefabAsset at " + PathToUrsaString(path) + ": " + error);
+		return Result<Json>::Failure("Cannot save PrefabAsset at " + label + ": " + error);
 	}
-	return WriteJsonResource(path, {{"format", "UrsaPrefab"},
-	                                {"version", resourceFormatVersion},
-	                                {"prefabGraphVersion", prefabGraphFormatVersion},
-	                                {"id", ToStdString(asset.Id().ToString())},
-	                                {"gameObjects", std::move(objects)}});
+	return Result<Json>::Success({{"format", "UrsaPrefab"},
+	                              {"version", resourceFormatVersion},
+	                              {"prefabGraphVersion", prefabGraphFormatVersion},
+	                              {"id", ToStdString(asset.Id().ToString())},
+	                              {"gameObjects", std::move(objects)}});
 }
 
-Result<PrefabAsset> LoadPrefabAssetResource(const std::filesystem::path& path, const ComponentRegistry& registry,
-                                            ComponentLoadContext& context)
+Result<void>
+SavePrefabAssetResource(VirtualFileSystem& filesystem, const VirtualPath& path, const PrefabAsset& asset,
+                        const ComponentRegistry& registry,
+                        const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId)
 {
-	context.ClearMappings();
-	auto document = ReadJsonResource(path, ResourceKind::Prefab);
-	if (!document)
-	{
-		return Result<PrefabAsset>::Failure(document.error);
-	}
-	const auto& json = document.value;
+	auto document = EncodePrefabAssetDocument("asset.ursaprefab", asset, registry, materialId);
+	return document ? WriteJsonResource(filesystem, path, document.value) : Result<void>::Failure(document.error);
+}
+
+Result<PrefabAsset> DecodePrefabAssetDocument(const String& label, const Json& json, const ComponentRegistry& registry,
+                                              ComponentLoadContext& context)
+{
+	ComponentMappingScope mappings(context);
+
 	if (!json.contains("prefabGraphVersion") || !json["prefabGraphVersion"].is_number_unsigned() ||
 	    json["prefabGraphVersion"].get<Ursa::UInt32>() != prefabGraphFormatVersion)
 	{
-		return Result<PrefabAsset>::Failure("Unsupported or missing GameObject Prefab format version at " +
-		                                    PathToUrsaString(path));
+		return Result<PrefabAsset>::Failure("Unsupported or missing GameObject Prefab format version at " + label);
 	}
 	if (!json.contains("gameObjects") || !json["gameObjects"].is_array() || json["gameObjects"].empty())
 	{
-		return Result<PrefabAsset>::Failure("Invalid Prefab GameObject list at " + PathToUrsaString(path));
+		return Result<PrefabAsset>::Failure("Invalid Prefab GameObject list at " + label);
 	}
 	auto resourceId = json.contains("id") && json["id"].is_string()
 	                      ? ResourceId::Parse(ToUrsaString(json["id"].get<std::string>()))
 	                      : Result<ResourceId>::Failure("Missing Prefab resource ID");
 	if (!resourceId || json["gameObjects"].size() > 100000)
 	{
-		return Result<PrefabAsset>::Failure("Invalid Prefab ID or GameObject count at " + PathToUrsaString(path));
+		return Result<PrefabAsset>::Failure("Invalid Prefab ID or GameObject count at " + label);
 	}
 
 	struct Pending
@@ -178,7 +191,7 @@ Result<PrefabAsset> LoadPrefabAssetResource(const std::filesystem::path& path, c
 	for (Ursa::Size index = 0; index < json["gameObjects"].size(); ++index)
 	{
 		const auto& item = json["gameObjects"][index];
-		const String location = PathToUrsaString(path) + ".gameObjects[" + ToUrsaString(std::to_string(index)) + "]";
+		const String location = label + ".gameObjects[" + ToUrsaString(std::to_string(index)) + "]";
 		if (!item.is_object() || !item.contains("id") || !item["id"].is_string() || !item.contains("name") ||
 		    !item["name"].is_string() || !item.contains("parentId") || !item.contains("enabled") ||
 		    !item["enabled"].is_boolean() || !item.contains("components") || !item["components"].is_array())
@@ -210,9 +223,16 @@ Result<PrefabAsset> LoadPrefabAssetResource(const std::filesystem::path& path, c
 			return Result<PrefabAsset>::Failure(transform.error);
 		}
 		auto object = GameObject::Create(ToUrsaString(item["name"].get<std::string>()));
-		object->SetId(objectId.value);
-		object->SetLocalTransform(transform.value);
-		object->SetEnabled(item["enabled"].get<bool>());
+		auto reader = ArchiveFromJson(item);
+		if (!reader)
+		{
+			return Result<PrefabAsset>::Failure(reader.error);
+		}
+		auto deserialized = object->Deserialize(reader.value, context);
+		if (!deserialized)
+		{
+			return Result<PrefabAsset>::Failure(deserialized.error + " at " + location);
+		}
 		auto mapped = context.MapGameObject(objectId.value, object);
 		if (!mapped)
 		{
@@ -227,8 +247,7 @@ Result<PrefabAsset> LoadPrefabAssetResource(const std::filesystem::path& path, c
 		{
 			if (root)
 			{
-				return Result<PrefabAsset>::Failure("Prefab must contain exactly one root at " +
-				                                    PathToUrsaString(path));
+				return Result<PrefabAsset>::Failure("Prefab must contain exactly one root at " + label);
 			}
 			root = entry.object;
 			continue;
@@ -236,17 +255,17 @@ Result<PrefabAsset> LoadPrefabAssetResource(const std::filesystem::path& path, c
 		auto parent = context.GameObjectById(entry.parent);
 		if (!parent)
 		{
-			return Result<PrefabAsset>::Failure("Missing parent GameObject at " + PathToUrsaString(path));
+			return Result<PrefabAsset>::Failure("Missing parent GameObject at " + label);
 		}
 		auto placed = entry.object->SetParent(parent.value);
 		if (!placed)
 		{
-			return Result<PrefabAsset>::Failure(placed.error + " at " + PathToUrsaString(path));
+			return Result<PrefabAsset>::Failure(placed.error + " at " + label);
 		}
 	}
 	if (!root)
 	{
-		return Result<PrefabAsset>::Failure("Prefab has no root GameObject at " + PathToUrsaString(path));
+		return Result<PrefabAsset>::Failure("Prefab has no root GameObject at " + label);
 	}
 
 	struct PendingBind
@@ -265,20 +284,19 @@ Result<PrefabAsset> LoadPrefabAssetResource(const std::filesystem::path& path, c
 			    !item["type"].is_string() || !item.contains("version") || !item["version"].is_number_unsigned() ||
 			    !item.contains("enabled") || !item["enabled"].is_boolean() || !item.contains("data"))
 			{
-				return Result<PrefabAsset>::Failure("Invalid Prefab component record at " + PathToUrsaString(path));
+				return Result<PrefabAsset>::Failure("Invalid Prefab component record at " + label);
 			}
 			auto componentId = ResourceId::Parse(ToUrsaString(item["id"].get<std::string>()));
 			if (!componentId || !componentIds.insert(componentId.value.ToString()).second)
 			{
-				return Result<PrefabAsset>::Failure("Invalid or duplicate Prefab component ID at " +
-				                                    PathToUrsaString(path));
+				return Result<PrefabAsset>::Failure("Invalid or duplicate Prefab component ID at " + label);
 			}
 			const auto componentType = ToUrsaString(item["type"].get<std::string>());
 			const auto* codec = registry.Find(componentType);
 			if (!codec || codec->version != item["version"].get<Ursa::UInt32>() || !codec->createDetached)
 			{
-				return Result<PrefabAsset>::Failure("Prefab component codec is missing or incompatible: " +
-				                                    componentType + " at " + PathToUrsaString(path));
+				return Result<PrefabAsset>::Failure(
+				    "Prefab component codec is missing or incompatible: " + componentType + " at " + label);
 			}
 			auto created = codec->createDetached(entry.object, item["data"], context);
 			if (!created)
@@ -308,7 +326,21 @@ Result<PrefabAsset> LoadPrefabAssetResource(const std::filesystem::path& path, c
 			}
 		}
 	}
+	auto resolvedReferences = context.ResolveReferences();
+	if (!resolvedReferences)
+	{
+		return Result<PrefabAsset>::Failure(resolvedReferences.error + " at " + label);
+	}
+	mappings.Commit();
 	return Result<PrefabAsset>::Success(PrefabAsset(resourceId.value, std::move(root)));
+}
+
+Result<PrefabAsset> LoadPrefabAssetResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
+                                            const ComponentRegistry& registry, ComponentLoadContext& context)
+{
+	auto document = ReadJsonResource(filesystem, path, ResourceKind::Prefab);
+	return document ? DecodePrefabAssetDocument(path.ToString(), document.value, registry, context)
+	                : Result<PrefabAsset>::Failure(document.error);
 }
 
 Result<PrefabAsset>
@@ -320,10 +352,7 @@ CapturePrefabAsset(ResourceId id, const Scene& scene, GameObject::Ptr root, cons
 	{
 		return Result<PrefabAsset>::Failure("Cannot capture an invalid PrefabAsset root");
 	}
-	const auto unique = ToStdString(ResourceId::Generate().ToString());
-	const auto base = std::filesystem::temp_directory_path() / ("UrsaPrefabCapture-" + unique);
-	const auto scenePath = base.string() + ".ursascene";
-	const auto prefabPath = base.string() + ".ursaprefab";
+	const String scenePath = "capture.ursascene";
 	auto encoded = EncodeSceneDocument(scenePath, id, scene, registry, materialId, root);
 	if (!encoded)
 	{
@@ -331,23 +360,13 @@ CapturePrefabAsset(ResourceId id, const Scene& scene, GameObject::Ptr root, cons
 	}
 	Json objects = std::move(encoded.value["gameObjects"]);
 	objects.front()["parentId"] = nullptr;
-	auto written = WriteJsonResource(prefabPath, {{"format", "UrsaPrefab"},
-	                                              {"version", resourceFormatVersion},
-	                                              {"prefabGraphVersion", prefabGraphFormatVersion},
-	                                              {"id", ToStdString(id.ToString())},
-	                                              {"gameObjects", std::move(objects)}});
-	if (!written)
-	{
-		return Result<PrefabAsset>::Failure(written.error);
-	}
-	auto loaded = LoadPrefabAssetResource(prefabPath, registry, context);
-	std::error_code ignored;
-	std::filesystem::remove(prefabPath, ignored);
-	if (!loaded)
-	{
-		return Result<PrefabAsset>::Failure(loaded.error);
-	}
-	return loaded;
+	return DecodePrefabAssetDocument("capture.ursaprefab",
+	                                 {{"format", "UrsaPrefab"},
+	                                  {"version", resourceFormatVersion},
+	                                  {"prefabGraphVersion", prefabGraphFormatVersion},
+	                                  {"id", ToStdString(id.ToString())},
+	                                  {"gameObjects", std::move(objects)}},
+	                                 registry, context);
 }
 
 Result<GameObject::Ptr> PrefabAsset::Instantiate(
@@ -358,7 +377,7 @@ Result<GameObject::Ptr> PrefabAsset::Instantiate(
 	{
 		return Result<GameObject::Ptr>::Failure("Cannot instantiate an empty PrefabAsset");
 	}
-	context.ClearMappings();
+	ComponentMappingScope mappings(context);
 	Map<String, GameObject::Ptr> objects;
 
 	struct PendingBind
@@ -460,11 +479,18 @@ Result<GameObject::Ptr> PrefabAsset::Instantiate(
 			}
 		}
 	}
+	auto resolvedReferences = context.ResolveReferences();
+	if (!resolvedReferences)
+	{
+		return Result<GameObject::Ptr>::Failure(resolvedReferences.error);
+	}
 	auto attached = scene.AttachGameObject(instanceRoot);
 	if (!attached)
 	{
 		return Result<GameObject::Ptr>::Failure(attached.error);
 	}
+	mappings.Commit();
 	return Result<GameObject::Ptr>::Success(instanceRoot);
 }
+
 } // namespace Ursa

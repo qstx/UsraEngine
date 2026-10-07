@@ -1,10 +1,10 @@
 #include <Workspace/EditorDocuments.hpp>
 #include <Core/Log.hpp>
-#include <Serialization/AtomicFile.hpp>
 #include <Serialization/ResourceFile.hpp>
+#include <Serialization/TextureResource.hpp>
 #include <Core/StringInterop.hpp>
 #include <imgui.h>
-#include <fstream>
+#include <Vfs/MemoryFileProvider.hpp>
 #include <iterator>
 #include <string>
 
@@ -34,23 +34,6 @@ String VirtualFileName(const VirtualPath& path)
 	return slash == String::npos ? path.relative : path.relative.substr(slash + 1);
 }
 
-Result<void> RestoreFile(const std::filesystem::path& path, bool existed, const std::string& original)
-{
-	if (!existed)
-	{
-		std::error_code error;
-		std::filesystem::remove(path, error);
-		return error ? Result<void>::Failure("Cannot remove failed new asset: " + PathToUrsaString(path))
-		             : Result<void>{};
-	}
-	return WriteResourceAtomically(path,
-	                               [&](std::ostream& output)
-	                               {
-		                               output.write(original.data(), static_cast<std::streamsize>(original.size()));
-		                               return output ? Result<void>{}
-		                                             : Result<void>::Failure("Cannot restore old asset bytes");
-	                               });
-}
 } // namespace
 
 Result<std::unique_ptr<EditorDocument>> EditorDocument::Create(ResourceKind documentKind, ResourceId documentId,
@@ -87,10 +70,9 @@ Result<void> EditorDocuments::RequestOpen(std::unique_ptr<EditorDocument> docume
 	{
 		return Result<void>::Failure("Resolve the unsaved changes prompt first");
 	}
-	auto target = workspace.WritablePath(document->Path());
-	if (!target)
+	if (!workspace.Index().Filesystem().IsMounted(document->Path().scheme))
 	{
-		return Result<void>::Failure(target.error);
+		return Result<void>::Failure("Document scheme is not mounted");
 	}
 	pending = std::move(document);
 	pendingClose = false;
@@ -174,95 +156,85 @@ Result<void> EditorDocuments::SaveCurrent()
 	{
 		return Result<void>::Failure("No Editor document is open");
 	}
-	auto target = workspace.WritablePath(current->Path());
-	if (!target)
+	auto& filesystem = workspace.Index().Filesystem();
+	auto writable = filesystem.CheckWritable(current->Path());
+	if (!writable || current->Path().scheme != projectResourceScheme)
 	{
-		return Result<void>::Failure(target.error);
-	}
-	if (target.value.extension() != ExtensionFor(current->Kind()))
-	{
-		return Result<void>::Failure("Document path has the wrong resource extension");
+		return Result<void>::Failure(writable ? "Only project resources are writable" : writable.error);
 	}
 	auto indexed = workspace.Index().Resolve(current->Id());
 	if (indexed && indexed.value.path != current->Path())
 	{
 		return Result<void>::Failure("Document ID is already used by " + indexed.value.path.ToString());
 	}
-	std::error_code fileError;
-	const bool existed = std::filesystem::exists(target.value, fileError);
-	if (fileError)
+	auto provider = std::make_shared<MemoryFileProvider>();
+	VirtualFileSystem staging;
+	auto mounted = staging.MountProvider(current->Path().scheme, provider, MountAccess::ReadWrite);
+	auto written = mounted ? current->writer(staging, current->Path(), current->Id()) : mounted;
+	auto fail = [&](const String& error)
 	{
-		return Result<void>::Failure("Cannot inspect document destination");
-	}
-	std::string original;
-	if (existed)
-	{
-		std::ifstream input(target.value, std::ios::binary);
-		if (!input)
-		{
-			return Result<void>::Failure("Cannot read existing document before save");
-		}
-		original.assign(std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{});
-		if (!input.eof() && input.fail())
-		{
-			return Result<void>::Failure("Cannot back up existing document before save");
-		}
-	}
-	const auto stage =
-	    target.value.parent_path() / (target.value.filename().string() + ".editor-stage-" +
-	                                  ToStdString(current->Id().ToString()) + ExtensionFor(current->Kind()));
-	std::filesystem::remove(stage, fileError);
-	if (fileError)
-	{
-		return Result<void>::Failure("Cannot clear previous Editor staging file");
-	}
-	auto written = current->writer(stage, current->Id());
+		lastError = error;
+		URSA_LOG_ERROR("Editor", "Cannot save asset " + current->Path().ToString() + ": " + error);
+		return Result<void>::Failure(error);
+	};
 	if (!written)
 	{
-		std::filesystem::remove(stage, fileError);
-		lastError = written.error;
-		URSA_LOG_ERROR("Editor", "Cannot save asset " + current->Path().ToString() + ": " + lastError);
-		return written;
+		return fail(written.error);
 	}
-	auto header = ReadResourceHeader(stage);
+	auto header = ReadResourceHeader(staging, current->Path());
 	if (!header || header.value.id != current->Id() || header.value.kind != current->Kind())
 	{
-		std::filesystem::remove(stage, fileError);
-		lastError = header ? String("Editor writer produced the wrong resource ID or kind") : header.error;
-		return Result<void>::Failure(lastError);
+		return fail(header ? "Editor writer produced the wrong resource ID or kind" : header.error);
 	}
-	written = WriteResourceAtomically(target.value,
-	                                  [&](std::ostream& output)
-	                                  {
-		                                  std::ifstream input(stage, std::ios::binary);
-		                                  if (!input)
-		                                  {
-			                                  return Result<void>::Failure("Cannot open staged Editor asset");
-		                                  }
-		                                  output << input.rdbuf();
-		                                  return output && !input.bad()
-		                                             ? Result<void>{}
-		                                             : Result<void>::Failure("Cannot copy staged Editor asset");
-	                                  });
-	std::filesystem::remove(stage, fileError);
+	Vector<ResourceMount> mounts;
+	mounts.push_back({current->Path().scheme, {}, MountAccess::ReadOnly, provider});
+	mounts.insert(mounts.end(), workspace.Index().Mounts().begin(), workspace.Index().Mounts().end());
+	auto validated = ResourceSession::Open(mounts);
+	if (!validated)
+	{
+		return fail(validated.error);
+	}
+	if (current->Kind() == ResourceKind::Texture)
+	{
+		auto texture = LoadTextureResource(staging, current->Path());
+		if (!texture)
+		{
+			return fail(texture.error);
+		}
+	}
+	if (current->Kind() == ResourceKind::Material)
+	{
+		auto material = validated.value->LoadMaterial(current->Id());
+		if (!material)
+		{
+			return fail(material.error);
+		}
+	}
+	auto existed = filesystem.Exists(current->Path());
+	if (!existed)
+	{
+		return fail(existed.error);
+	}
+	auto original = existed.value ? filesystem.Read(current->Path()) : Result<Vector<UInt8>>::Success({});
+	auto bytes = staging.Read(current->Path());
+	if (!original || !bytes)
+	{
+		return fail(!original ? original.error : bytes.error);
+	}
+	written = filesystem.WriteAtomic(current->Path(), bytes.value);
 	if (!written)
 	{
-		lastError = written.error;
-		return written;
+		return fail(written.error);
 	}
 	auto refreshed = workspace.Refresh();
 	auto session = refreshed ? ResourceSession::Open(workspace.Index().Mounts())
 	                         : Result<std::unique_ptr<ResourceSession>>::Failure(refreshed.error);
 	if (!session)
 	{
-		auto restored = RestoreFile(target.value, existed, original);
+		auto restored = existed.value ? filesystem.WriteAtomic(current->Path(), original.value)
+		                              : filesystem.Remove(current->Path());
 		workspace.Refresh();
-		lastError = session.error;
-		if (!restored)
-		{
-			lastError += "; rollback failed: " + restored.error;
-		}
-		return Result<void>::Failure(lastError);
+		return fail(session.error + (restored ? String{} : "; rollback failed: " + restored.error));
 	}
 	sessions.push_back(std::move(session.value));
 	current->dirty = false;
@@ -306,5 +278,61 @@ void EditorDocuments::DrawUnsavedPrompt()
 		ResolvePrompt(UnsavedChoice::Cancel);
 	}
 	ImGui::EndPopup();
+}
+
+Result<void> EditorDocuments::RenameCurrent(const VirtualPath& path)
+{
+	if (saveBlocked || promptPending || !current)
+	{
+		return Result<void>::Failure("Cannot rename the current document now");
+	}
+	auto kind = ResourceKindForPath(path);
+	if (!kind || kind.value != current->Kind() || path.scheme != projectResourceScheme)
+	{
+		return Result<void>::Failure("Rename must retain the resource kind and project scheme");
+	}
+	if (path == current->Path())
+	{
+		return {};
+	}
+	auto& files = workspace.Index().Filesystem();
+	auto writable = workspace.CheckWritable(path);
+	if (!writable)
+	{
+		return writable;
+	}
+	auto exists = files.Exists(path);
+	if (!exists || exists.value)
+	{
+		return Result<void>::Failure(exists ? "Rename destination already exists" : exists.error);
+	}
+	if (current->Dirty())
+	{
+		auto saved = SaveCurrent();
+		if (!saved)
+		{
+			return saved;
+		}
+	}
+	const auto previous = current->Path();
+	auto renamed = files.Rename(previous, path);
+	if (!renamed)
+	{
+		return renamed;
+	}
+	auto refreshed = workspace.Refresh();
+	auto session = refreshed ? ResourceSession::Open(workspace.Index().Mounts())
+	                         : Result<std::unique_ptr<ResourceSession>>::Failure(refreshed.error);
+	if (!session)
+	{
+		auto restored = files.Rename(path, previous);
+		workspace.Refresh();
+		return Result<void>::Failure(session.error +
+		                             (restored ? String{} : "; rename rollback failed: " + restored.error));
+	}
+	sessions.push_back(std::move(session.value));
+	current->path = path;
+	current->dirty = false;
+	return {};
 }
 } // namespace Ursa::Editor

@@ -2,6 +2,8 @@
 #include <Core/Containers.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
+#include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/VirtualFileSystem.hpp>
 
 #include <fstream>
@@ -62,26 +64,42 @@ bool CreateEscapeLink(const std::filesystem::path& link, const std::filesystem::
 // The example published in Engine/README.md, kept compiling and running here.
 Ursa::Result<void> OpenResourcesExample(const std::filesystem::path& engineRoot,
                                         const std::filesystem::path& engineMirror,
-                                        const std::filesystem::path& projectAssets)
+                                        const std::filesystem::path& projectAssets,
+                                        const std::filesystem::path& userData)
 {
-	Ursa::VirtualFileSystem vfs;
-	if (!vfs.Mount("ursa", engineRoot, Ursa::MountAccess::ReadOnly) ||
-	    !vfs.Mount("ursa", engineMirror, Ursa::MountAccess::ReadOnly) ||
-	    !vfs.Mount("prj", projectAssets, Ursa::MountAccess::ReadWrite))
+	Ursa::RuntimeMountProfileConfig profile;
+	profile.mode = Ursa::RuntimeMountMode::Editor;
+	profile.applicationId = "UrsaEditor";
+	profile.engineDirectories = {engineRoot, engineMirror};
+	profile.projectAssetsDirectory = projectAssets;
+	profile.userDataDirectoryOverride = userData;
+	auto vfs = Ursa::OpenRuntimeFileSystem(profile);
+	if (!vfs)
 	{
-		return Ursa::Result<void>::Failure("Cannot mount resource roots");
+		return Ursa::Result<void>::Failure(vfs.error);
 	}
 	auto shader = Ursa::VirtualPath::Parse("ursa:Shaders/Renderer3D/Cube.vert.spv");
 	if (!shader)
 	{
 		return Ursa::Result<void>::Failure(shader.error);
 	}
-	auto bytes = vfs.Read(shader.value);
+	auto bytes = vfs.value.Read(shader.value);
 	if (!bytes)
 	{
 		return Ursa::Result<void>::Failure(bytes.error);
 	}
-	return {};
+	auto assetPath = Ursa::VirtualPath::Parse("prj:Generated/ShaderCopy.bin");
+	auto logPath = Ursa::VirtualPath::Parse("user:Logs/UrsaEditor.log");
+	if (!assetPath || !logPath)
+	{
+		return Ursa::Result<void>::Failure(!assetPath ? assetPath.error : logPath.error);
+	}
+	auto saved = vfs.value.WriteAtomic(assetPath.value, bytes.value);
+	if (!saved)
+	{
+		return saved;
+	}
+	return vfs.value.Append(logPath.value, BytesOf("example completed\n"));
 }
 
 void TestParsing()
@@ -124,12 +142,22 @@ void TestReadWriteAndPermissions(const std::filesystem::path& root)
 	const auto shader = Ursa::VirtualPath::Parse("ursa:Shaders/Cube.vert").value;
 	Expect(TextOf(vfs.Read(shader).value) == "engine-shader", "Read returned the wrong bytes");
 	Expect(vfs.Exists(shader).value, "Existing file was reported missing");
-	Expect(vfs.ResolveToDisk(shader).value == engineRoot / "Shaders" / "Cube.vert",
-	       "resolveToDisk returned the wrong host path");
+	Expect(TextOf(vfs.Read(shader).value) == "engine-shader", "resolveToDisk returned the wrong host path");
 
 	const auto saved = Ursa::VirtualPath::Parse("prj:Snake/new.ursatex").value;
 	Expect(static_cast<bool>(vfs.Write(saved, BytesOf("saved"))), "Cannot write to a writable mount");
 	Expect(TextOf(vfs.Read(saved).value) == "saved", "Written bytes did not round trip");
+	Expect(TextOf(vfs.ReadRange(saved, 1, 3).value) == "ave", "Range read returned the wrong bytes");
+	Expect(!vfs.ReadRange(saved, 4, 2), "An out-of-bounds range read succeeded");
+	Expect(static_cast<bool>(vfs.Append(saved, BytesOf("-tail"))), "Cannot append to a writable mount");
+	Expect(TextOf(vfs.Read(saved).value) == "saved-tail", "Appended bytes did not round trip");
+	Expect(static_cast<bool>(vfs.WriteAtomic(saved, BytesOf("atomic"))), "Cannot atomically replace a resource");
+	Expect(TextOf(vfs.Read(saved).value) == "atomic", "Atomic write did not replace the whole resource");
+	std::filesystem::create_directory(projectRoot / "directory-target");
+	const auto directoryTarget = Ursa::VirtualPath::Parse("prj:directory-target").value;
+	Expect(!vfs.WriteAtomic(directoryTarget, BytesOf("must-not-replace-directory")) &&
+	           std::filesystem::is_directory(projectRoot / "directory-target"),
+	       "Atomic write failure changed a directory target");
 	Expect(!vfs.Write(shader, BytesOf("changed")), "Wrote into a read-only mount");
 	Expect(TextOf(vfs.Read(shader).value) == "engine-shader", "Read-only write changed the target file");
 
@@ -148,8 +176,12 @@ void TestOverlayAndShadowing(const std::filesystem::path& root)
 	WriteFile(generatedRoot / "Shaders" / "Renderer3D" / "Cube.vert.spv", "generated-shader");
 	WriteFile(generatedRoot / "Shaders" / "Renderer3D" / "Cube.vert", "shadowed-shader");
 	std::filesystem::create_directories(root / "overlay-project");
-	Expect(static_cast<bool>(OpenResourcesExample(sourceRoot, generatedRoot, root / "overlay-project")),
-	       "The documented VirtualFileSystem example failed");
+	auto documentedExample =
+	    OpenResourcesExample(sourceRoot, generatedRoot, root / "overlay-project", root / "example-user");
+	if (!documentedExample)
+	{
+		throw std::runtime_error(Ursa::ToStdString(documentedExample.error));
+	}
 
 	Ursa::VirtualFileSystem vfs;
 	Expect(static_cast<bool>(vfs.Mount("ursa", sourceRoot, Ursa::MountAccess::ReadOnly)) &&
@@ -170,10 +202,10 @@ void TestOverlayAndShadowing(const std::filesystem::path& root)
 	Expect(listed.value[0].path.ToString() == "ursa:Shaders/Renderer3D/Cube.vert" &&
 	           listed.value[1].path.ToString() == "ursa:Shaders/Renderer3D/Cube.vert.spv",
 	       "Overlay listing returned unexpected virtual paths");
-	Expect(listed.value[0].shadowedHostPaths.size() == 1 &&
-	           listed.value[0].shadowedHostPaths.front() == generatedRoot / "Shaders" / "Renderer3D" / "Cube.vert",
-	       "Shadowed host location was not reported");
-	Expect(listed.value[1].shadowedHostPaths.empty(), "Unshadowed entry reported a shadowed location");
+	Expect(listed.value[0].shadowedSources.size() == 1 &&
+	           listed.value[0].shadowedSources.front() == "directory:overlay-generated",
+	       "Shadowed provider source was not reported");
+	Expect(listed.value[1].shadowedSources.empty(), "Unshadowed entry reported a shadowed provider");
 	Expect(!vfs.List("mod"), "Listing an unmounted scheme succeeded");
 }
 
@@ -194,7 +226,7 @@ void TestTraversalIsolation(const std::filesystem::path& root)
 	           listed.value.front().path.ToString() == "prj:Snake/Snake.ursascene",
 	       "Traversal followed a link out of its mount root");
 	const auto throughLink = Ursa::VirtualPath::Parse("prj:escape/secret.ursatex").value;
-	Expect(!vfs.ResolveToDisk(throughLink), "resolveToDisk followed a link out of its mount root");
+	Expect(!vfs.Read(throughLink), "resolveToDisk followed a link out of its mount root");
 	Expect(!vfs.Read(throughLink), "read followed a link out of its mount root");
 
 	const auto escaped = Ursa::VirtualPath::Parse("prj:Snake/../../secret.ursatex");
@@ -233,6 +265,69 @@ void TestEngineAssetRootResolution(const std::filesystem::path& root)
 	std::filesystem::remove_all(mirror);
 	candidates.explicitRoot.clear();
 	Expect(!Ursa::ResolveEngineAssetRoot(candidates), "Resolution succeeded although no candidate directory exists");
+}
+
+void TestRuntimeMountProfiles(const std::filesystem::path& root)
+{
+	const auto engineRoot = root / "profile-engine";
+	const auto projectRoot = root / "profile-project";
+	const auto editorUserRoot = root / "profile-editor-user";
+	const auto looseUserRoot = root / "profile-loose-user";
+	const auto packageEngineRoot = root / "profile-package-engine";
+	const auto packageProjectRoot = root / "profile-package-project";
+	const auto packageUserRoot = root / "profile-package-user";
+	WriteFile(engineRoot / "engine.txt", "engine");
+	WriteFile(projectRoot / "project.txt", "project");
+	WriteFile(packageEngineRoot / "engine.txt", "packed-engine");
+	WriteFile(packageProjectRoot / "project.txt", "packed-project");
+
+	Ursa::RuntimeMountProfileConfig editorConfig;
+	editorConfig.mode = Ursa::RuntimeMountMode::Editor;
+	editorConfig.engineDirectories.push_back(engineRoot);
+	editorConfig.projectAssetsDirectory = projectRoot;
+	editorConfig.userDataDirectoryOverride = editorUserRoot;
+	auto editor = Ursa::OpenRuntimeFileSystem(editorConfig);
+	Expect(static_cast<bool>(editor), "Cannot create the Editor mount profile");
+	const auto engineAsset = Ursa::VirtualPath::Parse("ursa:engine.txt").value;
+	const auto projectAsset = Ursa::VirtualPath::Parse("prj:project.txt").value;
+	const auto editorLog = Ursa::VirtualPath::Parse("user:Logs/editor.log").value;
+	Expect(TextOf(editor.value.Read(engineAsset).value) == "engine" &&
+	           TextOf(editor.value.Read(projectAsset).value) == "project",
+	       "Editor mount profile did not expose Engine and project resources");
+	Expect(static_cast<bool>(editor.value.Write(projectAsset, BytesOf("edited"))) &&
+	           !editor.value.Write(engineAsset, BytesOf("changed")) &&
+	           static_cast<bool>(editor.value.Append(editorLog, BytesOf("log"))),
+	       "Editor mount profile has incorrect resource or user-data access");
+	const auto editorUserRoots = editor.value.Roots(Ursa::userDataScheme);
+	Expect(editorUserRoots && editorUserRoots.value.size() == 1 && editorUserRoots.value.front() == editorUserRoot,
+	       "Editor user-data override was not mounted");
+
+	Ursa::RuntimeMountProfileConfig looseConfig = editorConfig;
+	looseConfig.mode = Ursa::RuntimeMountMode::LooseRuntime;
+	looseConfig.userDataDirectoryOverride = looseUserRoot;
+	auto loose = Ursa::OpenRuntimeFileSystem(looseConfig);
+	Expect(loose && !loose.value.Write(projectAsset, BytesOf("runtime edit")) &&
+	           static_cast<bool>(loose.value.Write(Ursa::VirtualPath::Parse("user:save.dat").value, BytesOf("save"))),
+	       "Loose runtime mount profile has incorrect project or user-data access");
+
+	auto packageEngine = Ursa::DirectoryFileProvider::Open(packageEngineRoot);
+	auto packageProject = Ursa::DirectoryFileProvider::Open(packageProjectRoot);
+	Expect(packageEngine && packageProject, "Cannot create packaged profile provider fixtures");
+	Ursa::RuntimeMountProfileConfig packagedConfig;
+	packagedConfig.mode = Ursa::RuntimeMountMode::PackagedRuntime;
+	packagedConfig.userDataDirectoryOverride = packageUserRoot;
+	packagedConfig.packagedProviders.push_back({Ursa::engineScheme, packageEngine.value});
+	packagedConfig.packagedProviders.push_back({Ursa::projectScheme, packageProject.value});
+	auto packaged = Ursa::OpenRuntimeFileSystem(packagedConfig);
+	Expect(packaged && TextOf(packaged.value.Read(engineAsset).value) == "packed-engine" &&
+	           TextOf(packaged.value.Read(projectAsset).value) == "packed-project",
+	       "Packaged mount profile did not expose its scheme providers");
+	Expect(
+	    !packaged.value.Write(projectAsset, BytesOf("overwrite")) &&
+	        static_cast<bool>(packaged.value.Write(Ursa::VirtualPath::Parse("user:save.dat").value, BytesOf("save"))),
+	    "Packaged content was writable or user data was not writable");
+	Expect(!Ursa::ResolveUserDataDirectory("../outside"),
+	       "Invalid application ID was accepted for user-data resolution");
 }
 } // namespace
 
