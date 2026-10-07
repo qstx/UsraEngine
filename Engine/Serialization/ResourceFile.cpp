@@ -71,6 +71,8 @@ Result<ResourceHeader> FinishHeader(ResourceHeader header, const String& where)
 	const bool supportedVersion =
 	    header.kind == ResourceKind::Material
 	        ? header.version == resourceFormatVersion || header.version == materialResourceFormatVersion
+	    : header.kind == ResourceKind::Texture
+	        ? header.version == resourceFormatVersion || header.version == textureResourceFormatVersion
 	        : header.version == resourceFormatVersion;
 	if (!supportedVersion)
 	{

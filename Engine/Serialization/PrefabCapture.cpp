@@ -125,6 +125,18 @@ void CaptureFields(const Json& before, const Json& after, const String& pointer,
 	{
 		return;
 	}
+	if (before.is_string() && after.is_object() && after.contains("guid") && after["guid"].is_string() &&
+	    after.contains("localFileId") && after["localFileId"].is_number_unsigned() &&
+	    after["localFileId"].get<Ursa::UInt64>() == 0 && before.get<std::string>() == after["guid"].get<std::string>())
+	{
+		return;
+	}
+	if (after.is_string() && before.is_object() && before.contains("guid") && before["guid"].is_string() &&
+	    before.contains("localFileId") && before["localFileId"].is_number_unsigned() &&
+	    before["localFileId"].get<Ursa::UInt64>() == 0 && after.get<std::string>() == before["guid"].get<std::string>())
+	{
+		return;
+	}
 	if (before.is_object() && after.is_object())
 	{
 		for (const auto& entry : after.items())

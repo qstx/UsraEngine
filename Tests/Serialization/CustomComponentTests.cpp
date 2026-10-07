@@ -206,6 +206,7 @@ void TestCustomComponents(const std::filesystem::path& root)
 	const auto targetPersistent = Take(source.ComponentPersistentId(target));
 	const auto path = root / "custom.ursascene";
 	done(Ursa::SaveSceneResource(path, Ursa::ResourceId::Generate(), source, registry));
+	done(Ursa::WriteResourceMetadataTree(root));
 
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext context(*session);
@@ -271,7 +272,7 @@ int main()
 		                  ("UrsaCustomComponentTests-" + Ursa::ToStdString(Ursa::ResourceId::Generate().ToString()));
 		std::filesystem::create_directory(root);
 		TestCustomComponents(root);
-		std::filesystem::remove(root);
+		std::filesystem::remove_all(root);
 		return 0;
 	}
 	catch (const std::exception& error)

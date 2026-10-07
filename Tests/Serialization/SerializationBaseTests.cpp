@@ -100,6 +100,7 @@ void TestIndex(const std::filesystem::path& directory)
 		std::ofstream output(first);
 		output << document;
 	}
+	Expect(static_cast<bool>(Ursa::WriteAssetMetadata(first, id)), "Cannot write original resource GUID metadata");
 	Ursa::ResourceIndex index;
 	const auto firstMount = Ursa::ResourceMount{Ursa::projectScheme, firstRoot, Ursa::MountAccess::ReadOnly};
 	const auto secondMount = Ursa::ResourceMount{Ursa::engineScheme, secondRoot, Ursa::MountAccess::ReadOnly};
@@ -109,11 +110,13 @@ void TestIndex(const std::filesystem::path& directory)
 	Expect(static_cast<bool>(index.Rebuild()), "Could not scan resource roots");
 	Expect(index.Resolve(id) && index.Resolve(id).value.path == firstPath, "Could not resolve indexed resource");
 	std::filesystem::rename(first, moved);
+	std::filesystem::rename(first.string() + ".meta", moved.string() + ".meta");
 	Expect(index.Rebuild() && index.Resolve(id).value.path == movedPath, "Moved resource lost its identity");
 	{
 		std::ofstream output(duplicate);
 		output << document;
 	}
+	Expect(static_cast<bool>(Ursa::WriteAssetMetadata(duplicate, id)), "Cannot write duplicate resource GUID metadata");
 	const auto collision = index.Rebuild();
 	Expect(!collision && collision.error.find("prj:renamed.ursamat") != Ursa::String::npos &&
 	           collision.error.find("ursa:copy.ursamat") != Ursa::String::npos,
@@ -124,7 +127,9 @@ void TestIndex(const std::filesystem::path& directory)
 	Expect(!missing && missing.error.find("sample scene") != Ursa::String::npos,
 	       "Missing resource diagnostic omitted reference source");
 	std::filesystem::remove(moved);
+	std::filesystem::remove(moved.string() + ".meta");
 	std::filesystem::remove(duplicate);
+	std::filesystem::remove(duplicate.string() + ".meta");
 	std::filesystem::remove(firstRoot);
 	std::filesystem::remove(secondRoot);
 }

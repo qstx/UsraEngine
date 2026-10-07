@@ -39,39 +39,40 @@ Result<void> SaveTextureResource(VirtualFileSystem& filesystem, const VirtualPat
 	{
 		return Result<void>::Failure("Texture resource needs .ursatex extension: " + path.ToString());
 	}
-	if (texture.GetPixels().size() > maxTextureResourceBytes - textureHeaderBytes)
+	Ursa::UInt64 pixelBytes = texture.GetPixels().size();
+	for (const TextureMip& mipmap : texture.GetMipmaps())
+	{
+		pixelBytes += mipmap.pixels.size();
+	}
+	if (pixelBytes > maxTextureResourceBytes - textureHeaderBytes || texture.GetMipmaps().size() > 255)
 	{
 		return Result<void>::Failure("Texture resource exceeds size limit at " + path.ToString());
-	}
-	ArchiveWriter writer;
-	auto saved = texture.Serialize(writer);
-	if (!saved)
-	{
-		return saved;
-	}
-	auto reader = ArchiveSnapshot(writer);
-	if (!reader)
-	{
-		return Result<void>::Failure(reader.error);
-	}
-	auto width = reader.value.Unsigned("width");
-	auto height = reader.value.Unsigned("height");
-	auto space = reader.value.Text("colorSpace");
-	auto pixels = reader.value.Bytes("pixels");
-	if (!width || !height || !space || !pixels)
-	{
-		return Result<void>::Failure("Invalid serialized texture fields");
 	}
 	Array<Ursa::UInt8, textureHeaderBytes> header{};
 	constexpr Array<Ursa::UInt8, 8> magic{'U', 'R', 'S', 'A', 'T', 'E', 'X', 0};
 	std::copy(magic.begin(), magic.end(), header.begin());
-	EncodeUint32(header, 8, resourceFormatVersion);
+	const MaterialSampler defaultSampler{};
+	const bool extendedHeader = !texture.GetMipmaps().empty() ||
+	                            texture.DefaultSampler().linear != defaultSampler.linear ||
+	                            texture.DefaultSampler().repeat != defaultSampler.repeat;
+	const Ursa::UInt32 formatVersion = extendedHeader ? textureResourceFormatVersion : resourceFormatVersion;
+	EncodeUint32(header, 8, formatVersion);
 	std::copy(id.bytes.begin(), id.bytes.end(), header.begin() + 12);
-	EncodeUint32(header, 28, UInt32(width.value));
-	EncodeUint32(header, 32, UInt32(height.value));
-	header[36] = space.value == "Srgb" ? 1 : 0;
+	EncodeUint32(header, 28, texture.GetWidth());
+	EncodeUint32(header, 32, texture.GetHeight());
+	header[36] = texture.GetColorSpace() == TextureColorSpace::Srgb ? 1 : 0;
+	if (formatVersion == textureResourceFormatVersion)
+	{
+		header[37] = static_cast<Ursa::UInt8>(texture.GetMipmaps().size());
+		header[38] = texture.DefaultSampler().linear ? 1 : 0;
+		header[39] = texture.DefaultSampler().repeat ? 1 : 0;
+	}
 	Vector<UInt8> bytes(header.begin(), header.end());
-	bytes.insert(bytes.end(), pixels.value.begin(), pixels.value.end());
+	bytes.insert(bytes.end(), texture.GetPixels().begin(), texture.GetPixels().end());
+	for (const TextureMip& mipmap : texture.GetMipmaps())
+	{
+		bytes.insert(bytes.end(), mipmap.pixels.begin(), mipmap.pixels.end());
+	}
 	return filesystem.WriteAtomic(path, bytes);
 }
 
@@ -102,50 +103,67 @@ Result<LoadedTextureResource> LoadTextureResource(const VirtualFileSystem& files
 	{
 		return Result<LoadedTextureResource>::Failure("Invalid texture dimensions at " + path.ToString());
 	}
-	const Ursa::UInt64 expected = textureHeaderBytes + static_cast<Ursa::UInt64>(width) * height * 4;
-	if (size != expected)
+	const Ursa::UInt8 mipCount = resource.value.version == textureResourceFormatVersion ? header[37] : 0;
+	if (resource.value.version == resourceFormatVersion && (header[37] != 0 || header[38] != 0 || header[39] != 0))
 	{
-		return Result<LoadedTextureResource>::Failure("Texture pixel byte count does not match dimensions at " +
-		                                              path.ToString());
+		return Result<LoadedTextureResource>::Failure("Invalid legacy texture reserved bytes at " + path.ToString());
 	}
-	if (header[36] > 1 || header[37] || header[38] || header[39])
+	if (header[36] > 1 ||
+	    (resource.value.version == textureResourceFormatVersion && (header[38] > 1 || header[39] > 1)))
 	{
 		return Result<LoadedTextureResource>::Failure("Invalid texture color space or reserved bytes at " +
 		                                              path.ToString());
 	}
-	Vector<UInt8> pixels(data.value.begin() + textureHeaderBytes, data.value.end());
-	ArchiveWriter writer;
-	auto fields = writer.Write("width", UInt64(width));
-	if (fields)
+	Ursa::UInt64 expectedPixelBytes = static_cast<Ursa::UInt64>(width) * height * 4;
+	Ursa::UInt32 mipWidth = width;
+	Ursa::UInt32 mipHeight = height;
+	for (Ursa::UInt8 mip = 0; mip < mipCount; ++mip)
 	{
-		fields = writer.Write("height", UInt64(height));
+		if (mipWidth == 1 && mipHeight == 1)
+		{
+			return Result<LoadedTextureResource>::Failure("Texture mip count exceeds its dimensions at " +
+			                                              path.ToString());
+		}
+		mipWidth = mipWidth > 1 ? mipWidth / 2 : 1;
+		mipHeight = mipHeight > 1 ? mipHeight / 2 : 1;
+		expectedPixelBytes += static_cast<Ursa::UInt64>(mipWidth) * mipHeight * 4;
 	}
-	if (fields)
+	if (size != textureHeaderBytes + expectedPixelBytes)
 	{
-		fields = writer.Write("colorSpace", String(header[36] ? "Srgb" : "Linear"));
+		return Result<LoadedTextureResource>::Failure("Texture mip byte count does not match dimensions at " +
+		                                              path.ToString());
 	}
-	if (fields)
+	Ursa::Size pixelOffset = textureHeaderBytes;
+	const Ursa::Size baseBytes = static_cast<Ursa::Size>(width) * height * 4;
+	Vector<UInt8> pixels(data.value.begin() + pixelOffset, data.value.begin() + pixelOffset + baseBytes);
+	pixelOffset += baseBytes;
+	Vector<TextureMip> mipmaps;
+	mipWidth = width;
+	mipHeight = height;
+	for (Ursa::UInt8 mip = 0; mip < mipCount; ++mip)
 	{
-		fields = writer.WriteBytes("pixels", pixels);
+		mipWidth = mipWidth > 1 ? mipWidth / 2 : 1;
+		mipHeight = mipHeight > 1 ? mipHeight / 2 : 1;
+		const Ursa::Size mipBytes = static_cast<Ursa::Size>(mipWidth) * mipHeight * 4;
+		mipmaps.push_back(
+		    {mipWidth, mipHeight,
+		     Vector<UInt8>(data.value.begin() + pixelOffset, data.value.begin() + pixelOffset + mipBytes)});
+		pixelOffset += mipBytes;
 	}
-	if (!fields)
+	MaterialSampler sampler{};
+	if (resource.value.version == textureResourceFormatVersion)
 	{
-		return Result<LoadedTextureResource>::Failure(fields.error);
+		sampler = {header[38] != 0, header[39] != 0};
 	}
-	auto reader = ArchiveSnapshot(writer);
-	if (!reader)
-	{
-		return Result<LoadedTextureResource>::Failure(reader.error);
-	}
-	auto texture = MaterialTexture::CreateForDeserialization();
-	SerializationContext context;
-	auto loaded = texture->Deserialize(reader.value, context);
-	if (!loaded)
+	auto texture =
+	    MaterialTexture::Create(width, height, header[36] ? TextureColorSpace::Srgb : TextureColorSpace::Linear,
+	                            std::move(pixels), std::move(mipmaps), sampler);
+	if (!texture)
 	{
 		return Result<LoadedTextureResource>::Failure("Invalid texture resource at " + path.ToString() + ": " +
-		                                              loaded.error);
+		                                              texture.error);
 	}
-	return Result<LoadedTextureResource>::Success({resource.value.id, std::move(texture)});
+	return Result<LoadedTextureResource>::Success({resource.value.id, std::move(texture.value)});
 }
 
 } // namespace Ursa

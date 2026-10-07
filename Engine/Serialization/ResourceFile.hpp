@@ -27,6 +27,7 @@ struct ResourceHeader
 
 constexpr Ursa::UInt32 resourceFormatVersion = 1;
 constexpr Ursa::UInt32 materialResourceFormatVersion = 2;
+constexpr Ursa::UInt32 textureResourceFormatVersion = 2;
 constexpr Ursa::UInt64 maxJsonResourceBytes = 16ull * 1024 * 1024;
 constexpr Ursa::UInt64 maxTextureResourceBytes = 256ull * 1024 * 1024;
 constexpr Ursa::UInt64 maxShaderResourceBytes = 256ull * 1024 * 1024;

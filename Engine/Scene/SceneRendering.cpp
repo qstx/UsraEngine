@@ -1,4 +1,5 @@
 #include <Core/Types.hpp>
+#include <Animation/AnimatorComponent.hpp>
 #include <Scene/Scene.hpp>
 #include <Core/StringInterop.hpp>
 #include <cmath>
@@ -125,6 +126,57 @@ void Scene::CollectRendering(ObjectHandle node, SceneRenderData& out) const
 		if (const auto* box = dynamic_cast<const BoxRenderComponent*>(object))
 		{
 			out.boxes.push_back({world, box->color, box->material});
+		}
+		if (const auto* meshRenderer = dynamic_cast<const MeshRendererComponent*>(object))
+		{
+			const ModelMeshPtr mesh = meshRenderer->Mesh();
+			if (mesh)
+			{
+				out.boxes.push_back({world, {}, mesh->material, mesh});
+			}
+		}
+		if (const auto* skinnedRenderer = dynamic_cast<const SkinnedMeshRendererComponent*>(object))
+		{
+			const ModelMeshPtr mesh = skinnedRenderer->Mesh();
+			if (mesh)
+			{
+				Vector<Mat4> palette;
+				auto owner = skinnedRenderer->GetGameObject();
+				for (GameObject::Ptr current = owner; current; current = current->Parent())
+				{
+					const AnimatorComponent* animator = current->FindComponent<AnimatorComponent>();
+					if (animator && animator->ModelGuid() == mesh->modelGuid &&
+					    animator->SkeletonLocalFileId() == mesh->skeletonLocalFileId)
+					{
+						palette = animator->JointPalette();
+						break;
+					}
+				}
+				if (palette.empty() && mesh->skeleton)
+				{
+					Vector<Mat4> bindTransforms;
+					bindTransforms.reserve(mesh->skeleton->joints.size());
+					for (Ursa::Size jointIndex = 0; jointIndex < mesh->skeleton->joints.size(); ++jointIndex)
+					{
+						const SkeletonJoint& joint = mesh->skeleton->joints[jointIndex];
+						const Mat4 global = joint.parentJointIndex < 0
+						                        ? joint.bindLocalTransform.Matrix()
+						                        : bindTransforms[static_cast<Ursa::Size>(joint.parentJointIndex)] *
+						                              joint.bindLocalTransform.Matrix();
+						bindTransforms.push_back(global);
+						palette.push_back(global * joint.inverseBindMatrix);
+					}
+				}
+				if (mesh->skeleton)
+				{
+					const Mat4 inverseMeshWorld = world.InverseAffine();
+					for (Mat4& jointMatrix : palette)
+					{
+						jointMatrix = inverseMeshWorld * jointMatrix;
+					}
+				}
+				out.boxes.push_back({world, {}, mesh->material, mesh, std::move(palette)});
+			}
 		}
 		if (const auto* light = dynamic_cast<const DirectionalLightComponent*>(object))
 		{

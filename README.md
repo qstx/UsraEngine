@@ -6,17 +6,56 @@ UrsaEngine is a C++17 graphics engine foundation with an API independent RHI and
 
 - Windows 10 or newer, Visual Studio 2022 with C++ desktop tools, CMake 3.20 or newer.
 - Vulkan SDK 1.2 or newer with `glslc`, and a Vulkan 1.2 capable GPU and driver.
-- Git submodules containing pinned GLFW 3.5.1, VMA 3.4.0, nlohmann/json 3.12.0, EASTL 3.21.23 (`7fadbf0`), its matching EABase (`123363e`), spdlog 1.13.0 (`7c02e20`), Dear ImGui `v1.92.9b-docking` (`b48d1af`), and ImGuizmo `1.10` (`b796ac3`) sources.
+- Git submodules containing pinned GLFW 3.5.1, VMA 3.4.0, nlohmann/json 3.12.0, EASTL 3.21.23 (`7fadbf0`), its matching EABase (`123363e`), spdlog 1.13.0 (`7c02e20`), Assimp 6.0.5 (`392a658f`), stb (`2c980bb5`), Dear ImGui `v1.92.9b-docking` (`b48d1af`), and ImGuizmo `1.10` (`b796ac3`) sources.
 
-Initialize the top-level dependencies after checkout with `git submodule update --init`. To verify the Editor dependencies recursively, run `git submodule update --init --recursive third_party/imgui third_party/imguizmo`. EABase also declares upstream test-only submodules over SSH; they are not needed for this Engine build. The Dear ImGui and ImGuizmo Git links are fixed to the revisions above; the tags document the upstream releases but are not followed automatically.
+Initialize the top-level dependencies after checkout with `git submodule update --init`. To verify the Editor dependencies recursively, run `git submodule update --init --recursive third_party/imgui third_party/imguizmo`. EABase also declares upstream test-only submodules over SSH; they are not needed for this Engine build. All submodule Git links are fixed to the revisions above.
 
 `UrsaRuntime` owns the window, RHI interface, and Vulkan backend. `UrsaEngine` provides the application loop and links to `UrsaRuntime`. The optional `UrsaEditorCore` target (alias `Ursa::Editor`) owns the Editor UI and links to `Ursa::Engine`. CMake aliases `Ursa::Runtime`, `Ursa::Engine`, and `Ursa::Editor` are available to other targets when the Editor is enabled.
 
 ## Source layout
 
-`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Renderer3D`, and `Engine/Serialization` contain the engine modules. `Editor/Application` and `Editor/Ui` contain the Editor loop and UI bridge. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Renderer3D/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. Tests are grouped by module under `Tests/`.
+`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Renderer3D`, and `Engine/Serialization` contain the engine modules. `Editor/Application` and `Editor/Ui` contain the Editor loop and UI bridge. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Renderer3D/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. The Editor creates a generated, rebuildable `Library/` directory beside `Assets/`; keep it out of source control. Tests are grouped by module under `Tests/`.
 
 CMake discovers `.cpp` and `.hpp` files within the listed module directories and checks for additions or removals during a build. New modules and test executables still need a CMake target or directory entry.
+
+## Asset metadata
+
+The Editor AssetDatabase stores a versioned JSON `.meta` sidecar next to each
+asset and directory. A sidecar owns the stable GUID, importer identity/version,
+and import settings; source bytes remain unchanged. In the Editor, `prj:` is the
+VFS address for the project's `Assets/` directory, so `prj:Models/Hero.fbx`
+appears as `Assets/Models/Hero.fbx` in project UI and its metadata is stored as
+`Assets/Models/Hero.fbx.meta`.
+
+Use the AssetDatabase move operation to move/rename a source together with its
+sidecar; the GUID remains stable. Copying creates fresh GUIDs for the copy and
+its imported source tree. If duplicate GUID sidecars are found during refresh,
+the first sorted asset keeps its identity and later copies receive new GUIDs.
+Missing sidecars are created on writable project mounts. A read-only project
+must already contain valid metadata. The generated project `Library/` directory
+is mounted as `lib:` only by the Editor, is ignored by source control, and can be
+deleted and rebuilt from assets and their sidecars.
+
+Before switching an existing asset root to the new identity format, back up the
+project and run the migration tool once per asset root:
+
+```powershell
+Engine/build/Debug/UrsaAssetMigrate.exe --assets Engine/Assets --library Engine/Library
+Engine/build/Debug/UrsaAssetMigrate.exe --assets Demo/Assets --library Demo/Library
+```
+
+The tool seeds `.meta` GUIDs from IDs embedded in supported `.ursa*` resources,
+converts known external references to `{guid, localFileId}`, and leaves scene
+object/component IDs alone. It writes a recovery manifest and copies changed
+files into `Library/Migrations/<id>`. To restore a reported backup, pass its
+`lib:Migrations/<id>` path with `--restore`; refresh the Editor workspace after
+restoration.
+
+See [Docs/TextureImport.md](Docs/TextureImport.md) for image formats, settings,
+previews, and the runtime artifact path.
+
+See [Docs/ModelImport.md](Docs/ModelImport.md) for FBX/OBJ import settings,
+hierarchy and sub-assets, materials, dependencies, and current format limits.
 
 ## Logging
 
@@ -137,12 +176,14 @@ user:Logs/UrsaDemoEditor.log            -> per-user application data directory
 Ursa::Result<void> OpenEditorResources(const std::filesystem::path &engineAssets,
                                        const std::filesystem::path &generatedAssets,
                                        const std::filesystem::path &projectAssets,
+                                       const std::filesystem::path &projectLibrary,
                                        const std::filesystem::path &userData) {
     Ursa::RuntimeMountProfileConfig profile;
     profile.mode = Ursa::RuntimeMountMode::Editor;
     profile.applicationId = "UrsaEditor";
     profile.engineDirectories = {engineAssets, generatedAssets};
     profile.projectAssetsDirectory = projectAssets;
+    profile.projectLibraryDirectory = projectLibrary;
     profile.userDataDirectoryOverride = userData;
     auto vfs = Ursa::OpenRuntimeFileSystem(profile);
     if (!vfs)
@@ -195,7 +236,11 @@ cmake --build build --config Debug --target UrsaEnginePackage
 ```
 
 The Engine-only package is `build/package/Content.pak`. Demo's `UrsaDemoPackage`
-target includes project content in the same file and supports runtime `--pak` startup.
+target includes project content and the current `Demo/Library` runtime imports in
+the same file and supports runtime `--pak` startup. `UrsaPak` stages imported
+artifacts and a deterministic GUID/local-file-ID catalog into the package while
+filtering `.meta`, `Library`, and raw importer-only source files. Run the Editor
+to import changed assets before packaging; stale imports stop package creation.
 
 ## Runtime materials
 

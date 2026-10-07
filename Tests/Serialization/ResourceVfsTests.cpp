@@ -8,6 +8,7 @@
 #include <Vfs/PakArchive.hpp>
 #include <Vfs/UserDataStore.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
+#include <nlohmann/json.hpp>
 #include <Core/StringInterop.hpp>
 #include <iostream>
 #include <stdexcept>
@@ -45,6 +46,22 @@ VirtualPath Path(const char* name)
 {
 	return Take(VirtualPath::Parse(name));
 }
+
+void WriteAssetMetadata(VirtualFileSystem& filesystem, const VirtualPath& sourcePath, ResourceId guid)
+{
+	const auto sidecar = Path((ToStdString(sourcePath.ToString()) + ".meta").c_str());
+	const nlohmann::json document = {{"version", 1},         {"guid", ToStdString(guid.ToString())},
+	                                 {"folder", false},      {"importer", ""},
+	                                 {"importerVersion", 0}, {"settings", nlohmann::json::object()}};
+	const std::string text = document.dump(2);
+	Vector<UInt8> bytes;
+	bytes.reserve(text.size());
+	for (unsigned char value : text)
+	{
+		bytes.push_back(value);
+	}
+	Done(filesystem.WriteAtomic(sidecar, bytes));
+}
 } // namespace
 
 int main()
@@ -65,10 +82,12 @@ int main()
 		auto texture =
 		    Take(MaterialTexture::Create(256, 256, TextureColorSpace::Srgb, Vector<UInt8>(256 * 256 * 4, 200)));
 		Done(SaveTextureResource(source, Path("prj:Texture.ursatex"), textureId, *texture));
+		WriteAssetMetadata(source, Path("prj:Texture.ursatex"), textureId);
 		auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 		Done(material->SetTexture(MaterialTextureSlot::BaseColor, texture));
 		Done(SaveMaterialResource(source, Path("prj:Material.ursamat"), materialId, *material,
 		                          [&](MaterialTexturePtr) { return Result<ResourceId>::Success(textureId); }));
+		WriteAssetMetadata(source, Path("prj:Material.ursamat"), materialId);
 		ComponentRegistry registry;
 		Done(RegisterBuiltinComponents(registry));
 		Scene authored;
@@ -82,6 +101,8 @@ int main()
 		{ return Result<ResourceId>::Success(materialId); };
 		Done(SaveSceneResource(source, Path("prj:Scene.ursascene"), sceneId, authored, registry, identify));
 		Done(SavePrefabResource(source, Path("prj:Box.ursaprefab"), prefabId, authored, box, registry, identify));
+		WriteAssetMetadata(source, Path("prj:Scene.ursascene"), sceneId);
+		WriteAssetMetadata(source, Path("prj:Box.ursaprefab"), prefabId);
 		VirtualFileSystem output;
 		Done(output.Mount("output", root / "Output", MountAccess::ReadWrite));
 		Done(PakBuilder::Build(source, {projectScheme}, output, Path("output:Content.pak")));

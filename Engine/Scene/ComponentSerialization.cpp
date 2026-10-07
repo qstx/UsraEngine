@@ -1,5 +1,6 @@
 #include <Scene/RenderingComponents.hpp>
 #include <Serialization/ArchiveFields.hpp>
+#include <Serialization/AssetReference.hpp>
 #include <Serialization/SerializationContext.hpp>
 #include <Serialization/ResourceSession.hpp>
 
@@ -74,7 +75,7 @@ Result<void> BoxRenderComponent::Serialize(ArchiveWriter& writer) const
 		return Result<void>::Failure("No material ID resolver for BoxRenderComponent");
 	}
 	auto id = writer.Context()->Identify(*material);
-	return id ? writer.Write("material", id.value.ToString()) : Result<void>::Failure(id.error);
+	return id ? WriteAssetReference(writer, "material", {id.value, 0}) : Result<void>::Failure(id.error);
 }
 
 Result<void> BoxRenderComponent::Deserialize(const ArchiveReader& reader, SerializationContext& context)
@@ -91,17 +92,17 @@ Result<void> BoxRenderComponent::Deserialize(const ArchiveReader& reader, Serial
 	std::shared_ptr<MaterialInstance> loadedMaterial;
 	if (!reader.IsNull("material"))
 	{
-		auto text = reader.Text("material");
-		if (!text)
+		auto reference = ReadAssetReference(reader, "material");
+		if (!reference || reference.value.localFileId != 0)
 		{
-			return Result<void>::Failure(text.error);
+			return Result<void>::Failure(reference ? "Material sub-asset references are not supported by this loader"
+			                                       : reference.error);
 		}
-		auto id = ResourceId::Parse(text.value);
-		if (!id || !context.ResourceLoader())
+		if (!context.ResourceLoader())
 		{
 			return Result<void>::Failure("Invalid BoxRender material reference");
 		}
-		auto loaded = context.ResourceLoader()->LoadMaterial(id.value);
+		auto loaded = context.ResourceLoader()->LoadMaterial(reference.value.guid);
 		if (!loaded)
 		{
 			return Result<void>::Failure(loaded.error);
@@ -111,6 +112,56 @@ Result<void> BoxRenderComponent::Deserialize(const ArchiveReader& reader, Serial
 	color = loadedColor.value;
 	material = std::move(loadedMaterial);
 	return {};
+}
+
+Result<void> MeshRendererComponent::Serialize(ArchiveWriter& writer) const
+{
+	if (!meshGuid || meshLocalFileId == 0 || !mesh)
+	{
+		return Result<void>::Failure("MeshRenderer has no imported model mesh assigned");
+	}
+	return WriteAssetReference(writer, "mesh", {meshGuid, meshLocalFileId});
+}
+
+Result<void> MeshRendererComponent::Deserialize(const ArchiveReader& reader, SerializationContext& context)
+{
+	auto reference = ReadAssetReference(reader, "mesh");
+	if (!reference || reference.value.localFileId == 0 || !context.ResourceLoader())
+	{
+		return Result<void>::Failure(reference ? "MeshRenderer requires a model mesh sub-asset and ResourceSession"
+		                                       : reference.error);
+	}
+	auto loaded = context.ResourceLoader()->LoadMesh(reference.value.guid, reference.value.localFileId);
+	if (!loaded)
+	{
+		return Result<void>::Failure(loaded.error);
+	}
+	return SetMesh(reference.value.guid, reference.value.localFileId, std::move(loaded.value));
+}
+
+Result<void> SkinnedMeshRendererComponent::Serialize(ArchiveWriter& writer) const
+{
+	if (!meshGuid || meshLocalFileId == 0 || !mesh || !mesh->skeleton)
+	{
+		return Result<void>::Failure("SkinnedMeshRenderer has no imported skinned mesh assigned");
+	}
+	return WriteAssetReference(writer, "mesh", {meshGuid, meshLocalFileId});
+}
+
+Result<void> SkinnedMeshRendererComponent::Deserialize(const ArchiveReader& reader, SerializationContext& context)
+{
+	auto reference = ReadAssetReference(reader, "mesh");
+	if (!reference || reference.value.localFileId == 0 || !context.ResourceLoader())
+	{
+		return Result<void>::Failure(
+		    reference ? "SkinnedMeshRenderer requires a model mesh sub-asset and ResourceSession" : reference.error);
+	}
+	auto loaded = context.ResourceLoader()->LoadMesh(reference.value.guid, reference.value.localFileId);
+	if (!loaded)
+	{
+		return Result<void>::Failure(loaded.error);
+	}
+	return SetMesh(reference.value.guid, reference.value.localFileId, std::move(loaded.value));
 }
 
 Result<void> DirectionalLightComponent::Serialize(ArchiveWriter& writer) const

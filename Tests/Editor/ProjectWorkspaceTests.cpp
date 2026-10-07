@@ -1,5 +1,7 @@
 #include <Workspace/ProjectWorkspace.hpp>
+#include <ResourceFixtures.hpp>
 #include <Core/StringInterop.hpp>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -72,6 +74,8 @@ int main()
 		const auto original = assets / "original.ursamat";
 		const auto renamed = assets / "renamed.ursamat";
 		WriteHeader(original, id);
+		done(WriteAssetMetadata(original, id));
+		std::ofstream(assets / "Logo.png", std::ios::binary) << "image-source";
 		auto workspace = Take(Editor::ProjectWorkspace::Open(project, engineMounts(engine)));
 		Expect(workspace->ProjectRoot() == project && workspace->AssetsRoot() == assets,
 		       "Project directory and assets root were not separated");
@@ -89,16 +93,28 @@ int main()
 		Expect(!Editor::ProjectWorkspace::Open(engine, engineMounts(engine)),
 		       "A project without an assets directory was accepted");
 
-		std::filesystem::rename(original, renamed);
+		Expect(workspace->Database() != nullptr, "Project workspace did not create an AssetDatabase");
+		done(workspace->Database()->Move(Asset("original.ursamat"), Asset("renamed.ursamat")));
 		done(workspace->Refresh());
 		Expect(workspace->Resources().size() == 1 && workspace->Resources()[0].id == id &&
 		           workspace->Resources()[0].location.path.ToString() == "prj:renamed.ursamat",
 		       "Resource ID changed after rename and refresh");
+		const auto assetsAfterMove = workspace->Assets();
+		const auto renamedAsset =
+		    std::find_if(assetsAfterMove.begin(), assetsAfterMove.end(), [](const Editor::AssetRecord& asset)
+		                 { return asset.path.ToString() == "prj:renamed.ursamat"; });
+		const auto imageAsset =
+		    std::find_if(assetsAfterMove.begin(), assetsAfterMove.end(),
+		                 [](const Editor::AssetRecord& asset) { return asset.path.ToString() == "prj:Logo.png"; });
+		Expect(assetsAfterMove.size() == 2 && renamedAsset != assetsAfterMove.end() &&
+		           renamedAsset->metadata.guid == id && imageAsset != assetsAfterMove.end(),
+		       "AssetDatabase identity changed after moving the source and its sidecar");
 
 		const auto duplicate = engine / "duplicate.ursamat";
 		WriteHeader(duplicate, id);
+		done(WriteAssetMetadata(duplicate, id));
 		const auto failed = workspace->Refresh();
-		Expect(!failed && failed.error.find("Duplicate resource ID") != String::npos,
+		Expect(!failed && failed.error.find("Duplicate asset GUID") != String::npos,
 		       "Duplicate ID did not report an error");
 		Expect(failed.error.find("prj:renamed.ursamat") != String::npos &&
 		           failed.error.find("ursa:duplicate.ursamat") != String::npos,

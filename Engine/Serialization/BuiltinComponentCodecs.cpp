@@ -1,4 +1,5 @@
 #include <Serialization/ComponentRegistry.hpp>
+#include <Animation/AnimatorComponent.hpp>
 
 namespace Ursa
 {
@@ -12,6 +13,24 @@ Result<void> RegisterBuiltinComponents(ComponentRegistry& registry)
 		result = registry.RegisterSerializable<BoxRenderComponent>(
 		    "ursa.BoxRender", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
 		    { return owner->AddComponent<BoxRenderComponent>(); });
+	}
+	if (result)
+	{
+		result = registry.RegisterSerializable<MeshRendererComponent>(
+		    "ursa.MeshRenderer", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
+		    { return owner->AddComponent<MeshRendererComponent>(); });
+	}
+	if (result)
+	{
+		result = registry.RegisterSerializable<SkinnedMeshRendererComponent>(
+		    "ursa.SkinnedMeshRenderer", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
+		    { return owner->AddComponent<SkinnedMeshRendererComponent>(); });
+	}
+	if (result)
+	{
+		result = registry.RegisterSerializable<AnimatorComponent>(
+		    "ursa.Animator", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
+		    { return owner->AddComponent<AnimatorComponent>(); });
 	}
 	if (result)
 	{

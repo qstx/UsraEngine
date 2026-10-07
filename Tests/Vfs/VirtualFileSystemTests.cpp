@@ -72,6 +72,7 @@ Ursa::Result<void> OpenResourcesExample(const std::filesystem::path& engineRoot,
 	profile.applicationId = "UrsaEditor";
 	profile.engineDirectories = {engineRoot, engineMirror};
 	profile.projectAssetsDirectory = projectAssets;
+	profile.projectLibraryDirectory = projectAssets.parent_path() / "Library";
 	profile.userDataDirectoryOverride = userData;
 	auto vfs = Ursa::OpenRuntimeFileSystem(profile);
 	if (!vfs)
@@ -271,6 +272,7 @@ void TestRuntimeMountProfiles(const std::filesystem::path& root)
 {
 	const auto engineRoot = root / "profile-engine";
 	const auto projectRoot = root / "profile-project";
+	const auto editorLibraryRoot = root / "profile-editor-library";
 	const auto editorUserRoot = root / "profile-editor-user";
 	const auto looseUserRoot = root / "profile-loose-user";
 	const auto packageEngineRoot = root / "profile-package-engine";
@@ -285,16 +287,20 @@ void TestRuntimeMountProfiles(const std::filesystem::path& root)
 	editorConfig.mode = Ursa::RuntimeMountMode::Editor;
 	editorConfig.engineDirectories.push_back(engineRoot);
 	editorConfig.projectAssetsDirectory = projectRoot;
+	editorConfig.projectLibraryDirectory = editorLibraryRoot;
 	editorConfig.userDataDirectoryOverride = editorUserRoot;
 	auto editor = Ursa::OpenRuntimeFileSystem(editorConfig);
 	Expect(static_cast<bool>(editor), "Cannot create the Editor mount profile");
 	const auto engineAsset = Ursa::VirtualPath::Parse("ursa:engine.txt").value;
 	const auto projectAsset = Ursa::VirtualPath::Parse("prj:project.txt").value;
+	const auto editorArtifact = Ursa::VirtualPath::Parse("lib:Artifacts/test.bin").value;
 	const auto editorLog = Ursa::VirtualPath::Parse("user:Logs/editor.log").value;
 	Expect(TextOf(editor.value.Read(engineAsset).value) == "engine" &&
 	           TextOf(editor.value.Read(projectAsset).value) == "project",
 	       "Editor mount profile did not expose Engine and project resources");
 	Expect(static_cast<bool>(editor.value.Write(projectAsset, BytesOf("edited"))) &&
+	           static_cast<bool>(editor.value.Write(editorArtifact, BytesOf("artifact"))) &&
+	           TextOf(editor.value.Read(editorArtifact).value) == "artifact" &&
 	           !editor.value.Write(engineAsset, BytesOf("changed")) &&
 	           static_cast<bool>(editor.value.Append(editorLog, BytesOf("log"))),
 	       "Editor mount profile has incorrect resource or user-data access");
@@ -306,7 +312,8 @@ void TestRuntimeMountProfiles(const std::filesystem::path& root)
 	looseConfig.mode = Ursa::RuntimeMountMode::LooseRuntime;
 	looseConfig.userDataDirectoryOverride = looseUserRoot;
 	auto loose = Ursa::OpenRuntimeFileSystem(looseConfig);
-	Expect(loose && !loose.value.Write(projectAsset, BytesOf("runtime edit")) &&
+	Expect(loose && !loose.value.IsMounted(Ursa::editorLibraryScheme) &&
+	           !loose.value.Write(projectAsset, BytesOf("runtime edit")) &&
 	           static_cast<bool>(loose.value.Write(Ursa::VirtualPath::Parse("user:save.dat").value, BytesOf("save"))),
 	       "Loose runtime mount profile has incorrect project or user-data access");
 
@@ -319,7 +326,8 @@ void TestRuntimeMountProfiles(const std::filesystem::path& root)
 	packagedConfig.packagedProviders.push_back({Ursa::engineScheme, packageEngine.value});
 	packagedConfig.packagedProviders.push_back({Ursa::projectScheme, packageProject.value});
 	auto packaged = Ursa::OpenRuntimeFileSystem(packagedConfig);
-	Expect(packaged && TextOf(packaged.value.Read(engineAsset).value) == "packed-engine" &&
+	Expect(packaged && !packaged.value.IsMounted(Ursa::editorLibraryScheme) &&
+	           TextOf(packaged.value.Read(engineAsset).value) == "packed-engine" &&
 	           TextOf(packaged.value.Read(projectAsset).value) == "packed-project",
 	       "Packaged mount profile did not expose its scheme providers");
 	Expect(

@@ -1,5 +1,6 @@
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceIndex.hpp>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 
 namespace Ursa
@@ -35,9 +36,11 @@ Result<void> ResourceIndex::Mount(const ResourceMount& mount)
 Result<void> ResourceIndex::Rebuild()
 {
 	Map<String, ResourceLocation> candidate;
+	Map<String, VirtualPath> candidateCatalog;
+	bool catalogRead = false;
 	for (const String& scheme : filesystem.Schemes())
 	{
-		if (scheme == userDataScheme)
+		if (scheme == userDataScheme || scheme == editorLibraryScheme)
 		{
 			continue;
 		}
@@ -48,31 +51,126 @@ Result<void> ResourceIndex::Rebuild()
 		}
 		for (const VirtualFileEntry& entry : listed.value)
 		{
-			auto kind = ResourceKindForPath(entry.path);
+			if ((scheme == projectScheme || scheme == engineScheme) &&
+			    entry.path.relative == "__UrsaCooked/AssetCatalog.ursacatalog")
+			{
+				if (catalogRead)
+				{
+					return Result<void>::Failure("Duplicate runtime asset catalog in project mounts");
+				}
+				auto text = filesystem.ReadText(entry.path);
+				if (!text)
+				{
+					return Result<void>::Failure(text.error);
+				}
+				try
+				{
+					const nlohmann::json document = nlohmann::json::parse(ToStdString(text.value));
+					if (!document.is_object() || document.value("format", std::string{}) != "UrsaAssetCatalog" ||
+					    document.value("version", UInt32{0}) != 1 || !document.contains("assets") ||
+					    !document["assets"].is_array())
+					{
+						return Result<void>::Failure("Runtime asset catalog has an unsupported schema at " +
+						                             entry.path.ToString());
+					}
+					for (const nlohmann::json& asset : document["assets"])
+					{
+						if (!asset.is_object() || !asset.contains("guid") || !asset["guid"].is_string() ||
+						    !asset.contains("localFileId") || !asset["localFileId"].is_number_unsigned() ||
+						    !asset.contains("kind") || !asset["kind"].is_string() || !asset.contains("path") ||
+						    !asset["path"].is_string())
+						{
+							return Result<void>::Failure("Runtime asset catalog contains a malformed entry at " +
+							                             entry.path.ToString());
+						}
+						auto guid = ResourceId::Parse(ToUrsaString(asset["guid"].get<std::string>()));
+						auto path = VirtualPath::Parse(ToUrsaString(asset["path"].get<std::string>()));
+						if (!guid || !path || (path.value.scheme != projectScheme && path.value.scheme != engineScheme))
+						{
+							return Result<void>::Failure("Runtime asset catalog contains an invalid reference at " +
+							                             entry.path.ToString());
+						}
+						auto exists = filesystem.Exists(path.value);
+						if (!exists || !exists.value)
+						{
+							return Result<void>::Failure("Runtime asset catalog target is missing: " +
+							                             path.value.ToString());
+						}
+						const String key = guid.value.ToString() + ":" +
+						                   ToUrsaString(std::to_string(asset["localFileId"].get<UInt64>()));
+						if (!candidateCatalog.emplace(key, std::move(path.value)).second)
+						{
+							return Result<void>::Failure(
+							    "Runtime asset catalog contains duplicate GUID/local-file-ID entry " + key);
+						}
+					}
+					catalogRead = true;
+				}
+				catch (const std::exception& error)
+				{
+					return Result<void>::Failure("Cannot parse runtime asset catalog: " + ToUrsaString(error.what()));
+				}
+				continue;
+			}
+			if (entry.path.relative.size() < 5 || entry.path.relative.substr(entry.path.relative.size() - 5) != ".meta")
+			{
+				continue;
+			}
+			const String assetRelative = entry.path.relative.substr(0, entry.path.relative.size() - 5);
+			auto assetPath = VirtualPath::Parse(scheme + ":" + assetRelative);
+			if (!assetPath)
+			{
+				return Result<void>::Failure(assetPath.error);
+			}
+			auto kind = ResourceKindForPath(assetPath.value);
 			if (!kind)
 			{
 				continue;
 			}
-			auto header = ReadResourceHeader(filesystem, entry.path);
-			if (!header)
+			auto exists = filesystem.Exists(assetPath.value);
+			if (!exists || !exists.value)
 			{
-				return Result<void>::Failure(header.error);
+				return Result<void>::Failure("Resource metadata has no source resource at " +
+				                             assetPath.value.ToString());
 			}
-			if (header.value.kind != kind.value)
+			auto metadata = filesystem.ReadText(entry.path);
+			if (!metadata)
 			{
-				return Result<void>::Failure("Resource kind does not match its extension at " + entry.path.ToString());
+				return Result<void>::Failure(metadata.error);
 			}
-			const auto key = header.value.id.ToString();
-			const auto found = candidate.find(key);
-			if (found != candidate.end())
+			try
 			{
-				return Result<void>::Failure("Duplicate resource ID " + key + " in " + found->second.path.ToString() +
-				                             " and " + entry.path.ToString());
+				const nlohmann::json document = nlohmann::json::parse(ToStdString(metadata.value));
+				if (!document.is_object() || !document.contains("guid") || !document["guid"].is_string() ||
+				    (document.contains("folder") &&
+				     (!document["folder"].is_boolean() || document["folder"].get<bool>())))
+				{
+					return Result<void>::Failure("Resource metadata has an invalid GUID or folder flag at " +
+					                             entry.path.ToString());
+				}
+				auto guid = ResourceId::Parse(ToUrsaString(document["guid"].get<std::string>()));
+				if (!guid)
+				{
+					return Result<void>::Failure(guid.error + " at " + entry.path.ToString());
+				}
+				const auto key = guid.value.ToString();
+				const auto found = candidate.find(key);
+				if (found != candidate.end())
+				{
+					return Result<void>::Failure("Duplicate asset GUID " + key + " in " +
+					                             found->second.path.ToString() + " and " + assetPath.value.ToString());
+				}
+				candidate.emplace(key, ResourceLocation{kind.value, std::move(assetPath.value)});
 			}
-			candidate.emplace(key, ResourceLocation{kind.value, entry.path});
+			catch (const std::exception& error)
+			{
+				return Result<void>::Failure("Cannot parse resource metadata at " + entry.path.ToString() + ": " +
+				                             ToUrsaString(error.what()));
+			}
 		}
 	}
 	locations = std::move(candidate);
+	catalogAssets = std::move(candidateCatalog);
 	return {};
 }
 
@@ -86,6 +184,26 @@ Result<ResourceLocation> ResourceIndex::Resolve(ResourceId id, const String& ref
 		                                         (referencedBy.empty() ? String{} : " referenced by " + referencedBy));
 	}
 	return Result<ResourceLocation>::Success(found->second);
+}
+
+Result<VirtualPath> ResourceIndex::ResolveAsset(ResourceId guid, Ursa::UInt64 localFileId) const
+{
+	if (!guid)
+	{
+		return Result<VirtualPath>::Failure("Cannot resolve an empty asset GUID");
+	}
+	const String key = guid.ToString() + ":" + ToUrsaString(std::to_string(localFileId));
+	const auto imported = catalogAssets.find(key);
+	if (imported != catalogAssets.end())
+	{
+		return Result<VirtualPath>::Success(imported->second);
+	}
+	if (localFileId != 0)
+	{
+		return Result<VirtualPath>::Failure("Missing asset sub-resource GUID/local-file-ID " + key);
+	}
+	auto resource = Resolve(guid);
+	return resource ? Result<VirtualPath>::Success(resource.value.path) : Result<VirtualPath>::Failure(resource.error);
 }
 
 Vector<ResourceEntry> ResourceIndex::Entries() const

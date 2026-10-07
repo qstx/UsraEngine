@@ -28,7 +28,7 @@ add_library(Ursa::Editor ALIAS UrsaEditorCore)
 set_target_properties(UrsaEditorCore PROPERTIES FOLDER "Engine")
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${URSA_EDITOR_SOURCES})
 target_include_directories(UrsaEditorCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(UrsaEditorCore PUBLIC Ursa::Engine UrsaImGui)
+target_link_libraries(UrsaEditorCore PUBLIC Ursa::Engine UrsaImGui PRIVATE assimp::assimp Ursa::StbImage)
 target_compile_definitions(UrsaEditorCore PRIVATE
   URSA_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
   URSA_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"

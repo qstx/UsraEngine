@@ -151,6 +151,7 @@ void TestSession(const std::filesystem::path& directory)
 	auto red = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::Srgb, {255, 0, 0, 255});
 	Expect(red && static_cast<bool>(Ursa::SaveTextureResource(texturePath, textureId, *red.value)),
 	       "Could not save shared texture");
+	Expect(static_cast<bool>(Ursa::WriteResourceMetadata(texturePath)), "Could not write texture GUID metadata");
 	Ursa::MaterialInstance source(Ursa::MaterialType::Unlit);
 	Expect(static_cast<bool>(source.SetTexture(Ursa::MaterialTextureSlot::BaseColor, red.value)),
 	       "Could not bind shared texture");
@@ -162,6 +163,9 @@ void TestSession(const std::filesystem::path& directory)
 	Expect(static_cast<bool>(Ursa::SaveMaterialResource(firstPath, firstId, source, resolve)) &&
 	           static_cast<bool>(Ursa::SaveMaterialResource(secondPath, secondId, source, resolve)),
 	       "Could not save shared materials");
+	Expect(static_cast<bool>(Ursa::WriteResourceMetadata(firstPath)) &&
+	           static_cast<bool>(Ursa::WriteResourceMetadata(secondPath)),
+	       "Could not write material GUID metadata");
 	auto opened = Ursa::ResourceSession::Open({root});
 	Expect(static_cast<bool>(opened), "Could not open resource session");
 	auto first = opened.value->LoadMaterial(firstId);
@@ -185,7 +189,7 @@ void TestSession(const std::filesystem::path& directory)
 	std::filesystem::remove(texturePath);
 	std::filesystem::remove(firstPath);
 	std::filesystem::remove(secondPath);
-	std::filesystem::remove(root);
+	std::filesystem::remove_all(root);
 }
 } // namespace
 

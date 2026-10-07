@@ -134,6 +134,24 @@ Result<VirtualFileSystem> OpenRuntimeFileSystem(const RuntimeMountProfileConfig&
 		{
 			return Result<VirtualFileSystem>::Failure(mountedProject.error);
 		}
+		if (config.mode == RuntimeMountMode::Editor)
+		{
+			if (config.projectLibraryDirectory.empty())
+			{
+				return Result<VirtualFileSystem>::Failure("Editor mount profile needs a project Library directory");
+			}
+			auto libraryProvider = DirectoryFileProvider::Open(config.projectLibraryDirectory, true);
+			if (!libraryProvider)
+			{
+				return Result<VirtualFileSystem>::Failure(libraryProvider.error);
+			}
+			auto mountedLibrary =
+			    filesystem.MountProvider(editorLibraryScheme, std::move(libraryProvider.value), MountAccess::ReadWrite);
+			if (!mountedLibrary)
+			{
+				return Result<VirtualFileSystem>::Failure(mountedLibrary.error);
+			}
+		}
 	}
 
 	auto userRoot = ResolveUserDataDirectory(config.applicationId, config.userDataDirectoryOverride);

@@ -11,7 +11,26 @@ APIs. Test fixture adapters live under `Tests/Fixtures` and are not engine APIs.
 | --- | --- | --- | --- |
 | `ursa:` | Engine source/generated roots, read only | Engine roots, read only | Content.pak, read only |
 | `prj:` | Project Assets, writable | Project Assets, read only | Content.pak, read only |
+| `lib:` | Project Library cache, writable (Editor only) | Not mounted | Not mounted |
 | `user:` | Platform application data, writable | Same | Same |
+
+The Editor uses `lib:` for its generated asset database and import cache. It is
+separate from the source `Assets` tree, is rebuildable, and is never included in
+runtime mount profiles or packages.
+
+In Editor UI, `prj:` corresponds to the project `Assets/` directory. Asset
+identity is stored in sidecar `.meta` files beside files and directories; move
+and copy operations must go through the AssetDatabase so GUIDs follow moves and
+copies receive new identities. Read-only project roots need valid sidecars in
+advance.
+
+Editor projects resolve source GUIDs and imported local file IDs through the live
+AssetDatabase and its `lib:` artifact provider. Scene and Prefab edits in Play
+mode use the same resolver. Standalone loose Players load direct runtime
+`.ursa*` resources from `ursa:` and `prj:`; source FBX/OBJ/images are editor
+inputs and should be cooked before a Player uses them. Pak-backed Players resolve
+ordinary resources and imported sub-assets through the packaged asset catalog,
+without mounting `lib:` or reading `.meta` sidecars.
 
 Windows uses `%LOCALAPPDATA%/<applicationId>`. The mount profile's
 `userDataDirectoryOverride` supports portable/test layouts. Use `UserDataStore`
@@ -62,7 +81,11 @@ rejected. Asset drafts receive virtual paths and never resolve assets to host fi
 
 Build `UrsaEnginePackage` for engine content, or `UrsaDemoPackage` for a single
 `Content.pak` containing both `ursa:` and `prj:`. The generated SPIR-V root joins
-the Engine source Assets root. PakBuilder rejects conflicting virtual entries.
+the Engine source Assets root. Demo packaging also reads the current `Library/`
+import cache, copies its runtime artifacts under `prj:__UrsaCooked/`, and writes
+`AssetCatalog.ursacatalog` with deterministic GUID/local-file-ID mappings. Pak
+output omits `.meta` files, `Library/`, and raw FBX/OBJ/image/Shader sources.
+Stale or missing imported artifacts stop packaging with a diagnostic. PakBuilder rejects conflicting virtual entries.
 Place Content.pak beside the executable for engine shader discovery, or supply
 the package explicitly at startup.
 
@@ -75,6 +98,10 @@ Demo/build/Debug/UrsaSnake.exe --pak Demo/build/package/Content.pak
 Demo/build/Debug/UrsaDemoEditor.exe --project Demo --scene Snake/Snake.ursascene
 Demo/build/Debug/UrsaDemoEditor.exe --project Demo --pak Demo/build/package/Content.pak --scene Snake/Snake.ursascene
 ```
+
+When invoking `UrsaPak` directly for a project, pass `--library <Project/Library>`
+to include imported textures, models, materials, skeletons, and clips. Runtime
+resolves those references from the packaged catalog and does not mount `lib:`.
 
 `--scene` is relative to `prj:`. Runtime mounts resources once; renderer, UI and
 scene loading share the configured VFS. Explicit `--pak` failure never falls back

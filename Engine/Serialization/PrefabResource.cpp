@@ -2,6 +2,7 @@
 #include <Core/Types.hpp>
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/PrefabResource.hpp>
+#include <Serialization/AssetReference.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/PrefabMerge.hpp>
 #include <Serialization/PrefabCapture.hpp>
@@ -68,12 +69,16 @@ Result<void> ApplyProperties(Json& object, const Json& properties, const String&
 
 Result<ResourceId> ParseId(const Json& value, const String& location)
 {
-	if (!value.is_string())
+	auto reference = AssetReferenceFromJson(value, location);
+	if (!reference)
 	{
-		return Result<ResourceId>::Failure("Invalid ID at " + location);
+		return Result<ResourceId>::Failure(reference.error);
 	}
-	auto id = ResourceId::Parse(value.get<String>());
-	return id ? id : Result<ResourceId>::Failure(id.error + " at " + location);
+	if (reference.value.localFileId != 0)
+	{
+		return Result<ResourceId>::Failure("Sub-asset reference is not supported here at " + location);
+	}
+	return Result<ResourceId>::Success(reference.value.guid);
 }
 
 ResourceId ScopedId(ResourceId instance, ResourceId local)
@@ -183,17 +188,18 @@ Result<Json> ExpandInstances(const String& scenePath, const Json& source, Resour
 		{
 			return Result<Json>::Failure("Invalid prefab overrides at " + location);
 		}
-		auto resolved = resources.Index().Resolve(prefabId.value, location);
+		auto resolved = resources.ResolveAsset(prefabId.value, 0);
 		if (!resolved)
 		{
 			return Result<Json>::Failure(resolved.error);
 		}
-		if (resolved.value.kind != ResourceKind::Prefab)
+		auto resolvedKind = ResourceKindForPath(resolved.value);
+		if (!resolvedKind || resolvedKind.value != ResourceKind::Prefab)
 		{
 			return Result<Json>::Failure("Referenced resource is not a Prefab at " + location);
 		}
-		const String prefabSource = resolved.value.path.ToString();
-		auto prefab = ReadJsonResource(resources.Index().Filesystem(), resolved.value.path, ResourceKind::Prefab);
+		const String prefabSource = resolved.value.ToString();
+		auto prefab = ReadJsonResource(resources.Index().Filesystem(), resolved.value, ResourceKind::Prefab);
 		if (!prefab)
 		{
 			return Result<Json>::Failure(prefab.error);
@@ -436,7 +442,7 @@ Result<void> AddPrefabInstance(Json& sceneDocument, ResourceId prefabId, Resourc
 		}
 	}
 	sceneDocument["instances"].push_back({{"id", instanceId.ToString()},
-	                                      {"prefab", prefabId.ToString()},
+	                                      {"prefab", AssetReferenceToJson({prefabId, 0})},
 	                                      {"parentId", parentId ? Json(parentId.ToString()) : Json(nullptr)},
 	                                      {"overrides", Json::object()}});
 	return {};

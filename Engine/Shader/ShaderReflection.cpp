@@ -138,6 +138,10 @@ Result<Rhi::VertexFormat> ParseVertexFormat(const String& type)
 	{
 		return Result<Rhi::VertexFormat>::Success(Rhi::VertexFormat::Float4);
 	}
+	if (type == "uint4" || type == "uvec4")
+	{
+		return Result<Rhi::VertexFormat>::Success(Rhi::VertexFormat::UInt4);
+	}
 	return Result<Rhi::VertexFormat>::Failure("Unsupported Shader vertex input type " + type);
 }
 

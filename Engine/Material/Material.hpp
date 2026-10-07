@@ -41,6 +41,13 @@ struct MaterialSampler
 	bool repeat = true;
 };
 
+struct TextureMip
+{
+	Ursa::UInt32 width = 0;
+	Ursa::UInt32 height = 0;
+	Vector<Ursa::UInt8> pixels;
+};
+
 class MaterialTexture final : public Serializable
 {
 public:
@@ -55,9 +62,9 @@ public:
 
 	static std::shared_ptr<MaterialTexture> CreateForDeserialization();
 
-	static Result<std::shared_ptr<const MaterialTexture>> Create(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight,
-	                                                             TextureColorSpace textureColorSpace,
-	                                                             Vector<Ursa::UInt8> rgba8);
+	static Result<std::shared_ptr<const MaterialTexture>>
+	Create(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight, TextureColorSpace textureColorSpace,
+	       Vector<Ursa::UInt8> rgba8, Vector<TextureMip> mipmaps = {}, MaterialSampler sampler = {});
 
 	Ursa::UInt32 GetWidth() const
 	{
@@ -79,14 +86,32 @@ public:
 		return pixels;
 	}
 
+	const Vector<TextureMip>& GetMipmaps() const
+	{
+		return mipmaps;
+	}
+
+	const MaterialSampler& DefaultSampler() const
+	{
+		return sampler;
+	}
+
+	Ursa::UInt32 GetMipLevels() const
+	{
+		return static_cast<Ursa::UInt32>(mipmaps.size() + 1);
+	}
+
 private:
 	MaterialTexture(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight, TextureColorSpace textureColorSpace,
-	                Vector<Ursa::UInt8> texturePixels);
+	                Vector<Ursa::UInt8> texturePixels, Vector<TextureMip> textureMipmaps,
+	                MaterialSampler textureSampler);
 
 	Ursa::UInt32 width;
 	Ursa::UInt32 height;
 	TextureColorSpace colorSpace;
 	Vector<Ursa::UInt8> pixels;
+	Vector<TextureMip> mipmaps;
+	MaterialSampler sampler;
 };
 
 using MaterialTexturePtr = std::shared_ptr<const MaterialTexture>;
@@ -154,6 +179,11 @@ public:
 	const MaterialParameters& Parameters() const
 	{
 		return parameters;
+	}
+
+	bool SamplerOverridden() const
+	{
+		return samplerOverridden;
 	}
 
 	Result<void> SetBaseColor(Color color);
@@ -237,8 +267,10 @@ private:
 	ResourceId shaderId;
 	std::shared_ptr<const Shader::ShaderAsset> shaderAsset;
 	MaterialParameters parameters;
+	bool samplerOverridden = false;
 	Array<MaterialTexturePtr, 5> textures{};
 	Array<ResourceId, 5> textureResourceIds{};
+	Array<Ursa::UInt64, 5> textureLocalFileIds{};
 	Map<String, MaterialPropertyValue> propertyOverrides;
 	Vector<String> keywords;
 	Ursa::UInt64 version = 1;

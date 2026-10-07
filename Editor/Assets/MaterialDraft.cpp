@@ -3,6 +3,7 @@
 #include <Assets/MaterialInspectors.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/JsonInterop.hpp>
+#include <Serialization/AssetReference.hpp>
 #include <Core/StringInterop.hpp>
 #include <Shader/ShaderBuiltins.hpp>
 #include <imgui.h>
@@ -65,12 +66,13 @@ Result<std::shared_ptr<MaterialDraft>> MaterialDraft::Load(const VirtualFileSyst
 		{
 			if (document.value["textures"].contains(fieldNames[index]))
 			{
-				auto id = ResourceId::Parse(document.value["textures"][fieldNames[index]].get<String>());
-				if (!id)
+				auto reference = AssetReferenceFromJson(document.value["textures"][fieldNames[index]],
+				                                        "textures." + String(fieldNames[index]));
+				if (!reference)
 				{
-					return Result<std::shared_ptr<MaterialDraft>>::Failure(id.error);
+					return Result<std::shared_ptr<MaterialDraft>>::Failure(reference.error);
 				}
-				draft->textureIds[index] = id.value;
+				draft->textureIds[index] = reference.value.guid;
 			}
 		}
 	}
@@ -109,12 +111,13 @@ Result<void> MaterialDraft::SetTextureId(MaterialTextureSlot slot, ResourceId id
 		}
 		return cleared;
 	}
-	auto location = session.Index().Resolve(id, "material editor");
-	if (!location)
+	auto assetPath = session.ResolveAsset(id);
+	if (!assetPath)
 	{
-		return Result<void>::Failure(location.error);
+		return Result<void>::Failure(assetPath.error);
 	}
-	if (location.value.kind != ResourceKind::Texture)
+	auto kind = ResourceKindForPath(assetPath.value);
+	if (!kind || kind.value != ResourceKind::Texture)
 	{
 		return Result<void>::Failure("Selected resource is not a texture");
 	}
@@ -148,12 +151,13 @@ Result<void> MaterialDraft::SetTextureProperty(const String& identifier, Resourc
 		}
 		return removed;
 	}
-	auto location = session.Index().Resolve(id, "material editor");
-	if (!location)
+	auto assetPath = session.ResolveAsset(id);
+	if (!assetPath)
 	{
-		return Result<void>::Failure(location.error);
+		return Result<void>::Failure(assetPath.error);
 	}
-	if (location.value.kind != ResourceKind::Texture)
+	auto kind = ResourceKindForPath(assetPath.value);
+	if (!kind || kind.value != ResourceKind::Texture)
 	{
 		return Result<void>::Failure("Selected resource is not a texture");
 	}
@@ -166,7 +170,8 @@ Result<void> MaterialDraft::SetTextureProperty(const String& identifier, Resourc
 }
 
 Result<void> MaterialDraft::Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id,
-                                 const ResourceIndex& index) const
+                                 const ResourceIndex& index,
+                                 const ResourceSession::AssetPathResolver& assetResolver) const
 {
 	for (const auto& property : material->PropertyOverrides())
 	{
@@ -174,16 +179,18 @@ Result<void> MaterialDraft::Save(VirtualFileSystem& filesystem, const VirtualPat
 		{
 			continue;
 		}
-		auto location = index.Resolve(property.second.textureId, "material " + id.ToString());
-		if (!location)
+		auto assetPath =
+		    assetResolver ? assetResolver(property.second.textureId, 0) : index.ResolveAsset(property.second.textureId);
+		if (!assetPath)
 		{
-			return Result<void>::Failure(location.error);
+			return Result<void>::Failure(assetPath.error);
 		}
-		if (location.value.kind != ResourceKind::Texture)
+		auto kind = ResourceKindForPath(assetPath.value);
+		if (!kind || kind.value != ResourceKind::Texture)
 		{
 			return Result<void>::Failure("Material Shader texture property resolves to a non-texture resource");
 		}
-		auto header = ReadResourceHeader(index.Filesystem(), location.value.path);
+		auto header = ReadResourceHeader(index.Filesystem(), assetPath.value);
 		if (!header || header.value.id != property.second.textureId)
 		{
 			return Result<void>::Failure("Material Shader texture reference changed on disk");
@@ -193,16 +200,17 @@ Result<void> MaterialDraft::Save(VirtualFileSystem& filesystem, const VirtualPat
 	{
 		if (textureIds[slot])
 		{
-			auto location = index.Resolve(textureIds[slot], "material " + id.ToString());
-			if (!location)
+			auto assetPath = assetResolver ? assetResolver(textureIds[slot], 0) : index.ResolveAsset(textureIds[slot]);
+			if (!assetPath)
 			{
-				return Result<void>::Failure(location.error);
+				return Result<void>::Failure(assetPath.error);
 			}
-			if (location.value.kind != ResourceKind::Texture)
+			auto kind = ResourceKindForPath(assetPath.value);
+			if (!kind || kind.value != ResourceKind::Texture)
 			{
 				return Result<void>::Failure("Material texture ID resolves to a non-texture resource");
 			}
-			auto header = ReadResourceHeader(index.Filesystem(), location.value.path);
+			auto header = ReadResourceHeader(index.Filesystem(), assetPath.value);
 			if (!header || header.value.id != textureIds[slot])
 			{
 				return Result<void>::Failure("Material texture reference changed on disk");
@@ -236,7 +244,7 @@ Result<std::unique_ptr<EditorDocument>> NewMaterialDocument(const VirtualPath& p
                                                             ProjectWorkspace& workspace)
 {
 	auto draft = std::make_shared<MaterialDraft>(type);
-	auto session = ResourceSession::Open(workspace.Index().Mounts());
+	auto session = ResourceSession::Open(workspace.Index().Mounts(), workspace.AssetResolver());
 	if (!session)
 	{
 		return Result<std::unique_ptr<EditorDocument>>::Failure(session.error);
@@ -256,7 +264,7 @@ Result<std::unique_ptr<EditorDocument>> NewMaterialDocument(const VirtualPath& p
 	auto document = EditorDocument::Create(
 	    ResourceKind::Material, ResourceId::Generate(), path,
 	    [draft, &workspace](VirtualFileSystem& filesystem, const VirtualPath& target, ResourceId id)
-	    { return draft->Save(filesystem, target, id, workspace.Index()); });
+	    { return draft->Save(filesystem, target, id, workspace.Index(), workspace.AssetResolver()); });
 	if (document)
 	{
 		document.value->SetPayload(draft);
@@ -282,7 +290,7 @@ Result<std::unique_ptr<EditorDocument>> OpenMaterialDocument(const VirtualPath& 
 	auto document = EditorDocument::Create(
 	    ResourceKind::Material, header.value.id, path,
 	    [draft = draft.value, &workspace](VirtualFileSystem& filesystem, const VirtualPath& target, ResourceId id)
-	    { return draft->Save(filesystem, target, id, workspace.Index()); });
+	    { return draft->Save(filesystem, target, id, workspace.Index(), workspace.AssetResolver()); });
 	if (document)
 	{
 		document.value->SetPayload(draft.value);
@@ -572,12 +580,14 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 				diagnostic = set ? String{} : set.error;
 				changed |= static_cast<bool>(set);
 			}
+			Set<String> shownTextureIds;
 			for (const auto& entry : workspace.Resources())
 			{
 				if (entry.location.kind != ResourceKind::Texture)
 				{
 					continue;
 				}
+				shownTextureIds.insert(entry.id.ToString());
 				ImGui::PushID(entry.id.ToString().c_str());
 				const auto label = entry.location.path.FileName();
 				if (ImGui::Selectable(label.c_str(), selected == entry.id))
@@ -587,6 +597,36 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 					changed |= static_cast<bool>(set);
 				}
 				ImGui::PopID();
+			}
+			if (const AssetDatabase* database = workspace.Database())
+			{
+				for (const AssetRecord& asset : database->Assets())
+				{
+					if (asset.metadata.folder || shownTextureIds.count(asset.metadata.guid.ToString()))
+					{
+						continue;
+					}
+					auto resolvedPath = database->Resolve(asset.metadata.guid, 0);
+					if (!resolvedPath)
+					{
+						continue;
+					}
+					auto resourceKind = ResourceKindForPath(resolvedPath.value);
+					if (!resourceKind || resourceKind.value != ResourceKind::Texture)
+					{
+						continue;
+					}
+					const String id = asset.metadata.guid.ToString();
+					ImGui::PushID(id.c_str());
+					const String label = asset.path.FileName();
+					if (ImGui::Selectable(label.c_str(), selected == asset.metadata.guid))
+					{
+						auto set = draft->SetTextureId(kind, asset.metadata.guid, documents.Session());
+						diagnostic = set ? String{} : set.error;
+						changed |= static_cast<bool>(set);
+					}
+					ImGui::PopID();
+				}
 			}
 			ImGui::EndCombo();
 		}

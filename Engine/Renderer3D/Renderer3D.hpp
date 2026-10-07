@@ -4,6 +4,7 @@
 #include <Material/Material.hpp>
 #include <Math/Camera.hpp>
 #include <Math/Transform.hpp>
+#include <Renderer3D/ModelMesh.hpp>
 #include <Rhi/RHI.hpp>
 #include <Scene/Lighting.hpp>
 #include <memory>
@@ -22,6 +23,8 @@ struct ModelBoxInstance
 	Mat4 model;
 	Color color;
 	std::shared_ptr<MaterialInstance> material;
+	ModelMeshPtr mesh;
+	Vector<Mat4> jointPalette;
 };
 
 class Renderer3D final

@@ -1,3 +1,4 @@
+#include <ResourceFixtures.hpp>
 #include <Serialization/ResourceFile.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Serialization/MaterialResource.hpp>
@@ -79,6 +80,8 @@ int main()
 		const auto assetPath = VirtualPath::Parse("prj:Imported/Asset.ursashaderasset").value;
 		Expect(static_cast<bool>(SaveShaderAssetResource(filesystem, assetPath, asset.value)),
 		       "Shader asset could not be saved through VFS");
+		Expect(static_cast<bool>(WriteAssetMetadata(filesystem, assetPath, source->source.id)),
+		       "Shader asset GUID metadata could not be saved through VFS");
 		auto header = ReadResourceHeader(filesystem, assetPath);
 		Expect(static_cast<bool>(header) && header.value.kind == ResourceKind::Shader &&
 		           header.value.id == source->source.id,
@@ -92,6 +95,8 @@ int main()
 		Expect(static_cast<bool>(
 		           SaveMaterialResource(filesystem, Path("prj:Imported/Material.ursamat"), materialId, material, {})),
 		       "Cannot save a Shader-backed material");
+		Expect(static_cast<bool>(WriteAssetMetadata(filesystem, Path("prj:Imported/Material.ursamat"), materialId)),
+		       "Cannot save Shader-backed material GUID metadata");
 		auto session = ResourceSession::Open(filesystem);
 		Expect(static_cast<bool>(session), "Resource session could not index a compiled Shader asset");
 		auto loaded = session.value->LoadShader(source->source.id);
@@ -122,6 +127,9 @@ int main()
 		Expect(static_cast<bool>(SaveMaterialResource(filesystem, Path("prj:Imported/MissingShader.ursamat"),
 		                                              missingShaderMaterialId, missingShaderMaterial, {})),
 		       "Cannot save missing-Shader fixture");
+		Expect(static_cast<bool>(
+		           WriteAssetMetadata(filesystem, Path("prj:Imported/MissingShader.ursamat"), missingShaderMaterialId)),
+		       "Cannot save missing-Shader metadata");
 		auto refreshed = ResourceSession::Open(filesystem);
 		Expect(static_cast<bool>(refreshed), "Cannot refresh resource index for missing-Shader test");
 		auto rejectedShader = refreshed.value->LoadMaterial(missingShaderMaterialId);
@@ -138,6 +146,9 @@ int main()
 		Expect(static_cast<bool>(SaveMaterialResource(filesystem, Path("prj:Imported/MissingTexture.ursamat"),
 		                                              missingTextureMaterialId, missingTextureMaterial, {})),
 		       "Cannot save missing-texture fixture");
+		Expect(static_cast<bool>(WriteAssetMetadata(filesystem, Path("prj:Imported/MissingTexture.ursamat"),
+		                                            missingTextureMaterialId)),
+		       "Cannot save missing-texture metadata");
 		refreshed = ResourceSession::Open(filesystem);
 		Expect(static_cast<bool>(refreshed), "Cannot refresh resource index for missing-texture test");
 		auto rejectedTexture = refreshed.value->LoadMaterial(missingTextureMaterialId);
@@ -158,8 +169,11 @@ int main()
 		Expect(static_cast<bool>(
 		           SaveShaderAssetResource(filesystem, Path("prj:Imported/Duplicate.ursashaderasset"), asset.value)),
 		       "Cannot write duplicate Shader ID fixture");
+		Expect(static_cast<bool>(
+		           WriteAssetMetadata(filesystem, Path("prj:Imported/Duplicate.ursashaderasset"), source->source.id)),
+		       "Cannot write duplicate Shader ID metadata fixture");
 		auto duplicates = ResourceSession::Open(filesystem);
-		Expect(!duplicates && duplicates.error.find("Duplicate resource ID") != String::npos,
+		Expect(!duplicates && duplicates.error.find("Duplicate asset GUID") != String::npos,
 		       "Resource index accepted duplicate Shader IDs");
 		std::cout << "Shader asset tests passed\n";
 		return 0;

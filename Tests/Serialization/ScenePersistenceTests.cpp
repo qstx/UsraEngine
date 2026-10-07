@@ -52,6 +52,10 @@ void RoundTripScene(const std::filesystem::path& path, Ursa::ResourceSession& re
 	{
 		return;
 	}
+	if (!Ursa::WriteResourceMetadata(path))
+	{
+		return;
+	}
 	Ursa::ComponentLoadContext context(resources);
 	auto loaded = Ursa::LoadSceneResource(path, registry, context);
 	if (!loaded)
@@ -102,6 +106,7 @@ void TestScene(const std::filesystem::path& root)
 	const auto materialId = Ursa::ResourceId::Generate();
 	const auto materialPath = root / "box.ursamat";
 	done(Ursa::SaveMaterialResource(materialPath, materialId, *material, {}));
+	done(Ursa::WriteResourceMetadata(materialPath));
 	const auto visibleBox = Take(scene.AddComponent<Ursa::BoxRenderComponent>(first));
 	static_cast<Ursa::BoxRenderComponent*>(scene.GetComponent(visibleBox))->material = material;
 	const auto firstId = Take(scene.PersistentId(first));
@@ -118,6 +123,7 @@ void TestScene(const std::filesystem::path& root)
 		                                        ? Ursa::Result<Ursa::ResourceId>::Success(materialId)
 		                                        : Ursa::Result<Ursa::ResourceId>::Failure("Unknown material");
 	                             }));
+	done(Ursa::WriteResourceMetadata(path));
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext context(*session);
 	auto loaded = Take(Ursa::LoadSceneResource(path, registry, context));
@@ -232,6 +238,7 @@ void TestReload(const std::filesystem::path& root)
 	Take(active->AddComponent<ProbeComponent>(node, counters));
 	const auto path = root / "reload.ursascene";
 	done(Ursa::SaveSceneResource(path, Ursa::ResourceId::Generate(), *active, registry));
+	done(Ursa::WriteResourceMetadata(path));
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext context(*session);
 	context.Provide(counters);
@@ -262,12 +269,19 @@ int main()
 		const auto root = std::filesystem::temp_directory_path() /
 		                  ("UrsaScenePersistenceTests-" + Ursa::ToStdString(Ursa::ResourceId::Generate().ToString()));
 		std::filesystem::create_directory(root);
+		const auto reset = [&]
+		{
+			std::filesystem::remove_all(root);
+			std::filesystem::create_directory(root);
+		};
 		TestScene(root);
+		reset();
 		TestReload(root);
+		reset();
 		auto session = Take(Ursa::ResourceSession::Open({root}));
 		RoundTripScene(root / "docs.ursascene", *session);
 		std::filesystem::remove(root / "docs.ursascene");
-		std::filesystem::remove(root);
+		std::filesystem::remove_all(root);
 		return 0;
 	}
 	catch (const std::exception& error)

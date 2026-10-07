@@ -27,6 +27,7 @@ struct RuntimeMountProfileConfig
 	String applicationId = "UrsaEngine";
 	Vector<std::filesystem::path> engineDirectories;
 	std::filesystem::path projectAssetsDirectory;
+	std::filesystem::path projectLibraryDirectory;
 	Vector<PackagedSchemeProvider> packagedProviders;
 	std::filesystem::path userDataDirectoryOverride;
 };

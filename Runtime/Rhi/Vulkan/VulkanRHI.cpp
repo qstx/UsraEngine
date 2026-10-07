@@ -984,7 +984,8 @@ struct CommandImpl final : CommandList
 			    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			    b.image = t->image;
 			    b.subresourceRange.aspectMask = ImageAspect(t->desc.format);
-			    b.subresourceRange.levelCount = b.subresourceRange.layerCount = 1;
+			    b.subresourceRange.levelCount = t->desc.mipLevels;
+			    b.subresourceRange.layerCount = 1;
 			    vkCmdPipelineBarrier(command, src.stage, dst.stage, 0, 0, nullptr, 0, nullptr, 1, &b);
 			    keepAlive.push_back(t);
 		    });
@@ -1032,7 +1033,8 @@ struct CommandImpl final : CommandList
 		    });
 	}
 
-	Result<void> CopyBufferToTexture(const BufferPtr& source, const TexturePtr& destination) override
+	Result<void> CopyBufferToTexture(const BufferPtr& source, const TexturePtr& destination, Ursa::UInt32 mipLevel,
+	                                 Ursa::Size sourceOffset) override
 	{
 		return GuardedVoid(
 		    [&]
@@ -1044,12 +1046,18 @@ struct CommandImpl final : CommandList
 			    Require(Has(src->desc.usage, BufferUsage::TransferSource) &&
 			                Has(dst->desc.usage, TextureUsage::TransferDestination),
 			            "Buffer-to-texture transfer usage missing");
-			    Require(src->desc.size >= Ursa::Size(dst->desc.width) * dst->desc.height * PixelSize(dst->desc.format),
+			    Require(mipLevel < dst->desc.mipLevels, "Buffer-to-texture mip level is out of range");
+			    const Ursa::UInt32 width = (std::max)(1u, dst->desc.width >> mipLevel);
+			    const Ursa::UInt32 height = (std::max)(1u, dst->desc.height >> mipLevel);
+			    const Ursa::Size uploadSize = Ursa::Size(width) * height * PixelSize(dst->desc.format);
+			    Require(sourceOffset <= src->desc.size && uploadSize <= src->desc.size - sourceOffset,
 			            "Upload buffer too small");
 			    VkBufferImageCopy region{};
+			    region.bufferOffset = sourceOffset;
 			    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			    region.imageSubresource.mipLevel = mipLevel;
 			    region.imageSubresource.layerCount = 1;
-			    region.imageExtent = {dst->desc.width, dst->desc.height, 1};
+			    region.imageExtent = {width, height, 1};
 			    vkCmdCopyBufferToImage(command, src->buffer, dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
 			                           &region);
 			    keepAlive.push_back(src);
@@ -1057,7 +1065,8 @@ struct CommandImpl final : CommandList
 		    });
 	}
 
-	Result<void> CopyTextureToBuffer(const TexturePtr& source, const BufferPtr& destination) override
+	Result<void> CopyTextureToBuffer(const TexturePtr& source, const BufferPtr& destination,
+	                                 Ursa::UInt32 mipLevel) override
 	{
 		return GuardedVoid(
 		    [&]
@@ -1069,12 +1078,16 @@ struct CommandImpl final : CommandList
 			    Require(Has(src->desc.usage, TextureUsage::TransferSource) &&
 			                Has(dst->desc.usage, BufferUsage::TransferDestination),
 			            "Texture-to-buffer transfer usage missing");
-			    Require(dst->desc.size >= Ursa::Size(src->desc.width) * src->desc.height * PixelSize(src->desc.format),
+			    Require(mipLevel < src->desc.mipLevels, "Texture-to-buffer mip level is out of range");
+			    const Ursa::UInt32 width = (std::max)(1u, src->desc.width >> mipLevel);
+			    const Ursa::UInt32 height = (std::max)(1u, src->desc.height >> mipLevel);
+			    Require(dst->desc.size >= Ursa::Size(width) * height * PixelSize(src->desc.format),
 			            "Readback buffer too small");
 			    VkBufferImageCopy region{};
 			    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			    region.imageSubresource.mipLevel = mipLevel;
 			    region.imageSubresource.layerCount = 1;
-			    region.imageExtent = {src->desc.width, src->desc.height, 1};
+			    region.imageExtent = {width, height, 1};
 			    vkCmdCopyImageToBuffer(command, src->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->buffer, 1,
 			                           &region);
 			    keepAlive.push_back(src);
@@ -1564,7 +1577,8 @@ struct DeviceImpl final : Device
 		        true,
 		        true,
 		        ctx->properties.limits.maxImageDimension2D,
-		        ctx->properties.limits.maxPushConstantsSize};
+		        ctx->properties.limits.maxPushConstantsSize,
+		        ctx->properties.limits.maxStorageBufferRange};
 	}
 
 	Result<BufferPtr> CreateBuffer(const BufferDesc& desc) override
@@ -1599,11 +1613,17 @@ struct DeviceImpl final : Device
 		return Guarded<TexturePtr>(
 		    [&]
 		    {
-			    Require(desc.width && desc.height && desc.usage != TextureUsage::None,
+			    Require(desc.width && desc.height && desc.mipLevels && desc.usage != TextureUsage::None,
 			            "Texture dimensions and usage must be set");
 			    Require(desc.width <= ctx->properties.limits.maxImageDimension2D &&
 			                desc.height <= ctx->properties.limits.maxImageDimension2D,
 			            "Texture exceeds adapter limit");
+			    Ursa::UInt32 maximumMipLevels = 1;
+			    for (Ursa::UInt32 dimension = (std::max)(desc.width, desc.height); dimension > 1; dimension >>= 1)
+			    {
+				    ++maximumMipLevels;
+			    }
+			    Require(desc.mipLevels <= maximumMipLevels, "Texture mip count exceeds its dimensions");
 			    Require(!IsDepthFormat(desc.format) || !Has(desc.usage, TextureUsage::ColorAttachment),
 			            "Depth texture cannot be a color attachment");
 			    Require(desc.format != Format::RgbA8Srgb || !Has(desc.usage, TextureUsage::Storage),
@@ -1613,7 +1633,7 @@ struct DeviceImpl final : Device
 			    info.imageType = VK_IMAGE_TYPE_2D;
 			    info.format = ToVkFormat(desc.format);
 			    info.extent = {desc.width, desc.height, 1};
-			    info.mipLevels = 1;
+			    info.mipLevels = desc.mipLevels;
 			    info.arrayLayers = 1;
 			    info.samples = VK_SAMPLE_COUNT_1_BIT;
 			    info.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -1629,7 +1649,8 @@ struct DeviceImpl final : Device
 			    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
 			    view.format = info.format;
 			    view.subresourceRange.aspectMask = ImageAspect(desc.format);
-			    view.subresourceRange.levelCount = view.subresourceRange.layerCount = 1;
+			    view.subresourceRange.levelCount = desc.mipLevels;
+			    view.subresourceRange.layerCount = 1;
 			    Check(vkCreateImageView(ctx->device, &view, nullptr, &texture->view), "Creating texture view");
 			    return std::static_pointer_cast<Texture>(texture);
 		    });
@@ -1647,7 +1668,7 @@ struct DeviceImpl final : Device
 			    info.mipmapMode = desc.linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
 			    info.addressModeU = info.addressModeV = info.addressModeW =
 			        desc.repeat ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-			    info.maxLod = 0.0f;
+			    info.maxLod = desc.maxLod;
 			    info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
 			    Check(vkCreateSampler(ctx->device, &info, nullptr, &sampler->sampler), "Creating sampler");
 			    return std::static_pointer_cast<Sampler>(sampler);
@@ -1847,6 +1868,7 @@ struct DeviceImpl final : Device
 				    Require(desc.vertexStride && a.offset < desc.vertexStride, "Vertex attribute exceeds stride");
 				    VkFormat format = a.format == VertexFormat::Float2   ? VK_FORMAT_R32G32_SFLOAT
 				                      : a.format == VertexFormat::Float3 ? VK_FORMAT_R32G32B32_SFLOAT
+				                      : a.format == VertexFormat::UInt4  ? VK_FORMAT_R32G32B32A32_UINT
 				                                                         : VK_FORMAT_R32G32B32A32_SFLOAT;
 				    attributes.push_back({a.location, 0, format, a.offset});
 			    }

@@ -4,6 +4,7 @@
 #include <Renderer3D/Renderer3D.hpp>
 #include <Scene/Component.hpp>
 #include <Scene/Lighting.hpp>
+#include <Renderer3D/ModelMesh.hpp>
 
 namespace Ursa
 {
@@ -42,6 +43,98 @@ public:
 
 	Color color;
 	std::shared_ptr<MaterialInstance> material;
+};
+
+class MeshRendererComponent final : public Component
+{
+public:
+	String SerializationType() const override
+	{
+		return "ursa.MeshRenderer";
+	}
+
+	Result<void> Serialize(ArchiveWriter& writer) const override;
+
+	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
+
+	Result<void> SetMesh(ResourceId modelGuid, Ursa::UInt64 localFileId, ModelMeshPtr value)
+	{
+		if (!modelGuid || localFileId == 0 || !value || value->modelGuid != modelGuid ||
+		    value->localFileId != localFileId)
+		{
+			return Result<void>::Failure("MeshRenderer needs a valid model mesh sub-asset reference");
+		}
+		meshGuid = modelGuid;
+		meshLocalFileId = localFileId;
+		mesh = std::move(value);
+		return {};
+	}
+
+	ResourceId MeshGuid() const
+	{
+		return meshGuid;
+	}
+
+	Ursa::UInt64 MeshLocalFileId() const
+	{
+		return meshLocalFileId;
+	}
+
+	ModelMeshPtr Mesh() const
+	{
+		return mesh;
+	}
+
+private:
+	ResourceId meshGuid;
+	Ursa::UInt64 meshLocalFileId = 0;
+	ModelMeshPtr mesh;
+};
+
+class SkinnedMeshRendererComponent final : public Component
+{
+public:
+	String SerializationType() const override
+	{
+		return "ursa.SkinnedMeshRenderer";
+	}
+
+	Result<void> Serialize(ArchiveWriter& writer) const override;
+
+	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
+
+	Result<void> SetMesh(ResourceId modelGuid, Ursa::UInt64 localFileId, ModelMeshPtr value)
+	{
+		if (!modelGuid || localFileId == 0 || !value || value->modelGuid != modelGuid ||
+		    value->localFileId != localFileId || !value->skeleton || value->skinInfluences.empty())
+		{
+			return Result<void>::Failure("SkinnedMeshRenderer needs a skinned model mesh sub-asset");
+		}
+		meshGuid = modelGuid;
+		meshLocalFileId = localFileId;
+		mesh = std::move(value);
+		return {};
+	}
+
+	ResourceId MeshGuid() const
+	{
+		return meshGuid;
+	}
+
+	Ursa::UInt64 MeshLocalFileId() const
+	{
+		return meshLocalFileId;
+	}
+
+	ModelMeshPtr Mesh() const
+	{
+		return mesh;
+	}
+
+private:
+	ResourceId meshGuid;
+	Ursa::UInt64 meshLocalFileId = 0;
+	ModelMeshPtr mesh;
 };
 
 struct SceneRenderData

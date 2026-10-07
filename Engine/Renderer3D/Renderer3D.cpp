@@ -8,6 +8,7 @@
 #include <Vfs/AssetRoots.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <functional>
 #include <sstream>
@@ -44,7 +45,12 @@ struct Vertex
 	Ursa::Float32 uv[2];
 	Ursa::Float32 tangent[3];
 	Ursa::Float32 color[4];
+	Ursa::UInt32 jointIndices[4]{};
+	Ursa::Float32 jointWeights[4]{1.0f, 0.0f, 0.0f, 0.0f};
 };
+
+static_assert(offsetof(Vertex, jointIndices) == 60, "Unexpected model vertex skin index offset");
+static_assert(sizeof(Vertex) == 92, "Unexpected model vertex stride");
 
 struct CubeMesh
 {
@@ -169,6 +175,14 @@ struct DrawItem
 	AlphaMode mode = AlphaMode::Opaque;
 	Ursa::Float32 distanceSquared = 0.0f;
 	Ursa::Size ordinal = 0;
+};
+
+struct GpuModelMesh
+{
+	ModelMeshPtr source;
+	Rhi::BufferPtr vertexBuffer;
+	Rhi::BufferPtr indexBuffer;
+	Ursa::UInt32 indexCount = 0;
 };
 
 AlphaMode ShaderAlphaMode(const std::shared_ptr<MaterialInstance>& material);
@@ -784,6 +798,14 @@ Rhi::VertexAttribute VertexAttributeFor(const ShaderVertexInput& input)
 	{
 		attribute.offset = offsetof(Vertex, color);
 	}
+	else if (input.semantic == "BLENDINDICES" || input.semantic == "BLENDINDICES0")
+	{
+		attribute.offset = offsetof(Vertex, jointIndices);
+	}
+	else if (input.semantic == "BLENDWEIGHT" || input.semantic == "BLENDWEIGHT0")
+	{
+		attribute.offset = offsetof(Vertex, jointWeights);
+	}
 	else
 	{
 		throw std::runtime_error("Unsupported Ursa cube vertex semantic " + ToStdString(input.semantic));
@@ -911,6 +933,53 @@ struct Renderer3D::Impl
 		    engineFiles.value, Take(VirtualPath::Parse("ursa:Shaders/Renderer3D/Pbr.ursashaderasset")))));
 		fallback = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 		done(fallback->SetShaderAsset(builtinUnlit));
+	}
+
+	GpuModelMesh& MeshFor(const ModelMeshPtr& mesh)
+	{
+		if (!mesh || !mesh->modelGuid || mesh->localFileId == 0 ||
+		    mesh->vertexStride != offsetof(Vertex, jointIndices) || mesh->vertexBytes.empty() ||
+		    mesh->indices.empty() || mesh->indices.size() > UINT32_MAX)
+		{
+			throw std::runtime_error("Renderer received an invalid imported model mesh");
+		}
+		const String key = mesh->modelGuid.ToString() + ":" + ToUrsaString(std::to_string(mesh->localFileId));
+		const auto cached = modelMeshes.find(key);
+		if (cached != modelMeshes.end())
+		{
+			return cached->second;
+		}
+		GpuModelMesh gpuMesh;
+		gpuMesh.source = mesh;
+		const Ursa::Size vertexCount = mesh->vertexBytes.size() / mesh->vertexStride;
+		if (mesh->vertexBytes.size() % mesh->vertexStride != 0 ||
+		    (!mesh->skinInfluences.empty() && mesh->skinInfluences.size() != vertexCount))
+		{
+			throw std::runtime_error("Imported mesh vertex skin data does not match its vertex count");
+		}
+		Vector<Ursa::UInt8> packedVertices(vertexCount * sizeof(Vertex));
+		for (Ursa::Size vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
+		{
+			Vertex vertex{};
+			std::memcpy(&vertex, mesh->vertexBytes.data() + vertexIndex * mesh->vertexStride, mesh->vertexStride);
+			if (!mesh->skinInfluences.empty())
+			{
+				for (Ursa::Size influence = 0; influence < 4; ++influence)
+				{
+					vertex.jointIndices[influence] = mesh->skinInfluences[vertexIndex].jointIndices[influence];
+					vertex.jointWeights[influence] = mesh->skinInfluences[vertexIndex].weights[influence];
+				}
+			}
+			std::memcpy(packedVertices.data() + vertexIndex * sizeof(Vertex), &vertex, sizeof(Vertex));
+		}
+		gpuMesh.vertexBuffer =
+		    Take(device->CreateBuffer({packedVertices.size(), Rhi::BufferUsage::Vertex, Rhi::Memory::Upload}));
+		gpuMesh.indexBuffer = Take(device->CreateBuffer(
+		    {mesh->indices.size() * sizeof(Ursa::UInt32), Rhi::BufferUsage::Index, Rhi::Memory::Upload}));
+		done(gpuMesh.vertexBuffer->Write(0, packedVertices.data(), packedVertices.size()));
+		done(gpuMesh.indexBuffer->Write(0, mesh->indices.data(), mesh->indices.size() * sizeof(Ursa::UInt32)));
+		gpuMesh.indexCount = static_cast<Ursa::UInt32>(mesh->indices.size());
+		return modelMeshes.emplace(key, std::move(gpuMesh)).first->second;
 	}
 
 	void WaitPrevious()
@@ -1094,8 +1163,10 @@ struct Renderer3D::Impl
 	Rhi::BindGroupPtr ShaderGroupFor(const std::shared_ptr<const ShaderAsset>& propertyShader,
 	                                 const ShaderPipelineCache& cache,
 	                                 const std::shared_ptr<MaterialInstance>& material, const Mat4& viewProjection,
-	                                 const Mat4& model, const GpuFrameHeader& frame, const Rhi::CommandListPtr& command)
+	                                 const ModelBoxInstance& item, const GpuFrameHeader& frame,
+	                                 const Rhi::CommandListPtr& command)
 	{
+		const Mat4& model = item.model;
 		Vector<Rhi::BindingResource> resources;
 		Vector<Rhi::BufferPtr> buffers;
 		Vector<Rhi::SamplerPtr> samplers;
@@ -1126,6 +1197,26 @@ struct Renderer3D::Impl
 		}
 		for (const Rhi::LayoutBinding& descriptor : cache.reflection.descriptors)
 		{
+			if (descriptor.type == Rhi::BindingType::StorageBuffer)
+			{
+				Vector<Mat4> palette = item.jointPalette;
+				if (palette.empty())
+				{
+					palette.push_back(Mat4::Identity());
+				}
+				const Ursa::Size byteSize = palette.size() * sizeof(Mat4);
+				const Ursa::UInt32 maxStorageRange = device->Capabilities().maxStorageBufferRange;
+				if (maxStorageRange == 0 || byteSize > maxStorageRange)
+				{
+					throw std::runtime_error("Model bone palette exceeds the RHI storage buffer limit");
+				}
+				auto buffer = Take(device->CreateBuffer({byteSize, Rhi::BufferUsage::Storage, Rhi::Memory::Upload}));
+				done(buffer->Write(0, palette.data(), byteSize));
+				done(command->Barrier(buffer, Rhi::ResourceState::Undefined, Rhi::ResourceState::StorageReadWrite));
+				resources.push_back({descriptor.binding, buffer, {}, {}});
+				buffers.push_back(std::move(buffer));
+				continue;
+			}
 			if (descriptor.type == Rhi::BindingType::UniformBuffer)
 			{
 				auto uniform = std::find_if(
@@ -1233,16 +1324,22 @@ struct Renderer3D::Impl
 				Rhi::SamplerPtr sampler;
 				if (descriptor.type == Rhi::BindingType::CombinedImageSampler)
 				{
-					sampler = Take(device->CreateSampler(
-					    {material->Parameters().sampler.linear, material->Parameters().sampler.repeat}));
+					const MaterialSampler samplerSettings = material->SamplerOverridden()
+					                                            ? material->Parameters().sampler
+					                                            : texture->second->DefaultSampler();
+					sampler = Take(device->CreateSampler({samplerSettings.linear, samplerSettings.repeat}));
 					samplers.push_back(sampler);
 				}
 				resources.push_back({descriptor.binding, {}, gpuTexture, sampler});
 			}
 			else if (descriptor.type == Rhi::BindingType::Sampler)
 			{
-				auto sampler = Take(device->CreateSampler(
-				    {material->Parameters().sampler.linear, material->Parameters().sampler.repeat}));
+				MaterialSampler samplerSettings = material->Parameters().sampler;
+				if (!material->SamplerOverridden() && !texturesByBinding.empty())
+				{
+					samplerSettings = texturesByBinding.begin()->second->DefaultSampler();
+				}
+				auto sampler = Take(device->CreateSampler({samplerSettings.linear, samplerSettings.repeat}));
 				resources.push_back({descriptor.binding, {}, {}, sampler});
 				samplers.push_back(std::move(sampler));
 			}
@@ -1316,16 +1413,34 @@ struct Renderer3D::Impl
 		{
 			return found->second.texture;
 		}
-		const auto bytes = source->GetPixels().size();
+		Ursa::Size bytes = source->GetPixels().size();
+		for (const TextureMip& mipmap : source->GetMipmaps())
+		{
+			bytes += mipmap.pixels.size();
+		}
 		auto upload = Take(device->CreateBuffer({bytes, Rhi::BufferUsage::TransferSource, Rhi::Memory::Upload}));
-		done(upload->Write(0, source->GetPixels().data(), bytes));
+		Ursa::Size sourceOffset = 0;
+		done(upload->Write(sourceOffset, source->GetPixels().data(), source->GetPixels().size()));
+		sourceOffset += source->GetPixels().size();
+		for (const TextureMip& mipmap : source->GetMipmaps())
+		{
+			done(upload->Write(sourceOffset, mipmap.pixels.data(), mipmap.pixels.size()));
+			sourceOffset += mipmap.pixels.size();
+		}
 		const auto format =
 		    source->GetColorSpace() == TextureColorSpace::Srgb ? Rhi::Format::RgbA8Srgb : Rhi::Format::RgbA8Unorm;
-		auto texture =
-		    Take(device->CreateTexture({source->GetWidth(), source->GetHeight(), format,
-		                                Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination}));
+		auto texture = Take(device->CreateTexture({source->GetWidth(), source->GetHeight(), format,
+		                                           Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination,
+		                                           source->GetMipLevels()}));
 		done(command->Barrier(texture, Rhi::ResourceState::Undefined, Rhi::ResourceState::TransferDestination));
-		done(command->CopyBufferToTexture(upload, texture));
+		sourceOffset = 0;
+		for (Ursa::UInt32 mipLevel = 0; mipLevel < source->GetMipLevels(); ++mipLevel)
+		{
+			const Ursa::Size levelBytes =
+			    mipLevel == 0 ? source->GetPixels().size() : source->GetMipmaps()[mipLevel - 1].pixels.size();
+			done(command->CopyBufferToTexture(upload, texture, mipLevel, sourceOffset));
+			sourceOffset += levelBytes;
+		}
 		done(command->Barrier(texture, Rhi::ResourceState::TransferDestination, Rhi::ResourceState::ShaderRead));
 		textureCache.emplace(source.get(), GpuTexture{source, texture});
 		return texture;
@@ -1397,6 +1512,10 @@ struct Renderer3D::Impl
 		for (Ursa::Size itemIndex = 0; itemIndex < items.size(); ++itemIndex)
 		{
 			const auto& item = items[itemIndex];
+			if (item.box->mesh)
+			{
+				MeshFor(item.box->mesh);
+			}
 			const auto shader = item.material->Shader();
 			bool hasCompiledShader = false;
 			if (item.material->IsShaderBacked() && shader)
@@ -1429,8 +1548,7 @@ struct Renderer3D::Impl
 				ShaderPipelineCache& cache = ShaderPipelineFor(
 				    shader, plan, *variant, color->desc.format,
 				    needsStencil ? Rhi::Format::D32FloatS8Uint : Rhi::Format::D32Float, *item.material);
-				auto group =
-				    ShaderGroupFor(shader, cache, item.material, viewProjection, item.box->model, frame, command);
+				auto group = ShaderGroupFor(shader, cache, item.material, viewProjection, *item.box, frame, command);
 				recordedPasses.push_back({itemIndex, cache.pipeline, std::move(group)});
 			}
 		}
@@ -1443,16 +1561,37 @@ struct Renderer3D::Impl
 		target.colorValue[1] = 0.055f;
 		target.colorValue[2] = 0.09f;
 		done(command->BeginRendering(target));
-		done(command->BindVertexBuffer(vertexBuffer));
-		done(command->BindIndexBuffer(indexBuffer));
+		const ModelMesh* boundMesh = nullptr;
+		if (items.empty() || !items.front().box->mesh)
+		{
+			done(command->BindVertexBuffer(vertexBuffer));
+			done(command->BindIndexBuffer(indexBuffer));
+		}
 		for (const RecordedPass& pass : recordedPasses)
 		{
+			const ModelMeshPtr& mesh = items[pass.itemIndex].box->mesh;
+			if (mesh.get() != boundMesh)
+			{
+				if (mesh)
+				{
+					GpuModelMesh& gpuMesh = MeshFor(mesh);
+					done(command->BindVertexBuffer(gpuMesh.vertexBuffer));
+					done(command->BindIndexBuffer(gpuMesh.indexBuffer));
+				}
+				else
+				{
+					done(command->BindVertexBuffer(vertexBuffer));
+					done(command->BindIndexBuffer(indexBuffer));
+				}
+				boundMesh = mesh.get();
+			}
 			done(command->BindPipeline(pass.pipeline));
 			if (pass.group)
 			{
 				done(command->BindGroup(pass.group));
 			}
-			done(command->DrawIndexed(36, 1, static_cast<Ursa::UInt32>(pass.itemIndex)));
+			const Ursa::UInt32 indexCount = mesh ? MeshFor(mesh).indexCount : 36;
+			done(command->DrawIndexed(indexCount, 1, static_cast<Ursa::UInt32>(pass.itemIndex)));
 		}
 		done(command->EndRendering());
 		done(command->Barrier(color, Rhi::ResourceState::ColorAttachment, after));
@@ -1486,6 +1625,7 @@ struct Renderer3D::Impl
 	Rhi::FencePtr lastFence;
 	Map<String, ShaderPipelineCache> shaderPipelines;
 	UnorderedMap<const MaterialTexture*, GpuTexture> textureCache;
+	Map<String, GpuModelMesh> modelMeshes;
 };
 
 Renderer3D::Renderer3D(std::unique_ptr<Impl> implementation) : impl(std::move(implementation))

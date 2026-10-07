@@ -2,8 +2,11 @@
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
 #include <Material/Material.hpp>
+#include <Animation/AnimationAssets.hpp>
+#include <Renderer3D/ModelMesh.hpp>
 #include <Serialization/ResourceIndex.hpp>
 #include <Shader/ShaderAsset.hpp>
+#include <functional>
 #include <memory>
 
 namespace Ursa
@@ -12,9 +15,13 @@ namespace Ursa
 class ResourceSession final
 {
 public:
-	static Result<std::unique_ptr<ResourceSession>> Open(const Vector<ResourceMount>& mounts);
+	using AssetPathResolver = std::function<Result<VirtualPath>(ResourceId, Ursa::UInt64)>;
 
-	static Result<std::unique_ptr<ResourceSession>> Open(const VirtualFileSystem& filesystem);
+	static Result<std::unique_ptr<ResourceSession>> Open(const Vector<ResourceMount>& mounts,
+	                                                     AssetPathResolver assetPathResolver = {});
+
+	static Result<std::unique_ptr<ResourceSession>> Open(const VirtualFileSystem& filesystem,
+	                                                     AssetPathResolver assetPathResolver = {});
 
 	// Convenience for a caller that owns a single directory of resources; the
 	// directory is mounted under the conventional project scheme.
@@ -25,7 +32,22 @@ public:
 
 	Result<MaterialTexturePtr> LoadTexture(ResourceId id);
 
+	Result<MaterialTexturePtr> LoadTexture(ResourceId guid, Ursa::UInt64 localFileId);
+
 	Result<std::shared_ptr<MaterialInstance>> LoadMaterial(ResourceId id);
+
+	Result<std::shared_ptr<MaterialInstance>> LoadMaterial(ResourceId guid, Ursa::UInt64 localFileId);
+
+	Result<ModelMeshPtr> LoadMesh(ResourceId modelGuid, Ursa::UInt64 localFileId);
+
+	Result<std::shared_ptr<const ModelSkeleton>> LoadSkeleton(ResourceId modelGuid, Ursa::UInt64 localFileId);
+
+	Result<std::shared_ptr<const AnimationClip>> LoadAnimationClip(ResourceId modelGuid, Ursa::UInt64 localFileId);
+
+	Result<VirtualPath> ResolveAsset(ResourceId guid, Ursa::UInt64 localFileId = 0) const
+	{
+		return ResolveAssetPath(guid, localFileId);
+	}
 
 	Result<std::shared_ptr<const Shader::ShaderAsset>> LoadShader(ResourceId id);
 
@@ -42,11 +64,19 @@ public:
 	}
 
 private:
+	Result<VirtualPath> ResolveAssetPath(ResourceId guid, Ursa::UInt64 localFileId) const;
+
+	Result<ResourceLocation> ResolveResource(ResourceId id) const;
+
 	Result<std::shared_ptr<const Shader::ShaderAsset>> LoadShaderInternal(ResourceId id, Set<String>& active);
 
 	ResourceIndex index;
+	AssetPathResolver assetPathResolver;
 	Map<String, MaterialTexturePtr> textures;
 	Map<String, std::shared_ptr<MaterialInstance>> materials;
 	Map<String, std::shared_ptr<const Shader::ShaderAsset>> shaders;
+	Map<String, ModelMeshPtr> meshes;
+	Map<String, std::shared_ptr<const ModelSkeleton>> skeletons;
+	Map<String, std::shared_ptr<const AnimationClip>> animationClips;
 };
 } // namespace Ursa

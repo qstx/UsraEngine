@@ -26,8 +26,8 @@ public:
 	Result<void> SetTextureProperty(const String& identifier, ResourceId id, const Shader::ShaderAsset& shader,
 	                                ResourceSession& session);
 
-	Result<void> Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id,
-	                  const ResourceIndex& index) const;
+	Result<void> Save(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceId id, const ResourceIndex& index,
+	                  const ResourceSession::AssetPathResolver& assetResolver) const;
 
 	MaterialInstance& Material()
 	{

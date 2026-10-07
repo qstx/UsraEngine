@@ -29,6 +29,47 @@ Result<VirtualPath> ProjectAssetPath(const char* input)
 	}
 	return VirtualPath::Parse(String(projectResourceScheme) + ":" + name);
 }
+
+String AssetDisplayPath(const VirtualPath& path)
+{
+	return path.scheme == projectResourceScheme ? String("Assets/") + path.relative : path.ToString();
+}
+
+bool IsTextureSource(const VirtualPath& path)
+{
+	const auto dot = path.relative.rfind('.');
+	if (dot == String::npos)
+	{
+		return false;
+	}
+	String extension = path.relative.substr(dot);
+	for (char& character : extension)
+	{
+		if (character >= 'A' && character <= 'Z')
+		{
+			character = static_cast<char>(character - 'A' + 'a');
+		}
+	}
+	return extension == ".png" || extension == ".jpg" || extension == ".jpeg";
+}
+
+bool IsModelSource(const VirtualPath& path)
+{
+	const auto dot = path.relative.rfind('.');
+	if (dot == String::npos)
+	{
+		return false;
+	}
+	String extension = path.relative.substr(dot);
+	for (char& character : extension)
+	{
+		if (character >= 'A' && character <= 'Z')
+		{
+			character = static_cast<char>(character - 'A' + 'a');
+		}
+	}
+	return extension == ".fbx" || extension == ".obj";
+}
 } // namespace
 
 Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, const std::filesystem::path& package)
@@ -46,6 +87,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	profile.mode = package.empty() ? RuntimeMountMode::Editor : RuntimeMountMode::PackagedRuntime;
 	profile.applicationId = PathToUrsaString(CurrentExecutablePath().stem());
 	profile.projectAssetsDirectory = root / "Assets";
+	profile.projectLibraryDirectory = root / "Library";
 	if (package.empty())
 	{
 		auto roots = ResolveEngineAssetRoots();
@@ -88,6 +130,13 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	{
 		return Result<void>::Failure(documentsResult.error);
 	}
+	if (textureImportView && gui)
+	{
+		textureImportView->Close(*gui);
+	}
+	textureImportView.reset();
+	modelImportView.reset();
+	shaderImportView.reset();
 	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(files.value));
 	documents = std::move(documentsResult.value);
 	workspace = std::move(openedWorkspace);
@@ -427,7 +476,7 @@ Result<void> EditorApplication::OnGui()
 			ImGui::PushID(entry.id.ToString().c_str());
 			ImGui::TextUnformatted(writable ? "[Project]" : "[Engine]");
 			ImGui::SameLine();
-			const auto name = entry.location.path.ToString();
+			const auto name = AssetDisplayPath(entry.location.path);
 			if (ImGui::Selectable(name.c_str()) && documents)
 			{
 				if (entry.location.kind == ResourceKind::Texture)
@@ -479,6 +528,66 @@ Result<void> EditorApplication::OnGui()
 			ImGui::TextDisabled("%s", entry.id.ToString().c_str());
 			ImGui::PopID();
 		}
+		for (const AssetRecord& asset : workspace->Assets())
+		{
+			if (!asset.metadata.folder &&
+			    (std::filesystem::u8path(ToStdString(asset.path.relative)).extension() == ".ursashader" ||
+			     ResourceKindForPath(asset.path)))
+			{
+				continue;
+			}
+			const String pathText = AssetDisplayPath(asset.path);
+			const String itemId = asset.metadata.guid.ToString();
+			ImGui::PushID(itemId.c_str());
+			ImGui::TextUnformatted(asset.metadata.folder ? "[Project Folder]" : "[Project Source]");
+			ImGui::SameLine();
+			if (ImGui::Selectable(pathText.c_str()) && !asset.metadata.folder)
+			{
+				if (IsTextureSource(asset.path) && workspace->Database())
+				{
+					auto settings = TextureImporter::Settings(*workspace->Database(), asset.path);
+					auto opened = settings ? TextureImportView::Open(asset.path, settings.value)
+					                       : Result<std::unique_ptr<TextureImportView>>::Failure(settings.error);
+					if (opened)
+					{
+						if (textureImportView && gui)
+						{
+							textureImportView->Close(*gui);
+						}
+						textureImportView = std::move(opened.value);
+						auto imported = textureImportView->Reimport(*workspace->Database(), device, *gui);
+						workspaceError = imported ? String{} : imported.error;
+					}
+					else
+					{
+						workspaceError = opened.error;
+					}
+				}
+				else if (IsModelSource(asset.path) && workspace->Database())
+				{
+					auto settings = ModelImporter::Settings(*workspace->Database(), asset.path);
+					auto opened = settings ? ModelImportView::Open(asset.path, settings.value)
+					                       : Result<std::unique_ptr<ModelImportView>>::Failure(settings.error);
+					if (opened)
+					{
+						modelImportView = std::move(opened.value);
+						auto imported = modelImportView->Reimport(*workspace->Database());
+						workspaceError = imported ? String{} : imported.error;
+					}
+					else
+					{
+						workspaceError = opened.error;
+					}
+				}
+				else
+				{
+					workspaceError = "No importer is registered for " + pathText;
+				}
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("%s", itemId.c_str());
+			ImGui::PopID();
+		}
 		for (const String& scheme : {String(projectResourceScheme), String(engineResourceScheme)})
 		{
 			if (!workspace->Index().Filesystem().IsMounted(scheme))
@@ -497,7 +606,7 @@ Result<void> EditorApplication::OnGui()
 				{
 					continue;
 				}
-				const String pathText = file.path.ToString();
+				const String pathText = AssetDisplayPath(file.path);
 				ImGui::PushID(pathText.c_str());
 				ImGui::TextUnformatted(file.path.scheme == projectResourceScheme ? "[Project Shader Source]"
 				                                                                 : "[Engine Shader Source]");
@@ -558,6 +667,41 @@ Result<void> EditorApplication::OnGui()
 		ImGui::TextUnformatted(shaderImportView->SourceText().c_str());
 		ImGui::EndChild();
 		ImGui::End();
+	}
+	if (textureImportView && workspace && workspace->Database())
+	{
+		auto drawn = textureImportView->Draw(*workspace->Database(), device, *gui, !play.Active());
+		if (!drawn)
+		{
+			inspectorError = drawn.error;
+		}
+	}
+	if (modelImportView && workspace && workspace->Database())
+	{
+		std::function<Result<void>()> instantiate;
+		if (!play.Active() && documents && documents->Current() &&
+		    (documents->Current()->Kind() == ResourceKind::Scene ||
+		     documents->Current()->Kind() == ResourceKind::Prefab))
+		{
+			auto draft = documents->Current()->Payload<SceneDraft>();
+			if (draft)
+			{
+				instantiate = [this, draft]
+				{
+					auto added = modelImportView->Instantiate(*draft);
+					if (added && documents && documents->Current())
+					{
+						documents->Current()->MarkDirty();
+					}
+					return added;
+				};
+			}
+		}
+		auto drawn = modelImportView->Draw(*workspace->Database(), !play.Active(), instantiate);
+		if (!drawn)
+		{
+			inspectorError = drawn.error;
+		}
 	}
 	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Texture)
 	{
@@ -748,8 +892,9 @@ Result<void> EditorApplication::OnGui()
 		ImGui::End();
 	}
 	const bool assetInspectorOpen = documents && documents->Current() &&
-	                                (documents->Current()->Kind() == ResourceKind::Material ||
-	                                 documents->Current()->Kind() == ResourceKind::Texture);
+	                                    (documents->Current()->Kind() == ResourceKind::Material ||
+	                                     documents->Current()->Kind() == ResourceKind::Texture) ||
+	                                modelImportView != nullptr;
 	if (!sceneOpen && !assetInspectorOpen)
 	{
 		ImGui::Begin("Inspector");
@@ -1044,6 +1189,12 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		documents->SetSaveBlocked(false);
 	}
 	OnStop();
+	if (textureImportView && gui)
+	{
+		textureImportView->Close(*gui);
+	}
+	textureImportView.reset();
+	modelImportView.reset();
 	documents.reset();
 	workspace.reset();
 	if (scenePreviewId != ImTextureID_Invalid)

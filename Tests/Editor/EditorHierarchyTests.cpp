@@ -40,6 +40,8 @@ void Expect(bool condition, const char* message)
 
 int main()
 {
+	const auto resourceRoot =
+	    std::filesystem::current_path() / ("hierarchy_resources_" + ToStdString(ResourceId::Generate().ToString()));
 	try
 	{
 		ComponentRegistry registry;
@@ -61,7 +63,8 @@ int main()
 
 		const auto path = std::filesystem::current_path() / "hierarchy.ursascene";
 		const auto document = Take(EncodeSceneDocument(path, ResourceId::Generate(), scene, registry));
-		const auto resources = Take(ResourceSession::Open({std::filesystem::current_path()}));
+		std::filesystem::create_directories(resourceRoot);
+		const auto resources = Take(ResourceSession::Open(resourceRoot));
 		ComponentLoadContext context(*resources);
 		auto loaded = Take(DecodeSceneDocument(path, document, registry, context));
 		Expect(loaded.scene->RootGameObjects().size() == 2, "Root count changed after save/reopen");
@@ -105,11 +108,13 @@ int main()
 		Expect(cleared && !hierarchy.SelectedId(), "Deleting the selected GameObject left a stale Inspector selection");
 		ImGui::Render();
 		ImGui::DestroyContext(imgui);
+		std::filesystem::remove_all(resourceRoot);
 		std::cout << "Editor hierarchy persistence test passed\n";
 		return 0;
 	}
 	catch (const std::exception& error)
 	{
+		std::filesystem::remove_all(resourceRoot);
 		std::cerr << error.what() << '\n';
 		return 1;
 	}

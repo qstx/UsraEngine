@@ -117,6 +117,42 @@ int main(int argc, char** argv)
 		{
 			throw std::runtime_error(Ursa::ToStdString(imported.error));
 		}
+		for (const Ursa::Shader::ShaderAsset& shader : imported.value)
+		{
+			auto sourcePath = Ursa::VirtualPath::Parse(shader.sourcePath);
+			if (!sourcePath)
+			{
+				throw std::runtime_error(Ursa::ToStdString(sourcePath.error));
+			}
+			auto sourceMetadataPath = Ursa::VirtualPath::Parse(shader.sourcePath + ".meta");
+			if (!sourceMetadataPath)
+			{
+				throw std::runtime_error(Ursa::ToStdString(sourceMetadataPath.error));
+			}
+			auto metadata = filesystem.Read(sourceMetadataPath.value);
+			if (!metadata)
+			{
+				throw std::runtime_error("Generated Shader assets require source .meta GUIDs: " +
+				                         Ursa::ToStdString(sourcePath.value.ToString()));
+			}
+			std::filesystem::path relative = Ursa::PathFromUrsaString(sourcePath.value.relative);
+			relative.replace_extension(".ursashaderasset");
+			auto artifactPath = Ursa::VirtualPath::Parse("generated:" + Ursa::PathToUrsaString(relative));
+			if (!artifactPath)
+			{
+				throw std::runtime_error(Ursa::ToStdString(artifactPath.error));
+			}
+			auto outputMetadataPath = Ursa::VirtualPath::Parse(artifactPath.value.ToString() + ".meta");
+			if (!outputMetadataPath)
+			{
+				throw std::runtime_error(Ursa::ToStdString(outputMetadataPath.error));
+			}
+			auto copiedMetadata = filesystem.WriteAtomic(outputMetadataPath.value, metadata.value);
+			if (!copiedMetadata)
+			{
+				throw std::runtime_error(Ursa::ToStdString(copiedMetadata.error));
+			}
+		}
 		std::cout << "Imported " << imported.value.size() << " Shader assets for Vulkan\n";
 		return 0;
 	}

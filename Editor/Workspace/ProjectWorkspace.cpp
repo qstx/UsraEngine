@@ -1,5 +1,6 @@
 #include <Workspace/ProjectWorkspace.hpp>
 #include <Core/StringInterop.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
 #include <algorithm>
 #include <cwctype>
 
@@ -82,7 +83,24 @@ Result<std::unique_ptr<ProjectWorkspace>> ProjectWorkspace::Open(const std::file
 			return Result<std::unique_ptr<ProjectWorkspace>>::Failure(mounted.error);
 		}
 	}
-	auto rebuilt = workspace->index.Rebuild();
+	auto libraryProvider = DirectoryFileProvider::Open(canonicalProject / "Library", true);
+	if (!libraryProvider)
+	{
+		return Result<std::unique_ptr<ProjectWorkspace>>::Failure(libraryProvider.error);
+	}
+	auto mountedLibrary = workspace->index.Mount(
+	    ResourceMount{editorLibraryScheme, {}, MountAccess::ReadWrite, std::move(libraryProvider.value)});
+	if (!mountedLibrary)
+	{
+		return Result<std::unique_ptr<ProjectWorkspace>>::Failure(mountedLibrary.error);
+	}
+	auto database = AssetDatabase::Open(workspace->index.Filesystem(), projectResourceScheme);
+	if (!database)
+	{
+		return Result<std::unique_ptr<ProjectWorkspace>>::Failure(database.error);
+	}
+	workspace->assetDatabase = std::move(database.value);
+	auto rebuilt = workspace->Refresh();
 	if (!rebuilt)
 	{
 		return Result<std::unique_ptr<ProjectWorkspace>>::Failure(rebuilt.error);
@@ -92,7 +110,31 @@ Result<std::unique_ptr<ProjectWorkspace>> ProjectWorkspace::Open(const std::file
 
 Result<void> ProjectWorkspace::Refresh()
 {
+	auto refreshedAssets = assetDatabase ? assetDatabase->Refresh() : Result<void>{};
+	if (!refreshedAssets)
+	{
+		return refreshedAssets;
+	}
 	return index.Rebuild();
+}
+
+ResourceSession::AssetPathResolver ProjectWorkspace::AssetResolver() const
+{
+	return [this](ResourceId guid, Ursa::UInt64 localFileId)
+	{
+		if (assetDatabase)
+		{
+			return assetDatabase->Resolve(guid, localFileId);
+		}
+		if (localFileId != 0)
+		{
+			return Result<VirtualPath>::Failure("No AssetDatabase is available for sub-asset reference " +
+			                                    guid.ToString());
+		}
+		auto location = index.Resolve(guid);
+		return location ? Result<VirtualPath>::Success(location.value.path)
+		                : Result<VirtualPath>::Failure(location.error);
+	};
 }
 
 Result<std::unique_ptr<ProjectWorkspace>>
@@ -108,6 +150,16 @@ ProjectWorkspace::FromFilesystem(const std::filesystem::path& projectDirectory, 
 		{
 			return Result<std::unique_ptr<ProjectWorkspace>>::Failure(added.error);
 		}
+	}
+	const auto projectCheck = VirtualPath::Parse(String(projectResourceScheme) + ":.asset-database-check");
+	if (projectCheck && filesystem.IsMounted(editorLibraryScheme) && filesystem.CheckWritable(projectCheck.value))
+	{
+		auto database = AssetDatabase::Open(workspace->index.Filesystem(), projectResourceScheme);
+		if (!database)
+		{
+			return Result<std::unique_ptr<ProjectWorkspace>>::Failure(database.error);
+		}
+		workspace->assetDatabase = std::move(database.value);
 	}
 	auto rebuilt = workspace->Refresh();
 	return rebuilt ? Result<std::unique_ptr<ProjectWorkspace>>::Success(std::move(workspace))

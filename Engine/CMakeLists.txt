@@ -1,6 +1,8 @@
 file(GLOB_RECURSE URSA_ENGINE_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/Application/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Application/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Animation/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Animation/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Math/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Math/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Material/*.cpp"

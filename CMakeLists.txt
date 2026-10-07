@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 if(MSVC)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc> $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
 endif()
 
 if(WIN32)
@@ -16,6 +16,8 @@ if(WIN32)
     VERBATIM)
   set_target_properties(UrsaEngineFormatCheck PROPERTIES FOLDER "Tools")
 endif()
+
+option(URSA_BUILD_EDITOR "Build the Ursa editor" ON)
 
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -45,12 +47,37 @@ set(FETCHCONTENT_SOURCE_DIR_EABASE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eaba
 add_subdirectory(third_party/eastl)
 target_compile_definitions(EASTL PUBLIC EASTL_USER_DEFINED_ALLOCATOR=1)
 
+if(URSA_BUILD_EDITOR)
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/assimp/CMakeLists.txt" OR
+     NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/stb_image.h")
+    message(FATAL_ERROR "Asset importer submodules are missing. Run: git submodule update --init third_party/assimp third_party/stb")
+  endif()
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build Assimp as a static library" FORCE)
+  set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+  add_subdirectory(third_party/assimp)
+  add_library(UrsaStbImage INTERFACE)
+  target_include_directories(UrsaStbImage INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb")
+  add_library(Ursa::StbImage ALIAS UrsaStbImage)
+  set_target_properties(assimp UrsaStbImage PROPERTIES FOLDER "Dependencies")
+endif()
+
 # Keep vendored projects out of the way in the generated solution.
 foreach(URSA_DEPENDENCY IN ITEMS EASTL EABase glfw spdlog spdlog_header_only update_mappings uninstall)
   if(TARGET ${URSA_DEPENDENCY})
     set_target_properties(${URSA_DEPENDENCY} PROPERTIES FOLDER "Dependencies")
   endif()
 endforeach()
+
+# Apply the engine source encoding only to first-party targets and Editor UI.
+# Assimp configures its own equivalent /source-charset:utf-8 flag.
+if(MSVC)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+endif()
 
 find_package(Vulkan 1.2 REQUIRED COMPONENTS glslc)
 find_program(URSA_DXC_EXECUTABLE NAMES dxc HINTS "$ENV{VULKAN_SDK}/Bin")
@@ -81,13 +108,17 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     DEPENDS UrsaPak UrsaEngine UrsaEngineShaderAssets VERBATIM)
 endif()
 
-option(URSA_BUILD_EDITOR "Build the Ursa editor" ON)
 if(URSA_BUILD_EDITOR)
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp" OR
      NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imguizmo/src/ImGuizmo.cpp")
     message(FATAL_ERROR "Editor submodules are missing. Run: git submodule update --init third_party/imgui third_party/imguizmo")
   endif()
   add_subdirectory(Editor)
+  target_link_libraries(UrsaPak PRIVATE Ursa::Editor)
+  target_compile_definitions(UrsaPak PRIVATE URSA_HAS_EDITOR_ASSET_PIPELINE=1)
+  add_executable(UrsaAssetMigrate Tools/AssetMigrate/Main.cpp)
+  target_link_libraries(UrsaAssetMigrate PRIVATE Ursa::Editor)
+  set_target_properties(UrsaAssetMigrate PROPERTIES FOLDER "Tools")
   if(TARGET UrsaEnginePackage)
     add_dependencies(UrsaEnginePackage UrsaEditorCore)
   endif()
@@ -142,6 +173,18 @@ if(URSA_BUILD_TESTS)
     add_executable(UrsaEditorDocumentsTests Tests/Editor/EditorDocumentsTests.cpp)
     target_link_libraries(UrsaEditorDocumentsTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorDocumentsTests COMMAND UrsaEditorDocumentsTests)
+
+    add_executable(UrsaAssetDatabaseTests Tests/Editor/AssetDatabaseTests.cpp)
+    target_link_libraries(UrsaAssetDatabaseTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaAssetDatabaseTests COMMAND UrsaAssetDatabaseTests)
+
+    add_executable(UrsaAssetMigrationTests Tests/Editor/AssetMigrationTests.cpp)
+    target_link_libraries(UrsaAssetMigrationTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaAssetMigrationTests COMMAND UrsaAssetMigrationTests)
+
+    add_executable(UrsaTextureImporterTests Tests/Editor/TextureImporterTests.cpp)
+    target_link_libraries(UrsaTextureImporterTests PRIVATE Ursa::Editor Ursa::StbImage)
+    add_test(NAME UrsaTextureImporterTests COMMAND UrsaTextureImporterTests)
 
     add_executable(UrsaEditorShaderImportTests Tests/Editor/ShaderImportViewTests.cpp)
     target_link_libraries(UrsaEditorShaderImportTests PRIVATE Ursa::Editor)

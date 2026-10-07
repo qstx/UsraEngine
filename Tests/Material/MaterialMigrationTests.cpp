@@ -1,3 +1,4 @@
+#include <ResourceFixtures.hpp>
 #include <Material/Material.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/JsonResource.hpp>
@@ -47,6 +48,8 @@ int main()
 		Expect(static_cast<bool>(texture), "Cannot create migration texture");
 		Expect(static_cast<bool>(SaveTextureResource(filesystem, Path("prj:Base.ursatex"), textureId, *texture.value)),
 		       "Cannot save migration texture");
+		Expect(static_cast<bool>(WriteAssetMetadata(filesystem, Path("prj:Base.ursatex"), textureId)),
+		       "Cannot save migration texture metadata");
 
 		Json legacy = {{"format", "UrsaMaterial"},
 		               {"version", resourceFormatVersion},
@@ -65,6 +68,8 @@ int main()
 		               {"textures", {{"baseColor", ToStdString(textureId.ToString())}}}};
 		Expect(static_cast<bool>(WriteJsonResource(filesystem, Path("prj:Material.ursamat"), legacy)),
 		       "Cannot write legacy material fixture");
+		Expect(static_cast<bool>(WriteAssetMetadata(filesystem, Path("prj:Material.ursamat"), materialId)),
+		       "Cannot write legacy material metadata");
 		Json legacyUnlit = {{"format", "UrsaMaterial"},
 		                    {"version", resourceFormatVersion},
 		                    {"id", ToStdString(unlitId.ToString())},
@@ -77,6 +82,8 @@ int main()
 		                    {"textures", Json::object()}};
 		Expect(static_cast<bool>(WriteJsonResource(filesystem, Path("prj:Unlit.ursamat"), legacyUnlit)),
 		       "Cannot write legacy Unlit material fixture");
+		Expect(static_cast<bool>(WriteAssetMetadata(filesystem, Path("prj:Unlit.ursamat"), unlitId)),
+		       "Cannot write legacy Unlit material metadata");
 
 		auto session = ResourceSession::Open(filesystem);
 		Expect(static_cast<bool>(session), "Cannot open migration resource session");
@@ -117,7 +124,8 @@ int main()
 		auto saved = ReadJsonResource(filesystem, Path("prj:Material.ursamat"), ResourceKind::Material);
 		Expect(saved && saved.value["version"] == materialResourceFormatVersion &&
 		           saved.value["id"] == ToStdString(materialId.ToString()) &&
-		           saved.value["shaderId"] == ToStdString(Shader::BuiltinPbrShaderId().ToString()),
+		           saved.value["shaderId"]["guid"] == ToStdString(Shader::BuiltinPbrShaderId().ToString()) &&
+		           saved.value["shaderId"]["localFileId"] == 0,
 		       "Explicit save did not write the new versioned Shader-backed material format");
 
 		saved.value["propertyOverrides"]["_RemovedProperty"] = {{"type", "Int"}, {"int", 77}};

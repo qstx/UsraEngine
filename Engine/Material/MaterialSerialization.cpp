@@ -3,6 +3,7 @@
 #include <Serialization/SerializationContext.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Serialization/MaterialResource.hpp>
+#include <Serialization/AssetReference.hpp>
 
 namespace Ursa
 {
@@ -86,9 +87,9 @@ Result<void> WritePropertyValue(ArchiveWriter& writer, const MaterialPropertyVal
 					return Result<void>::Failure("Texture property override requires a stable resource ID");
 				}
 				auto id = writer.Context()->Identify(*value.texture);
-				return id ? writer.Write("textureId", id.value.ToString()) : Result<void>::Failure(id.error);
+				return id ? WriteAssetReference(writer, "textureId", {id.value, 0}) : Result<void>::Failure(id.error);
 			}
-			return writer.Write("textureId", value.textureId.ToString());
+			return WriteAssetReference(writer, "textureId", {value.textureId, 0});
 	}
 	return Result<void>::Failure("Unknown material Shader property value type");
 }
@@ -150,28 +151,24 @@ Result<MaterialPropertyValue> ReadPropertyValue(const ArchiveReader& reader, Ser
 		}
 		case Shader::PropertyType::Texture2D:
 		{
-			auto text = reader.Text("textureId");
-			if (!text)
+			auto reference = ReadAssetReference(reader, "textureId");
+			if (!reference || reference.value.localFileId != 0)
 			{
-				return Result<MaterialPropertyValue>::Failure(text.error);
-			}
-			auto id = ResourceId::Parse(text.value);
-			if (!id)
-			{
-				return Result<MaterialPropertyValue>::Failure(id.error);
+				return Result<MaterialPropertyValue>::Failure(
+				    reference ? "Texture sub-asset references are not supported by this loader" : reference.error);
 			}
 			auto loader = context.Service<TextureResourceLoader>();
 			if (!context.ResourceLoader() && (!loader || !*loader.value))
 			{
 				return Result<MaterialPropertyValue>::Failure("Missing texture resource loader");
 			}
-			auto texture =
-			    context.ResourceLoader() ? context.ResourceLoader()->LoadTexture(id.value) : (*loader.value)(id.value);
+			auto texture = context.ResourceLoader() ? context.ResourceLoader()->LoadTexture(reference.value.guid)
+			                                        : (*loader.value)(reference.value.guid);
 			if (!texture)
 			{
 				return Result<MaterialPropertyValue>::Failure(texture.error);
 			}
-			value.textureId = id.value;
+			value.textureId = reference.value.guid;
 			value.texture = std::move(texture.value);
 			break;
 		}
@@ -182,7 +179,8 @@ Result<MaterialPropertyValue> ReadPropertyValue(const ArchiveReader& reader, Ser
 
 std::shared_ptr<MaterialTexture> MaterialTexture::CreateForDeserialization()
 {
-	return std::shared_ptr<MaterialTexture>(new MaterialTexture(1, 1, TextureColorSpace::Linear, {255, 255, 255, 255}));
+	return std::shared_ptr<MaterialTexture>(
+	    new MaterialTexture(1, 1, TextureColorSpace::Linear, {255, 255, 255, 255}, {}, MaterialSampler{}));
 }
 
 Result<void> MaterialTexture::Serialize(ArchiveWriter& writer) const
@@ -200,6 +198,46 @@ Result<void> MaterialTexture::Serialize(ArchiveWriter& writer) const
 	{
 		result = writer.WriteBytes("pixels", pixels);
 	}
+	if (!result)
+	{
+		return result;
+	}
+	auto mipArray = writer.Array("mipmaps");
+	if (!mipArray)
+	{
+		return Result<void>::Failure(mipArray.error);
+	}
+	for (const TextureMip& mipmap : mipmaps)
+	{
+		auto mip = mipArray.value.AddObject();
+		if (!mip)
+		{
+			return Result<void>::Failure(mip.error);
+		}
+		result = mip.value.Write("width", UInt64(mipmap.width));
+		if (result)
+		{
+			result = mip.value.Write("height", UInt64(mipmap.height));
+		}
+		if (result)
+		{
+			result = mip.value.WriteBytes("pixels", mipmap.pixels);
+		}
+		if (!result)
+		{
+			return result;
+		}
+	}
+	auto samplerWriter = writer.Object("sampler");
+	if (!samplerWriter)
+	{
+		return Result<void>::Failure(samplerWriter.error);
+	}
+	result = samplerWriter.value.Write("linear", sampler.linear);
+	if (result)
+	{
+		result = samplerWriter.value.Write("repeat", sampler.repeat);
+	}
 	return result;
 }
 
@@ -209,14 +247,48 @@ Result<void> MaterialTexture::Deserialize(const ArchiveReader& reader, Serializa
 	auto loadedHeight = reader.Unsigned("height");
 	auto space = reader.Text("colorSpace");
 	auto data = reader.Bytes("pixels");
+	Vector<TextureMip> loadedMipmaps;
+	MaterialSampler loadedSampler;
+	if (reader.Contains("sampler"))
+	{
+		auto samplerReader = reader.Object("sampler");
+		auto linear =
+		    samplerReader ? samplerReader.value.Boolean("linear") : Result<bool>::Failure(samplerReader.error);
+		auto repeat =
+		    samplerReader ? samplerReader.value.Boolean("repeat") : Result<bool>::Failure(samplerReader.error);
+		if (!linear || !repeat)
+		{
+			return Result<void>::Failure("Invalid texture sampler archive fields");
+		}
+		loadedSampler = {linear.value, repeat.value};
+	}
+	if (reader.Contains("mipmaps"))
+	{
+		auto mipArray = reader.Array("mipmaps");
+		if (!mipArray)
+		{
+			return Result<void>::Failure(mipArray.error);
+		}
+		for (const ArchiveReader& mipReader : mipArray.value)
+		{
+			auto mipWidth = mipReader.Unsigned("width");
+			auto mipHeight = mipReader.Unsigned("height");
+			auto mipPixels = mipReader.Bytes("pixels");
+			if (!mipWidth || !mipHeight || !mipPixels || mipWidth.value > UINT32_MAX || mipHeight.value > UINT32_MAX)
+			{
+				return Result<void>::Failure("Invalid texture mip archive fields");
+			}
+			loadedMipmaps.push_back({UInt32(mipWidth.value), UInt32(mipHeight.value), std::move(mipPixels.value)});
+		}
+	}
 	if (!loadedWidth || !loadedHeight || !space || !data || loadedWidth.value > UINT32_MAX ||
 	    loadedHeight.value > UINT32_MAX || (space.value != "Srgb" && space.value != "Linear"))
 	{
 		return Result<void>::Failure("Invalid texture archive fields");
 	}
-	auto candidate =
-	    Create(UInt32(loadedWidth.value), UInt32(loadedHeight.value),
-	           space.value == "Srgb" ? TextureColorSpace::Srgb : TextureColorSpace::Linear, std::move(data.value));
+	auto candidate = Create(UInt32(loadedWidth.value), UInt32(loadedHeight.value),
+	                        space.value == "Srgb" ? TextureColorSpace::Srgb : TextureColorSpace::Linear,
+	                        std::move(data.value), std::move(loadedMipmaps), loadedSampler);
 	if (!candidate)
 	{
 		return Result<void>::Failure(candidate.error);
@@ -225,15 +297,21 @@ Result<void> MaterialTexture::Deserialize(const ArchiveReader& reader, Serializa
 	height = candidate.value->height;
 	colorSpace = candidate.value->colorSpace;
 	pixels = candidate.value->pixels;
+	mipmaps = candidate.value->mipmaps;
+	sampler = candidate.value->sampler;
 	return {};
 }
 
 Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 {
 	auto result = writer.Write("type", String(type == MaterialType::Unlit ? "Unlit" : "PbrMetallicRoughness"));
+	if (result)
+	{
+		result = writer.Write("samplerOverridden", samplerOverridden);
+	}
 	if (result && IsShaderBacked())
 	{
-		result = writer.Write("shaderId", shaderId.ToString());
+		result = WriteAssetReference(writer, "shaderId", {shaderId, 0});
 	}
 	auto fields = writer.Object("parameters");
 	if (!fields)
@@ -325,7 +403,7 @@ Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 		{
 			return Result<void>::Failure("Material texture has no stable resource ID");
 		}
-		result = textureFields.value.Write(slotNames[i], id.ToString());
+		result = WriteAssetReference(textureFields.value, slotNames[i], {id, textureLocalFileIds[i]});
 		if (!result)
 		{
 			return result;
@@ -379,19 +457,16 @@ Result<void> MaterialInstance::Deserialize(const ArchiveReader& reader, Serializ
 	{
 		return DeserializeLegacy(reader, context);
 	}
-	auto shaderText = reader.Text("shaderId");
+	auto shaderReference = ReadAssetReference(reader, "shaderId");
 	auto overrides = reader.Object("propertyOverrides");
 	auto keywordReaders = reader.Array("keywords");
-	if (!shaderText || !overrides || !keywordReaders)
+	if (!shaderReference || shaderReference.value.localFileId != 0 || !overrides || !keywordReaders)
 	{
-		return Result<void>::Failure(!shaderText  ? shaderText.error
+		return Result<void>::Failure(!shaderReference ? shaderReference.error
+		                             : shaderReference.value.localFileId != 0
+		                                 ? "Shader sub-asset references are not supported by this loader"
 		                             : !overrides ? overrides.error
 		                                          : keywordReaders.error);
-	}
-	auto parsedShaderId = ResourceId::Parse(shaderText.value);
-	if (!parsedShaderId)
-	{
-		return Result<void>::Failure("Invalid material Shader ID: " + parsedShaderId.error);
 	}
 	MaterialInstance candidate(loadedType.value == "PbrMetallicRoughness" ? MaterialType::PbrMetallicRoughness
 	                                                                      : MaterialType::Unlit);
@@ -400,7 +475,7 @@ Result<void> MaterialInstance::Deserialize(const ArchiveReader& reader, Serializ
 	{
 		return restoredLegacy;
 	}
-	candidate.shaderId = parsedShaderId.value;
+	candidate.shaderId = shaderReference.value.guid;
 	auto names = overrides.value.Fields();
 	if (!names)
 	{
@@ -494,6 +569,19 @@ Result<void> MaterialInstance::DeserializeLegacy(const ArchiveReader& reader, Se
 	{
 		return result;
 	}
+	if (reader.Contains("samplerOverridden"))
+	{
+		auto samplerOverrideFlag = reader.Boolean("samplerOverridden");
+		if (!samplerOverrideFlag)
+		{
+			return Result<void>::Failure("Invalid material sampler override flag");
+		}
+		candidate.samplerOverridden = samplerOverrideFlag.value;
+	}
+	else
+	{
+		candidate.samplerOverridden = true;
+	}
 	if (candidate.type == MaterialType::PbrMetallicRoughness)
 	{
 		auto metallic = fields.value.Number("metallic");
@@ -555,19 +643,16 @@ Result<void> MaterialInstance::DeserializeLegacy(const ArchiveReader& reader, Se
 		{
 			continue;
 		}
-		auto text = textureFields.value.Text(slotNames[i]);
-		if (!text)
-		{
-			return Result<void>::Failure(text.error);
-		}
-		auto id = ResourceId::Parse(text.value);
+		auto reference = ReadAssetReference(textureFields.value, slotNames[i]);
 		auto loader = context.Service<TextureResourceLoader>();
-		if (!id || (!context.ResourceLoader() && (!loader || !*loader.value)))
+		if (!reference || (reference.value.localFileId != 0 && !context.ResourceLoader()) ||
+		    (!context.ResourceLoader() && (!loader || !*loader.value)))
 		{
 			return Result<void>::Failure("Invalid material texture reference");
 		}
-		auto loaded =
-		    context.ResourceLoader() ? context.ResourceLoader()->LoadTexture(id.value) : (*loader.value)(id.value);
+		auto loaded = context.ResourceLoader()
+		                  ? context.ResourceLoader()->LoadTexture(reference.value.guid, reference.value.localFileId)
+		                  : (*loader.value)(reference.value.guid);
 		if (!loaded)
 		{
 			return Result<void>::Failure(loaded.error);
@@ -577,12 +662,15 @@ Result<void> MaterialInstance::DeserializeLegacy(const ArchiveReader& reader, Se
 		{
 			return result;
 		}
-		candidate.textureResourceIds[i] = id.value;
+		candidate.textureResourceIds[i] = reference.value.guid;
+		candidate.textureLocalFileIds[i] = reference.value.localFileId;
 	}
 	type = candidate.type;
 	parameters = candidate.parameters;
+	samplerOverridden = candidate.samplerOverridden;
 	textures = std::move(candidate.textures);
 	textureResourceIds = std::move(candidate.textureResourceIds);
+	textureLocalFileIds = std::move(candidate.textureLocalFileIds);
 	++version;
 	return {};
 }

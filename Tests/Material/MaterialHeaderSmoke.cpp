@@ -50,7 +50,7 @@ int main()
 	}
 	auto saved = Ursa::ReadJsonResource(filesystem, path.value, Ursa::ResourceKind::Material);
 	return saved && saved.value["version"] == Ursa::materialResourceFormatVersion &&
-	               saved.value["shaderId"].get<std::string>() == Ursa::ToStdString(shader.id.ToString())
+	               saved.value["shaderId"]["guid"].get<std::string>() == Ursa::ToStdString(shader.id.ToString())
 	           ? 0
 	           : 1;
 }

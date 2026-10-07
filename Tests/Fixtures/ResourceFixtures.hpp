@@ -4,6 +4,7 @@
 #include <Vfs/VirtualFileSystem.hpp>
 #include <Core/StringInterop.hpp>
 #include <filesystem>
+#include <fstream>
 
 #include <Serialization/ResourceFile.hpp>
 #include <Serialization/JsonResource.hpp>
@@ -16,6 +17,56 @@
 
 namespace Ursa
 {
+inline Result<void> WriteAssetMetadata(VirtualFileSystem& filesystem, const VirtualPath& assetPath, ResourceId guid)
+{
+	if (!guid)
+	{
+		return Result<void>::Failure("Test asset metadata needs a stable GUID");
+	}
+	auto sidecar = VirtualPath::Parse(assetPath.ToString() + ".meta");
+	if (!sidecar)
+	{
+		return Result<void>::Failure(sidecar.error);
+	}
+	const nlohmann::json document = {{"version", 1},         {"guid", ToStdString(guid.ToString())},
+	                                 {"folder", false},      {"importer", ""},
+	                                 {"importerVersion", 0}, {"settings", nlohmann::json::object()}};
+	const std::string text = document.dump(2);
+	Vector<UInt8> bytes;
+	bytes.reserve(text.size());
+	for (unsigned char value : text)
+	{
+		bytes.push_back(value);
+	}
+	return filesystem.WriteAtomic(sidecar.value, bytes);
+}
+
+inline Result<void> WriteAssetMetadata(const std::filesystem::path& assetPath, ResourceId guid)
+{
+	if (!guid)
+	{
+		return Result<void>::Failure("Test asset metadata needs a stable GUID");
+	}
+	std::filesystem::path sidecar = assetPath;
+	sidecar += ".meta";
+	std::filesystem::create_directories(sidecar.parent_path());
+	const nlohmann::json document = {{"version", 1},         {"guid", ToStdString(guid.ToString())},
+	                                 {"folder", false},      {"importer", ""},
+	                                 {"importerVersion", 0}, {"settings", nlohmann::json::object()}};
+	std::ofstream output(sidecar, std::ios::binary | std::ios::trunc);
+	output << document.dump(2);
+	return output ? Result<void>{}
+	              : Result<void>::Failure("Cannot write test asset metadata at " + PathToUrsaString(sidecar));
+}
+
+inline Result<ResourceHeader> ReadResourceHeader(const std::filesystem::path& path);
+
+inline Result<void> WriteResourceMetadata(const std::filesystem::path& resourcePath)
+{
+	auto header = ReadResourceHeader(resourcePath);
+	return header ? WriteAssetMetadata(resourcePath, header.value.id) : Result<void>::Failure(header.error);
+}
+
 struct HostResourceBridge
 {
 	VirtualFileSystem filesystem;
@@ -50,6 +101,51 @@ inline Result<ResourceHeader> ReadResourceHeader(const std::filesystem::path& pa
 	auto bridge = HostResourceBridge::Open(path, MountAccess::ReadOnly);
 	return bridge ? ReadResourceHeader(bridge.value.filesystem, bridge.value.path)
 	              : Result<ResourceHeader>::Failure(bridge.error);
+}
+
+inline Result<void> WriteResourceMetadataTree(const std::filesystem::path& root)
+{
+	std::error_code error;
+	for (std::filesystem::recursive_directory_iterator entry(root, error), end; entry != end; entry.increment(error))
+	{
+		if (error)
+		{
+			return Result<void>::Failure("Cannot enumerate test resource fixtures: " + PathToUrsaString(root));
+		}
+		if (!entry->is_regular_file() || entry->path().extension() == ".meta")
+		{
+			continue;
+		}
+		const auto relative = std::filesystem::relative(entry->path(), root, error);
+		if (error)
+		{
+			return Result<void>::Failure("Cannot resolve test resource fixture path");
+		}
+		auto virtualPath = VirtualPath::Parse("fixture:" + PathToUrsaString(relative));
+		if (!virtualPath)
+		{
+			return Result<void>::Failure(virtualPath.error);
+		}
+		if (!ResourceKindForPath(virtualPath.value))
+		{
+			continue;
+		}
+		std::filesystem::path sidecar = entry->path();
+		sidecar += ".meta";
+		if (!std::filesystem::exists(sidecar, error) && !error)
+		{
+			auto written = WriteResourceMetadata(entry->path());
+			if (!written)
+			{
+				return written;
+			}
+		}
+		if (error)
+		{
+			return Result<void>::Failure("Cannot inspect test resource metadata path");
+		}
+	}
+	return {};
 }
 
 inline Result<nlohmann::json> ReadJsonResource(const std::filesystem::path& path, ResourceKind expectedKind)

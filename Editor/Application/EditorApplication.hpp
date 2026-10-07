@@ -11,6 +11,8 @@
 #include <Assets/MaterialPreview.hpp>
 #include <Assets/MaterialInspectors.hpp>
 #include <Assets/ShaderImportView.hpp>
+#include <Assets/TextureImportView.hpp>
+#include <Assets/ModelImportView.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Scene/EditorScenePreview.hpp>
 #include <Scene/EditorGizmo.hpp>
@@ -96,6 +98,8 @@ private:
 	std::unique_ptr<ImGuiBridge> gui;
 	std::unique_ptr<MaterialPreview> materialPreview;
 	std::unique_ptr<ShaderImportView> shaderImportView;
+	std::unique_ptr<TextureImportView> textureImportView;
+	std::unique_ptr<ModelImportView> modelImportView;
 	std::unique_ptr<EditorScenePreview> scenePreview;
 	EditorHierarchy hierarchy;
 	Rhi::TexturePtr scenePreviewColor;

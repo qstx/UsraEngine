@@ -137,13 +137,16 @@ MaterialPropertyValue MaterialPropertyValue::Texture2D(ResourceId id, MaterialTe
 }
 
 MaterialTexture::MaterialTexture(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight,
-                                 TextureColorSpace textureColorSpace, Vector<Ursa::UInt8> texturePixels)
-    : width(textureWidth), height(textureHeight), colorSpace(textureColorSpace), pixels(std::move(texturePixels))
+                                 TextureColorSpace textureColorSpace, Vector<Ursa::UInt8> texturePixels,
+                                 Vector<TextureMip> textureMipmaps, MaterialSampler textureSampler)
+    : width(textureWidth), height(textureHeight), colorSpace(textureColorSpace), pixels(std::move(texturePixels)),
+      mipmaps(std::move(textureMipmaps)), sampler(textureSampler)
 {
 }
 
 Result<MaterialTexturePtr> MaterialTexture::Create(Ursa::UInt32 textureWidth, Ursa::UInt32 textureHeight,
-                                                   TextureColorSpace textureColorSpace, Vector<Ursa::UInt8> rgba8)
+                                                   TextureColorSpace textureColorSpace, Vector<Ursa::UInt8> rgba8,
+                                                   Vector<TextureMip> textureMipmaps, MaterialSampler textureSampler)
 {
 	if (!textureWidth || !textureHeight ||
 	    static_cast<Ursa::UInt64>(textureWidth) * textureHeight > std::numeric_limits<Ursa::Size>::max() / 4 ||
@@ -155,8 +158,30 @@ Result<MaterialTexturePtr> MaterialTexture::Create(Ursa::UInt32 textureWidth, Ur
 	{
 		return Result<MaterialTexturePtr>::Failure("Material texture color space is invalid");
 	}
-	return Result<MaterialTexturePtr>::Success(
-	    MaterialTexturePtr(new MaterialTexture(textureWidth, textureHeight, textureColorSpace, std::move(rgba8))));
+	Ursa::UInt32 mipWidth = textureWidth;
+	Ursa::UInt32 mipHeight = textureHeight;
+	Ursa::UInt64 totalBytes = rgba8.size();
+	for (const TextureMip& mipmap : textureMipmaps)
+	{
+		if (mipWidth == 1 && mipHeight == 1)
+		{
+			return Result<MaterialTexturePtr>::Failure("Material texture mip chain exceeds its dimensions");
+		}
+		mipWidth = mipWidth > 1 ? mipWidth / 2 : 1;
+		mipHeight = mipHeight > 1 ? mipHeight / 2 : 1;
+		const Ursa::UInt64 expectedBytes = static_cast<Ursa::UInt64>(mipWidth) * mipHeight * 4;
+		if (mipmap.width != mipWidth || mipmap.height != mipHeight || mipmap.pixels.size() != expectedBytes)
+		{
+			return Result<MaterialTexturePtr>::Failure("Material texture mip dimensions or pixel bytes are invalid");
+		}
+		totalBytes += expectedBytes;
+		if (totalBytes > 256ull * 1024 * 1024)
+		{
+			return Result<MaterialTexturePtr>::Failure("Material texture mip chain exceeds the size limit");
+		}
+	}
+	return Result<MaterialTexturePtr>::Success(MaterialTexturePtr(new MaterialTexture(
+	    textureWidth, textureHeight, textureColorSpace, std::move(rgba8), std::move(textureMipmaps), textureSampler)));
 }
 
 MaterialInstance::MaterialInstance(MaterialType materialType) : type(materialType)
@@ -616,6 +641,7 @@ Result<void> MaterialInstance::SetAlphaMode(AlphaMode mode, Ursa::Float32 cutoff
 Result<void> MaterialInstance::SetSampler(MaterialSampler sampler)
 {
 	parameters.sampler = sampler;
+	samplerOverridden = true;
 	++version;
 	return {};
 }
@@ -636,6 +662,7 @@ Result<void> MaterialInstance::SetTexture(MaterialTextureSlot slot, MaterialText
 	}
 	textures[SlotIndex(slot)] = std::move(texture);
 	textureResourceIds[SlotIndex(slot)] = {};
+	textureLocalFileIds[SlotIndex(slot)] = 0;
 	if (IsShaderBacked())
 	{
 		const String propertyName = BuiltinTextureProperty(shaderId, slot);
@@ -675,6 +702,7 @@ Result<void> MaterialInstance::SetTextureResourceId(MaterialTextureSlot slot, Re
 		return Result<void>::Failure("Invalid material texture slot or zero resource ID");
 	}
 	textureResourceIds[SlotIndex(slot)] = id;
+	textureLocalFileIds[SlotIndex(slot)] = 0;
 	if (shaderId)
 	{
 		const String propertyName = BuiltinTextureProperty(shaderId, slot);

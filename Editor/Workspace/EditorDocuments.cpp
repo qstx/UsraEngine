@@ -52,7 +52,7 @@ Result<std::unique_ptr<EditorDocument>> EditorDocument::Create(ResourceKind docu
 
 Result<std::unique_ptr<EditorDocuments>> EditorDocuments::Create(ProjectWorkspace& projectWorkspace)
 {
-	auto session = ResourceSession::Open(projectWorkspace.Index().Mounts());
+	auto session = ResourceSession::Open(projectWorkspace.Index().Mounts(), projectWorkspace.AssetResolver());
 	if (!session)
 	{
 		return Result<std::unique_ptr<EditorDocuments>>::Failure(session.error);
@@ -183,6 +183,37 @@ Result<void> EditorDocuments::SaveCurrent()
 	{
 		return fail(written.error);
 	}
+	auto sidecar = VirtualPath::Parse(current->Path().ToString() + ".meta");
+	if (!sidecar)
+	{
+		return fail(sidecar.error);
+	}
+	auto existingMetadata = filesystem.Read(sidecar.value);
+	Vector<UInt8> metadataBytes;
+	if (existingMetadata)
+	{
+		metadataBytes = std::move(existingMetadata.value);
+	}
+	else
+	{
+		const nlohmann::json metadata = {{"version", assetMetadataVersion},
+		                                 {"guid", ToStdString(current->Id().ToString())},
+		                                 {"folder", false},
+		                                 {"importer", ""},
+		                                 {"importerVersion", 0},
+		                                 {"settings", nlohmann::json::object()}};
+		const std::string text = metadata.dump(2);
+		metadataBytes.reserve(text.size());
+		for (unsigned char value : text)
+		{
+			metadataBytes.push_back(value);
+		}
+	}
+	written = staging.WriteAtomic(sidecar.value, metadataBytes);
+	if (!written)
+	{
+		return fail(written.error);
+	}
 	auto header = ReadResourceHeader(staging, current->Path());
 	if (!header || header.value.id != current->Id() || header.value.kind != current->Kind())
 	{
@@ -191,7 +222,17 @@ Result<void> EditorDocuments::SaveCurrent()
 	Vector<ResourceMount> mounts;
 	mounts.push_back({current->Path().scheme, {}, MountAccess::ReadOnly, provider});
 	mounts.insert(mounts.end(), workspace.Index().Mounts().begin(), workspace.Index().Mounts().end());
-	auto validated = ResourceSession::Open(mounts);
+	auto assetResolver = workspace.AssetResolver();
+	auto validated = ResourceSession::Open(mounts,
+	                                       [assetResolver, currentId = current->Id(),
+	                                        currentPath = current->Path()](ResourceId guid, Ursa::UInt64 localFileId)
+	                                       {
+		                                       if (guid == currentId && localFileId == 0)
+		                                       {
+			                                       return Result<VirtualPath>::Success(currentPath);
+		                                       }
+		                                       return assetResolver(guid, localFileId);
+	                                       });
 	if (!validated)
 	{
 		return fail(validated.error);
@@ -223,20 +264,41 @@ Result<void> EditorDocuments::SaveCurrent()
 	{
 		return fail(!original ? original.error : bytes.error);
 	}
+	auto metadataExisted = filesystem.Exists(sidecar.value);
+	if (!metadataExisted)
+	{
+		return fail(metadataExisted.error);
+	}
+	auto originalMetadata = metadataExisted.value ? filesystem.Read(sidecar.value) : Result<Vector<UInt8>>::Success({});
+	if (!originalMetadata)
+	{
+		return fail(originalMetadata.error);
+	}
 	written = filesystem.WriteAtomic(current->Path(), bytes.value);
 	if (!written)
 	{
 		return fail(written.error);
 	}
 	auto refreshed = workspace.Refresh();
-	auto session = refreshed ? ResourceSession::Open(workspace.Index().Mounts())
+	auto session = refreshed ? ResourceSession::Open(workspace.Index().Mounts(), workspace.AssetResolver())
 	                         : Result<std::unique_ptr<ResourceSession>>::Failure(refreshed.error);
 	if (!session)
 	{
 		auto restored = existed.value ? filesystem.WriteAtomic(current->Path(), original.value)
 		                              : filesystem.Remove(current->Path());
+		auto restoredMetadata = metadataExisted.value ? filesystem.WriteAtomic(sidecar.value, originalMetadata.value)
+		                                              : filesystem.Remove(sidecar.value);
 		workspace.Refresh();
-		return fail(session.error + (restored ? String{} : "; rollback failed: " + restored.error));
+		String rollbackError;
+		if (!restored)
+		{
+			rollbackError = "; asset rollback failed: " + restored.error;
+		}
+		if (!restoredMetadata)
+		{
+			rollbackError += "; metadata rollback failed: " + restoredMetadata.error;
+		}
+		return fail(session.error + rollbackError);
 	}
 	sessions.push_back(std::move(session.value));
 	current->dirty = false;
@@ -317,17 +379,22 @@ Result<void> EditorDocuments::RenameCurrent(const VirtualPath& path)
 		}
 	}
 	const auto previous = current->Path();
-	auto renamed = files.Rename(previous, path);
+	auto* database = workspace.Database();
+	if (!database)
+	{
+		return Result<void>::Failure("AssetDatabase is unavailable for project asset rename");
+	}
+	auto renamed = database->Move(previous, path);
 	if (!renamed)
 	{
 		return renamed;
 	}
 	auto refreshed = workspace.Refresh();
-	auto session = refreshed ? ResourceSession::Open(workspace.Index().Mounts())
+	auto session = refreshed ? ResourceSession::Open(workspace.Index().Mounts(), workspace.AssetResolver())
 	                         : Result<std::unique_ptr<ResourceSession>>::Failure(refreshed.error);
 	if (!session)
 	{
-		auto restored = files.Rename(path, previous);
+		auto restored = database->Move(path, previous);
 		workspace.Refresh();
 		return Result<void>::Failure(session.error +
 		                             (restored ? String{} : "; rename rollback failed: " + restored.error));

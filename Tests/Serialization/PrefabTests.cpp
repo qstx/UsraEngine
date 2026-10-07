@@ -5,6 +5,7 @@
 #include <Serialization/PrefabResource.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/MaterialResource.hpp>
+#include <Serialization/AssetReference.hpp>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -65,6 +66,10 @@ void PlacePrefab(const std::filesystem::path& root, Ursa::Scene& source, Ursa::G
 	{
 		return;
 	}
+	if (!Ursa::WriteResourceMetadataTree(root))
+	{
+		return;
+	}
 	auto resources = Ursa::ResourceSession::Open({root});
 	if (!resources)
 	{
@@ -115,6 +120,7 @@ void TestInstances(const std::filesystem::path& root)
 	const auto prefabId = Ursa::ResourceId::Generate();
 	const auto prefabPath = root / "box.ursaprefab";
 	done(Ursa::SavePrefabResource(prefabPath, prefabId, source, prefabRoot, registry));
+	done(Ursa::WriteResourceMetadataTree(root));
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext prefabContext(*session);
 	auto direct = Take(Ursa::LoadPrefabResource(prefabPath, registry, prefabContext));
@@ -193,11 +199,16 @@ void TestInstances(const std::filesystem::path& root)
 	auto secondRoot = Take(secondLoaded.scene->GameObjectById(outsideId));
 	const auto firstChildren = Take(firstLoaded.scene->ChildrenOf(firstRoot));
 	const auto secondChildren = Take(secondLoaded.scene->ChildrenOf(secondRoot));
+	auto firstPrefabReference =
+	    Ursa::AssetReferenceFromJson(firstLoaded.document["instances"][0]["prefab"], "first.prefab");
+	auto secondPrefabReference =
+	    Ursa::AssetReferenceFromJson(secondLoaded.document["instances"][0]["prefab"], "second.prefab");
 	Expect(firstChildren.size() == 2 && secondChildren.size() == 1 &&
 	           Take(firstLoaded.scene->PersistentId(firstChildren[0])) !=
 	               Take(firstLoaded.scene->PersistentId(firstChildren[1])) &&
-	           firstLoaded.document["instances"][0]["prefab"] == Ursa::ToStdString(prefabId.ToString()) &&
-	           secondLoaded.document["instances"][0]["prefab"] == Ursa::ToStdString(prefabId.ToString()),
+	           firstPrefabReference && secondPrefabReference && firstPrefabReference.value.guid == prefabId &&
+	           secondPrefabReference.value.guid == prefabId && firstPrefabReference.value.localFileId == 0 &&
+	           secondPrefabReference.value.localFileId == 0,
 	       "Prefab instances lost their independent identity or source reference");
 	std::filesystem::remove(firstPath);
 	std::filesystem::remove(secondPath);
@@ -244,6 +255,7 @@ void TestProperties(const std::filesystem::path& root)
 	done(Ursa::AddPrefabInstance(document, prefabId, firstInstance));
 	done(Ursa::AddPrefabInstance(document, prefabId, Ursa::ResourceId::Generate()));
 	done(Ursa::WriteJsonResource(path, document));
+	done(Ursa::WriteResourceMetadataTree(root));
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext context(*session);
 	auto loaded = Take(Ursa::LoadLinkedSceneResource(path, registry, context));
@@ -281,7 +293,9 @@ void TestProperties(const std::filesystem::path& root)
 	firstChild = Take(loaded.scene->ChildrenOf(loaded.scene->RootGameObjects()[0]))[0];
 	firstBox = loaded.scene->FindComponent<Ursa::BoxRenderComponent>(firstChild);
 	Expect(firstBox && firstBox->material->Parameters().baseColor.green == 0.8f,
-	       "Clearing the explicit material override did not restore source inheritance");
+	       ("Clearing the explicit material override did not restore source inheritance (green=" +
+	        std::to_string(firstBox ? firstBox->material->Parameters().baseColor.green : -1.0f) + ")")
+	           .c_str());
 	std::filesystem::remove(path);
 	std::filesystem::remove(prefabPath);
 	std::filesystem::remove(root / "initial.ursamat");
@@ -317,6 +331,7 @@ void TestStructure(const std::filesystem::path& root)
 	const auto instanceId = Ursa::ResourceId::Generate();
 	done(Ursa::AddPrefabInstance(document, prefabId, instanceId));
 	done(Ursa::WriteJsonResource(path, document));
+	done(Ursa::WriteResourceMetadataTree(root));
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext context(*session);
 	auto linked = Take(Ursa::LoadLinkedSceneResource(path, registry, context));
@@ -414,6 +429,7 @@ void TestConflicts(const std::filesystem::path& root)
 	done(Ursa::AddPrefabInstance(base, prefabId, firstInstance));
 	done(Ursa::AddPrefabInstance(base, prefabId, secondInstance));
 	done(Ursa::WriteJsonResource(path, base));
+	done(Ursa::WriteResourceMetadataTree(root));
 	auto session = Take(Ursa::ResourceSession::Open({root}));
 	Ursa::ComponentLoadContext context(*session);
 	auto active = Take(Ursa::LoadLinkedSceneResource(path, registry, context));
@@ -476,16 +492,25 @@ int main()
 		const auto root = std::filesystem::temp_directory_path() /
 		                  ("UrsaPrefabTests-" + Ursa::ToStdString(Ursa::ResourceId::Generate().ToString()));
 		std::filesystem::create_directory(root);
+		const auto reset = [&]
+		{
+			std::filesystem::remove_all(root);
+			std::filesystem::create_directory(root);
+		};
 		TestInstances(root);
+		reset();
 		TestProperties(root);
+		reset();
 		TestStructure(root);
+		reset();
 		TestConflicts(root);
+		reset();
 		Ursa::Scene docsSource;
 		const auto docsRoot = Take(docsSource.CreateGameObject());
 		PlacePrefab(root, docsSource, docsRoot);
 		std::filesystem::remove(root / "tile.ursaprefab");
 		std::filesystem::remove(root / "level.ursascene");
-		std::filesystem::remove(root);
+		std::filesystem::remove_all(root);
 		return 0;
 	}
 	catch (const std::exception& error)

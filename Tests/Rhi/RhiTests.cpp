@@ -2,6 +2,7 @@
 #include <Core/Containers.hpp>
 #include <Rhi/RHI.hpp>
 #include <Core/StringInterop.hpp>
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -154,6 +155,42 @@ void TestTextureAndOffscreen(const DevicePtr& device, bool srgb)
 		           result[i + 2] == (srgb ? 55 : 40) && result[i + 3] == 255,
 		       "Texture sampling or offscreen readback mismatch");
 	}
+}
+
+void TestTextureMipUploads(const DevicePtr& device)
+{
+	constexpr Ursa::UInt32 textureWidth = 2;
+	constexpr Ursa::UInt32 textureHeight = 2;
+	constexpr Ursa::Size baseLevelBytes = textureWidth * textureHeight * 4;
+	constexpr Ursa::Array<Ursa::UInt8, baseLevelBytes + 4> pixels{10, 20,  30,  255, 40,  50,  60,  255, 70,  80,
+	                                                              90, 255, 100, 110, 120, 255, 130, 140, 150, 255};
+	auto upload = Take(device->CreateBuffer({pixels.size(), BufferUsage::TransferSource, Memory::Upload}));
+	done(upload->Write(0, pixels.data(), pixels.size()));
+	auto texture = Take(device->CreateTexture(
+	    {textureWidth, textureHeight, Format::RgbA8Unorm,
+	     TextureUsage::Sampled | TextureUsage::TransferSource | TextureUsage::TransferDestination, 2}));
+	auto baseReadback =
+	    Take(device->CreateBuffer({baseLevelBytes, BufferUsage::TransferDestination, Memory::Readback}));
+	auto mipReadback = Take(device->CreateBuffer({4, BufferUsage::TransferDestination, Memory::Readback}));
+	auto command = Take(device->CreateCommandList());
+	done(command->Begin());
+	done(command->Barrier(texture, ResourceState::Undefined, ResourceState::TransferDestination));
+	done(command->CopyBufferToTexture(upload, texture, 0, 0));
+	done(command->CopyBufferToTexture(upload, texture, 1, baseLevelBytes));
+	done(command->Barrier(texture, ResourceState::TransferDestination, ResourceState::TransferSource));
+	done(command->Barrier(baseReadback, ResourceState::Undefined, ResourceState::TransferDestination));
+	done(command->Barrier(mipReadback, ResourceState::Undefined, ResourceState::TransferDestination));
+	done(command->CopyTextureToBuffer(texture, baseReadback, 0));
+	done(command->CopyTextureToBuffer(texture, mipReadback, 1));
+	done(command->End());
+	done(Take(device->Submit(command))->Wait());
+	Ursa::Array<Ursa::UInt8, baseLevelBytes> baseResult{};
+	Ursa::Array<Ursa::UInt8, 4> mipResult{};
+	done(baseReadback->Read(0, baseResult.data(), baseResult.size()));
+	done(mipReadback->Read(0, mipResult.data(), mipResult.size()));
+	Expect(std::equal(baseResult.begin(), baseResult.end(), pixels.begin()) &&
+	           std::equal(mipResult.begin(), mipResult.end(), pixels.begin() + baseLevelBytes),
+	       "Texture mip upload or readback returned incorrect level data");
 }
 
 void TestFirstInstance(const DevicePtr& device)
@@ -396,6 +433,7 @@ int main()
 		TestCompute(device);
 		TestTextureAndOffscreen(device, false);
 		TestTextureAndOffscreen(device, true);
+		TestTextureMipUploads(device);
 		TestFirstInstance(device);
 		TestScissorAndIndexedOffsets(device);
 		TestStorageImage(device);

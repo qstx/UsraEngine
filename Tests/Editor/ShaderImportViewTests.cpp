@@ -157,6 +157,11 @@ int main()
 		          "float4 ReturnColor() { return float4(1, 0, 0, 1); }\n");
 		WriteText(projectRoot / "Assets" / "Shaders" / "EditorImport.ursashader",
 		          ShaderSource("float4 PSMain() : SV_Target0 { return ReturnColor(); }"));
+		WriteText(projectRoot / "Assets" / "Shaders" / "Independent.ursashader",
+		          "Shader \"Tests/Independent\" { ID \"5403c8ea-669d-4b64-8c30-6d63d128de75\" Version 1 "
+		          "SubShader { Pass { HLSLPROGRAM\n#pragma vertex VSMain\n#pragma fragment PSMain\n"
+		          "float4 VSMain(float3 p : POSITION) : SV_Position { return float4(p, 1); }\n"
+		          "float4 PSMain() : SV_Target0 { return float4(0, 0, 1, 1); }\nENDHLSL } } }");
 		auto workspace = Take(ProjectWorkspace::Open(projectRoot));
 		auto sourcePath = Take(VirtualPath::Parse("prj:Shaders/EditorImport.ursashader"));
 		auto view = Take(ShaderImportView::Open(workspace->Index().Filesystem(), sourcePath));
@@ -166,23 +171,55 @@ int main()
 		Expect(view->Imported() && view->Dependencies().size() == 1 &&
 		           view->Dependencies()[0] == "prj:Shaders/Includes/Shared.hlsli",
 		       "Shader import status did not report the resolved include dependency");
+		const VirtualPath independentPath = Take(VirtualPath::Parse("prj:Shaders/Independent.ursashader"));
+		const AssetMetadata initialMetadata = Take(workspace->Database()->Metadata(sourcePath));
+		const auto initialDependencies = Take(workspace->Database()->ImportDependencies(sourcePath, "ursa.Shader"));
+		Expect(initialMetadata.importer == "ursa.Shader" && initialDependencies.size() == 1 &&
+		           initialDependencies[0].ToString() == "prj:Shaders/Includes/Shared.hlsli",
+		       "Shader source identity and include dependencies were not recorded in AssetDatabase");
+		const auto initialCache = Take(
+		    workspace->Database()->CheckImport(sourcePath, initialMetadata.importer, initialMetadata.importerVersion,
+		                                       "vulkan-spv", initialMetadata.importSettings, initialDependencies));
+		const AssetMetadata independentMetadata = Take(workspace->Database()->Metadata(independentPath));
+		const auto independentDependencies =
+		    Take(workspace->Database()->ImportDependencies(independentPath, "ursa.Shader"));
+		const auto independentCache = Take(workspace->Database()->CheckImport(
+		    independentPath, independentMetadata.importer, independentMetadata.importerVersion, "vulkan-spv",
+		    independentMetadata.importSettings, independentDependencies));
+		Expect(initialCache.upToDate && independentCache.upToDate,
+		       "Shader artifacts were not published into the AssetDatabase import cache");
 		const ResourceId shaderId = Take(ResourceId::Parse("5403c8ea-669d-4b64-8c30-6d63d128de71"));
-		auto location = Take(workspace->Index().Resolve(shaderId));
-		auto originalAsset = Take(Shader::LoadShaderAssetResource(workspace->Index().Filesystem(), location.path));
+		auto location = Take(workspace->Database()->Resolve(shaderId));
+		auto originalAsset = Take(Shader::LoadShaderAssetResource(workspace->Index().Filesystem(), location));
 		WriteText(projectRoot / "Assets" / "Shaders" / "Includes" / "Shared.hlsli",
 		          "float4 ReturnColor() { return float4(0, 1, 0, 1); }\n");
 		Done(view->Reimport(*workspace));
-		location = Take(workspace->Index().Resolve(shaderId));
-		auto updatedAsset = Take(Shader::LoadShaderAssetResource(workspace->Index().Filesystem(), location.path));
+		location = Take(workspace->Database()->Resolve(shaderId));
+		auto updatedAsset = Take(Shader::LoadShaderAssetResource(workspace->Index().Filesystem(), location));
 		Expect(updatedAsset.sourceHash != originalAsset.sourceHash,
 		       "Reimport did not invalidate the compiled Shader after its include changed");
+		const AssetMetadata updatedMetadata = Take(workspace->Database()->Metadata(sourcePath));
+		const auto updatedDependencies = Take(workspace->Database()->ImportDependencies(sourcePath, "ursa.Shader"));
+		const auto updatedCache = Take(
+		    workspace->Database()->CheckImport(sourcePath, updatedMetadata.importer, updatedMetadata.importerVersion,
+		                                       "vulkan-spv", updatedMetadata.importSettings, updatedDependencies));
+		const AssetMetadata updatedIndependentMetadata = Take(workspace->Database()->Metadata(independentPath));
+		const auto updatedIndependentDependencies =
+		    Take(workspace->Database()->ImportDependencies(independentPath, "ursa.Shader"));
+		const auto updatedIndependentCache = Take(workspace->Database()->CheckImport(
+		    independentPath, updatedIndependentMetadata.importer, updatedIndependentMetadata.importerVersion,
+		    "vulkan-spv", updatedIndependentMetadata.importSettings, updatedIndependentDependencies));
+		Expect(updatedCache.upToDate && updatedCache.fingerprint != initialCache.fingerprint &&
+		           updatedIndependentCache.upToDate &&
+		           updatedIndependentCache.fingerprint == independentCache.fingerprint,
+		       "Changing a Shader include invalidated unrelated Shader artifact cache entries");
 		WriteText(projectRoot / "Assets" / "Shaders" / "EditorImport.ursashader",
 		          ShaderSource("float4 PSMain( : SV_Target0 { return ReturnColor(); }"));
 		auto failedImport = view->Reimport(*workspace);
 		Expect(!failedImport && view->Diagnostic().find("prj:Shaders/EditorImport.ursashader") != String::npos,
 		       "Invalid HLSL did not expose its source-located diagnostic in the Editor Shader view");
-		location = Take(workspace->Index().Resolve(shaderId));
-		auto retainedAsset = Take(Shader::LoadShaderAssetResource(workspace->Index().Filesystem(), location.path));
+		location = Take(workspace->Database()->Resolve(shaderId));
+		auto retainedAsset = Take(Shader::LoadShaderAssetResource(workspace->Index().Filesystem(), location));
 		Expect(retainedAsset.sourceHash == updatedAsset.sourceHash,
 		       "Failed Shader reimport replaced the last valid compiled asset");
 

@@ -70,6 +70,8 @@ public:
 
 	Result<void> AssignMaterial(ComponentId component, ResourceId materialId, ResourceSession& resourceSession);
 
+	Result<GameObject::Ptr> InstantiateModel(ResourceId modelGuid, const nlohmann::json& modelDocument);
+
 	Result<ResourceId> MaterialId(const std::shared_ptr<MaterialInstance>& material) const;
 
 	Result<void> SetInstanceProperty(ResourceId instanceId, ResourceId sourceObjectId, const String& pointer,

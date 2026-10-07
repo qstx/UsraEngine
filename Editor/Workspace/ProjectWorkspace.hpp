@@ -1,6 +1,8 @@
 #pragma once
 
+#include <Assets/AssetDatabase.hpp>
 #include <Serialization/ResourceIndex.hpp>
+#include <Serialization/ResourceSession.hpp>
 #include <filesystem>
 #include <memory>
 
@@ -30,6 +32,23 @@ public:
 		return index.Entries();
 	}
 
+	Vector<AssetRecord> Assets() const
+	{
+		return assetDatabase ? assetDatabase->Assets() : Vector<AssetRecord>{};
+	}
+
+	AssetDatabase* Database()
+	{
+		return assetDatabase.get();
+	}
+
+	const AssetDatabase* Database() const
+	{
+		return assetDatabase.get();
+	}
+
+	ResourceSession::AssetPathResolver AssetResolver() const;
+
 	const ResourceIndex& Index() const
 	{
 		return index;
@@ -55,5 +74,6 @@ private:
 	std::filesystem::path assetsRoot;
 	Vector<ResourceMount> engineMounts;
 	ResourceIndex index;
+	std::unique_ptr<AssetDatabase> assetDatabase;
 };
 } // namespace Ursa::Editor

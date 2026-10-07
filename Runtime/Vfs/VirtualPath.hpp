@@ -10,6 +10,7 @@ namespace Ursa
 inline constexpr const char* engineScheme = "ursa";
 inline constexpr const char* projectScheme = "prj";
 inline constexpr const char* userDataScheme = "user";
+inline constexpr const char* editorLibraryScheme = "lib";
 
 // A resource address of the form "<scheme>:<relative-path>", for example
 // "ursa:Shaders/Renderer3D/Cube.vert" or "prj:Snake/Snake.ursascene".

@@ -110,7 +110,8 @@ enum class VertexFormat
 {
 	Float2,
 	Float3,
-	Float4
+	Float4,
+	UInt4
 };
 enum class Compare
 {
@@ -239,6 +240,7 @@ struct Capabilities
 	bool offscreenRendering = false;
 	Ursa::UInt32 maxTextureSize = 0;
 	Ursa::UInt32 maxPushConstants = 0;
+	Ursa::UInt32 maxStorageBufferRange = 0;
 };
 
 struct BufferDesc
@@ -253,12 +255,14 @@ struct TextureDesc
 	Ursa::UInt32 width = 0, height = 0;
 	Format format = Format::RgbA8Unorm;
 	TextureUsage usage = TextureUsage::None;
+	Ursa::UInt32 mipLevels = 1;
 };
 
 struct SamplerDesc
 {
 	bool linear = true;
 	bool repeat = false;
+	Ursa::Float32 maxLod = 16.0f;
 };
 
 struct ShaderDesc
@@ -448,9 +452,11 @@ public:
 	virtual Result<void> CopyBuffer(const BufferPtr& source, const BufferPtr& destination, Ursa::Size size,
 	                                Ursa::Size sourceOffset = 0, Ursa::Size destinationOffset = 0) = 0;
 
-	virtual Result<void> CopyBufferToTexture(const BufferPtr& source, const TexturePtr& destination) = 0;
+	virtual Result<void> CopyBufferToTexture(const BufferPtr& source, const TexturePtr& destination,
+	                                         Ursa::UInt32 mipLevel = 0, Ursa::Size sourceOffset = 0) = 0;
 
-	virtual Result<void> CopyTextureToBuffer(const TexturePtr& source, const BufferPtr& destination) = 0;
+	virtual Result<void> CopyTextureToBuffer(const TexturePtr& source, const BufferPtr& destination,
+	                                         Ursa::UInt32 mipLevel = 0) = 0;
 
 	virtual Result<void> BeginRendering(const RenderTarget& target) = 0;
 

@@ -64,6 +64,7 @@ Texture2D<float4> _OcclusionMap : register(t3);
 SamplerState sampler_OcclusionMap : register(s3);
 Texture2D<float4> _EmissiveMap : register(t4);
 SamplerState sampler_EmissiveMap : register(s4);
+StructuredBuffer<float4x4> _UrsaBonePalette : register(t5);
 ENDHLSL
 	SubShader
 	{
@@ -87,16 +88,21 @@ struct VertexOutput
 	float3 worldTangent : TEXCOORD3;
 };
 VertexOutput VSMain(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD0,
-	                float3 tangent : TANGENT)
+	                float3 tangent : TANGENT, uint4 joints : BLENDINDICES, float4 weights : BLENDWEIGHT)
 {
 	VertexOutput output;
-	float4 world = mul(_UrsaModel, float4(position, 1.0));
+	float4x4 skin = _UrsaBonePalette[joints.x] * weights.x + _UrsaBonePalette[joints.y] * weights.y +
+	                _UrsaBonePalette[joints.z] * weights.z + _UrsaBonePalette[joints.w] * weights.w;
+	float4 skinnedPosition = mul(skin, float4(position, 1.0));
+	float3 skinnedNormal = mul((float3x3)skin, normal);
+	float3 skinnedTangent = mul((float3x3)skin, tangent);
+	float4 world = mul(_UrsaModel, skinnedPosition);
 	float3x3 model = (float3x3)_UrsaModel;
 	float3x3 normalMatrix = (float3x3)_UrsaNormal;
 	output.position = mul(_UrsaViewProjection, world);
 	output.worldPosition = world.xyz;
-	output.worldNormal = normalize(mul(normalMatrix, normal));
-	output.worldTangent = normalize(mul(model, tangent));
+	output.worldNormal = normalize(mul(normalMatrix, skinnedNormal));
+	output.worldTangent = normalize(mul(model, skinnedTangent));
 	output.uv = uv;
 	return output;
 }

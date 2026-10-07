@@ -39,6 +39,8 @@ public:
 
 	Result<ResourceLocation> Resolve(ResourceId id, const String& referencedBy = {}) const;
 
+	Result<VirtualPath> ResolveAsset(ResourceId guid, Ursa::UInt64 localFileId = 0) const;
+
 	Vector<ResourceEntry> Entries() const;
 
 	VirtualFileSystem& Filesystem()
@@ -60,5 +62,6 @@ private:
 	VirtualFileSystem filesystem;
 	Vector<ResourceMount> mounts;
 	Map<String, ResourceLocation> locations;
+	Map<String, VirtualPath> catalogAssets;
 };
 } // namespace Ursa
