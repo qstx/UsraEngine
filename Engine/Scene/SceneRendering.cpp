@@ -109,7 +109,7 @@ void Scene::CollectRendering(ObjectHandle node, SceneRenderData& out) const
 	GameObject* gameObject = objects[node.index].object;
 	for (GameObject* current = gameObject; current; current = current->parent)
 	{
-		if (!current->enabled)
+		if (!current->activeSelf)
 		{
 			return;
 		}

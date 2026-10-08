@@ -89,14 +89,17 @@ Stale or missing imported artifacts stop packaging with a diagnostic. PakBuilder
 Place Content.pak beside the executable for engine shader discovery, or supply
 the package explicitly at startup.
 
-From the workspace root after configuring `Demo/build`:
+From the workspace root after configuring Engine with `-DURSA_PROJECT_DIR=Demo`:
 
 ```powershell
-cmake --build Demo/build --config Debug --target UrsaDemoPackage
-Demo/build/Debug/UrsaSnake.exe --project Demo
-Demo/build/Debug/UrsaSnake.exe --pak Demo/build/package/Content.pak
-Demo/build/Debug/UrsaDemoEditor.exe --project Demo --scene Snake/Snake.ursascene
-Demo/build/Debug/UrsaDemoEditor.exe --project Demo --pak Demo/build/package/Content.pak --scene Snake/Snake.ursascene
+cmake --build Engine/build --config Debug --target UrsaPak UrsaScriptPlayer UrsaEditor
+Engine/build/Debug/UrsaScriptCompile.exe Demo Debug
+Engine/build/Debug/UrsaPak.exe --engine Engine/Assets --engine-generated Engine/cache/assets `
+  --project Demo/Assets --library Demo/Library --configuration Debug `
+  --output Engine/build/package/Content.pak
+Engine/build/Debug/UrsaScriptPlayer.exe --project Demo --scene Snake/Snake.ursascene
+Engine/build/Debug/UrsaScriptPlayer.exe --pak Engine/build/package/Content.pak --scene Snake/Snake.ursascene
+Engine/build/editor/Debug/UrsaEditor.exe --project Demo --scene Snake/Snake.ursascene
 ```
 
 When invoking `UrsaPak` directly for a project, pass `--library <Project/Library>`
@@ -105,8 +108,8 @@ resolves those references from the packaged catalog and does not mount `lib:`.
 
 `--scene` is relative to `prj:`. Runtime mounts resources once; renderer, UI and
 scene loading share the configured VFS. Explicit `--pak` failure never falls back
-to loose files. Snake smoke serialization uses a private memory provider. The
-asset baker mounts the output project Assets directory and writes virtual files.
+to loose files. Project scripts are compiled with `UrsaScriptCompile`; the pak
+tool includes the current Game assembly and rejects stale script content.
 
 Pak V1 validates the header and directory table at mount. Its 64 KiB payload blocks
 are verified on their first actual read and cached for the immutable mount's

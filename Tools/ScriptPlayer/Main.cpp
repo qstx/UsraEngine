@@ -1,0 +1,271 @@
+#include <Application/Application.hpp>
+#include <Core/Log.hpp>
+#include <Core/StringInterop.hpp>
+#include <Scripting/DotNetHost.hpp>
+#include <Scripting/ManagedSceneApi.hpp>
+#include <Scripting/ManagedScriptRuntime.hpp>
+#include <Serialization/SceneResource.hpp>
+#include <Serialization/JsonResource.hpp>
+#include <Serialization/PrefabResource.hpp>
+#include <Vfs/AssetRoots.hpp>
+#include <Vfs/RuntimeMountProfile.hpp>
+#include <Vfs/PakArchive.hpp>
+#include <iostream>
+#include <stdexcept>
+
+namespace
+{
+using namespace Ursa;
+using namespace Ursa::Scripting;
+
+template <class T> T Take(Result<T> result)
+{
+	if (!result)
+	{
+		throw std::runtime_error(ToStdString(result.error));
+	}
+	return std::move(result.value);
+}
+
+void Done(Result<void> result)
+{
+	if (!result)
+	{
+		throw std::runtime_error(ToStdString(result.error));
+	}
+}
+
+VirtualPath Path(const char* value)
+{
+	return Take(VirtualPath::Parse(value));
+}
+
+class ScriptPlayer final : public Application
+{
+public:
+	~ScriptPlayer() override
+	{
+		if (scene)
+		{
+			scene->Clear();
+		}
+		OnStop();
+	}
+
+	explicit ScriptPlayer(std::shared_ptr<VirtualFileSystem> files, String scenePath, String manifestPath,
+	                      bool stressWindow)
+	    : files(std::move(files)), scenePath(std::move(scenePath)), manifestPath(std::move(manifestPath)),
+	      stressWindow(stressWindow)
+	{
+	}
+
+private:
+	Result<void> OnStart() override
+	{
+		resources = Take(ResourceSession::Open(*files));
+		ComponentRegistry registry;
+		Done(RegisterBuiltinComponents(registry));
+		ComponentLoadContext context(*resources);
+		auto sceneVirtualPath = Take(VirtualPath::Parse(String("prj:") + scenePath));
+		auto document = Take(ReadJsonResource(*files, sceneVirtualPath, ResourceKind::Scene));
+		if (document.contains("instances"))
+		{
+			auto loaded = Take(LoadLinkedSceneResource(*files, sceneVirtualPath, registry, context));
+			linkedScene = std::make_unique<LinkedSceneResource>(std::move(loaded));
+			scene = std::shared_ptr<Scene>(linkedScene->scene.get(), [](Scene*) {});
+		}
+		else
+		{
+			auto loaded = Take(DecodeSceneDocument(sceneVirtualPath.ToString(), document, registry, context));
+			scene = std::shared_ptr<Scene>(std::move(loaded.scene));
+		}
+		sceneApi = std::make_unique<ManagedSceneApi>(*scene, resources.get(),
+		                                             [this](const String& title)
+		                                             {
+			                                             if (window)
+			                                             {
+				                                             window->SetTitle(title);
+			                                             }
+		                                             });
+		host = Take(DotNetHost::Create());
+		ManagedHostFiles bootstrap;
+		bootstrap.runtimeConfig = Path("ursa:Managed/Ursa.ManagedHost.runtimeconfig.json");
+		bootstrap.entryAssembly = Path("ursa:Managed/Ursa.ManagedHost.dll");
+		bootstrap.dependencies = {Path("ursa:Managed/Ursa.ManagedHost.deps.json"),
+		                          Path("ursa:Managed/Ursa.Runtime.dll")};
+		Done(host->Start(*files, bootstrap,
+		                 [](UInt32 level, const String& message)
+		                 {
+			                 if (level >= 4)
+			                 {
+				                 URSA_LOG_ERROR("Script", message);
+			                 }
+			                 else
+			                 {
+				                 URSA_LOG_INFO("Script", message);
+			                 }
+		                 }));
+		domain = Take(host->CreateScriptSession(false, sceneApi.get()));
+		Done(host->LoadScriptContent(domain, Take(VirtualPath::Parse(manifestPath))));
+		runtime = std::make_unique<ManagedScriptRuntime>(*scene, *host, *sceneApi, domain);
+		return runtime->AttachSerializedComponents();
+	}
+
+	void OnStop() override
+	{
+		runtime.reset();
+		sceneApi.reset();
+		if (host && domain)
+		{
+			auto closed = host->CloseScriptSession(domain);
+			if (!closed)
+			{
+				URSA_LOG_ERROR("Script", closed.error);
+			}
+			domain = 0;
+		}
+		resources.reset();
+	}
+
+	Result<void> OnFrame(Float32) override
+	{
+		++frame;
+		if (stressWindow && frame == 5)
+		{
+			window->Resize(800, 600);
+		}
+		if (stressWindow && frame == 10)
+		{
+			window->Minimize();
+			window->Restore();
+		}
+		return {};
+	}
+
+	std::shared_ptr<VirtualFileSystem> files;
+	String scenePath;
+	String manifestPath;
+	bool stressWindow = false;
+	UInt32 frame = 0;
+	std::unique_ptr<LinkedSceneResource> linkedScene;
+	std::unique_ptr<ResourceSession> resources;
+	std::unique_ptr<DotNetHost> host;
+	std::unique_ptr<ManagedSceneApi> sceneApi;
+	std::unique_ptr<ManagedScriptRuntime> runtime;
+	UInt64 domain = 0;
+};
+} // namespace
+
+int main(int argc, char** argv)
+{
+	LogSession logging;
+	try
+	{
+		bool visible = true;
+		UInt32 frames = 0;
+		std::filesystem::path content = CurrentExecutablePath().parent_path() / "Content";
+		std::filesystem::path project;
+		std::filesystem::path engineAssets;
+		std::filesystem::path package;
+		String scenePath = "ScriptSample/ScriptPlayer.ursascene";
+		bool stressWindow = false;
+		for (int index = 1; index < argc; ++index)
+		{
+			const String argument = argv[index];
+			if (argument == "--hidden")
+			{
+				visible = false;
+			}
+			else if (argument == "--frames" && index + 1 < argc)
+			{
+				frames = static_cast<UInt32>(std::stoul(argv[++index]));
+			}
+			else if (argument == "--pak" && index + 1 < argc)
+			{
+				package = std::filesystem::absolute(std::filesystem::u8path(argv[++index]));
+			}
+			else if (argument == "--content" && index + 1 < argc)
+			{
+				content = std::filesystem::absolute(std::filesystem::u8path(argv[++index]));
+			}
+			else if (argument == "--project" && index + 1 < argc)
+			{
+				project = std::filesystem::absolute(std::filesystem::u8path(argv[++index]));
+			}
+			else if (argument == "--engine" && index + 1 < argc)
+			{
+				engineAssets = std::filesystem::absolute(std::filesystem::u8path(argv[++index]));
+			}
+			else if (argument == "--scene" && index + 1 < argc)
+			{
+				scenePath = ToUrsaString(std::filesystem::u8path(argv[++index]).generic_string());
+			}
+			else if (argument == "--stress-window")
+			{
+				stressWindow = true;
+			}
+			else
+			{
+				throw std::runtime_error("Usage: UrsaScriptPlayer [--project <directory> | --content <directory> | "
+				                         "--pak <Content.pak>] [--engine <Engine/Assets>] [--scene <asset path>] "
+				                         "[--hidden] [--frames N]");
+			}
+		}
+		if (!package.empty() && !project.empty())
+		{
+			throw std::runtime_error("Choose either --project or --pak");
+		}
+		RuntimeMountProfileConfig profile;
+		profile.applicationId = "UrsaScriptPlayer";
+		profile.mode = package.empty() ? RuntimeMountMode::LooseRuntime : RuntimeMountMode::PackagedRuntime;
+		String manifestPath = "prj:__UrsaManaged/Game.json";
+		if (package.empty())
+		{
+			if (project.empty())
+			{
+				profile.engineDirectories = {content / "Engine"};
+				profile.projectAssetsDirectory = content / "Project";
+				if (scenePath == "ScriptSample/ScriptPlayer.ursascene")
+				{
+					scenePath = "ScriptSample/ScriptPlayer.ursascene";
+				}
+			}
+			else
+			{
+				if (engineAssets.empty())
+				{
+					const auto adjacentEngine = project.parent_path() / "Engine" / "Assets";
+					engineAssets = std::filesystem::is_directory(adjacentEngine)
+					                   ? adjacentEngine
+					                   : std::filesystem::path(URSA_SCRIPT_PLAYER_ENGINE_ASSETS);
+				}
+				profile.engineDirectories = Take(ResolveEngineAssetRoots());
+				profile.engineDirectories.insert(profile.engineDirectories.begin(), engineAssets);
+				profile.projectAssetsDirectory = project / "Assets";
+				scenePath = scenePath == "ScriptSample/ScriptPlayer.ursascene" ? "Snake/Snake.ursascene" : scenePath;
+				manifestPath = "lib:ScriptBuild/Manifests/Game.json";
+			}
+		}
+		else
+		{
+			auto archive = Take(PakArchive::Open(package));
+			profile.packagedProviders = {{engineScheme, Take(archive->View(engineScheme))},
+			                             {projectScheme, Take(archive->View(projectScheme))}};
+		}
+		auto files = std::make_shared<VirtualFileSystem>(Take(OpenRuntimeFileSystem(profile)));
+		if (package.empty() && !project.empty())
+		{
+			auto mountedLibrary = files->Mount("lib", project / "Library", MountAccess::ReadOnly);
+			Done(std::move(mountedLibrary));
+		}
+		ConfigureEngineFileSystem(files);
+		ScriptPlayer player(files, scenePath, manifestPath, stressWindow);
+		Done(player.Run(1024, 720, "Ursa Script Player", visible, frames));
+		return 0;
+	}
+	catch (const std::exception& error)
+	{
+		URSA_LOG_ERROR("Player", ToUrsaString(error.what()));
+		return 1;
+	}
+}

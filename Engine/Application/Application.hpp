@@ -2,7 +2,7 @@
 #include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Rhi/RHI.hpp>
-#include <Application/FrameScheduler.hpp>
+#include <Application/SceneFrameRunner.hpp>
 #include <Scene/Scene.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 
@@ -37,7 +37,7 @@ protected:
 	std::shared_ptr<Scene> scene;
 
 private:
-	FrameScheduler frameScheduler;
+	SceneFrameRunner sceneFrameRunner;
 	std::unique_ptr<Renderer3D> sceneRenderer;
 };
 } // namespace Ursa

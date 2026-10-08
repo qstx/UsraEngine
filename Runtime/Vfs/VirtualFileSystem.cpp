@@ -290,6 +290,52 @@ Result<void> VirtualFileSystem::CheckWritable(const VirtualPath& path) const
 	return target ? target.value->provider->CheckWritable(path.relative) : Result<void>::Failure(target.error);
 }
 
+Result<std::filesystem::path> VirtualFileSystem::ResolveForNativeHostInterop(const VirtualPath& path) const
+{
+	if (path.scheme != userDataScheme)
+	{
+		return Result<std::filesystem::path>::Failure(
+		    "Native host paths are restricted to files in the writable user: scheme");
+	}
+	auto writable = ResolveWriteProvider(path);
+	if (!writable)
+	{
+		return Result<std::filesystem::path>::Failure(writable.error);
+	}
+	auto existing = ResolveExisting(path);
+	if (!existing)
+	{
+		return Result<std::filesystem::path>::Failure(existing.error);
+	}
+	if (existing.value != writable.value)
+	{
+		return Result<std::filesystem::path>::Failure(
+		    "Native host path does not resolve to the writable user: provider");
+	}
+	auto directory = std::dynamic_pointer_cast<DirectoryFileProvider>(existing.value->provider);
+	if (!directory)
+	{
+		return Result<std::filesystem::path>::Failure("Native host path requires a directory-backed user: provider");
+	}
+	return directory->ResolveToDisk(path.relative);
+}
+
+Result<std::filesystem::path> VirtualFileSystem::ResolveForExternalToolInterop(const VirtualPath& path) const
+{
+	auto provider = ResolveExisting(path);
+	if (!provider)
+	{
+		return Result<std::filesystem::path>::Failure(provider.error);
+	}
+	auto directory = std::dynamic_pointer_cast<DirectoryFileProvider>(provider.value->provider);
+	if (!directory)
+	{
+		return Result<std::filesystem::path>::Failure("External tools require a directory-mounted file: " +
+		                                              path.ToString());
+	}
+	return directory->ResolveToDisk(path.relative);
+}
+
 Vector<VirtualMount> VirtualFileSystem::Providers() const
 {
 	Vector<VirtualMount> providers;

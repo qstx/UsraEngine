@@ -4,6 +4,8 @@
 
 namespace Ursa
 {
+class VirtualFileSystem;
+
 class DirectoryFileProvider final : public VirtualFileProvider
 {
 public:
@@ -40,6 +42,8 @@ public:
 	}
 
 private:
+	friend class VirtualFileSystem;
+
 	Result<std::filesystem::path> ResolveToDisk(const String& relativePath) const;
 
 	Result<std::filesystem::path> ResolveForWrite(const String& relativePath) const;

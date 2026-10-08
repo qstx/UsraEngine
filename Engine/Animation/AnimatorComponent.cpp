@@ -230,7 +230,7 @@ Result<void> AnimatorComponent::SetSpeed(Ursa::Float32 value)
 	return {};
 }
 
-Result<void> AnimatorComponent::OnUpdate(const FrameContext& context)
+Result<void> AnimatorComponent::Update(const FrameContext& context)
 {
 	if (!playing)
 	{

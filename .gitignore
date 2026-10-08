@@ -1,6 +1,10 @@
 /build/
+/build-*/
 /out/
 /cache/
 /Library/
 /.vs/
 *.user
+
+/Managed/**/bin/
+/Managed/**/obj/

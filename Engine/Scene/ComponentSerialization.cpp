@@ -74,8 +74,9 @@ Result<void> BoxRenderComponent::Serialize(ArchiveWriter& writer) const
 	{
 		return Result<void>::Failure("No material ID resolver for BoxRenderComponent");
 	}
-	auto id = writer.Context()->Identify(*material);
-	return id ? WriteAssetReference(writer, "material", {id.value, 0}) : Result<void>::Failure(id.error);
+	auto materialId = writer.Context()->Identify(*material);
+	return materialId ? WriteAssetReference(writer, "material", {materialId.value, 0})
+	                  : Result<void>::Failure(materialId.error);
 }
 
 Result<void> BoxRenderComponent::Deserialize(const ArchiveReader& reader, SerializationContext& context)

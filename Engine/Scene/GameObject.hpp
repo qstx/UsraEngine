@@ -47,6 +47,11 @@ public:
 		return alive;
 	}
 
+	Scene* TryGetScene() const
+	{
+		return scene;
+	}
+
 	Result<String> Name() const;
 
 	Result<void> SetName(String value);
@@ -68,11 +73,11 @@ public:
 
 	Result<Mat4> WorldTransform() const;
 
-	Result<void> SetEnabled(bool value);
+	Result<void> SetActive(bool value);
 
-	Result<bool> IsEnabled() const;
+	Result<bool> ActiveSelf() const;
 
-	Result<bool> IsActive() const;
+	Result<bool> ActiveInHierarchy() const;
 
 	template <class T, class... Args> Result<T*> AddComponent(Args&&... args)
 	{
@@ -136,7 +141,7 @@ private:
 	Vector<Ptr> children;
 	Vector<std::unique_ptr<Component>> components;
 	LocalTransform localTransform;
-	bool enabled = true;
+	bool activeSelf = true;
 	bool alive = true;
 	Scene* scene = nullptr;
 	Ursa::UInt32 sceneNodeIndex = std::numeric_limits<Ursa::UInt32>::max();

@@ -3,6 +3,7 @@
 #include <Core/Containers.hpp>
 #include <Core/Result.hpp>
 #include <Serialization/ResourceId.hpp>
+#include <Scripting/ScriptTypeDescriptor.hpp>
 #include <Vfs/VirtualFileSystem.hpp>
 #include <nlohmann/json.hpp>
 #include <memory>
@@ -30,6 +31,15 @@ struct AssetGuidAssignment
 {
 	VirtualPath path;
 	ResourceId guid;
+};
+
+using ScriptAssemblyGroup = Ursa::ScriptAssemblyGroup;
+
+struct ScriptSourceAsset
+{
+	VirtualPath path;
+	ResourceId guid;
+	ScriptAssemblyGroup group = ScriptAssemblyGroup::Game;
 };
 
 struct ImportedArtifact
@@ -91,6 +101,8 @@ public:
 	                           const Vector<VirtualPath>& dependencies, const Vector<ImportedArtifact>& artifacts);
 
 	Vector<AssetRecord> Assets() const;
+
+	Vector<ScriptSourceAsset> ScriptSources() const;
 
 	Result<void> Move(const VirtualPath& source, const VirtualPath& destination);
 

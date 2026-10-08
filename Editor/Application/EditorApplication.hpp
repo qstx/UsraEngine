@@ -13,6 +13,8 @@
 #include <Assets/ShaderImportView.hpp>
 #include <Assets/TextureImportView.hpp>
 #include <Assets/ModelImportView.hpp>
+#include <Assets/ScriptBuildService.hpp>
+#include <Scripting/ManagedEditorBridge.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Scene/EditorScenePreview.hpp>
 #include <Scene/EditorGizmo.hpp>
@@ -20,6 +22,13 @@
 #include <Tools/EditorTools.hpp>
 #include <Application/PlaySession.hpp>
 #include <functional>
+#include <future>
+#include <chrono>
+
+namespace Ursa::Scripting
+{
+class DotNetHost;
+}
 
 namespace Ursa::Editor
 {
@@ -42,18 +51,20 @@ public:
 	{
 	}
 
-	virtual ~EditorApplication() = default;
+	virtual ~EditorApplication();
 
 	Result<void> Run(Ursa::UInt32 width = 1280, Ursa::UInt32 height = 720, const String& title = "Ursa Editor",
 	                 bool visible = true, Ursa::UInt32 frameLimit = 0);
 
 	Result<void> OpenProject(const std::filesystem::path& root, const std::filesystem::path& package = {});
 
-protected:
-	virtual Result<void> OnStart()
+	void SetStartupAsset(VirtualPath path)
 	{
-		return {};
+		startupAsset = std::move(path);
 	}
+
+protected:
+	virtual Result<void> OnStart();
 
 	virtual Result<void> OnFrame(Ursa::Float32 deltaSeconds)
 	{
@@ -62,6 +73,43 @@ protected:
 	}
 
 	virtual Result<void> OnGui();
+
+	Result<void> RegisterScriptComponentTypes(const Vector<ManagedExtensionDescriptor>* extensions = nullptr,
+	                                          UInt64 sessionId = 0);
+
+	Result<void> EnsureManagedHost();
+
+	Result<void> ReloadEditorScripts();
+
+	Result<void> OpenEditorAsset(const VirtualPath& path);
+
+	Result<void> CompileScripts();
+
+	bool ScriptWorkPending() const
+	{
+		return scriptBuildJob.valid() || scriptCheckJob.valid();
+	}
+
+	const String& ScriptStatus() const
+	{
+		return scriptBuildStatus;
+	}
+
+	void RequestPlayToggle()
+	{
+		requestRun = true;
+	}
+
+	Scene* RunningScene()
+	{
+		return play.GetScene();
+	}
+
+	void FinishScriptJobs();
+
+	void DrawManagedMenus(const String& root);
+
+	Result<bool> InvokeEditorTool(const ManagedExtensionDescriptor& descriptor);
 
 	virtual void OnStop()
 	{
@@ -93,6 +141,7 @@ protected:
 
 private:
 	EditorProjectSetup projectSetup;
+	VirtualPath startupAsset;
 	std::unique_ptr<EditorProject> project;
 	String activeEditorTool;
 	std::unique_ptr<ImGuiBridge> gui;
@@ -112,6 +161,23 @@ private:
 	bool viewportFocused = false;
 	std::unique_ptr<ProjectWorkspace> workspace;
 	std::unique_ptr<EditorDocuments> documents;
+	std::unique_ptr<AssetDatabase> scriptAssetDatabase;
+	std::unique_ptr<ScriptBuildService> scriptBuildService;
+	std::shared_ptr<Ursa::Scripting::DotNetHost> managedHost;
+	std::future<Result<ScriptBuildReport>> scriptBuildJob;
+	std::future<Result<String>> scriptCheckJob;
+	String observedScriptSources;
+	std::chrono::steady_clock::time_point nextScriptCheck;
+	String scriptBuildStatus;
+	UInt64 editingScriptSession = 0;
+	Vector<ManagedExtensionDescriptor> managedExtensions;
+	Map<String, ComponentEditor> managedEditorFallbacks;
+	Set<String> managedOpenWindows;
+	VirtualPath pendingManagedAsset;
+	ResourceId pendingRunDocument;
+	bool runAfterScriptBuild = false;
+	bool requestRun = false;
+	Set<String> registeredScriptComponentTypes;
 	Ursa::Array<char, 256> assetNameInput{};
 	String workspaceError;
 	String inspectorError;

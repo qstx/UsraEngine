@@ -95,6 +95,164 @@ ResourceId ScopedId(ResourceId instance, ResourceId local)
 	return result;
 }
 
+String EscapePointerSegment(String segment)
+{
+	String escaped;
+	for (char value : segment)
+	{
+		escaped += value == '~' ? "~0" : value == '/' ? "~1" : String(1, value);
+	}
+	return escaped;
+}
+
+Result<void> RemapScriptFieldOverrides(const Json& nodes, Json& overrides, const String& location)
+{
+	if (!overrides.is_object() || !nodes.is_array())
+	{
+		return Result<void>::Failure("Invalid Prefab alias mapping source at " + location);
+	}
+	if (!overrides.contains("properties") || !overrides["properties"].is_object())
+	{
+		return {};
+	}
+	auto& properties = overrides["properties"];
+	for (const auto& node : nodes)
+	{
+		if (!node.is_object() || !node.contains("components") || !node["components"].is_array())
+		{
+			continue;
+		}
+		for (const auto& component : node["components"])
+		{
+			if (!component.is_object() || !component.contains("id") || !component["id"].is_string() ||
+			    !component.contains("data") || !component["data"].is_object() ||
+			    !component["data"].contains("scriptPayload") || !component["data"]["scriptPayload"].is_object())
+			{
+				continue;
+			}
+			const auto& payload = component["data"]["scriptPayload"];
+			if (!payload.contains("FormerFieldNames") || !payload["FormerFieldNames"].is_object())
+			{
+				continue;
+			}
+			const String componentId = component["id"].get<String>();
+			auto propertyValues = properties.find(ToStdString(componentId));
+			if (propertyValues == properties.end() || !propertyValues->is_object())
+			{
+				continue;
+			}
+			Map<String, String> pathAliases;
+			for (const auto& entry : payload["FormerFieldNames"].items())
+			{
+				if (!entry.value().is_array())
+				{
+					return Result<void>::Failure("Invalid script field alias list at " + location + "." + componentId);
+				}
+				const String newPrefix =
+				    "/data/scriptPayload/Fields/" + EscapePointerSegment(ToUrsaString(entry.key()));
+				for (const auto& alias : entry.value())
+				{
+					if (!alias.is_string())
+					{
+						return Result<void>::Failure("Invalid former script field name at " + location + "." +
+						                             componentId);
+					}
+					const String oldPrefix =
+					    "/data/scriptPayload/Fields/" + EscapePointerSegment(ToUrsaString(alias.get<std::string>()));
+					pathAliases[oldPrefix] = newPrefix;
+				}
+			}
+			Vector<std::pair<String, String>> renamedPaths;
+			for (const auto& property : propertyValues->items())
+			{
+				const String oldPath = ToUrsaString(property.key());
+				for (const auto& alias : pathAliases)
+				{
+					if (oldPath == alias.first || (oldPath.size() > alias.first.size() &&
+					                               oldPath.compare(0, alias.first.size(), alias.first) == 0 &&
+					                               oldPath[alias.first.size()] == '/'))
+					{
+						renamedPaths.emplace_back(oldPath, alias.second + oldPath.substr(alias.first.size()));
+						break;
+					}
+				}
+			}
+			for (const auto& renamed : renamedPaths)
+			{
+				if (!propertyValues->contains(ToStdString(renamed.second)))
+				{
+					(*propertyValues)[ToStdString(renamed.second)] = (*propertyValues)[ToStdString(renamed.first)];
+				}
+				propertyValues->erase(ToStdString(renamed.first));
+			}
+		}
+	}
+	return {};
+}
+
+Result<void> MigrateScriptFieldAliases(Json& nodes, const ComponentRegistry& registry, const String& location)
+{
+	if (!nodes.is_array())
+	{
+		return Result<void>::Failure("Invalid Prefab nodes while migrating script fields at " + location);
+	}
+	for (auto& node : nodes)
+	{
+		if (!node.is_object() || !node.contains("components") || !node["components"].is_array())
+		{
+			continue;
+		}
+		for (auto& component : node["components"])
+		{
+			if (!component.is_object() || !component.contains("id") || !component["id"].is_string() ||
+			    !component.contains("data") || !component["data"].is_object() ||
+			    !component["data"].contains("scriptPayload") || !component["data"]["scriptPayload"].is_object())
+			{
+				continue;
+			}
+			auto& payload = component["data"]["scriptPayload"];
+			if (!payload.contains("ScriptType") || !payload["ScriptType"].is_string() || !payload.contains("Fields") ||
+			    !payload["Fields"].is_object())
+			{
+				continue;
+			}
+			const String scriptType = ToUrsaString(payload["ScriptType"].get<std::string>());
+			const Map<String, String> aliases = registry.ScriptFieldAliases(scriptType);
+			if (aliases.empty())
+			{
+				continue;
+			}
+			if (!payload.contains("FormerFieldNames") || !payload["FormerFieldNames"].is_object())
+			{
+				payload["FormerFieldNames"] = Json::object();
+			}
+			for (const auto& alias : aliases)
+			{
+				const std::string formerName = ToStdString(alias.first);
+				const std::string currentName = ToStdString(alias.second);
+				if (payload["Fields"].contains(formerName))
+				{
+					if (!payload["Fields"].contains(currentName))
+					{
+						payload["Fields"][currentName] = payload["Fields"][formerName];
+					}
+					payload["Fields"].erase(formerName);
+				}
+				auto& formerNames = payload["FormerFieldNames"][currentName];
+				if (!formerNames.is_array())
+				{
+					formerNames = Json::array();
+				}
+				if (std::find(formerNames.begin(), formerNames.end(), formerName) == formerNames.end())
+				{
+					formerNames.push_back(formerName);
+				}
+			}
+		}
+	}
+	return {};
+}
+
 Json SceneEnvelope(ResourceId id, Json nodes)
 {
 	return {{"format", "UrsaScene"},
@@ -107,7 +265,7 @@ Json SceneEnvelope(ResourceId id, Json nodes)
 }
 
 Result<Json> ExpandInstances(const String& scenePath, const Json& source, ResourceSession& resources,
-                             Map<String, Map<String, String>>& scopedIds)
+                             const ComponentRegistry& registry, Map<String, Map<String, String>>& scopedIds)
 {
 	Json expanded = source;
 	auto graphVersion = source.find("sceneGraphVersion");
@@ -209,8 +367,20 @@ Result<Json> ExpandInstances(const String& scenePath, const Json& source, Resour
 		{
 			return Result<Json>::Failure("Invalid or nested Prefab at " + prefabSource);
 		}
-		const auto& overrides = instance["overrides"];
-		auto merged = MergePrefabNodes(prefab.value["gameObjects"], overrides,
+		Json prefabNodes = prefab.value["gameObjects"];
+		Json migratedOverrides = instance["overrides"];
+		auto migratedFields = MigrateScriptFieldAliases(prefabNodes, registry, location);
+		if (!migratedFields)
+		{
+			return Result<Json>::Failure(migratedFields.error);
+		}
+		auto remappedOverrides = RemapScriptFieldOverrides(prefabNodes, migratedOverrides, location);
+		if (!remappedOverrides)
+		{
+			return Result<Json>::Failure(remappedOverrides.error);
+		}
+		const auto& overrides = migratedOverrides;
+		auto merged = MergePrefabNodes(prefabNodes, overrides,
 		                               "Prefab " + prefabId.value.ToString() + " instance " +
 		                                   instanceId.value.ToString() + " at " + location);
 		if (!merged)
@@ -332,6 +502,21 @@ Result<Json> ExpandInstances(const String& scenePath, const Json& source, Resour
 						}
 					}
 				};
+				if (component["data"].is_object() && component["data"].contains("scriptPayload") &&
+				    component["data"]["scriptPayload"].is_string())
+				{
+					try
+					{
+						Json scriptPayload = Json::parse(ToStdString(component["data"]["scriptPayload"].get<String>()));
+						remap(scriptPayload);
+						component["data"]["scriptPayload"] = scriptPayload.dump();
+					}
+					catch (const Json::exception& error)
+					{
+						return Result<Json>::Failure("Invalid managed script payload at " + location + ": " +
+						                             error.what());
+					}
+				}
 				remap(component["data"]);
 			}
 			expanded["gameObjects"].push_back(std::move(node));
@@ -465,7 +650,7 @@ Result<LinkedSceneResource> DecodeLinkedSceneDocument(const String& path, Json d
 	try
 	{
 		Map<String, Map<String, String>> scopedIds;
-		auto expanded = ExpandInstances(path, document, context.Resources(), scopedIds);
+		auto expanded = ExpandInstances(path, document, context.Resources(), registry, scopedIds);
 		if (!expanded)
 		{
 			return Result<LinkedSceneResource>::Failure(expanded.error);

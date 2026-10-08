@@ -78,6 +78,22 @@ void fallback(LogLevel level, const char* module, const String& message) noexcep
 	std::fprintf(stderr, "[%s] [%s] %s\n", LevelName(level), module ? module : "Unknown", message.c_str());
 	std::fflush(stderr);
 }
+
+void SetConsoleOutputUtf8() noexcept
+{
+#ifdef _WIN32
+	const auto isConsole = [](DWORD standardHandle)
+	{
+		const HANDLE handle = GetStdHandle(standardHandle);
+		DWORD mode = 0;
+		return handle != nullptr && handle != INVALID_HANDLE_VALUE && GetConsoleMode(handle, &mode) != FALSE;
+	};
+	if (isConsole(STD_OUTPUT_HANDLE) || isConsole(STD_ERROR_HANDLE))
+	{
+		SetConsoleOutputCP(CP_UTF8);
+	}
+#endif
+}
 } // namespace
 
 LogConfig::LogConfig() : level(Log::DefaultLevel())
@@ -91,6 +107,11 @@ LogLevel Log::DefaultLevel() noexcept
 #else
 	return LogLevel::Info;
 #endif
+}
+
+void Log::ConfigureConsoleEncoding() noexcept
+{
+	SetConsoleOutputUtf8();
 }
 
 Result<void> Log::Initialize(const std::filesystem::path& executable, const LogConfig& config)
@@ -178,6 +199,7 @@ Result<void> Log::Initialize(std::shared_ptr<VirtualFileSystem> filesystem, cons
 Result<void> Log::InitializeForCurrentProcess(const LogConfig& config)
 {
 #ifdef _WIN32
+	ConfigureConsoleEncoding();
 	std::wstring buffer(32768, L'\0');
 	const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
 	if (length == 0 || length >= buffer.size())

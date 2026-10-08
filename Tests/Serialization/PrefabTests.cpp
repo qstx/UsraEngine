@@ -6,6 +6,7 @@
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/MaterialResource.hpp>
 #include <Serialization/AssetReference.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -114,7 +115,22 @@ void TestInstances(const std::filesystem::path& root)
 	Ursa::Scene source;
 	auto prefabRoot = Take(source.CreateGameObject());
 	auto child = Take(source.CreateGameObject(prefabRoot));
-	Take(source.AddComponent<Ursa::BoxRenderComponent>(child, Ursa::Color{0.2f, 0.3f, 0.4f, 1.0f}));
+	const auto boxId = Take(source.AddComponent<Ursa::BoxRenderComponent>(child, Ursa::Color{0.2f, 0.3f, 0.4f, 1.0f}));
+	const auto scriptId =
+	    Take(source.AddComponent<Ursa::Scripting::ScriptBehaviourComponent>(child, Ursa::String("Demo.MoveWithInput")));
+	auto* script = static_cast<Ursa::Scripting::ScriptBehaviourComponent*>(source.GetComponent(scriptId));
+	nlohmann::json scriptPayload = nlohmann::json::object();
+	scriptPayload["FormatVersion"] = 1u;
+	scriptPayload["ScriptType"] = "demo.move-with-input";
+	scriptPayload["Version"] = 1u;
+	scriptPayload["Fields"] = nlohmann::json::object();
+	scriptPayload["Fields"]["step"] = 2.5;
+	scriptPayload["Fields"]["targetObject"]["$ursaReference"]["Kind"] = "GameObject";
+	scriptPayload["Fields"]["targetObject"]["$ursaReference"]["Id"] = Ursa::ToStdString(prefabRoot->Id().ToString());
+	scriptPayload["Fields"]["targetComponent"]["$ursaReference"]["Kind"] = "Component";
+	scriptPayload["Fields"]["targetComponent"]["$ursaReference"]["Id"] =
+	    Ursa::ToStdString(Take(source.ComponentPersistentId(boxId)).ToString());
+	script->SetSerializedPayload(Ursa::ToUrsaString(scriptPayload.dump()));
 	auto unrelated = Take(source.CreateGameObject());
 	Take(source.AddComponent<UnregisteredComponent>(unrelated));
 	const auto prefabId = Ursa::ResourceId::Generate();
@@ -130,6 +146,11 @@ void TestInstances(const std::filesystem::path& root)
 	const auto assetChildren = asset.Root()->Children();
 	Expect(asset.Id() == prefabId && assetRootId == prefabRoot->Id() && assetChildren.size() == 1 &&
 	           assetChildren[0]->Id() == child->Id() && assetChildren[0]->FindComponent<Ursa::BoxRenderComponent>() &&
+	           assetChildren[0]->FindComponent<Ursa::Scripting::ScriptBehaviourComponent>() &&
+	           assetChildren[0]->FindComponent<Ursa::Scripting::ScriptBehaviourComponent>()->HasSerializedPayload() &&
+	           Ursa::ToStdString(
+	               assetChildren[0]->FindComponent<Ursa::Scripting::ScriptBehaviourComponent>()->SerializedPayload())
+	                   .find("2.5") != std::string::npos &&
 	           assetChildren[0]->FindComponent<Ursa::BoxRenderComponent>()->TryGetScene() == nullptr,
 	       "PrefabAsset did not preserve detached GameObject or component identity");
 	const auto copiedPrefabPath = root / "asset-copy.ursaprefab";
@@ -149,6 +170,17 @@ void TestInstances(const std::filesystem::path& root)
 	           instantiatedScene.Contains(instance) && secondPrefabInstance->Id() != instance->Id() &&
 	           secondInstanceScene.Contains(instanceInSecondScene) && instanceInSecondScene->Id() != instance->Id(),
 	       "PrefabAsset instantiation did not create independent runtime GameObjects across instances and Scenes");
+	auto* instanceScript = instance->Children()[0]->FindComponent<Ursa::Scripting::ScriptBehaviourComponent>();
+	const auto instanceBox = instance->Children()[0]->FindComponent<Ursa::BoxRenderComponent>();
+	Expect(instanceScript && instanceBox, "Instantiated Prefab lost its script or referenced native Component");
+	const nlohmann::json instancePayload =
+	    nlohmann::json::parse(Ursa::ToStdString(instanceScript->SerializedPayload()));
+	const auto& fields = instancePayload.at("Fields");
+	Expect(fields.at("targetObject").at("$ursaReference").at("Id").get<std::string>() ==
+	               Ursa::ToStdString(instance->Id().ToString()) &&
+	           fields.at("targetComponent").at("$ursaReference").at("Id").get<std::string>() ==
+	               Ursa::ToStdString(instanceBox->PersistentId().ToString()),
+	       "Prefab instantiation did not remap script object/Component references into the new instance");
 	done(instantiatedScene.DestroyGameObject(instance));
 	done(instantiatedScene.DestroyGameObject(secondPrefabInstance));
 	done(secondInstanceScene.DestroyGameObject(instanceInSecondScene));
@@ -213,6 +245,90 @@ void TestInstances(const std::filesystem::path& root)
 	std::filesystem::remove(firstPath);
 	std::filesystem::remove(secondPath);
 	std::filesystem::remove(prefabPath);
+}
+
+void TestScriptFieldOverrideMigration(const std::filesystem::path& root)
+{
+	Ursa::ComponentRegistry registry;
+	done(Ursa::RegisterBuiltinComponents(registry));
+	done(registry.RegisterScriptFieldAlias("demo.migrating", "oldName", "newName"));
+	Ursa::Scene prefabSource;
+	const auto prefabRoot = Take(prefabSource.CreateGameObject());
+	const auto child = Take(prefabSource.CreateGameObject(prefabRoot));
+	const auto scriptId = Take(prefabSource.AddComponent<Ursa::Scripting::ScriptBehaviourComponent>(
+	    child, Ursa::String("Demo.MigratingBehaviour")));
+	auto* script = static_cast<Ursa::Scripting::ScriptBehaviourComponent*>(prefabSource.GetComponent(scriptId));
+	nlohmann::json payload = nlohmann::json::object();
+	payload["FormatVersion"] = 1u;
+	payload["ScriptType"] = "demo.migrating";
+	payload["Version"] = 2u;
+	payload["Fields"] = {{"oldName", 2.5}};
+	script->SetSerializedPayload(Ursa::ToUrsaString(payload.dump()));
+
+	const Ursa::ResourceId prefabId = Ursa::ResourceId::Generate();
+	const auto prefabPath = root / "migration.ursaprefab";
+	done(Ursa::SavePrefabResource(prefabPath, prefabId, prefabSource, prefabRoot, registry));
+	done(Ursa::WriteResourceMetadataTree(root));
+	Ursa::Scene sceneSource;
+	const Ursa::ResourceId sceneId = Ursa::ResourceId::Generate();
+	const auto scenePath = root / "migration.ursascene";
+	auto document = Take(Ursa::EncodeSceneDocument(scenePath, sceneId, sceneSource, registry));
+	done(Ursa::WriteJsonResource(scenePath, document));
+	done(Ursa::WriteResourceMetadata(scenePath));
+	done(Ursa::WriteResourceMetadataTree(root));
+	const Ursa::ResourceId instanceId = Ursa::ResourceId::Generate();
+	done(Ursa::AddPrefabInstance(document, prefabId, instanceId));
+	const std::string componentKey = Ursa::ToStdString(Take(prefabSource.ComponentPersistentId(scriptId)).ToString());
+	document["instances"][0]["overrides"]["properties"][componentKey]["/data/scriptPayload/Fields/oldName"] = 9.5;
+	done(Ursa::WriteJsonResource(scenePath, document));
+	done(Ursa::WriteResourceMetadataTree(root));
+	auto resources = Take(Ursa::ResourceSession::Open({root}));
+	Expect(std::filesystem::exists(scenePath) && std::filesystem::exists(prefabPath),
+	       "Script Prefab override fixtures were not written to disk");
+	const auto prefabLocation = Take(resources->ResolveAsset(prefabId, 0));
+	Expect(prefabLocation.FileName() == "migration.ursaprefab",
+	       "Script Prefab resource ID resolved to the wrong fixture asset");
+	Ursa::ComponentLoadContext context(*resources);
+	auto linked =
+	    Take(Ursa::DecodeLinkedSceneDocument(Ursa::String("fixture:migration.ursascene"), document, registry, context));
+	auto linkedChild = linked.scene->RootGameObjects().front()->Children().front();
+	auto* linkedScript = linkedChild->FindComponent<Ursa::Scripting::ScriptBehaviourComponent>();
+	Expect(linkedScript != nullptr, "Script Prefab instance has no managed component");
+	const nlohmann::json linkedPayload = nlohmann::json::parse(Ursa::ToStdString(linkedScript->SerializedPayload()));
+	Expect(linkedPayload.at("Fields").contains("newName"),
+	       ("Prefab field migration produced: " + linkedPayload.dump()).c_str());
+	Expect(linkedPayload.at("Fields").at("newName").get<double>() == 9.5 &&
+	           !linkedPayload.at("Fields").contains("oldName"),
+	       "Prefab override did not follow FormerlySerializedAs from oldName to newName");
+	auto editedPayload = linkedPayload;
+	editedPayload["Fields"]["newName"] = 7.5;
+	linkedScript->SetSerializedPayload(Ursa::ToUrsaString(editedPayload.dump()));
+	done(Ursa::SaveLinkedSceneResource(scenePath, linked, registry));
+	const auto savedPrefab = Take(Ursa::ReadJsonResource(prefabPath, Ursa::ResourceKind::Prefab));
+	bool sourceStayedUnchanged = false;
+	for (const auto& node : savedPrefab.at("gameObjects"))
+	{
+		for (const auto& component : node.at("components"))
+		{
+			if (component.at("type") == "ursa.ScriptBehaviour")
+			{
+				const auto sourcePayload = component.at("data").at("scriptPayload");
+				sourceStayedUnchanged = sourcePayload.at("Fields").at("oldName").get<double>() == 2.5;
+			}
+		}
+	}
+	Expect(sourceStayedUnchanged, "Saving a script Prefab instance modified the Prefab source fields");
+	auto refreshedResources = Take(Ursa::ResourceSession::Open({root}));
+	Ursa::ComponentLoadContext reloadContext(*refreshedResources);
+	auto reloadedLinked = Take(Ursa::LoadLinkedSceneResource(scenePath, registry, reloadContext));
+	auto reloadedScript = reloadedLinked.scene->RootGameObjects()
+	                          .front()
+	                          ->Children()
+	                          .front()
+	                          ->FindComponent<Ursa::Scripting::ScriptBehaviourComponent>();
+	const auto reloadedPayload = nlohmann::json::parse(Ursa::ToStdString(reloadedScript->SerializedPayload()));
+	Expect(reloadedPayload.at("Fields").at("newName").get<double>() == 7.5,
+	       "Saving/reloading a managed Prefab field override lost its value");
 }
 
 void TestProperties(const std::filesystem::path& root)
@@ -498,6 +614,8 @@ int main()
 			std::filesystem::create_directory(root);
 		};
 		TestInstances(root);
+		reset();
+		TestScriptFieldOverrideMigration(root);
 		reset();
 		TestProperties(root);
 		reset();

@@ -1,0 +1,387 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+
+internal sealed class Manifest
+{
+	public string RuntimeAssembly { get; set; } = string.Empty;
+	public string EditorAssembly { get; set; } = string.Empty;
+	public string ReferenceDirectory { get; set; } = string.Empty;
+	public string OutputPath { get; set; } = string.Empty;
+	public List<SourceEntry> Sources { get; set; } = new();
+}
+
+internal sealed class SourceEntry
+{
+	public string Path { get; set; } = string.Empty;
+	public string VirtualPath { get; set; } = string.Empty;
+	public string Guid { get; set; } = string.Empty;
+	public string Group { get; set; } = string.Empty;
+}
+
+internal sealed class ScriptRecord
+{
+	public string SourceGuid { get; set; } = string.Empty;
+	public string ScriptType { get; set; } = string.Empty;
+	public uint Version { get; set; }
+	public ulong LocalFileId { get; set; }
+	public string ClrTypeName { get; set; } = string.Empty;
+	public string VirtualPath { get; set; } = string.Empty;
+	public string Group { get; set; } = string.Empty;
+	public List<ScriptFieldRecord> Fields { get; set; } = new();
+}
+
+internal sealed class ScriptFieldRecord
+{
+	public string Name { get; set; } = string.Empty;
+	public string Kind { get; set; } = string.Empty;
+	public string ElementKind { get; set; } = string.Empty;
+	public string TypeName { get; set; } = string.Empty;
+	public string ElementTypeName { get; set; } = string.Empty;
+	public string DefaultValueJson { get; set; } = "null";
+	public List<string> EnumValues { get; set; } = new();
+	public List<object> EnumNumericValues { get; set; } = new();
+	public string EnumUnderlyingType { get; set; } = string.Empty;
+	public List<string> FormerNames { get; set; } = new();
+}
+
+internal sealed class Catalog
+{
+	public uint Version { get; set; } = 1;
+	public List<ScriptRecord> Scripts { get; set; } = new();
+}
+
+internal static class Program
+{
+	private static int Main(string[] arguments)
+	{
+		if (arguments.Length != 1)
+		{
+			Console.Error.WriteLine("Usage: Ursa.ScriptCatalogGenerator <manifest.json>");
+			return 2;
+		}
+
+		try
+		{
+			Manifest manifest = JsonSerializer.Deserialize<Manifest>(File.ReadAllText(arguments[0]))
+			                    ?? throw new InvalidDataException("Script catalog manifest is empty.");
+			if (!File.Exists(manifest.RuntimeAssembly) || !File.Exists(manifest.EditorAssembly) ||
+			    !Directory.Exists(manifest.ReferenceDirectory))
+			{
+				throw new FileNotFoundException("Script catalog compiler references are incomplete.");
+			}
+
+			var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+			var trees = manifest.Sources.Select(source =>
+				CSharpSyntaxTree.ParseText(File.ReadAllText(source.Path), parseOptions, source.VirtualPath)).ToArray();
+			var references = Directory.GetFiles(manifest.ReferenceDirectory, "*.dll")
+				.Select(path => MetadataReference.CreateFromFile(path)).ToList();
+			references.Add(MetadataReference.CreateFromFile(manifest.RuntimeAssembly));
+			references.Add(MetadataReference.CreateFromFile(manifest.EditorAssembly));
+			var compilation = CSharpCompilation.Create("Ursa.ScriptCatalog", trees, references,
+				new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+			var errors = compilation.GetDiagnostics().Where(diagnostic =>
+			{
+				if (diagnostic.Severity != DiagnosticSeverity.Error)
+				{
+					return false;
+				}
+				if (diagnostic.Location.SourceTree == null)
+				{
+					return true;
+				}
+				SourceEntry? source = manifest.Sources.FirstOrDefault(item => item.VirtualPath == diagnostic.Location.SourceTree.FilePath);
+				return source == null || source.Group != "Editor";
+			}).ToArray();
+			if (errors.Length != 0)
+			{
+				foreach (Diagnostic diagnostic in errors)
+				{
+					Console.Error.WriteLine(diagnostic.ToString());
+				}
+				return 1;
+			}
+
+			INamedTypeSymbol behaviorBase = compilation.GetTypeByMetadataName("Ursa.Behaviour")
+			                                ?? throw new InvalidDataException("Ursa.Runtime does not define Ursa.Behaviour.");
+			INamedTypeSymbol? scriptTypeAttribute = compilation.GetTypeByMetadataName("Ursa.UrsaScriptTypeAttribute");
+			INamedTypeSymbol? behaviorType = compilation.GetTypeByMetadataName("Ursa.Behaviour");
+			INamedTypeSymbol? componentType = compilation.GetTypeByMetadataName("Ursa.Component");
+			INamedTypeSymbol? serializeFieldAttribute = compilation.GetTypeByMetadataName("Ursa.SerializeFieldAttribute");
+			INamedTypeSymbol? formerlySerializedAsAttribute =
+				compilation.GetTypeByMetadataName("Ursa.FormerlySerializedAsAttribute");
+			INamedTypeSymbol? nonSerializedAttribute = compilation.GetTypeByMetadataName("System.NonSerializedAttribute");
+			var catalog = new Catalog();
+			var typeIds = new HashSet<string>(StringComparer.Ordinal);
+			var localIds = new HashSet<ulong>();
+			foreach (SyntaxTree tree in trees)
+			{
+				SourceEntry source = manifest.Sources.First(item => item.VirtualPath == tree.FilePath);
+				SemanticModel semanticModel = compilation.GetSemanticModel(tree);
+				var root = tree.GetCompilationUnitRoot();
+				foreach (ClassDeclarationSyntax declaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+				{
+					if (semanticModel.GetDeclaredSymbol(declaration) is not INamedTypeSymbol type ||
+					    type.DeclaredAccessibility != Accessibility.Public || type.IsAbstract || type.Arity != 0 ||
+					    !DerivesFrom(type, behaviorBase))
+					{
+						continue;
+					}
+
+					(string scriptTypeId, uint version) = ReadScriptType(type, scriptTypeAttribute, source);
+					if (!typeIds.Add(scriptTypeId))
+					{
+						throw new InvalidDataException($"Duplicate ScriptType '{scriptTypeId}' in {source.VirtualPath}.");
+					}
+					ulong localFileId = MakeLocalFileId(scriptTypeId);
+					if (!localIds.Add(localFileId))
+					{
+						throw new InvalidDataException($"Duplicate ScriptType local file ID for '{scriptTypeId}'.");
+					}
+					catalog.Scripts.Add(new ScriptRecord
+					{
+						SourceGuid = source.Guid,
+						ScriptType = scriptTypeId,
+						Version = version,
+						LocalFileId = localFileId,
+						ClrTypeName = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) + ", " +
+						              (source.Group == "Editor" ? "Ursa.EditorScripts" : "Ursa.Game"),
+						VirtualPath = source.VirtualPath,
+						Group = source.Group,
+						Fields = DescribeFields(type, compilation, behaviorType, componentType, serializeFieldAttribute,
+						                        formerlySerializedAsAttribute, nonSerializedAttribute)
+					});
+				}
+			}
+
+			catalog.Scripts.Sort((left, right) => string.CompareOrdinal(left.ScriptType, right.ScriptType));
+			Directory.CreateDirectory(Path.GetDirectoryName(manifest.OutputPath)!);
+			File.WriteAllText(manifest.OutputPath, JsonSerializer.Serialize(catalog, new JsonSerializerOptions { WriteIndented = true }));
+			return 0;
+		}
+		catch (Exception exception)
+		{
+			Console.Error.WriteLine(exception.Message);
+			return 2;
+		}
+	}
+
+	private static bool DerivesFrom(INamedTypeSymbol type, INamedTypeSymbol baseType)
+	{
+		for (INamedTypeSymbol? current = type.BaseType; current != null; current = current.BaseType)
+		{
+			if (SymbolEqualityComparer.Default.Equals(current, baseType))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static (string Id, uint Version) ReadScriptType(INamedTypeSymbol type, INamedTypeSymbol? attributeType,
+		SourceEntry source)
+	{
+		if (attributeType != null)
+		{
+			foreach (AttributeData attribute in type.GetAttributes())
+			{
+				if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, attributeType))
+				{
+					continue;
+				}
+				if (attribute.ConstructorArguments.Length != 1 || attribute.ConstructorArguments[0].Value is not string id ||
+				    string.IsNullOrWhiteSpace(id))
+				{
+					throw new InvalidDataException($"Invalid UrsaScriptType attribute on {type.Name} in {source.VirtualPath}.");
+				}
+				uint version = 1;
+				foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
+				{
+					if (argument.Key == "Version" && argument.Value.Value is uint declaredVersion)
+					{
+						version = declaredVersion;
+					}
+				}
+				return (id, version);
+			}
+		}
+		return ($"auto:{source.Guid}:{type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)}", 1);
+	}
+
+	private static ulong MakeLocalFileId(string id)
+	{
+		byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(id));
+		ulong value = BitConverter.ToUInt64(digest, 0);
+		return value == 0 ? 1ul : value;
+	}
+
+	private static List<ScriptFieldRecord> DescribeFields(INamedTypeSymbol scriptType, Compilation compilation,
+		INamedTypeSymbol? behaviorBase, INamedTypeSymbol? componentBase, INamedTypeSymbol? serializeFieldAttribute,
+		INamedTypeSymbol? formerNameAttribute, INamedTypeSymbol? nonSerializedAttribute)
+	{
+		var fields = new List<ScriptFieldRecord>();
+		for (INamedTypeSymbol? current = scriptType;
+		     current != null && !SymbolEqualityComparer.Default.Equals(current, behaviorBase) &&
+	     !SymbolEqualityComparer.Default.Equals(current, componentBase);
+		     current = current.BaseType)
+		{
+			foreach (IFieldSymbol field in current.GetMembers().OfType<IFieldSymbol>())
+			{
+				bool optedIn = serializeFieldAttribute != null && field.GetAttributes().Any(attribute =>
+					SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, serializeFieldAttribute));
+				if (field.IsImplicitlyDeclared || (field.DeclaredAccessibility != Accessibility.Public && !optedIn) ||
+				    field.IsStatic || field.IsConst || field.IsReadOnly ||
+				    (nonSerializedAttribute != null && field.GetAttributes().Any(attribute =>
+					 SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, nonSerializedAttribute))))
+				{
+					continue;
+				}
+
+				(string kind, string elementKind) = FieldKind(field.Type);
+				var record = new ScriptFieldRecord
+				{
+					Name = field.Name,
+					Kind = kind,
+					ElementKind = elementKind,
+					TypeName = field.Type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+					DefaultValueJson = DefaultValueJson(field, compilation, kind)
+				};
+				ITypeSymbol scalarType = field.Type is IArrayTypeSymbol arrayField ? arrayField.ElementType :
+					field.Type is INamedTypeSymbol listField && kind == "List" ? listField.TypeArguments[0] : field.Type;
+				record.ElementTypeName = kind is "Array" or "List" ? scalarType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) : string.Empty;
+				if (scalarType.TypeKind == TypeKind.Enum)
+				{
+					record.EnumUnderlyingType = ((INamedTypeSymbol)scalarType).EnumUnderlyingType!.ToDisplayString();
+					record.EnumNumericValues = scalarType.GetMembers().OfType<IFieldSymbol>()
+						.Where(member => member.HasConstantValue && !member.IsImplicitlyDeclared)
+						.Select(member => member.ConstantValue!).ToList();
+					record.EnumValues = scalarType.GetMembers().OfType<IFieldSymbol>()
+						.Where(member => member.HasConstantValue && !member.IsImplicitlyDeclared)
+						.Select(member => member.Name).ToList();
+				}
+				if (formerNameAttribute != null)
+				{
+					record.FormerNames = field.GetAttributes()
+						.Where(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, formerNameAttribute) &&
+						                    attribute.ConstructorArguments.Length == 1 &&
+						                    attribute.ConstructorArguments[0].Value is string)
+						.Select(attribute => (string)attribute.ConstructorArguments[0].Value!)
+						.Distinct(StringComparer.Ordinal).ToList();
+				}
+				fields.Add(record);
+			}
+		}
+		fields.Sort((left, right) => string.CompareOrdinal(left.Name, right.Name));
+		return fields;
+	}
+
+	private static (string Kind, string ElementKind) FieldKind(ITypeSymbol type)
+	{
+		if (type is IArrayTypeSymbol array)
+		{
+			if (array.Rank != 1 || array.ElementType is IArrayTypeSymbol)
+			{
+				return ("Unsupported", "Unsupported");
+			}
+			return ("Array", ScalarFieldKind(array.ElementType));
+		}
+		if (type is INamedTypeSymbol named && named.IsGenericType &&
+		    named.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.List<T>")
+		{
+			return ("List", ScalarFieldKind(named.TypeArguments[0]));
+		}
+		return (ScalarFieldKind(type), "Unsupported");
+	}
+
+	private static string ScalarFieldKind(ITypeSymbol type)
+	{
+		if (type.SpecialType == SpecialType.System_Boolean) return "Boolean";
+		if (type.SpecialType is SpecialType.System_SByte or SpecialType.System_Int16 or SpecialType.System_Int32 or
+		    SpecialType.System_Int64) return "SignedInteger";
+		if (type.SpecialType is SpecialType.System_Byte or SpecialType.System_UInt16 or SpecialType.System_UInt32 or
+		    SpecialType.System_UInt64) return "UnsignedInteger";
+		if (type.SpecialType is SpecialType.System_Single or SpecialType.System_Double) return "FloatingPoint";
+		if (type.SpecialType == SpecialType.System_String) return "String";
+		if (type.TypeKind == TypeKind.Enum) return "Enumeration";
+		for (INamedTypeSymbol? current = type as INamedTypeSymbol; current != null; current = current.BaseType)
+		{
+			if (current.ToDisplayString() == "Ursa.Component") return "ComponentReference";
+		}
+		if (type.ContainingNamespace.ToDisplayString() != "Ursa") return "Unsupported";
+		return type.Name switch
+		{
+			"Vector3" => "Vector3",
+			"Quaternion" => "Quaternion",
+			"Color" => "Color",
+			"AssetReference" => "AssetReference",
+			"GameObject" => "GameObjectReference",
+			"Component" or "Behaviour" => "ComponentReference",
+			_ => "Unsupported"
+		};
+	}
+
+	private static string DefaultValueJson(IFieldSymbol field, Compilation compilation, string kind)
+	{
+		foreach (SyntaxReference reference in field.DeclaringSyntaxReferences)
+		{
+			if (reference.GetSyntax() is not VariableDeclaratorSyntax variable || variable.Initializer == null)
+			{
+				continue;
+			}
+			SemanticModel model = compilation.GetSemanticModel(variable.SyntaxTree);
+			ExpressionSyntax initializer = variable.Initializer.Value;
+			if (kind == "Enumeration")
+			{
+				ISymbol? symbol = model.GetSymbolInfo(initializer).Symbol;
+				if (symbol is IFieldSymbol enumMember && enumMember.ContainingType.TypeKind == TypeKind.Enum)
+				{
+					return JsonSerializer.Serialize(enumMember.ConstantValue);
+				}
+			}
+			Optional<object?> constant = model.GetConstantValue(initializer);
+			if (constant.HasValue)
+			{
+				return JsonSerializer.Serialize(constant.Value);
+			}
+			if (kind is "Vector3" or "Quaternion" or "Color")
+			{
+				IEnumerable<ArgumentSyntax>? arguments = initializer switch
+				{
+					ObjectCreationExpressionSyntax creation => creation.ArgumentList?.Arguments,
+					ImplicitObjectCreationExpressionSyntax creation => creation.ArgumentList.Arguments,
+					_ => null
+				};
+				if (arguments != null)
+				{
+					var values = arguments.Select(argument => model.GetConstantValue(argument.Expression))
+						.Select(value => value.HasValue ? value.Value : null).ToList();
+					while (values.Count < 4)
+					{
+						values.Add(kind == "Quaternion" && values.Count == 3 || kind == "Color" && values.Count == 3 ? 1.0 : 0.0);
+					}
+					if (kind == "Vector3") values.RemoveAt(3);
+					return JsonSerializer.Serialize(values);
+				}
+			}
+			break;
+		}
+		return kind switch
+		{
+			"Boolean" => "false",
+			"SignedInteger" or "UnsignedInteger" or "FloatingPoint" => "0",
+			"String" or "GameObjectReference" or "ComponentReference" or "AssetReference" => "null",
+			"Vector3" => "[0,0,0]",
+			"Quaternion" or "Color" => "[0,0,0,0]",
+			"Enumeration" => "0",
+			"Array" or "List" => "[]",
+			_ => "null"
+		};
+	}
+}

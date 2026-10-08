@@ -97,11 +97,14 @@ Result<Scene::ObjectHandle> Scene::RegisterGameObject(const GameObject::Ptr& obj
 			}
 			ComponentSlot& componentSlot = components[componentIndex];
 			const ComponentId componentId{componentIndex, componentSlot.generation};
-			componentSlot.persistentId = ResourceId::Generate();
+			componentSlot.persistentId = component->persistentId;
 			componentSlot.owner = handle;
 			componentSlot.object = component.get();
-			componentSlot.enabled = true;
+			componentSlot.enabled = component->enabled;
+			componentSlot.awakeCalled = false;
+			componentSlot.enableCalled = false;
 			componentSlot.started = false;
+			componentSlot.wasActive = false;
 			componentSlot.pendingAdd = pendingCreate;
 			componentSlot.pendingRemoval = false;
 			componentSlot.availableFrame = frameSerial + (pendingCreate ? 1 : 0);
@@ -118,6 +121,38 @@ Result<Scene::ObjectHandle> Scene::RegisterGameObject(const GameObject::Ptr& obj
 	return Result<ObjectHandle>::Success(root);
 }
 
+std::function<void()> Scene::SetRuntimePreparation(std::function<Result<void>()> callback, bool clearOnRevoke)
+{
+	auto state = std::make_shared<RuntimePreparation>();
+	state->callback = std::move(callback);
+	runtimePreparation = state;
+	std::weak_ptr<RuntimePreparation> weak = state;
+	return [this, weak, clearOnRevoke]()
+	{
+		if (auto current = weak.lock())
+		{
+			current->callback = {};
+			if (clearOnRevoke)
+			{
+				Clear();
+			}
+		}
+	};
+}
+
+Result<void> Scene::PrepareRuntime()
+{
+	if (!runtimePreparation || !runtimePreparation->callback || runtimePreparation->preparing)
+	{
+		return {};
+	}
+	auto state = runtimePreparation;
+	state->preparing = true;
+	auto prepared = state->callback();
+	state->preparing = false;
+	return prepared;
+}
+
 Result<void> Scene::AttachGameObject(const GameObject::Ptr& object, GameObject::Ptr parent)
 {
 	if (!object || !object->alive || object->parent)
@@ -127,11 +162,6 @@ Result<void> Scene::AttachGameObject(const GameObject::Ptr& object, GameObject::
 	if (parent && !Contains(parent))
 	{
 		return Result<void>::Failure("Cannot attach a GameObject under an invalid Scene parent");
-	}
-	if (inPhase)
-	{
-		commands.push_back([this, object, parent] { return AttachGameObjectNow(object, std::move(parent), true); });
-		return {};
 	}
 	return AttachGameObjectNow(object, std::move(parent));
 }
@@ -157,7 +187,7 @@ Result<void> Scene::AttachGameObjectNow(const GameObject::Ptr& object, GameObjec
 				if (componentId && componentId.index < components.size() &&
 				    components[componentId.index].generation == componentId.generation)
 				{
-					components[componentId.index].availableFrame = frameSerial + 1;
+					components[componentId.index].availableFrame = frameSerial;
 				}
 			}
 			for (const auto& child : current->children)
@@ -180,6 +210,41 @@ Result<void> Scene::AttachGameObjectNow(const GameObject::Ptr& object, GameObjec
 	{
 		rootObjects.push_back(object);
 	}
+	if (hasRuntimeFrame)
+	{
+		auto prepared = PrepareRuntime();
+		if (!prepared)
+		{
+			return prepared;
+		}
+	}
+	Vector<GameObject::Ptr> pending{object};
+	while (!pending.empty())
+	{
+		auto current = std::move(pending.back());
+		pending.pop_back();
+		for (const auto& child : current->Children())
+		{
+			pending.push_back(child);
+		}
+		for (Component* component : current->Components())
+		{
+			if (!Contains(current) || !ContainsComponent(component->Id()))
+			{
+				continue;
+			}
+			auto bound = component->PrepareRuntimeBinding();
+			if (!bound)
+			{
+				return bound;
+			}
+			auto initialized = InitializeAttachedComponent(component->Id());
+			if (!initialized)
+			{
+				return initialized;
+			}
+		}
+	}
 	return {};
 }
 
@@ -190,14 +255,15 @@ Result<GameObject::Ptr> Scene::CreateGameObject(String name, GameObject::Ptr par
 	{
 		return Result<GameObject::Ptr>::Failure("Cannot create a GameObject under an invalid Scene parent");
 	}
-	auto registered = RegisterGameObject(object, inPhase);
+	const bool deferCreate = inPhase || inLifecycle;
+	auto registered = RegisterGameObject(object, deferCreate);
 	if (!registered)
 	{
 		return Result<GameObject::Ptr>::Failure(registered.error);
 	}
 	const ObjectHandle objectHandle = registered.value;
 	const ObjectHandle parentHandle = HandleOf(parent.get());
-	if (inPhase)
+	if (deferCreate)
 	{
 		objects[objectHandle.index].pendingParent = parentHandle;
 		objects[objectHandle.index].hasPendingParent = true;
@@ -241,7 +307,7 @@ Result<void> Scene::DestroyGameObject(const GameObject::Ptr& object)
 	{
 		return Result<void>::Failure("Cannot destroy a GameObject that is not in this Scene");
 	}
-	if (inPhase)
+	if (inPhase || inLifecycle)
 	{
 		MarkPendingDestroy(handle);
 		commands.push_back(
@@ -257,7 +323,7 @@ Result<void> Scene::DestroyGameObject(const GameObject::Ptr& object)
 		return {};
 	}
 	DestroyObjectNow(handle);
-	return {};
+	return CommitChanges();
 }
 
 bool Scene::Contains(const GameObject::Ptr& object) const
@@ -296,13 +362,19 @@ Result<void> Scene::SetParent(const GameObject::Ptr& object, GameObject::Ptr par
 		ancestor = slot.hasPendingParent ? (slot.pendingParent ? objects[slot.pendingParent.index].object : nullptr)
 		                                 : ancestor->parent;
 	}
-	if (inPhase)
+	if (inPhase || inLifecycle)
 	{
 		objects[childHandle.index].pendingParent = parentHandle;
 		objects[childHandle.index].hasPendingParent = true;
 		commands.push_back(
 		    [this, childHandle, parentHandle]()
 		    {
+			    if (childHandle.index < objects.size() &&
+			        objects[childHandle.index].generation == childHandle.generation &&
+			        objects[childHandle.index].pendingDestroy)
+			    {
+				    return Result<void>{};
+			    }
 			    if (!Contains(childHandle) || (parentHandle && !Contains(parentHandle)))
 			    {
 				    return Result<void>::Failure("Cannot commit reparenting: GameObject or parent is no longer valid");
@@ -525,31 +597,31 @@ Result<Mat4> Scene::WorldTransform(const GameObject::Ptr& object) const
 	return object->WorldTransform();
 }
 
-Result<void> Scene::SetEnabled(const GameObject::Ptr& object, bool enabled)
+Result<void> Scene::SetActive(const GameObject::Ptr& object, bool active)
 {
 	if (!Contains(object))
 	{
 		return Result<void>::Failure("Cannot change the state of a GameObject outside this Scene");
 	}
-	return object->SetEnabled(enabled);
+	return object->SetActive(active);
 }
 
-Result<bool> Scene::IsEnabled(const GameObject::Ptr& object) const
+Result<bool> Scene::ActiveSelf(const GameObject::Ptr& object) const
 {
 	if (!Contains(object))
 	{
 		return Result<bool>::Failure("Cannot query a GameObject outside this Scene");
 	}
-	return object->IsEnabled();
+	return object->ActiveSelf();
 }
 
-Result<bool> Scene::IsActive(const GameObject::Ptr& object) const
+Result<bool> Scene::ActiveInHierarchy(const GameObject::Ptr& object) const
 {
 	if (!Contains(object))
 	{
 		return Result<bool>::Failure("Cannot query a GameObject outside this Scene");
 	}
-	return object->IsActive();
+	return Result<bool>::Success(IsGameObjectActive(object.get()));
 }
 
 Result<ComponentId> Scene::AddComponentOwned(const GameObject::Ptr& object, std::unique_ptr<Component> component)
@@ -589,17 +661,27 @@ Result<Component*> Scene::AttachComponent(GameObject& owner, std::unique_ptr<Com
 	object->gameObject = &owner;
 	Component* component = object.get();
 	owner.components.push_back(std::move(object));
-	slot.persistentId = ResourceId::Generate();
+	slot.persistentId = component->persistentId;
 	component->scene = this;
 	component->id = id;
 	slot.owner = node;
 	slot.object = component;
-	slot.enabled = true;
+	slot.enabled = component->enabled;
+	slot.awakeCalled = false;
+	slot.enableCalled = false;
 	slot.started = false;
-	slot.pendingAdd = inPhase;
+	slot.wasActive = false;
+	const bool deferAttach = inPhase || inLifecycle;
+	slot.pendingAdd = deferAttach;
 	slot.pendingRemoval = false;
-	slot.availableFrame = frameSerial + (inPhase ? 1 : 0);
-	if (inPhase)
+	slot.availableFrame = frameSerial + (deferAttach ? 1 : 0);
+	auto bound = component->PrepareRuntimeBinding();
+	if (!bound)
+	{
+		RemoveComponentNow(id);
+		return Result<Component*>::Failure(bound.error);
+	}
+	if (deferAttach)
 	{
 		commands.push_back(
 		    [this, id, node]()
@@ -610,8 +692,15 @@ Result<Component*> Scene::AttachComponent(GameObject& owner, std::unique_ptr<Com
 				    return Result<void>::Failure("Cannot commit component creation: owner was destroyed");
 			    }
 			    components[id.index].pendingAdd = false;
+			    components[id.index].availableFrame = frameSerial;
 			    return Result<void>{};
 		    });
+	}
+	auto initialized = InitializeAttachedComponent(id);
+	if (!initialized)
+	{
+		RemoveComponentNow(id);
+		return Result<Component*>::Failure(initialized.error);
 	}
 	return Result<Component*>::Success(component);
 }
@@ -628,7 +717,7 @@ Result<void> Scene::RemoveComponent(ComponentId id)
 	{
 		return Result<void>::Failure("Cannot remove an invalid component");
 	}
-	if (inPhase)
+	if (inPhase || inLifecycle)
 	{
 		components[id.index].pendingRemoval = true;
 		commands.push_back(
@@ -644,27 +733,42 @@ Result<void> Scene::RemoveComponent(ComponentId id)
 		return {};
 	}
 	RemoveComponentNow(id);
-	return {};
+	return CommitChanges();
 }
 
 void Scene::RemoveComponentNow(ComponentId id)
 {
-	ComponentSlot& slot = components[id.index];
-	slot.pendingRemoval = true;
-	Component* object = slot.object;
-	slot.owner = {};
-	slot.object = nullptr;
-	slot.pendingAdd = false;
-	++slot.generation;
-	if (slot.generation == 0)
+	// Callbacks may add components and reallocate the slot array. Reacquire by ID.
+	components[id.index].pendingRemoval = true;
+	Component* object = components[id.index].object;
+	const bool previousLifecycleState = inLifecycle;
+	inLifecycle = true;
+	if (object && components[id.index].enableCalled)
 	{
-		slot.generation = 1;
+		components[id.index].enableCalled = false;
+		object->OnDisable();
+	}
+	if (object && components[id.index].wasActive)
+	{
+		components[id.index].wasActive = false;
+		object->OnDestroy();
+	}
+	components[id.index].owner = {};
+	components[id.index].object = nullptr;
+	components[id.index].pendingAdd = false;
+	components[id.index].awakeCalled = false;
+	components[id.index].started = false;
+	++components[id.index].generation;
+	if (components[id.index].generation == 0)
+	{
+		components[id.index].generation = 1;
 	}
 	freeComponentIndices.push_back(id.index);
 	if (object && object->gameObject)
 	{
 		object->gameObject->RemoveComponentOwned(object);
 	}
+	inLifecycle = previousLifecycleState;
 }
 
 Result<void> Scene::SetComponentEnabled(ComponentId id, bool enabled)
@@ -688,7 +792,7 @@ Result<bool> Scene::IsComponentActive(ComponentId id) const
 	GameObject* owner = slot.owner ? objects[slot.owner.index].object : nullptr;
 	for (GameObject* current = owner; current; current = current->parent)
 	{
-		if (!current->enabled)
+		if (!current->activeSelf)
 		{
 			return Result<bool>::Success(false);
 		}
@@ -788,7 +892,7 @@ Result<void> Scene::SetComponentOwner(ComponentId component, const GameObject::P
 	{
 		return Result<void>::Failure("Cannot move a component to an invalid GameObject");
 	}
-	if (inPhase)
+	if (inPhase || inLifecycle)
 	{
 		return Result<void>::Failure("Cannot move a component during an update phase");
 	}
@@ -821,7 +925,7 @@ Result<void> Scene::ReorderComponent(ComponentId component, Ursa::Size index)
 	{
 		return Result<void>::Failure("Cannot reorder an invalid component");
 	}
-	if (inPhase)
+	if (inPhase || inLifecycle)
 	{
 		return Result<void>::Failure("Cannot reorder a component during an update phase");
 	}
@@ -865,6 +969,18 @@ Result<void> Scene::LateUpdate(const FrameContext& context)
 
 Result<void> Scene::RunPhase(Phase phase, const FrameContext& context)
 {
+	runtimeFrameContext = context;
+	hasRuntimeFrame = true;
+	auto prepared = PrepareRuntime();
+	if (!prepared)
+	{
+		return prepared;
+	}
+	auto lifecycle = SynchronizeLifecycle(context);
+	if (!lifecycle)
+	{
+		return lifecycle;
+	}
 	Vector<ComponentId> order;
 	for (const GameObject::Ptr& root : RootGameObjects())
 	{
@@ -883,32 +999,18 @@ Result<void> Scene::RunPhase(Phase phase, const FrameContext& context)
 		{
 			continue;
 		}
-		if (!slot.started)
-		{
-			slot.started = true;
-			auto started = slot.object->OnStart(context);
-			if (!started)
-			{
-				phaseResult = Result<void>::Failure("Component start failed: " + started.error);
-				break;
-			}
-			if (!ContainsComponent(id))
-			{
-				continue;
-			}
-		}
 		Component* object = components[id.index].object;
 		Result<void> result;
 		switch (phase)
 		{
 			case Phase::Update:
-				result = object->OnUpdate(context);
+				result = object->Update(context);
 				break;
 			case Phase::Fixed:
-				result = object->OnFixedUpdate(context);
+				result = object->FixedUpdate(context);
 				break;
 			case Phase::Late:
-				result = object->OnLateUpdate(context);
+				result = object->LateUpdate(context);
 				break;
 		}
 		if (!result)
@@ -923,7 +1025,274 @@ Result<void> Scene::RunPhase(Phase phase, const FrameContext& context)
 	{
 		return phaseResult;
 	}
-	return committed;
+	if (!committed)
+	{
+		return committed;
+	}
+	return SynchronizeLifecycle(context);
+}
+
+Result<void> Scene::SynchronizeLifecycle(const FrameContext& context)
+{
+	auto needsSynchronization = [this](bool includeStart = false)
+	{
+		Vector<ComponentId> currentOrder;
+		for (const GameObject::Ptr& root : RootGameObjects())
+		{
+			CollectComponents(HandleOf(root.get()), currentOrder);
+		}
+		for (ComponentId currentId : currentOrder)
+		{
+			if (!ContainsComponent(currentId))
+			{
+				continue;
+			}
+			const ComponentSlot& current = components[currentId.index];
+			GameObject* currentOwner = current.owner ? objects[current.owner.index].object : nullptr;
+			if (!currentOwner || current.pendingAdd || current.availableFrame > frameSerial)
+			{
+				continue;
+			}
+			const bool objectActive = IsGameObjectActive(currentOwner);
+			if (objectActive && !current.awakeCalled)
+			{
+				return true;
+			}
+			if (!current.awakeCalled)
+			{
+				continue;
+			}
+			const bool shouldEnable = current.enabled && objectActive && !current.pendingRemoval;
+			if (shouldEnable != current.enableCalled || (includeStart && shouldEnable && !current.started))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	for (Ursa::UInt32 pass = 0; pass < 1024; ++pass)
+	{
+		Vector<ComponentId> order;
+		for (const GameObject::Ptr& root : RootGameObjects())
+		{
+			CollectComponents(HandleOf(root.get()), order);
+		}
+
+		bool restart = false;
+		for (ComponentId id : order)
+		{
+			if (!ContainsComponent(id))
+			{
+				continue;
+			}
+			ComponentSlot& slot = components[id.index];
+			GameObject* owner = slot.owner ? objects[slot.owner.index].object : nullptr;
+			if (!owner || slot.pendingAdd || slot.availableFrame > frameSerial || slot.awakeCalled ||
+			    !IsGameObjectActive(owner))
+			{
+				continue;
+			}
+
+			slot.awakeCalled = true;
+			slot.wasActive = true;
+			const Ursa::Size objectCount = objects.size();
+			const Ursa::Size componentCount = components.size();
+			Component* component = slot.object;
+			const bool previousLifecycleState = inLifecycle;
+			inLifecycle = true;
+			auto awoken = component->Awake(context);
+			inLifecycle = previousLifecycleState;
+			if (!awoken)
+			{
+				return Result<void>::Failure("Component Awake failed: " + awoken.error);
+			}
+			auto committed = CommitChanges();
+			if (!committed)
+			{
+				return committed;
+			}
+			if (objects.size() != objectCount || components.size() != componentCount)
+			{
+				restart = true;
+				break;
+			}
+		}
+		if (restart)
+		{
+			continue;
+		}
+
+		for (ComponentId id : order)
+		{
+			if (!ContainsComponent(id))
+			{
+				continue;
+			}
+			ComponentSlot& slot = components[id.index];
+			GameObject* owner = slot.owner ? objects[slot.owner.index].object : nullptr;
+			if (!owner || slot.pendingAdd || slot.availableFrame > frameSerial || !slot.awakeCalled)
+			{
+				continue;
+			}
+
+			const bool shouldEnable = slot.enabled && IsGameObjectActive(owner) && !slot.pendingRemoval;
+			if (shouldEnable == slot.enableCalled)
+			{
+				continue;
+			}
+
+			slot.enableCalled = shouldEnable;
+			if (shouldEnable)
+			{
+				slot.wasActive = true;
+			}
+			Component* component = slot.object;
+			const bool previousLifecycleState = inLifecycle;
+			inLifecycle = true;
+			if (shouldEnable)
+			{
+				component->OnEnable();
+			}
+			else
+			{
+				component->OnDisable();
+			}
+			inLifecycle = previousLifecycleState;
+			auto committed = CommitChanges();
+			if (!committed)
+			{
+				return committed;
+			}
+			if (needsSynchronization())
+			{
+				restart = true;
+				break;
+			}
+		}
+		if (restart)
+		{
+			continue;
+		}
+
+		for (ComponentId id : order)
+		{
+			if (!ContainsComponent(id))
+			{
+				continue;
+			}
+			ComponentSlot& slot = components[id.index];
+			GameObject* owner = slot.owner ? objects[slot.owner.index].object : nullptr;
+			if (!owner || slot.pendingAdd || slot.availableFrame > frameSerial || !slot.enableCalled || slot.started)
+			{
+				continue;
+			}
+
+			slot.started = true;
+			Component* component = slot.object;
+			const bool previousLifecycleState = inLifecycle;
+			inLifecycle = true;
+			auto started = component->Start(context);
+			inLifecycle = previousLifecycleState;
+			if (!started)
+			{
+				return Result<void>::Failure("Component Start failed: " + started.error);
+			}
+			auto committed = CommitChanges();
+			if (!committed)
+			{
+				return committed;
+			}
+			if (needsSynchronization(true))
+			{
+				restart = true;
+				break;
+			}
+		}
+		if (!restart)
+		{
+			return {};
+		}
+	}
+	return Result<void>::Failure("Component lifecycle callbacks exceeded the maximum reentrant scene changes");
+}
+
+Result<void> Scene::InitializeAttachedComponent(ComponentId id)
+{
+	if (!hasRuntimeFrame || !ContainsComponent(id))
+	{
+		return {};
+	}
+	const ObjectHandle ownerId = components[id.index].owner;
+	GameObject* owner = ownerId ? objects[ownerId.index].object : nullptr;
+	if (!owner || !Contains(ownerId) || !IsGameObjectActive(owner) || components[id.index].awakeCalled)
+	{
+		return {};
+	}
+	if (attachmentLifecycleDepth >= 1024)
+	{
+		return Result<void>::Failure("Runtime attachment exceeded the lifecycle reentry limit");
+	}
+
+	struct DepthScope
+	{
+		UInt32& value;
+
+		~DepthScope()
+		{
+			--value;
+		}
+	} depthScope{attachmentLifecycleDepth};
+
+	++attachmentLifecycleDepth;
+	components[id.index].pendingAdd = false;
+	components[id.index].availableFrame = frameSerial;
+	components[id.index].awakeCalled = true;
+	components[id.index].wasActive = true;
+	Component* component = components[id.index].object;
+	const bool previous = inLifecycle;
+	inLifecycle = true;
+	auto awoken = component->Awake(runtimeFrameContext);
+	inLifecycle = previous;
+	if (!awoken)
+	{
+		return Result<void>::Failure("Runtime component Awake failed: " + awoken.error);
+	}
+	if (!ContainsComponent(id) || !Contains(ownerId))
+	{
+		return {};
+	}
+	if (components[id.index].enabled && IsGameObjectActive(owner) && !components[id.index].enableCalled)
+	{
+		components[id.index].enableCalled = true;
+		inLifecycle = true;
+		component->OnEnable();
+		inLifecycle = previous;
+	}
+	return {};
+}
+
+bool Scene::IsGameObjectActive(const GameObject* object) const
+{
+	const GameObject* current = object;
+	for (Size depth = 0; current && depth <= objects.size(); ++depth)
+	{
+		if (!current->activeSelf)
+		{
+			return false;
+		}
+		const ObjectHandle handle = HandleOf(current);
+		if (handle && objects[handle.index].hasPendingParent)
+		{
+			const ObjectHandle parent = objects[handle.index].pendingParent;
+			current = parent && Contains(parent) ? objects[parent.index].object : nullptr;
+		}
+		else
+		{
+			current = current->parent;
+		}
+	}
+	return object != nullptr && current == nullptr;
 }
 
 Result<void> Scene::CommitChanges()
@@ -932,16 +1301,23 @@ Result<void> Scene::CommitChanges()
 	{
 		return Result<void>::Failure("Cannot commit scene changes during an update phase");
 	}
-	auto pendingCommands = std::move(commands);
-	commands.clear();
 	Result<void> result;
-	for (auto& command : pendingCommands)
+	for (Ursa::UInt32 pass = 0; pass < 1024 && !commands.empty(); ++pass)
 	{
-		auto committed = command();
-		if (!committed && result)
+		auto pendingCommands = std::move(commands);
+		commands.clear();
+		for (auto& command : pendingCommands)
 		{
-			result = committed;
+			auto committed = command();
+			if (!committed && result)
+			{
+				result = committed;
+			}
 		}
+	}
+	if (!commands.empty())
+	{
+		return Result<void>::Failure("Scene change callbacks exceeded the maximum reentrant command count");
 	}
 	return result;
 }
@@ -987,12 +1363,13 @@ void Scene::Clear()
 	}
 	rootObjects.clear();
 	activeCamera = {};
+	hasRuntimeFrame = false;
 }
 
 void Scene::DestroySubtree(ObjectHandle node)
 {
-	ObjectSlot& slot = objects[node.index];
-	GameObject* object = slot.object;
+	// Child/component callbacks may reallocate object slots.
+	GameObject* object = objects[node.index].object;
 	if (!object)
 	{
 		return;
@@ -1023,15 +1400,15 @@ void Scene::DestroySubtree(ObjectHandle node)
 	object->sceneNodeIndex = std::numeric_limits<Ursa::UInt32>::max();
 	object->sceneNodeGeneration = 0;
 	object->DestroyDetachedTree();
-	slot.object = nullptr;
-	slot.alive = false;
-	slot.pendingCreate = false;
-	slot.pendingDestroy = false;
-	slot.hasPendingParent = false;
-	++slot.generation;
-	if (slot.generation == 0)
+	objects[node.index].object = nullptr;
+	objects[node.index].alive = false;
+	objects[node.index].pendingCreate = false;
+	objects[node.index].pendingDestroy = false;
+	objects[node.index].hasPendingParent = false;
+	++objects[node.index].generation;
+	if (objects[node.index].generation == 0)
 	{
-		slot.generation = 1;
+		objects[node.index].generation = 1;
 	}
 	freeObjectIndices.push_back(node.index);
 }

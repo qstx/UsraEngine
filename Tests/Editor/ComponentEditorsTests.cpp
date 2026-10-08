@@ -1,6 +1,8 @@
 #include <Scene/ComponentEditors.hpp>
 #include <Scene/RenderingComponents.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Serialization/ResourceSession.hpp>
+#include <Serialization/SerializedObject.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Tools/EditorTools.hpp>
 #include <iostream>
@@ -126,6 +128,29 @@ int main()
 		const auto* inspector = registry.Find("test.Component");
 		Expect(inspector && Take((*inspector)(*component, context, ui)) && enabled && scalar == 4.0f,
 		       "Provider-neutral Inspector controls did not edit the component");
+		ScriptTypeDescriptor scriptType;
+		scriptType.scriptType = "test.editor-script";
+		scriptType.version = 1;
+		scriptType.clrTypeName = "Tests.EditorBehaviour, Ursa.Game";
+		scriptType.fields.push_back({"step", "FloatingPoint", "Unsupported", "System.Single", "1.25", {}, {}});
+		Done(RegisterScriptComponentType(registry, scriptType));
+		auto scriptComponent = Take(registry.Create(scriptType.clrTypeName, context));
+		auto* managedScript = dynamic_cast<Scripting::ScriptBehaviourComponent*>(scriptComponent);
+		Expect(managedScript && managedScript->TypeName() == scriptType.clrTypeName,
+		       "Add Component did not create a managed script with its generated CLR type");
+		auto serialized = Take(SerializedObject::Create(*managedScript));
+		const auto step = Take(serialized->FindProperty("/Fields/step"));
+		Expect(Take(step.Value()).get<double>() == 1.25,
+		       "Managed script Add Component did not create its declared default field values");
+		Scene scriptScene;
+		const auto scriptSceneObject = Take(scriptScene.CreateGameObject("Script scene target"));
+		ComponentInspectorContext scriptSceneContext;
+		scriptSceneContext.object = scriptSceneObject;
+		scriptSceneContext.scene = &scriptScene;
+		const auto sceneScript = Take(registry.Create(scriptType.clrTypeName, scriptSceneContext));
+		Expect(sceneScript->GetGameObject() == scriptSceneObject &&
+		           dynamic_cast<Scripting::ScriptBehaviourComponent*>(sceneScript) != nullptr,
+		       "Managed script factory could not attach a script to a Scene GameObject");
 		Done(registry.RegisterType({"test.Incomplete",
 		                            "Incomplete",
 		                            "Test",

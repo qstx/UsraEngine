@@ -205,34 +205,38 @@ Result<Mat4> GameObject::WorldTransform() const
 	return Result<Mat4>::Success(parentWorld.value * local);
 }
 
-Result<void> GameObject::SetEnabled(bool value)
+Result<void> GameObject::SetActive(bool value)
 {
 	if (!alive)
 	{
-		return Result<void>::Failure("Cannot change the enabled state of a destroyed GameObject");
+		return Result<void>::Failure("Cannot change the active state of a destroyed GameObject");
 	}
-	enabled = value;
+	activeSelf = value;
 	return {};
 }
 
-Result<bool> GameObject::IsEnabled() const
+Result<bool> GameObject::ActiveSelf() const
 {
 	if (!alive)
 	{
-		return Result<bool>::Failure("Cannot query the enabled state of a destroyed GameObject");
+		return Result<bool>::Failure("Cannot query the activeSelf state of a destroyed GameObject");
 	}
-	return Result<bool>::Success(enabled);
+	return Result<bool>::Success(activeSelf);
 }
 
-Result<bool> GameObject::IsActive() const
+Result<bool> GameObject::ActiveInHierarchy() const
 {
 	if (!alive)
 	{
 		return Result<bool>::Failure("Cannot query the active state of a destroyed GameObject");
 	}
+	if (scene)
+	{
+		return scene->ActiveInHierarchy(const_cast<GameObject*>(this)->shared_from_this());
+	}
 	for (const GameObject* current = this; current; current = current->parent)
 	{
-		if (!current->enabled)
+		if (!current->activeSelf)
 		{
 			return Result<bool>::Success(false);
 		}

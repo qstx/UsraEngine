@@ -67,8 +67,8 @@ void WriteAssetMetadata(VirtualFileSystem& filesystem, const VirtualPath& source
 int main()
 {
 	using namespace Ursa;
-	const auto root =
-	    std::filesystem::temp_directory_path() / ("UrsaResourceVfs-" + ToStdString(ResourceId::Generate().ToString()));
+	const auto root = std::filesystem::current_path() / "temp" /
+	                  ("UrsaResourceVfs-" + ToStdString(ResourceId::Generate().ToString()));
 	try
 	{
 		std::filesystem::create_directories(root / "Assets");

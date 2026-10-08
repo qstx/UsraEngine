@@ -126,7 +126,7 @@ See [Inspector components and Editor extensions](Docs/EditorComponents.md) for c
 
 For a linked instance, first save its Prefab source. Open a scene, select a regular parent node, and choose that Prefab from **Place Prefab**; each placement receives its own instance ID. Editing an instance node or its components changes only that placement. **Pin label override** records an explicit property override; hierarchy, component, and transform changes are captured as property or structure overrides on save. Open the `.ursaprefab` itself to edit the shared source. The next explicit scene reload merges source changes with saved instance overrides. A missing override target or invalid merge is reported, and the active scene and saved patch remain available. `UrsaSceneDraftTests` checks two placements, source isolation, and round-trip structure; `UrsaPrefabTests` checks source merges and conflict preservation.
 
-Project components need a Serializable factory registered with `RegisterSerializable` in `EditorProject::components`, plus a component descriptor and, when needed, a custom Inspector drawer in `EditorProject::componentEditors`. Descriptors provide the stable type ID/version, display name, category, factory, and availability rules used by Add Component. Custom Inspector drawers use Editor-owned controls and receive a context that supports both Scene and Prefab objects. Register them in the launcher setup passed to `EditorApplication`. A Serializable component without a property editor remains visible and its serialized fields are preserved on save. If decoding or creation needs project services, configure `editContextSetup` to provide them and keep those services alive. The Editor Tools menu exposes provider-neutral tool registration with a selection/document context. Demo's `Editor/Main.cpp` and `Editor/SnakeEditors.cpp` show the Snake registration. A future script provider can adapt these APIs; the script runtime and language are separate work.
+Native Engine components use Serializable factories and the Editor's component descriptor API. Project gameplay and project-specific Inspector, menu, and window extensions are authored in C# under the project's `Assets/Scripts/` and `Assets/Scripts/Editor/` folders. `Ursa.Runtime` supplies built-in GameObject, Transform, input, time, camera, renderer, and asset-reference APIs; `Ursa.Editor` supplies `CustomInspector`, `MenuItem`, and `EditorWindowMenu` extensions. The Demo project exercises these APIs without project-owned C++ registration.
 
 Click **Run** on a scene to clone the current effective edit scene in memory, including unsaved edits. The copy receives fresh project runtime services from `playContextSetup`; a missing service reports an error and leaves Edit mode intact. Engine `FrameScheduler` drives Update, fixed updates, and Late Update on the copy. The game uses the scene's active camera; focus the viewport image to send keyboard input to the game. Input sent to other Editor panels stays with the UI. **Save** and document switching are disabled during Play. Click **Stop** to destroy the play copy; the edit scene, dirty flag, and asset files remain as they were before Run. `UrsaPlaySessionTests` covers clone isolation, lifecycle order, service failure, save blocking, and cleanup.
 
@@ -134,7 +134,20 @@ Click **Run** on a scene to clone the current effective edit scene in memory, in
 
 The ImGui platform bridge forwards key and modifier state and uses the window's UTF-8 system clipboard callbacks. Editor text fields support Ctrl+C, Ctrl+X, and Ctrl+V with the Windows clipboard.
 
-The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). From the Engine repository, build it with `cmake --build build --config Debug --target UrsaEditor`, then launch it with `& .\build\Editor\Debug\UrsaEditor.exe --project ..\Demo\Assets`. The project asset directory is required at startup; `--hidden --frames 3` runs a short window smoke test. The default docked workspace places Hierarchy on the left, the scene viewport in the center, Inspector on the right, and Project along the bottom. Run/Stop is in the top bar. Panels can be rearranged during the session. `ctest --test-dir build -C Debug -R '^(UrsaImGuiBridgeTests|UrsaEditorWorkspaceWindowTests)$' --output-on-failure` checks UI rendering and the startup workspace. The same commands accept `Release`.
+The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). For the C# Demo project, configure Engine with `-DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=../Demo`, build the `UrsaEditor`, `UrsaScriptPlayer`, `UrsaScriptCompile`, and `UrsaPak` targets, and launch the generic Editor with `UrsaEditor --project ../Demo --scene Snake/Snake.ursascene`. The generic Editor accepts a project root and an optional scene path relative to `Assets/`. `--hidden --frames 3` runs a short window smoke test. The docked workspace provides Hierarchy, Scene, Inspector, and Project panels, with Run/Stop in the top bar.
+
+### C# project workflow
+
+在工作区根目录配置并构建 Demo：
+
+```powershell
+cmake -S Engine -B Engine/build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
+cmake --build Engine/build --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
+Engine/build/Debug/UrsaScriptCompile.exe Demo Debug
+ctest --test-dir Engine/build -C Debug --output-on-failure -R 'Ursa(Project|Snake)'
+```
+
+在 Demo 中运行独立 Player 可使用 `UrsaScriptPlayer --project Demo --scene Snake/Snake.ursascene`，也可通过 `--pak Content.pak` 运行打包内容。Engine 的 `URSA_PROJECT_DIR` 选项启用针对项目资源的 Scene/Prefab、导入、脚本、Editor、运行时和打包集成测试。
 
 To author project assets, pass a writable asset directory such as `--project ..\Demo\Assets`. The Project panel shows the selected root, lists each file's stable ID, and marks Engine assets as read-only. In the **New asset** field, enter `Checker.ursatex`, click **New texture**, edit its pixels or color space, and click **Save**. The new file appears only under the selected project root. Use **Refresh assets** after an external rename; references continue to use the stored ID. Switching or closing a changed document offers **Save**, **Discard**, and **Cancel**. Saving first writes a staged resource, validates its ID and kind, then atomically replaces the destination; a failed save leaves the previous file and the in-memory edit available. Paths outside the project root, including paths reached through symlinks, are rejected. `UrsaProjectWorkspaceTests`, `UrsaEditorDocumentsTests`, and `UrsaTextureDraftTests` exercise these rules.
 
@@ -166,7 +179,7 @@ Code uses the repository's `.clang-format` rules, including one blank line betwe
 ursa:Shaders/Renderer3D/Cube.vert      -> Engine source asset directory
 ursa:Shaders/Renderer3D/Cube.vert.spv  -> generated Engine asset directory
 prj:Snake/Snake.ursascene              -> selected project's Assets directory
-user:Logs/UrsaDemoEditor.log            -> per-user application data directory
+user:Logs/UrsaEditor.log                 -> per-user application data directory
 ```
 
 ```cpp
@@ -343,7 +356,7 @@ auto frame = renderer->render(swapchain, camera, boxes);
 
 ## Scene rendering
 
-Attach `CameraComponent` and `BoxRenderComponent` to GameObjects. The camera looks along its GameObject's local negative Z axis; its world transform supplies the view, and its fields specify perspective projection. The Scene gathers active boxes with complete world matrices, including ancestor rotation and scale. Disabled GameObjects or components are omitted. Without an enabled active camera, `CollectRenderData(aspect)` and an `Application` scene frame return a diagnostic error.
+Attach `CameraComponent` and `BoxRenderComponent` to GameObjects. The camera looks along its GameObject's local negative Z axis; its world transform supplies the view, and its fields specify perspective projection. The Scene gathers active boxes with complete world matrices, including ancestor rotation and scale. Inactive GameObjects and disabled components are omitted. Without an enabled active camera, `CollectRenderData(aspect)` and an `Application` scene frame return a diagnostic error.
 
 ```cpp
 #include <Scene/Scene.hpp>
@@ -438,3 +451,5 @@ cmake --build build --config Debug
 ## Unified serialization
 
 See [persistent serialization](Docs/Serialization.md) for Serializable authoring, archive formats, component factories, schema versions and deferred references.
+
+See [scene lifecycle and frame scheduling](Docs/SceneLifecycle.md) for GameObject activity, component lifecycle events, fixed-step time and Engine/Editor frame order.

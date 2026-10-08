@@ -1,6 +1,5 @@
+#include <Application/SceneFrameRunner.hpp>
 #include <Core/Types.hpp>
-#include <Core/Containers.hpp>
-#include <Application/FrameScheduler.hpp>
 #include <Scene/Scene.hpp>
 #include <cmath>
 #include <iostream>
@@ -24,67 +23,96 @@ public:
 	{
 	}
 
-	Ursa::Result<void> OnUpdate(const Ursa::FrameContext&) override
+	Ursa::Result<void> Update(const Ursa::FrameContext& context) override
 	{
+		Expect(std::abs(context.deltaSeconds - expectedFrameDelta) < 1e-6f, "Update received the wrong frame delta");
+		frameDeltas.push_back(context.deltaSeconds);
 		events.push_back('U');
 		return {};
 	}
 
-	Ursa::Result<void> OnFixedUpdate(const Ursa::FrameContext& context) override
+	Ursa::Result<void> FixedUpdate(const Ursa::FrameContext& context) override
 	{
-		Expect(std::abs(context.fixedDeltaSeconds - 0.02f) < 1e-6f, "Fixed callback step changed");
+		Expect(std::abs(context.deltaSeconds - 0.02f) < 1e-6f, "FixedUpdate received the wrong delta");
+		Expect(std::abs(context.fixedDeltaSeconds - 0.02f) < 1e-6f, "Fixed step changed");
+		Expect(std::abs(context.elapsedSeconds - context.fixedElapsedSeconds) < 1e-8,
+		       "FixedUpdate elapsed time did not use the fixed simulation clock");
+		fixedTimes.push_back(context.fixedElapsedSeconds);
+		fixedPressEdges.push_back(context.input.KeyPressed(Ursa::Key::W));
+		fixedReleaseEdges.push_back(context.input.KeyReleased(Ursa::Key::W));
 		events.push_back('F');
 		return {};
 	}
 
-	Ursa::Result<void> OnLateUpdate(const Ursa::FrameContext&) override
+	Ursa::Result<void> LateUpdate(const Ursa::FrameContext&) override
 	{
 		events.push_back('L');
 		return {};
 	}
 
+	Ursa::Float32 expectedFrameDelta = 0.0f;
+	Ursa::Vector<Ursa::Float32> frameDeltas;
+	Ursa::Vector<Ursa::Float64> fixedTimes;
+	Ursa::Vector<bool> fixedPressEdges;
+	Ursa::Vector<bool> fixedReleaseEdges;
+
 private:
 	Ursa::Vector<char>& events;
 };
 
-void TestSchedule()
+void TestSharedFrameOrderAndTime()
 {
-	Ursa::FrameScheduler scheduler;
-	Expect(!scheduler.Configure(0.0f, 2), "Zero fixed step was accepted");
-	Expect(!scheduler.Configure(0.02f, 0), "Zero step cap was accepted");
-	Expect(static_cast<bool>(scheduler.Configure(0.02f, 2)), "Valid step configuration failed");
+	Ursa::SceneFrameRunner runner;
+	Expect(!runner.ConfigureFixedStep(0.0f, 2), "Zero fixed step was accepted");
+	Expect(!runner.ConfigureFixedStep(0.02f, 0), "Zero step cap was accepted");
+	Expect(static_cast<bool>(runner.ConfigureFixedStep(0.02f, 2)), "Valid fixed step configuration failed");
+
 	Ursa::Scene scene;
 	const auto node = scene.CreateGameObject();
-	Expect(static_cast<bool>(node), "Could not create test node");
+	Expect(static_cast<bool>(node), "Could not create the test GameObject");
 	Ursa::Vector<char> events;
-	Expect(static_cast<bool>(scene.AddComponent<Trace>(node.value, events)), "Could not add test behavior");
-	Ursa::UInt64 frame = 0;
-	auto drive = [&](Ursa::Float32 seconds)
-	{
-		const auto schedule = scheduler.Advance(seconds);
-		Ursa::FrameContext context;
-		context.deltaSeconds = schedule.deltaSeconds;
-		context.fixedDeltaSeconds = scheduler.FixedSeconds();
-		context.frameIndex = ++frame;
-		scene.BeginFrame();
-		Expect(static_cast<bool>(scene.Update(context)), "Update failed");
-		for (Ursa::UInt32 step = 0; step < schedule.fixedSteps; ++step)
-		{
-			Expect(static_cast<bool>(scene.FixedUpdate(context)), "Fixed update failed");
-		}
-		Expect(static_cast<bool>(scene.LateUpdate(context)), "Late update failed");
-		return schedule;
-	};
-	Expect(drive(0.01f).fixedSteps == 0, "Premature fixed step");
-	Expect(drive(0.01f).fixedSteps == 1, "Missing fixed step");
-	Expect(drive(0.04f).fixedSteps == 2, "Two fixed steps were not executed");
-	Expect(events == Ursa::Vector<char>({'U', 'L', 'U', 'F', 'L', 'U', 'F', 'F', 'L'}),
-	       "Frame phases ran in the wrong order");
-	const auto longFrame = drive(1.0f);
-	Expect(longFrame.deltaSeconds == 0.25f && longFrame.fixedSteps == 2, "Long frame was not clamped and capped");
-	Expect(drive(0.01f).fixedSteps == 1, "Fractional time was not retained after dropping backlog");
-	scheduler.Reset();
-	Expect(drive(0.01f).fixedSteps == 0, "Reset did not clear the accumulator");
+	const auto traceId = scene.AddComponent<Trace>(node.value, events);
+	Expect(static_cast<bool>(traceId), "Could not add the trace component");
+	auto* trace = static_cast<Trace*>(scene.GetComponent(traceId.value));
+	Ursa::FrameInput input;
+
+	trace->expectedFrameDelta = 0.01f;
+	Expect(static_cast<bool>(runner.Tick(scene, 0.01f, nullptr, input)), "First frame failed");
+	Expect(events == Ursa::Vector<char>({'U', 'L'}), "A frame without a fixed step used the wrong phase order");
+
+	events.clear();
+	trace->expectedFrameDelta = 0.01f;
+	Expect(static_cast<bool>(runner.Tick(scene, 0.01f, nullptr, input)), "Second frame failed");
+	Expect(events == Ursa::Vector<char>({'F', 'U', 'L'}), "FixedUpdate did not run before Update");
+
+	events.clear();
+	trace->expectedFrameDelta = 0.04f;
+	input.keys[static_cast<Ursa::Size>(Ursa::Key::W)] = true;
+	Expect(static_cast<bool>(runner.Tick(scene, 0.04f, nullptr, input)), "Multi-step frame failed");
+	Expect(events == Ursa::Vector<char>({'F', 'F', 'U', 'L'}), "Multiple fixed steps did not precede Update");
+	Expect(trace->fixedTimes.size() == 3 && std::abs(trace->fixedTimes[0] - 0.02) < 1e-8 &&
+	           std::abs(trace->fixedTimes[1] - 0.04) < 1e-8 && std::abs(trace->fixedTimes[2] - 0.06) < 1e-8,
+	       "Fixed simulation time did not advance once per fixed step");
+	Expect(trace->fixedPressEdges[1] && trace->fixedPressEdges[2],
+	       "Fixed steps did not share the same sampled press edge");
+
+	events.clear();
+	trace->expectedFrameDelta = 0.25f;
+	Expect(static_cast<bool>(runner.Tick(scene, 1.0f, nullptr, input)), "Long frame failed");
+	Expect(events == Ursa::Vector<char>({'F', 'F', 'U', 'L'}), "Long frame exceeded its fixed-step cap");
+	Expect(trace->fixedTimes.size() == 5 && std::abs(trace->fixedTimes.back() - 0.1) < 1e-8,
+	       "Dropped fixed-step backlog advanced simulation time");
+	Expect(runner.FrameIndex() == 4 && std::abs(runner.ElapsedSeconds() - 0.31) < 1e-6,
+	       "Frame index or clamped elapsed time changed");
+
+	events.clear();
+	trace->expectedFrameDelta = 0.02f;
+	input.keys[static_cast<Ursa::Size>(Ursa::Key::W)] = false;
+	Expect(static_cast<bool>(runner.Tick(scene, 0.02f, nullptr, input)), "Key release frame failed");
+	Expect(events == Ursa::Vector<char>({'F', 'U', 'L'}) && trace->fixedReleaseEdges.back(),
+	       "Input release edge was not available in the sampled frame");
+	Expect(std::abs(trace->fixedTimes.back() - 0.12) < 1e-8 && std::abs(runner.ElapsedSeconds() - 0.33) < 1e-6,
+	       "Fixed and frame clocks diverged after additional input sampling");
 }
 } // namespace
 
@@ -92,7 +120,7 @@ int main()
 {
 	try
 	{
-		TestSchedule();
+		TestSharedFrameOrderAndTime();
 		return 0;
 	}
 	catch (const std::exception& error)

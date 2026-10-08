@@ -2,6 +2,7 @@
 #include <Application/PlaySession.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Core/StringInterop.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -24,13 +25,13 @@ public:
 	{
 	}
 
-	Result<void> OnStart(const FrameContext&) override
+	Result<void> Start(const FrameContext&) override
 	{
 		events.push_back("start");
 		return {};
 	}
 
-	Result<void> OnUpdate(const FrameContext&) override
+	Result<void> Update(const FrameContext&) override
 	{
 		events.push_back("update");
 		if (service.value < 0)
@@ -42,13 +43,13 @@ public:
 		return {};
 	}
 
-	Result<void> OnFixedUpdate(const FrameContext&) override
+	Result<void> FixedUpdate(const FrameContext&) override
 	{
 		events.push_back("fixed");
 		return {};
 	}
 
-	Result<void> OnLateUpdate(const FrameContext&) override
+	Result<void> LateUpdate(const FrameContext&) override
 	{
 		events.push_back("late");
 		return {};
@@ -134,6 +135,23 @@ int main()
 		auto draft = document->Payload<Editor::SceneDraft>();
 		const auto rootNode = draft->GetScene().RootGameObjects().front();
 		Take(draft->GetScene().AddComponent<TestComponent>(rootNode, editService, 12));
+		const auto targetNode = Take(draft->GetScene().CreateGameObject(rootNode));
+		const ComponentId targetCamera = Take(draft->GetScene().AddComponent<CameraComponent>(rootNode));
+		const ComponentId scriptId = Take(draft->GetScene().AddComponent<Scripting::ScriptBehaviourComponent>(
+		    rootNode, String("Demo.MoveWithInput")));
+		auto* script = static_cast<Scripting::ScriptBehaviourComponent*>(draft->GetScene().GetComponent(scriptId));
+		nlohmann::json scriptPayload = nlohmann::json::object();
+		scriptPayload["FormatVersion"] = 1u;
+		scriptPayload["ScriptType"] = "demo.move-with-input";
+		scriptPayload["Version"] = 1u;
+		scriptPayload["Fields"] = nlohmann::json::object();
+		scriptPayload["Fields"]["targetObject"]["$ursaReference"]["Kind"] = "GameObject";
+		scriptPayload["Fields"]["targetObject"]["$ursaReference"]["Id"] =
+		    ToStdString(Take(draft->GetScene().PersistentId(targetNode)).ToString());
+		scriptPayload["Fields"]["targetCamera"]["$ursaReference"]["Kind"] = "Component";
+		scriptPayload["Fields"]["targetCamera"]["$ursaReference"]["Id"] =
+		    ToStdString(Take(draft->GetScene().ComponentPersistentId(targetCamera)).ToString());
+		script->SetSerializedPayload(ToUrsaString(scriptPayload.dump()));
 		document->MarkDirty();
 		const auto documentId = document->Id();
 		done(documents->RequestOpen(std::move(document)));
@@ -154,12 +172,26 @@ int main()
 			                context.Provide(*service);
 			                return Result<std::shared_ptr<void>>::Success(service);
 		                }));
+		auto* playedScript = play.GetScene()->FindComponent<Scripting::ScriptBehaviourComponent>(
+		    play.GetScene()->RootGameObjects().front());
+		Expect(playedScript && playedScript->HasSerializedPayload(), "Run clone lost its managed script payload");
+		const nlohmann::json playedPayload = nlohmann::json::parse(ToStdString(playedScript->SerializedPayload()));
+		Expect(playedPayload.at("Fields").at("targetObject").at("$ursaReference").at("Id") ==
+		               ToStdString(Take(play.GetScene()->PersistentId(
+		                                    play.GetScene()->RootGameObjects().front()->Children().front()))
+		                               .ToString()) &&
+		           playedPayload.at("Fields").at("targetCamera").at("$ursaReference").at("Id") ==
+		               ToStdString(
+		                   Take(play.GetScene()->ComponentPersistentId(
+		                            play.GetScene()->ComponentsOf(play.GetScene()->RootGameObjects().front()).value[1]))
+		                       .ToString()),
+		       "Run clone did not retain object/Component references in its independent Scene graph");
 		documents->SetSaveBlocked(true);
 		Expect(!documents->SaveCurrent(), "Play mode allowed saving");
 		events.clear();
 		done(play.Tick(1.f / 30.f, nullptr, {}));
-		Expect(events.size() == 5 && events[0] == "start" && events[1] == "update" && events[2] == "fixed" &&
-		           events[3] == "fixed" && events[4] == "late",
+		Expect(events.size() == 5 && events[0] == "start" && events[1] == "fixed" && events[2] == "fixed" &&
+		           events[3] == "update" && events[4] == "late",
 		       "Play frame lifecycle order changed");
 		Expect(service->value == 1 && draft->GetScene().FindComponent<TestComponent>(rootNode)->Value() == 12,
 		       "Play mutation reached the edit scene");

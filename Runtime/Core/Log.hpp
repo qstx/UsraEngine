@@ -35,6 +35,8 @@ class Log final
 public:
 	static LogLevel DefaultLevel() noexcept;
 
+	static void ConfigureConsoleEncoding() noexcept;
+
 	static Result<void> Initialize(const std::filesystem::path& executable, const LogConfig& config = {});
 
 	static Result<void> Initialize(std::shared_ptr<VirtualFileSystem> filesystem, const VirtualPath& path,

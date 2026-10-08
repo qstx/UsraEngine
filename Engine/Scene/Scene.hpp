@@ -40,6 +40,8 @@ public:
 
 	Result<GameObject::Ptr> CreateGameObject(GameObject::Ptr parent);
 
+	std::function<void()> SetRuntimePreparation(std::function<Result<void>()> callback, bool clearOnRevoke = false);
+
 	Result<void> AttachGameObject(const GameObject::Ptr& object, GameObject::Ptr parent = {});
 
 	Result<void> DestroyGameObject(const GameObject::Ptr& object);
@@ -72,11 +74,11 @@ public:
 
 	Result<Mat4> WorldTransform(const GameObject::Ptr& object) const;
 
-	Result<void> SetEnabled(const GameObject::Ptr& object, bool enabled);
+	Result<void> SetActive(const GameObject::Ptr& object, bool active);
 
-	Result<bool> IsEnabled(const GameObject::Ptr& object) const;
+	Result<bool> ActiveSelf(const GameObject::Ptr& object) const;
 
-	Result<bool> IsActive(const GameObject::Ptr& object) const;
+	Result<bool> ActiveInHierarchy(const GameObject::Ptr& object) const;
 
 	template <class T, class... Args> Result<ComponentId> AddComponent(const GameObject::Ptr& object, Args&&... args)
 	{
@@ -227,7 +229,10 @@ private:
 		ObjectHandle owner;
 		Component* object = nullptr;
 		bool enabled = true;
+		bool awakeCalled = false;
+		bool enableCalled = false;
 		bool started = false;
+		bool wasActive = false;
 		bool pendingAdd = false;
 		bool pendingRemoval = false;
 		Ursa::UInt64 availableFrame = 0;
@@ -262,6 +267,12 @@ private:
 
 	Result<void> RunPhase(Phase phase, const FrameContext& context);
 
+	Result<void> SynchronizeLifecycle(const FrameContext& context);
+
+	bool IsGameObjectActive(const GameObject* object) const;
+
+	Result<void> InitializeAttachedComponent(ComponentId id);
+
 	void CollectComponents(ObjectHandle object, Vector<ComponentId>& out) const;
 
 	void CollectRendering(ObjectHandle object, SceneRenderData& out) const;
@@ -276,7 +287,22 @@ private:
 	Vector<ComponentSlot> components;
 	Vector<Ursa::UInt32> freeComponentIndices;
 	Ursa::UInt64 frameSerial = 0;
+
+	struct RuntimePreparation
+	{
+		std::function<Result<void>()> callback;
+		bool preparing = false;
+	};
+
+	std::shared_ptr<RuntimePreparation> runtimePreparation;
+
+	Result<void> PrepareRuntime();
+
+	FrameContext runtimeFrameContext;
+	bool hasRuntimeFrame = false;
+	UInt32 attachmentLifecycleDepth = 0;
 	bool inPhase = false;
+	bool inLifecycle = false;
 	Vector<std::function<Result<void>()>> commands;
 	ComponentId activeCamera;
 	Color ambientColor{1.0f, 1.0f, 1.0f, 1.0f};

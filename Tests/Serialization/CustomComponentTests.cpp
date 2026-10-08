@@ -36,6 +36,7 @@ void Expect(bool condition, const char* message)
 struct RuntimeService
 {
 	int updates = 0;
+	int awakes = 0;
 };
 
 struct CounterComponent : Ursa::Component
@@ -91,7 +92,17 @@ public:
 	{
 	}
 
-	Ursa::Result<void> OnUpdate(const Ursa::FrameContext&) override
+	Ursa::Result<void> Awake(const Ursa::FrameContext&) override
+	{
+		++service.awakes;
+		if (value == 42 && (!targetNode || !targetComponent))
+		{
+			return Ursa::Result<void>::Failure("Cross-object references were not restored before Awake");
+		}
+		return {};
+	}
+
+	Ursa::Result<void> Update(const Ursa::FrameContext&) override
 	{
 		++service.updates;
 		return {};
@@ -222,7 +233,8 @@ void TestCustomComponents(const std::filesystem::path& root)
 	       "Custom fields or cross-object references were not restored");
 	loaded.scene->BeginFrame();
 	done(loaded.scene->Update({}));
-	Expect(service.updates == 2, "Runtime service was not rebound to loaded components");
+	Expect(service.updates == 2 && service.awakes == 2,
+	       "References or runtime services were not restored before lifecycle startup");
 
 	Ursa::ComponentRegistry emptyRegistry;
 	Ursa::ComponentLoadContext missingTypeContext(*session);

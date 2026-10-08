@@ -6,7 +6,7 @@ namespace Ursa
 {
 Result<void> Application::ConfigureFixedStep(Ursa::Float32 seconds, Ursa::UInt32 maxSteps)
 {
-	return frameScheduler.Configure(seconds, maxSteps);
+	return sceneFrameRunner.ConfigureFixedStep(seconds, maxSteps);
 }
 
 Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const String& title, bool visible,
@@ -18,6 +18,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		return Result<void>::Failure(windowResult.error);
 	}
 	window = std::move(windowResult.value);
+	sceneFrameRunner.Reset();
 	Rhi::DeviceDesc deviceDesc;
 	deviceDesc.window = window;
 #ifndef NDEBUG
@@ -65,8 +66,6 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 	auto previous = std::chrono::steady_clock::now();
 	Result<void> result;
 	Ursa::UInt32 frames = 0;
-	Ursa::UInt64 frameIndex = 0;
-	Ursa::Float64 elapsedSeconds = 0.0;
 	while (!window->ShouldClose())
 	{
 		window->PollEvents();
@@ -74,7 +73,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		{
 			window->WaitEvents();
 			previous = std::chrono::steady_clock::now();
-			frameScheduler.Reset();
+			sceneFrameRunner.ResetAccumulator();
 			continue;
 		}
 		const auto now = std::chrono::steady_clock::now();
@@ -82,25 +81,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		previous = now;
 		if (scene)
 		{
-			const auto schedule = frameScheduler.Advance(dt);
-			elapsedSeconds += schedule.deltaSeconds;
-			FrameContext context;
-			context.deltaSeconds = schedule.deltaSeconds;
-			context.fixedDeltaSeconds = frameScheduler.FixedSeconds();
-			context.elapsedSeconds = elapsedSeconds;
-			context.frameIndex = ++frameIndex;
-			context.window = window.get();
-			context.input = FrameInput::Capture(*window);
-			scene->BeginFrame();
-			result = scene->Update(context);
-			for (Ursa::UInt32 step = 0; result && step < schedule.fixedSteps; ++step)
-			{
-				result = scene->FixedUpdate(context);
-			}
-			if (result)
-			{
-				result = scene->LateUpdate(context);
-			}
+			result = sceneFrameRunner.Tick(*scene, dt, window.get(), FrameInput::Capture(*window));
 			if (result)
 			{
 				const Ursa::Float32 aspect = static_cast<Ursa::Float32>(window->FramebufferWidth()) /

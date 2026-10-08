@@ -2,7 +2,9 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Serialization/SceneResource.hpp>
+#include <Serialization/Archive.hpp>
 #include <Serialization/MaterialResource.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -10,6 +12,8 @@
 
 namespace
 {
+using namespace Ursa;
+
 template <class T> T Take(Ursa::Result<T> result)
 {
 	if (!result)
@@ -33,6 +37,61 @@ void Expect(bool condition, const char* message)
 	{
 		throw std::runtime_error(message);
 	}
+}
+
+class FakeManagedBehaviourRuntime final : public Ursa::Scripting::ManagedBehaviourRuntime
+{
+public:
+	Result<ComponentId> AddExisting(const GameObject::Ptr&, const String&, UInt64) override
+	{
+		return Result<ComponentId>::Failure("Not used by the serialization fixture");
+	}
+
+	Result<ComponentId> CreateAndAdd(const GameObject::Ptr&, const String&) override
+	{
+		return Result<ComponentId>::Failure("Not used by the serialization fixture");
+	}
+
+	Result<void> Dispatch(UInt64, Ursa::Scripting::BehaviourEvent, const FrameContext*, Component*) override
+	{
+		return {};
+	}
+
+	Result<void> Destroy(UInt64) override
+	{
+		return {};
+	}
+
+	Result<String> SerializeFields(UInt64) override
+	{
+		return Result<String>::Success(
+		    R"({"FormatVersion":1,"ScriptType":"test.migration","Version":2,"Fields":{"newName":31},"FormerFieldNames":{"newName":["oldName"]}})");
+	}
+};
+
+void TestScriptFieldMigrationAndUnknownPreservation()
+{
+	FakeManagedBehaviourRuntime runtime;
+	Ursa::Scripting::ScriptBehaviourComponent component(runtime, "MigrationProbeBehaviour", 1);
+	Ursa::ArchiveWriter input;
+	done(input.Write("typeName", Ursa::String("MigrationProbeBehaviour")));
+	auto scriptPayload = Take(input.Object("scriptPayload"));
+	done(Ursa::ArchiveWriteJson(
+	    scriptPayload,
+	    nlohmann::json::parse(
+	        R"({"FormatVersion":1,"ScriptType":"test.migration","Version":2,"Fields":{"oldName":31,"removedField":"keep me"}})")));
+	auto encoded = Take(Ursa::ArchiveToJson(input));
+	auto reader = Take(Ursa::ArchiveFromJson(encoded));
+	Ursa::SerializationContext context;
+	done(component.Deserialize(reader, context));
+	Ursa::ArchiveWriter output;
+	done(component.Serialize(output));
+	const auto saved = Take(Ursa::ArchiveToJson(output));
+	const auto payload = saved.at("scriptPayload");
+	Expect(payload.at("Fields").at("newName").get<int>() == 31 &&
+	           payload.at("Fields").at("removedField").get<std::string>() == "keep me" &&
+	           !payload.at("Fields").contains("oldName"),
+	       "Script field migration did not keep the migrated value and unknown saved field");
 }
 
 void RoundTripScene(const std::filesystem::path& path, Ursa::ResourceSession& resources)
@@ -83,7 +142,7 @@ void TestScene(const std::filesystem::path& root)
 	transform.position = {2.0f, 3.0f, 4.0f};
 	transform.scale = {1.2f, 0.8f, 2.0f};
 	done(scene.SetLocalTransform(child, transform));
-	done(scene.SetEnabled(child, false));
+	done(scene.SetActive(child, false));
 	done(scene.SetAmbientLight({0.3f, 0.4f, 0.5f, 1.0f}, 0.25f));
 	const auto camera = Take(scene.AddComponent<Ursa::CameraComponent>(first));
 	auto* cameraObject = static_cast<Ursa::CameraComponent*>(scene.GetComponent(camera));
@@ -101,6 +160,32 @@ void TestScene(const std::filesystem::path& root)
 	auto* lampObject = static_cast<Ursa::PointLightComponent*>(scene.GetComponent(lamp));
 	done(lampObject->SetRange(7.0f));
 	Take(scene.AddComponent<Ursa::PointLightComponent>(second));
+	const auto script =
+	    Take(scene.AddComponent<Ursa::Scripting::ScriptBehaviourComponent>(first, "Demo.MoveWithInput"));
+	auto* scriptObject = static_cast<Ursa::Scripting::ScriptBehaviourComponent*>(scene.GetComponent(script));
+	const auto savedChildId = Take(scene.PersistentId(child));
+	const auto savedCameraId = Take(scene.ComponentPersistentId(camera));
+	nlohmann::json scriptPayload = nlohmann::json::object();
+	scriptPayload["FormatVersion"] = 1u;
+	scriptPayload["ScriptType"] = "demo.move-with-input";
+	scriptPayload["Version"] = 1u;
+	scriptPayload["Fields"] = nlohmann::json::object();
+	scriptPayload["Fields"]["step"] = 2.5;
+	scriptPayload["Fields"]["targetObject"]["$ursaReference"]["Kind"] = "GameObject";
+	scriptPayload["Fields"]["targetObject"]["$ursaReference"]["Id"] = Ursa::ToStdString(savedChildId.ToString());
+	scriptPayload["Fields"]["targetCamera"]["$ursaReference"]["Kind"] = "Component";
+	scriptPayload["Fields"]["targetCamera"]["$ursaReference"]["Id"] = Ursa::ToStdString(savedCameraId.ToString());
+	scriptObject->SetSerializedPayload(Ursa::ToUrsaString(scriptPayload.dump()));
+	Ursa::ArchiveWriter scriptArchive;
+	done(scriptObject->Serialize(scriptArchive));
+	Ursa::Vector<Ursa::UInt8> scriptArchiveBytes = Take(Ursa::BinaryArchive::Encode(scriptArchive));
+	Ursa::ArchiveReader scriptArchiveReader = Take(Ursa::BinaryArchive::Decode(scriptArchiveBytes));
+	Ursa::Scripting::ScriptBehaviourComponent archiveRestored(Ursa::String{});
+	Ursa::SerializationContext scriptSerializationContext;
+	done(archiveRestored.Deserialize(scriptArchiveReader, scriptSerializationContext));
+	Expect(archiveRestored.TypeName() == "Demo.MoveWithInput" && archiveRestored.HasSerializedPayload() &&
+	           Ursa::ToStdString(archiveRestored.SerializedPayload()).find("step") != std::string::npos,
+	       "Binary Archive did not preserve script identity and field payload");
 	auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
 	done(material->SetBaseColor({0.2f, 0.5f, 0.8f, 1.0f}));
 	const auto materialId = Ursa::ResourceId::Generate();
@@ -134,7 +219,7 @@ void TestScene(const std::filesystem::path& root)
 	const auto restoredChild = Take(loaded.scene->GameObjectById(childId));
 	Expect(Take(loaded.scene->ParentOf(restoredChild)) == restoredFirst &&
 	           Take(loaded.scene->GetLocalTransform(restoredChild)).position.x == 2.0f &&
-	           !Take(loaded.scene->IsEnabled(restoredChild)),
+	           !Take(loaded.scene->ActiveSelf(restoredChild)),
 	       "Scene hierarchy, transform, or enabled state was lost");
 	Expect(Take(loaded.scene->ComponentPersistentId(loaded.scene->ActiveCamera())) == cameraId &&
 	           loaded.scene->AmbientLightColor().green == 0.4f && loaded.scene->AmbientLightIntensity() == 0.25f &&
@@ -143,6 +228,22 @@ void TestScene(const std::filesystem::path& root)
 	Expect(Take(loaded.scene->ComponentsOf(Take(loaded.scene->GameObjectById(secondId)))).size() == 3 &&
 	           loaded.scene->GetComponent(Take(loaded.scene->ComponentByPersistentId(sunId))) != nullptr,
 	       "Scene components were not restored");
+	auto restoredComponents = Take(loaded.scene->ComponentsOf(restoredFirst));
+	bool restoredScript = false;
+	for (Ursa::ComponentId componentId : restoredComponents)
+	{
+		auto* component = loaded.scene->GetComponent(componentId);
+		auto* scriptComponent = dynamic_cast<Ursa::Scripting::ScriptBehaviourComponent*>(component);
+		if (scriptComponent)
+		{
+			restoredScript = scriptComponent->TypeName() == "Demo.MoveWithInput" &&
+			                 scriptComponent->HasSerializedPayload() &&
+			                 Ursa::ToStdString(scriptComponent->SerializedPayload()).find("demo.move-with-input") !=
+			                     std::string::npos &&
+			                 Ursa::ToStdString(scriptComponent->SerializedPayload()).find("step") != std::string::npos;
+		}
+	}
+	Expect(restoredScript, "Scene codec did not preserve a managed script type and field payload");
 	const auto restoredCamera = loaded.scene->FindComponent<Ursa::CameraComponent>(restoredFirst);
 	const auto frame = Take(loaded.scene->CollectRenderData(1.0f));
 	Expect(restoredCamera && restoredCamera->verticalFovRadians == 0.9f && restoredCamera->farPlane == 80.0f &&
@@ -197,7 +298,7 @@ public:
 	{
 	}
 
-	Ursa::Result<void> OnStart(const Ursa::FrameContext&) override
+	Ursa::Result<void> Start(const Ursa::FrameContext&) override
 	{
 		++counters.starts;
 		return {};
@@ -275,6 +376,7 @@ int main()
 			std::filesystem::create_directory(root);
 		};
 		TestScene(root);
+		TestScriptFieldMigrationAndUnknownPreservation();
 		reset();
 		TestReload(root);
 		reset();

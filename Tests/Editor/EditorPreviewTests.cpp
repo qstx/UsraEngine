@@ -42,13 +42,13 @@ public:
 	{
 	}
 
-	Result<void> OnStart(const FrameContext&) override
+	Result<void> Start(const FrameContext&) override
 	{
 		++starts;
 		return {};
 	}
 
-	Result<void> OnUpdate(const FrameContext&) override
+	Result<void> Update(const FrameContext&) override
 	{
 		++updates;
 		return {};

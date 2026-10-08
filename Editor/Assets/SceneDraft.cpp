@@ -5,10 +5,13 @@
 #include <Ui/ImGuiInspectorUI.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/PrefabCapture.hpp>
+#include <Serialization/SerializedObject.hpp>
 #include <Scene/RenderingComponents.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
 #include <imgui.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace Ursa::Editor
 {
@@ -66,6 +69,414 @@ bool DrawAddComponentBrowser(ComponentEditors& componentEditors, ComponentInspec
 		ImGui::EndPopup();
 	}
 	return changed;
+}
+
+bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const String& elementKind,
+                               const nlohmann::json& descriptor, const ProjectWorkspace& workspace,
+                               const ComponentInspectorContext& context);
+
+bool DrawSerializedReference(nlohmann::json& value, const String& kind, const ComponentInspectorContext& context)
+{
+	ResourceId currentId;
+	if (value.is_object() && value.contains("$ursaReference") && value["$ursaReference"].is_object() &&
+	    value["$ursaReference"].contains("Id") && value["$ursaReference"]["Id"].is_string())
+	{
+		auto parsed = ResourceId::Parse(ToUrsaString(value["$ursaReference"]["Id"].get<std::string>()));
+		if (parsed)
+		{
+			currentId = parsed.value;
+		}
+	}
+	bool changed = false;
+	const String preview = currentId ? currentId.ToString() : String("None");
+	if (!ImGui::BeginCombo("##Reference", preview.c_str()))
+	{
+		return false;
+	}
+	if (ImGui::Selectable("None", !currentId))
+	{
+		value = nullptr;
+		changed = true;
+	}
+	Vector<GameObject::Ptr> pending = context.roots;
+	while (!pending.empty())
+	{
+		GameObject::Ptr object = std::move(pending.back());
+		pending.pop_back();
+		if (kind == "GameObjectReference")
+		{
+			const ResourceId id = context.scene ? context.scene->PersistentId(object).value : object->Id();
+			const String label = object->Name().value + "##" + id.ToString();
+			if (ImGui::Selectable(label.c_str(), id == currentId))
+			{
+				value = {{"$ursaReference", {{"Kind", "GameObject"}, {"Id", ToStdString(id.ToString())}}}};
+				changed = true;
+			}
+		}
+		else
+		{
+			for (Component* component : object->Components())
+			{
+				ResourceId id = component->PersistentId();
+				if (context.scene)
+				{
+					auto persistent = context.scene->ComponentPersistentId(component->Id());
+					if (persistent)
+					{
+						id = persistent.value;
+					}
+				}
+				const String label = component->SerializationType() + "##" + id.ToString();
+				if (ImGui::Selectable(label.c_str(), id == currentId))
+				{
+					value = {{"$ursaReference", {{"Kind", "Component"}, {"Id", ToStdString(id.ToString())}}}};
+					changed = true;
+				}
+			}
+		}
+		for (const auto& child : object->Children())
+		{
+			pending.push_back(child);
+		}
+	}
+	ImGui::EndCombo();
+	return changed;
+}
+
+bool DrawSerializedAssetReference(nlohmann::json& value, const ProjectWorkspace& workspace)
+{
+	ResourceId currentId;
+	if (value.is_object() && value.contains("guid") && value["guid"].is_string())
+	{
+		auto parsed = ResourceId::Parse(ToUrsaString(value["guid"].get<std::string>()));
+		if (parsed)
+		{
+			currentId = parsed.value;
+		}
+	}
+	String preview = currentId ? currentId.ToString() : String("None");
+	for (const ResourceEntry& entry : workspace.Resources())
+	{
+		if (entry.id == currentId)
+		{
+			preview = entry.location.path.FileName();
+			break;
+		}
+	}
+	bool changed = false;
+	if (ImGui::BeginCombo("##Asset", preview.c_str()))
+	{
+		if (ImGui::Selectable("None", !currentId))
+		{
+			value = nullptr;
+			changed = true;
+		}
+		for (const ResourceEntry& entry : workspace.Resources())
+		{
+			const String label = entry.location.path.FileName() + "##" + entry.id.ToString();
+			if (ImGui::Selectable(label.c_str(), entry.id == currentId))
+			{
+				value = {{"guid", ToStdString(entry.id.ToString())}, {"localFileId", 0u}};
+				changed = true;
+			}
+		}
+		ImGui::EndCombo();
+	}
+	return changed;
+}
+
+bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const String& elementKind,
+                               const nlohmann::json& descriptor, const ProjectWorkspace& workspace,
+                               const ComponentInspectorContext& context)
+{
+	if (kind == "Boolean")
+	{
+		bool candidate = value.is_boolean() && value.get<bool>();
+		if (ImGui::Checkbox("##Value", &candidate))
+		{
+			value = candidate;
+			return true;
+		}
+	}
+	else if (kind == "SignedInteger")
+	{
+		Int64 candidate = value.is_number_integer() ? value.get<Int64>() : 0;
+		if (ImGui::InputScalar("##Value", ImGuiDataType_S64, &candidate))
+		{
+			value = candidate;
+			return true;
+		}
+	}
+	else if (kind == "UnsignedInteger")
+	{
+		UInt64 candidate = value.is_number_unsigned() ? value.get<UInt64>() : 0;
+		if (ImGui::InputScalar("##Value", ImGuiDataType_U64, &candidate))
+		{
+			value = candidate;
+			return true;
+		}
+	}
+	else if (kind == "FloatingPoint")
+	{
+		Float64 candidate = value.is_number() ? value.get<Float64>() : 0.0;
+		if (ImGui::InputScalar("##Value", ImGuiDataType_Double, &candidate, nullptr, nullptr, "%.6g"))
+		{
+			value = candidate;
+			return true;
+		}
+	}
+	else if (kind == "String")
+	{
+		Ursa::Array<char, 1024> candidate{};
+		if (value.is_string())
+		{
+			const std::string text = value.get<std::string>();
+			std::memcpy(candidate.data(), text.data(), std::min(text.size(), candidate.size() - 1));
+		}
+		if (ImGui::InputText("##Value", candidate.data(), candidate.size()))
+		{
+			value = candidate.data();
+			return true;
+		}
+	}
+	else if (kind == "Enumeration" && descriptor.contains("EnumNumericValues"))
+	{
+		const auto& names = descriptor["EnumValues"];
+		const auto& numbers = descriptor["EnumNumericValues"];
+		std::string preview = value.dump();
+		for (Size index = 0; index < names.size() && index < numbers.size(); ++index)
+		{
+			if (numbers[index] == value)
+			{
+				preview = names[index].get<std::string>();
+			}
+		}
+		if (ImGui::BeginCombo("##Value", preview.c_str()))
+		{
+			for (Size index = 0; index < names.size() && index < numbers.size(); ++index)
+			{
+				if (ImGui::Selectable(names[index].get<std::string>().c_str(), numbers[index] == value))
+				{
+					value = numbers[index];
+					ImGui::EndCombo();
+					return true;
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+	else if (kind == "Vector3" || kind == "Quaternion" || kind == "Color")
+	{
+		const Size count = kind == "Vector3" ? 3 : 4;
+		Float32 components[4]{0.0f, 0.0f, 0.0f, 1.0f};
+		for (Size index = 0; value.is_array() && index < count && index < value.size(); ++index)
+		{
+			if (value[index].is_number())
+			{
+				components[index] = value[index].get<Float32>();
+			}
+		}
+		const bool edited = kind == "Vector3" ? ImGui::DragFloat3("##Value", components, 0.05f)
+		                    : kind == "Color" ? ImGui::ColorEdit4("##Value", components)
+		                                      : ImGui::DragFloat4("##Value", components, 0.005f);
+		if (edited)
+		{
+			value = nlohmann::json::array();
+			for (Size index = 0; index < count; ++index)
+			{
+				value.push_back(components[index]);
+			}
+			return true;
+		}
+	}
+	else if (kind == "AssetReference")
+	{
+		return DrawSerializedAssetReference(value, workspace);
+	}
+	else if (kind == "GameObjectReference" || kind == "ComponentReference")
+	{
+		return DrawSerializedReference(value, kind, context);
+	}
+	else if (kind == "Array" || kind == "List")
+	{
+		if (!value.is_array())
+		{
+			value = nlohmann::json::array();
+		}
+		bool changed = false;
+		for (Size index = 0; index < value.size(); ++index)
+		{
+			ImGui::PushID(static_cast<int>(index));
+			ImGui::Text("[%u]", static_cast<unsigned int>(index));
+			ImGui::SameLine();
+			changed |= DrawSerializedScriptValue(value[index], elementKind, {}, descriptor, workspace, context);
+			ImGui::SameLine();
+			if (ImGui::SmallButton("-"))
+			{
+				value.erase(value.begin() + static_cast<std::ptrdiff_t>(index));
+				changed = true;
+				ImGui::PopID();
+				break;
+			}
+			ImGui::PopID();
+		}
+		if (ImGui::SmallButton("Add element"))
+		{
+			nlohmann::json item = nullptr;
+			if (elementKind == "Boolean")
+			{
+				item = false;
+			}
+			else if (elementKind == "SignedInteger")
+			{
+				item = Int64{0};
+			}
+			else if (elementKind == "UnsignedInteger")
+			{
+				item = UInt64{0};
+			}
+			else if (elementKind == "FloatingPoint")
+			{
+				item = 0.0;
+			}
+			else if (elementKind == "String")
+			{
+				item = "";
+			}
+			else if (elementKind == "Vector3")
+			{
+				item = {0.0, 0.0, 0.0};
+			}
+			else if (elementKind == "Quaternion" || elementKind == "Color")
+			{
+				item = {0.0, 0.0, 0.0, 0.0};
+			}
+			else if (elementKind == "Enumeration" && descriptor.contains("EnumNumericValues") &&
+			         !descriptor["EnumNumericValues"].empty())
+			{
+				item = descriptor["EnumNumericValues"][0];
+			}
+			value.push_back(std::move(item));
+			changed = true;
+		}
+		return changed;
+	}
+	else
+	{
+		ImGui::TextDisabled("Unsupported field type: %s", kind.c_str());
+	}
+	return false;
+}
+
+bool DrawSerializedScriptFields(Scripting::ScriptBehaviourComponent& component, const ProjectWorkspace& workspace,
+                                const ComponentInspectorContext& context, String& diagnostic,
+                                const Vector<ScriptTypeDescriptor>* scriptTypes)
+{
+	if (scriptTypes)
+	{
+		try
+		{
+			const nlohmann::json payload = nlohmann::json::parse(ToStdString(component.SerializedPayload()));
+			const String scriptType = ToUrsaString(payload.value("ScriptType", std::string{}));
+			const bool found = std::any_of(scriptTypes->begin(), scriptTypes->end(),
+			                               [&scriptType](const ScriptTypeDescriptor& descriptor)
+			                               { return descriptor.scriptType == scriptType; });
+			if (!found)
+			{
+				diagnostic = "Missing Script: " + scriptType + ". Serialized data is preserved.";
+				ImGui::TextWrapped("%s", diagnostic.c_str());
+				return false;
+			}
+		}
+		catch (const nlohmann::json::exception& error)
+		{
+			diagnostic = "Invalid Script payload: " + ToUrsaString(error.what());
+			ImGui::TextWrapped("%s", diagnostic.c_str());
+			return false;
+		}
+	}
+	auto serialized =
+	    SerializedObject::Create(component, context.loadContext ? &context.loadContext->Resources() : nullptr);
+	if (!serialized)
+	{
+		diagnostic = serialized.error;
+		ImGui::TextDisabled("Script fields are unavailable; serialized payload is preserved.");
+		return false;
+	}
+	nlohmann::json payload;
+	try
+	{
+		payload = nlohmann::json::parse(ToStdString(component.SerializedPayload()));
+	}
+	catch (const nlohmann::json::exception& error)
+	{
+		diagnostic = ToUrsaString(error.what());
+		return false;
+	}
+	if (!payload.contains("Fields") || !payload["Fields"].is_object() || !payload.contains("FieldTypes") ||
+	    !payload["FieldTypes"].is_object())
+	{
+		ImGui::TextDisabled("This script has no available field schema.");
+		return false;
+	}
+	bool staged = false;
+	for (const auto& field : payload["Fields"].items())
+	{
+		const String name = ToUrsaString(field.key());
+		if (!payload["FieldTypes"].contains(field.key()))
+		{
+			ImGui::TextDisabled("%s (unknown saved field; preserved)", name.c_str());
+			continue;
+		}
+		const auto& descriptor = payload["FieldTypes"][field.key()];
+		if (!descriptor.is_object() || !descriptor.contains("Kind") || !descriptor["Kind"].is_string())
+		{
+			ImGui::TextDisabled("%s (invalid field descriptor)", name.c_str());
+			continue;
+		}
+		String kind = ToUrsaString(descriptor["Kind"].get<std::string>());
+		String elementKind;
+		if (descriptor.contains("ElementKind") && descriptor["ElementKind"].is_string())
+		{
+			elementKind = ToUrsaString(descriptor["ElementKind"].get<std::string>());
+		}
+		auto property = serialized.value->FindProperty(String("/Fields/") + name);
+		if (!property)
+		{
+			ImGui::TextDisabled("%s (unavailable)", name.c_str());
+			continue;
+		}
+		ImGui::PushID(name.c_str());
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextUnformatted(name.c_str());
+		ImGui::SameLine(150.0f);
+		ImGui::SetNextItemWidth(-1.0f);
+		nlohmann::json candidate = field.value();
+		if (DrawSerializedScriptValue(candidate, kind, elementKind, descriptor, workspace, context))
+		{
+			auto set = property.value.SetValue(std::move(candidate));
+			if (!set)
+			{
+				diagnostic = set.error;
+			}
+			else
+			{
+				staged = true;
+			}
+		}
+		ImGui::PopID();
+	}
+	if (!staged)
+	{
+		return false;
+	}
+	auto applied = serialized.value->Apply();
+	if (!applied)
+	{
+		diagnostic = applied.error;
+		return false;
+	}
+	return true;
 }
 } // namespace
 
@@ -729,7 +1140,8 @@ Result<std::unique_ptr<EditorDocument>> OpenSceneDocument(const VirtualPath& pat
 
 Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hierarchy, EditorDocuments& documents,
                                 const ProjectWorkspace& workspace, ComponentRegistry& registry,
-                                ComponentEditors& componentEditors, String& diagnostic)
+                                ComponentEditors& componentEditors, String& diagnostic,
+                                const Vector<ScriptTypeDescriptor>* scriptTypes)
 {
 	auto draft = document.Payload<SceneDraft>();
 	if (!draft)
@@ -781,10 +1193,10 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				diagnostic = renamed ? String{} : renamed.error;
 				changed |= static_cast<bool>(renamed);
 			}
-			bool enabled = object->IsEnabled().value;
-			if (ImGui::Checkbox("Enabled", &enabled))
+			bool active = object->ActiveSelf().value;
+			if (ImGui::Checkbox("Active", &active))
 			{
-				auto set = object->SetEnabled(enabled);
+				auto set = object->SetActive(active);
 				diagnostic = set ? String{} : set.error;
 				changed |= static_cast<bool>(set);
 			}
@@ -830,10 +1242,14 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 			{
 				ImGui::PushID(component->PersistentId().ToString().c_str());
 				auto codec = registry.FindFor(*component);
-				const auto* descriptor = codec ? componentEditors.FindType(codec.value->type) : nullptr;
-				ImGui::SeparatorText(descriptor ? descriptor->displayName.c_str()
-				                     : codec    ? codec.value->type.c_str()
-				                                : "Component");
+				const auto* scriptHeader = dynamic_cast<Scripting::ScriptBehaviourComponent*>(component);
+				const auto* descriptor = scriptHeader ? componentEditors.FindType(scriptHeader->TypeName())
+				                         : codec      ? componentEditors.FindType(codec.value->type)
+				                                      : nullptr;
+				ImGui::SeparatorText(descriptor     ? descriptor->displayName.c_str()
+				                     : scriptHeader ? scriptHeader->TypeName().c_str()
+				                     : codec        ? codec.value->type.c_str()
+				                                    : "Component");
 				bool componentEnabled = component->IsEnabled();
 				if (ImGui::Checkbox("Enabled", &componentEnabled))
 				{
@@ -841,7 +1257,33 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					changed = true;
 				}
 				ImGui::SameLine();
-				if (auto* box = dynamic_cast<BoxRenderComponent*>(component))
+				const ComponentEditor* customEditor = componentEditors.Find(scriptHeader ? scriptHeader->TypeName()
+				                                                            : codec      ? codec.value->type
+				                                                                         : String{});
+				bool customDrawn = false;
+				if (customEditor)
+				{
+					ImGuiInspectorUI inspectorUi;
+					auto edited = (*customEditor)(*component, inspectorContext, inspectorUi);
+					if (edited)
+					{
+						changed |= edited.value;
+						customDrawn = true;
+					}
+					else
+					{
+						diagnostic = edited.error;
+					}
+				}
+				if (customDrawn)
+				{
+				}
+				else if (auto* scriptData = dynamic_cast<Scripting::ScriptBehaviourComponent*>(component))
+				{
+					changed |=
+					    DrawSerializedScriptFields(*scriptData, workspace, inspectorContext, diagnostic, scriptTypes);
+				}
+				else if (auto* box = dynamic_cast<BoxRenderComponent*>(component))
 				{
 					Ursa::Float32 color[4]{box->color.red, box->color.green, box->color.blue, box->color.alpha};
 					if (ImGui::ColorEdit4("Color", color))
@@ -994,16 +1436,16 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 			diagnostic = renamed ? String{} : renamed.error;
 			changed |= static_cast<bool>(renamed);
 		}
-		auto enabledState = scene.IsEnabled(node);
-		if (!enabledState)
+		auto activeState = scene.ActiveSelf(node);
+		if (!activeState)
 		{
 			ImGui::End();
-			return Result<bool>::Failure(enabledState.error);
+			return Result<bool>::Failure(activeState.error);
 		}
-		bool enabled = enabledState.value;
-		if (ImGui::Checkbox("Enabled", &enabled))
+		bool active = activeState.value;
+		if (ImGui::Checkbox("Active", &active))
 		{
-			auto set = scene.SetEnabled(node, enabled);
+			auto set = scene.SetActive(node, active);
 			diagnostic = set ? String{} : set.error;
 			changed |= static_cast<bool>(set);
 		}
@@ -1214,8 +1656,12 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					ImGui::PopID();
 					continue;
 				}
-				const auto* descriptor = componentEditors.FindType(codec.value->type);
-				ImGui::SeparatorText(descriptor ? descriptor->displayName.c_str() : codec.value->type.c_str());
+				auto* scriptHeader = dynamic_cast<Scripting::ScriptBehaviourComponent*>(object);
+				const auto* descriptor = scriptHeader ? componentEditors.FindType(scriptHeader->TypeName())
+				                                      : componentEditors.FindType(codec.value->type);
+				ImGui::SeparatorText(descriptor     ? descriptor->displayName.c_str()
+				                     : scriptHeader ? scriptHeader->TypeName().c_str()
+				                                    : codec.value->type.c_str());
 				auto enabled = scene.IsComponentEnabled(componentId);
 				if (enabled)
 				{
@@ -1237,7 +1683,33 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					ImGui::PopID();
 					continue;
 				}
-				if (auto* box = dynamic_cast<BoxRenderComponent*>(object))
+				const ComponentEditor* customEditor = componentEditors.Find(scriptHeader ? scriptHeader->TypeName()
+				                                                            : codec      ? codec.value->type
+				                                                                         : String{});
+				bool customDrawn = false;
+				if (customEditor)
+				{
+					ImGuiInspectorUI inspectorUi;
+					auto edited = (*customEditor)(*object, inspectorContext, inspectorUi);
+					if (edited)
+					{
+						changed |= edited.value;
+						customDrawn = true;
+					}
+					else
+					{
+						diagnostic = edited.error;
+					}
+				}
+				if (customDrawn)
+				{
+				}
+				else if (auto* scriptData = dynamic_cast<Scripting::ScriptBehaviourComponent*>(object))
+				{
+					changed |=
+					    DrawSerializedScriptFields(*scriptData, workspace, inspectorContext, diagnostic, scriptTypes);
+				}
+				else if (auto* box = dynamic_cast<BoxRenderComponent*>(object))
 				{
 					Ursa::Float32 color[4]{box->color.red, box->color.green, box->color.blue, box->color.alpha};
 					if (ImGui::ColorEdit4("Color", color))

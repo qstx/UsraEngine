@@ -59,6 +59,16 @@ public:
 
 	Result<void> MapComponentObject(ResourceId id, ::Ursa::Component* component);
 
+	void SetSceneReadyCallback(std::function<Result<void>(Scene&, ComponentLoadContext&)> callback)
+	{
+		sceneReadyCallback = std::move(callback);
+	}
+
+	Result<void> NotifySceneReady(Scene& scene)
+	{
+		return sceneReadyCallback ? sceneReadyCallback(scene, *this) : Result<void>{};
+	}
+
 	void ClearMappings();
 
 private:
@@ -67,6 +77,7 @@ private:
 	Map<String, GameObject::Ptr> gameObjects;
 	Map<String, ComponentId> components;
 	Map<String, ::Ursa::Component*> componentObjects;
+	std::function<Result<void>(Scene&, ComponentLoadContext&)> sceneReadyCallback;
 };
 
 // Clear candidate reference maps on failure so callers cannot observe a partial graph.
@@ -170,8 +181,16 @@ public:
 
 	const ComponentCodec* Find(const String& type) const;
 
+	Result<void> RegisterScriptFieldAlias(const String& scriptType, const String& formerName,
+	                                      const String& currentName);
+
+	Result<void> ReplaceScriptFieldAliases(const String& scriptType, Map<String, String> aliases);
+
+	Map<String, String> ScriptFieldAliases(const String& scriptType) const;
+
 private:
 	Map<String, ComponentCodec> codecs;
+	Map<String, Map<String, String>> scriptFieldAliases;
 };
 
 Result<void> RegisterBuiltinComponents(ComponentRegistry& registry);

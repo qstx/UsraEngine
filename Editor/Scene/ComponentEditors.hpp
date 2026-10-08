@@ -4,6 +4,7 @@
 #include <Core/Result.hpp>
 #include <Scene/Scene.hpp>
 #include <Serialization/ComponentRegistry.hpp>
+#include <Scripting/ScriptTypeDescriptor.hpp>
 #include <functional>
 
 namespace Ursa
@@ -69,6 +70,10 @@ public:
 
 	Result<void> RegisterType(ComponentTypeDescriptor descriptor, ComponentEditor editor = {});
 
+	void ReplaceEditor(const String& type, ComponentEditor editor);
+
+	void UnregisterType(const String& type);
+
 	const ComponentEditor* Find(const String& type) const;
 
 	const ComponentTypeDescriptor* FindType(const String& type) const;
@@ -85,4 +90,6 @@ private:
 };
 
 Result<void> RegisterBuiltinComponentEditors(ComponentEditors& editors);
+
+Result<void> RegisterScriptComponentType(ComponentEditors& editors, const ScriptTypeDescriptor& scriptType);
 } // namespace Ursa::Editor

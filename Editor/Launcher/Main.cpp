@@ -1,6 +1,8 @@
 #include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
 #include <Core/Log.hpp>
+#include <Core/StringInterop.hpp>
+#include <Vfs/VirtualPath.hpp>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -13,6 +15,7 @@ int main(int argc, char** argv)
 	Ursa::UInt32 frames = 0;
 	std::filesystem::path projectRoot;
 	std::filesystem::path package;
+	std::filesystem::path initialScene;
 	for (int index = 1; index < argc; ++index)
 	{
 		const Ursa::String argument = argv[index];
@@ -32,6 +35,10 @@ int main(int argc, char** argv)
 		{
 			projectRoot = std::filesystem::u8path(argv[++index]);
 		}
+		else if (argument == "--scene" && index + 1 < argc)
+		{
+			initialScene = std::filesystem::u8path(argv[++index]);
+		}
 		else
 		{
 			std::cerr << "Unknown editor option: " << argument.c_str() << '\n';
@@ -41,7 +48,13 @@ int main(int argc, char** argv)
 
 	if (projectRoot.empty())
 	{
-		std::cerr << "Usage: UrsaEditor --project <project-directory> [--hidden] [--frames N]\n";
+		std::cerr << "Usage: UrsaEditor --project <project-directory> [--scene <relative-scene-path>] "
+		             "[--hidden] [--frames N]\n";
+		return 2;
+	}
+	if (initialScene.is_absolute())
+	{
+		std::cerr << "--scene must be relative to the project Assets folder\n";
 		return 2;
 	}
 	Ursa::Editor::EditorApplication editor;
@@ -50,6 +63,17 @@ int main(int argc, char** argv)
 	{
 		URSA_LOG_CRITICAL("Editor", opened.error);
 		return 1;
+	}
+	if (!initialScene.empty())
+	{
+		auto scenePath =
+		    Ursa::VirtualPath::Parse(Ursa::String("prj:") + Ursa::ToUrsaString(initialScene.generic_string()));
+		if (!scenePath)
+		{
+			URSA_LOG_CRITICAL("Editor", scenePath.error);
+			return 1;
+		}
+		editor.SetStartupAsset(scenePath.value);
 	}
 	auto result = editor.Run(1280, 720, "Ursa Editor", visible, frames);
 	if (!result)

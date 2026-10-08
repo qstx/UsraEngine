@@ -70,6 +70,13 @@ public:
 		return {};
 	}
 
+	void ClearMesh()
+	{
+		meshGuid = {};
+		meshLocalFileId = 0;
+		mesh.reset();
+	}
+
 	ResourceId MeshGuid() const
 	{
 		return meshGuid;
@@ -114,6 +121,13 @@ public:
 		meshLocalFileId = localFileId;
 		mesh = std::move(value);
 		return {};
+	}
+
+	void ClearMesh()
+	{
+		meshGuid = {};
+		meshLocalFileId = 0;
+		mesh.reset();
 	}
 
 	ResourceId MeshGuid() const

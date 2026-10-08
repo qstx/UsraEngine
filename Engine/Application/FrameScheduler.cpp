@@ -25,16 +25,23 @@ FrameSchedule FrameScheduler::Advance(Ursa::Float32 elapsedSeconds)
 	while (accumulator + 1e-9 >= fixedSeconds && steps < maxSteps)
 	{
 		accumulator -= fixedSeconds;
+		fixedElapsedSeconds += fixedSeconds;
 		++steps;
 	}
 	if (steps == maxSteps && accumulator >= fixedSeconds)
 	{
 		accumulator = std::fmod(accumulator, fixedSeconds);
 	}
-	return {delta, steps};
+	return {delta, steps, fixedElapsedSeconds};
 }
 
 void FrameScheduler::Reset()
+{
+	accumulator = 0.0;
+	fixedElapsedSeconds = 0.0;
+}
+
+void FrameScheduler::ResetAccumulator()
 {
 	accumulator = 0.0;
 }

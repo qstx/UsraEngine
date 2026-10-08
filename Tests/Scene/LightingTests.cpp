@@ -89,11 +89,11 @@ void TestWorldSnapshotAndCapacity()
 	Expect(std::abs(frame.lighting.point[0].position.x - 1.0f) < 0.0001f &&
 	           std::abs(movedFrame.lighting.point[0].position.x) < 0.0001f,
 	       "A collected frame did not retain its own light snapshot");
-	done(scene.SetEnabled(parent, false));
+	done(scene.SetActive(parent, false));
 	Expect(Take(scene.CollectRenderData(1.0f)).lighting.point.empty() &&
 	           Take(scene.CollectRenderData(1.0f)).lighting.directional.empty(),
 	       "Disabled ancestor still contributed lights");
-	done(scene.SetEnabled(parent, true));
+	done(scene.SetActive(parent, true));
 	Expect(Take(scene.CollectRenderData(1.0f)).lighting.point.size() == 1, "Reenabled ancestor did not restore lights");
 	for (Ursa::UInt32 index = 1; index < Ursa::SceneLighting::maxPointLights; ++index)
 	{

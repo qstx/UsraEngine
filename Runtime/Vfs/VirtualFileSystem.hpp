@@ -74,6 +74,13 @@ public:
 
 	Result<void> CheckWritable(const VirtualPath& path) const;
 
+	// Returns a validated filename only for native platform APIs that require a path.
+	// The path must already exist in the writable user: directory provider.
+	Result<std::filesystem::path> ResolveForNativeHostInterop(const VirtualPath& path) const;
+
+	// Resolves an existing directory-mounted file for an explicitly configured external tool.
+	Result<std::filesystem::path> ResolveForExternalToolInterop(const VirtualPath& path) const;
+
 	Result<Vector<VirtualFileEntry>> List(const String& scheme) const;
 
 private:

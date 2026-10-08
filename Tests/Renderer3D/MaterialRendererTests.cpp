@@ -237,7 +237,7 @@ public:
 	{
 	}
 
-	Ursa::Result<void> OnUpdate(const Ursa::FrameContext&) override
+	Ursa::Result<void> Update(const Ursa::FrameContext&) override
 	{
 		box->material = next;
 		return {};

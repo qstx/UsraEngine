@@ -39,11 +39,25 @@ inline bool operator!=(ComponentId a, ComponentId b)
 
 struct FrameInput
 {
-	Array<bool, 10> keys{};
+	static constexpr Ursa::Size keyCount = static_cast<Ursa::Size>(Key::Digit9) + 1;
+	Array<bool, keyCount> keys{};
 
 	bool KeyDown(Key key) const
 	{
-		return keys.at(static_cast<Ursa::Size>(key));
+		const Ursa::Size index = static_cast<Ursa::Size>(key);
+		return index < keys.size() && keys[index];
+	}
+
+	bool KeyPressed(Key key) const
+	{
+		const Ursa::Size index = static_cast<Ursa::Size>(key);
+		return index < keyPressed.size() && keyPressed[index];
+	}
+
+	bool KeyReleased(Key key) const
+	{
+		const Ursa::Size index = static_cast<Ursa::Size>(key);
+		return index < keyReleased.size() && keyReleased[index];
 	}
 
 	static FrameInput Capture(const Window& window)
@@ -51,10 +65,16 @@ struct FrameInput
 		FrameInput input;
 		for (Ursa::Size i = 0; i < input.keys.size(); ++i)
 		{
-			input.keys[i] = window.KeyDown(static_cast<Key>(i));
+			if (static_cast<Key>(i) != Key::Unknown)
+			{
+				input.keys[i] = window.KeyDown(static_cast<Key>(i));
+			}
 		}
 		return input;
 	}
+
+	Array<bool, keyCount> keyPressed{};
+	Array<bool, keyCount> keyReleased{};
 };
 
 struct FrameContext
@@ -62,6 +82,7 @@ struct FrameContext
 	Ursa::Float32 deltaSeconds = 0.0f;
 	Ursa::Float32 fixedDeltaSeconds = 0.0f;
 	Ursa::Float64 elapsedSeconds = 0.0;
+	Ursa::Float64 fixedElapsedSeconds = 0.0;
 	Ursa::UInt64 frameIndex = 0;
 	Window* window = nullptr;
 	FrameInput input;
@@ -115,24 +136,47 @@ public:
 		return enabled;
 	}
 
-	virtual Result<void> OnStart(const FrameContext&)
+	// Internal attachment binding completes before gameplay callbacks can see this component.
+	virtual Result<void> PrepareRuntimeBinding()
 	{
 		return {};
 	}
 
-	virtual Result<void> OnUpdate(const FrameContext&)
+	virtual Result<void> Awake(const FrameContext&)
 	{
 		return {};
 	}
 
-	virtual Result<void> OnFixedUpdate(const FrameContext&)
+	virtual void OnEnable()
+	{
+	}
+
+	virtual Result<void> Start(const FrameContext&)
 	{
 		return {};
 	}
 
-	virtual Result<void> OnLateUpdate(const FrameContext&)
+	virtual Result<void> FixedUpdate(const FrameContext&)
 	{
 		return {};
+	}
+
+	virtual Result<void> Update(const FrameContext&)
+	{
+		return {};
+	}
+
+	virtual Result<void> LateUpdate(const FrameContext&)
+	{
+		return {};
+	}
+
+	virtual void OnDisable()
+	{
+	}
+
+	virtual void OnDestroy()
+	{
 	}
 
 	virtual void OnRemove()

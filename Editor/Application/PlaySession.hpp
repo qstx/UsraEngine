@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Types.hpp>
-#include <Application/FrameScheduler.hpp>
+#include <Application/SceneFrameRunner.hpp>
 #include <Assets/SceneDraft.hpp>
 #include <memory>
 
@@ -44,8 +44,6 @@ public:
 private:
 	std::shared_ptr<void> services;
 	std::unique_ptr<Scene> scene;
-	FrameScheduler scheduler;
-	Ursa::UInt64 frameIndex = 0;
-	Ursa::Float64 elapsedSeconds = 0.0;
+	SceneFrameRunner frameRunner;
 };
 } // namespace Ursa::Editor

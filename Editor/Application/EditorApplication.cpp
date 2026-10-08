@@ -2,10 +2,15 @@
 #include <Application/EditorApplication.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Ui/ImGuiInspectorUI.hpp>
-#include <Ui/ImGuiInspectorUI.hpp>
 #include <Assets/TextureDraft.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/SceneDraft.hpp>
+#if defined(URSA_ENABLE_DOTNET)
+#include <Scripting/DotNetHost.hpp>
+#include <Scripting/ManagedSceneApi.hpp>
+#include <Scripting/ManagedScriptRuntime.hpp>
+#endif
+#include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -20,6 +25,31 @@ namespace Ursa::Editor
 {
 namespace
 {
+#if defined(URSA_ENABLE_DOTNET)
+struct ManagedPlaySessionState
+{
+	std::shared_ptr<Scripting::DotNetHost> host;
+	std::shared_ptr<void> projectServices;
+	std::unique_ptr<Scripting::ManagedSceneApi> sceneApi;
+	std::unique_ptr<Scripting::ManagedScriptRuntime> scriptRuntime;
+	UInt64 sessionId = 0;
+
+	~ManagedPlaySessionState()
+	{
+		scriptRuntime.reset();
+		sceneApi.reset();
+		if (host && sessionId)
+		{
+			auto closed = host->CloseScriptSession(sessionId);
+			if (!closed)
+			{
+				URSA_LOG_ERROR("Script", closed.error);
+			}
+		}
+	}
+};
+#endif
+
 Result<VirtualPath> ProjectAssetPath(const char* input)
 {
 	const String name = ToUrsaString(std::string(input));
@@ -70,10 +100,450 @@ bool IsModelSource(const VirtualPath& path)
 	}
 	return extension == ".fbx" || extension == ".obj";
 }
+
+bool HasManagedScriptComponent(Scene& scene)
+{
+	Vector<GameObject::Ptr> pending = scene.RootGameObjects();
+	while (!pending.empty())
+	{
+		GameObject::Ptr object = std::move(pending.back());
+		pending.pop_back();
+		for (const auto& child : object->Children())
+		{
+			pending.push_back(child);
+		}
+		for (ComponentId id : scene.ComponentsOf(object).value)
+		{
+			if (dynamic_cast<Scripting::ScriptBehaviourComponent*>(scene.GetComponent(id)))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
 } // namespace
+
+EditorApplication::~EditorApplication()
+{
+	FinishScriptJobs();
+	play.Stop();
+#if defined(URSA_ENABLE_DOTNET)
+	if (managedHost && editingScriptSession)
+	{
+		auto closed = managedHost->CloseScriptSession(editingScriptSession);
+		if (!closed)
+		{
+			URSA_LOG_ERROR("Script", closed.error);
+		}
+	}
+#endif
+}
+
+void EditorApplication::FinishScriptJobs()
+{
+	if (scriptCheckJob.valid())
+	{
+		scriptCheckJob.wait();
+		scriptCheckJob = {};
+	}
+	if (scriptBuildJob.valid())
+	{
+		scriptBuildJob.wait();
+		scriptBuildJob = {};
+	}
+}
+
+Result<void> EditorApplication::EnsureManagedHost()
+{
+#if defined(URSA_ENABLE_DOTNET)
+	if (managedHost)
+	{
+		return managedHost->IsSessionFaulted() ? Result<void>::Failure("脚本环境卸载失败，请重启编辑器")
+		                                       : Result<void>{};
+	}
+	if (!workspace)
+	{
+		return Result<void>::Failure("Open a project before initializing scripts");
+	}
+	auto host = Scripting::DotNetHost::Create();
+	if (!host)
+	{
+		return Result<void>::Failure(host.error);
+	}
+	const auto path = [](const char* value) { return VirtualPath::Parse(value).value; };
+	Scripting::ManagedHostFiles files;
+	files.runtimeConfig = path("ursa:Ursa.ManagedHost.runtimeconfig.json");
+	files.entryAssembly = path("ursa:Ursa.ManagedHost.dll");
+	files.dependencies = {path("ursa:Ursa.ManagedHost.deps.json"), path("ursa:Ursa.Runtime.dll"),
+	                      path("ursa:Ursa.Editor.dll")};
+	auto started = host.value->Start(workspace->Index().Filesystem(), files,
+	                                 [](UInt32 level, const String& message)
+	                                 {
+		                                 if (level >= static_cast<UInt32>(LogLevel::Error))
+		                                 {
+			                                 URSA_LOG_ERROR("Script", message);
+		                                 }
+		                                 else
+		                                 {
+			                                 URSA_LOG_INFO("Script", message);
+		                                 }
+	                                 });
+	if (!started)
+	{
+		return started;
+	}
+	managedHost = std::shared_ptr<Scripting::DotNetHost>(std::move(host.value));
+	return managedHost->LoadEditorApi(path("ursa:Ursa.Editor.dll"));
+#else
+	return Result<void>::Failure("This build does not enable .NET scripting");
+#endif
+}
+
+Result<void> EditorApplication::ReloadEditorScripts()
+{
+#if defined(URSA_ENABLE_DOTNET)
+	if (play.Active())
+	{
+		return Result<void>::Failure("Stop before reloading editing scripts");
+	}
+	auto ready = EnsureManagedHost();
+	if (!ready)
+	{
+		return ready;
+	}
+	auto candidate = managedHost->CreateScriptSession(true);
+	if (!candidate)
+	{
+		return Result<void>::Failure(candidate.error);
+	}
+	const auto abandon = [&]() { return managedHost->CloseScriptSession(candidate.value); };
+	auto content = managedHost->LoadScriptContent(candidate.value,
+	                                              VirtualPath::Parse("lib:ScriptBuild/Manifests/Editor.json").value);
+	if (!content)
+	{
+		abandon();
+		return content;
+	}
+	Vector<GameObject::Ptr> objects;
+	if (documents && documents->Current())
+	{
+		auto draft = documents->Current()->Payload<SceneDraft>();
+		if (draft)
+		{
+			if (draft->Kind() == ResourceKind::Prefab && draft->GetPrefabAsset())
+			{
+				objects = {draft->GetPrefabAsset()->Root()};
+			}
+			else
+			{
+				objects = draft->GetScene().RootGameObjects();
+			}
+		}
+	}
+	nlohmann::json snapshots = nlohmann::json::array();
+	Map<String, Scripting::ScriptBehaviourComponent*> components;
+	while (!objects.empty())
+	{
+		auto object = std::move(objects.back());
+		objects.pop_back();
+		for (const auto& child : object->Children())
+		{
+			objects.push_back(child);
+		}
+		for (Component* component : object->Components())
+		{
+			auto* script = dynamic_cast<Scripting::ScriptBehaviourComponent*>(component);
+			if (!script)
+			{
+				continue;
+			}
+			if (!script->HasSerializedPayload())
+			{
+				abandon();
+				return Result<void>::Failure("Script component has no persistent payload");
+			}
+			try
+			{
+				const String id = component->PersistentId().ToString();
+				snapshots.push_back({{"Id", ToStdString(id)},
+				                     {"Payload", nlohmann::json::parse(ToStdString(script->SerializedPayload()))}});
+				components[id] = script;
+			}
+			catch (const std::exception& error)
+			{
+				abandon();
+				return Result<void>::Failure(ToUrsaString(error.what()));
+			}
+		}
+	}
+	auto restored = managedHost->PrepareScriptReload(candidate.value, ToUrsaString(snapshots.dump()));
+	if (!restored)
+	{
+		abandon();
+		return Result<void>::Failure(restored.error);
+	}
+
+	struct CandidateFields
+	{
+		Scripting::ScriptBehaviourComponent* component;
+		String type;
+		String payload;
+	};
+
+	Vector<CandidateFields> replacements;
+	try
+	{
+		for (const auto& item : nlohmann::json::parse(ToStdString(restored.value)))
+		{
+			const String id = ToUrsaString(item.at("Id").get<std::string>());
+			auto found = components.find(id);
+			if (found == components.end())
+			{
+				throw std::runtime_error("Candidate snapshot has an unknown component ID");
+			}
+			replacements.push_back({found->second, ToUrsaString(item.at("TypeName").get<std::string>()),
+			                        ToUrsaString(item.at("Payload").dump())});
+		}
+	}
+	catch (const std::exception& error)
+	{
+		abandon();
+		return Result<void>::Failure(ToUrsaString(error.what()));
+	}
+	auto extensionDirectory = managedHost->PrepareEditorExtensions(candidate.value);
+	if (!extensionDirectory)
+	{
+		abandon();
+		return Result<void>::Failure(extensionDirectory.error);
+	}
+	Vector<ManagedExtensionDescriptor> candidateExtensions;
+	try
+	{
+		for (const auto& extension : nlohmann::json::parse(ToStdString(extensionDirectory.value)))
+		{
+			candidateExtensions.push_back({ToUrsaString(extension.at("Id").get<std::string>()),
+			                               ToUrsaString(extension.at("Kind").get<std::string>()),
+			                               ToUrsaString(extension.at("Path").get<std::string>()),
+			                               ToUrsaString(extension.at("Target").get<std::string>()),
+			                               ToUrsaString(extension.at("Title").get<std::string>())});
+		}
+	}
+	catch (const std::exception& error)
+	{
+		abandon();
+		return Result<void>::Failure(ToUrsaString(error.what()));
+	}
+	auto registered = RegisterScriptComponentTypes(&candidateExtensions, candidate.value);
+	if (!registered)
+	{
+		abandon();
+		return registered;
+	}
+	const UInt64 previous = editingScriptSession;
+	editingScriptSession = candidate.value;
+	managedExtensions = std::move(candidateExtensions);
+	for (auto& fields : replacements)
+	{
+		fields.component->SetTypeName(std::move(fields.type));
+		fields.component->SetSerializedPayload(std::move(fields.payload));
+	}
+	if (previous)
+	{
+		auto closed = managedHost->CloseScriptSession(previous);
+		if (!closed)
+		{
+			return closed;
+		}
+	}
+	return managedHost->SelectScriptSession(editingScriptSession);
+#else
+	return {};
+#endif
+}
+
+Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
+{
+	if (!workspace || !documents || !project || play.Active())
+	{
+		return Result<void>::Failure("Asset opening requires Stop mode and an open project");
+	}
+	auto kind = ResourceKindForPath(path);
+	Result<std::unique_ptr<EditorDocument>> opened =
+	    Result<std::unique_ptr<EditorDocument>>::Failure("This asset has no editing document");
+	if (kind && (kind.value == ResourceKind::Scene || kind.value == ResourceKind::Prefab))
+	{
+		opened =
+		    OpenSceneDocument(path, kind.value, project->components, documents->Session(), project->editContextSetup);
+	}
+	else if (kind && kind.value == ResourceKind::Texture)
+	{
+		opened = OpenTextureDocument(path, workspace->Index());
+	}
+	else if (kind && kind.value == ResourceKind::Material)
+	{
+		opened = OpenMaterialDocument(path, documents->Session(), *workspace);
+	}
+	else if (IsTextureSource(path) && workspace->Database() && gui)
+	{
+		auto settings = TextureImporter::Settings(*workspace->Database(), path);
+		if (!settings)
+		{
+			return Result<void>::Failure(settings.error);
+		}
+		auto view = TextureImportView::Open(path, settings.value);
+		if (!view)
+		{
+			return Result<void>::Failure(view.error);
+		}
+		if (textureImportView)
+		{
+			textureImportView->Close(*gui);
+		}
+		textureImportView = std::move(view.value);
+		return textureImportView->Reimport(*workspace->Database(), device, *gui);
+	}
+	else if (IsModelSource(path) && workspace->Database())
+	{
+		auto settings = ModelImporter::Settings(*workspace->Database(), path);
+		if (!settings)
+		{
+			return Result<void>::Failure(settings.error);
+		}
+		auto view = ModelImportView::Open(path, settings.value);
+		if (!view)
+		{
+			return Result<void>::Failure(view.error);
+		}
+		modelImportView = std::move(view.value);
+		return modelImportView->Reimport(*workspace->Database());
+	}
+	else if (path.relative.size() >= 11 && path.relative.substr(path.relative.size() - 11) == ".ursashader")
+	{
+		auto view = ShaderImportView::Open(workspace->Index().Filesystem(), path);
+		if (!view)
+		{
+			return Result<void>::Failure(view.error);
+		}
+		shaderImportView = std::move(view.value);
+		return {};
+	}
+	if (!opened)
+	{
+		return Result<void>::Failure(opened.error);
+	}
+	return documents->RequestOpen(std::move(opened.value));
+}
+
+Result<bool> EditorApplication::InvokeEditorTool(const ManagedExtensionDescriptor& descriptor)
+{
+#if defined(URSA_ENABLE_DOTNET)
+	if (!managedHost || !editingScriptSession)
+	{
+		return Result<bool>::Failure("No editing script session is available");
+	}
+	ManagedEditorContext context;
+	context.document = documents ? documents->Current() : nullptr;
+	context.documents = documents.get();
+	context.workspace = workspace.get();
+	context.registry = &project->components;
+	context.openAsset = [this](const VirtualPath& path)
+	{
+		pendingManagedAsset = path;
+		return Result<void>{};
+	};
+	if (context.document)
+	{
+		auto draft = context.document->Payload<SceneDraft>();
+		if (draft)
+		{
+			if (draft->Kind() == ResourceKind::Prefab && draft->GetPrefabAsset())
+			{
+				context.selection.prefab = draft->GetPrefabAsset();
+				context.selection.roots = {draft->GetPrefabAsset()->Root()};
+				auto selected = hierarchy.SelectedGameObject(*draft->GetPrefabAsset());
+				if (selected)
+				{
+					context.selection.object = selected.value;
+				}
+			}
+			else
+			{
+				context.selection.scene = &draft->GetScene();
+				context.selection.roots = draft->GetScene().RootGameObjects();
+				auto selected = hierarchy.SelectedGameObject(draft->GetScene());
+				if (selected)
+				{
+					context.selection.object = selected.value;
+				}
+			}
+		}
+	}
+	return InvokeManagedEditorExtension(*managedHost, editingScriptSession, descriptor.id, context);
+#else
+	(void)descriptor;
+	return Result<bool>::Failure("This build does not enable .NET scripting");
+#endif
+}
+
+void EditorApplication::DrawManagedMenus(const String& root)
+{
+	Set<String> submenus;
+	const String prefix = root + "/";
+	for (const auto& extension : managedExtensions)
+	{
+		if ((extension.kind != "Menu" && extension.kind != "Window") || extension.path.rfind(prefix, 0) != 0)
+		{
+			continue;
+		}
+		const String remainder = extension.path.substr(prefix.size());
+		const Size separator = remainder.find('/');
+		if (separator != String::npos)
+		{
+			submenus.insert(remainder.substr(0, separator));
+			continue;
+		}
+		if (ImGui::MenuItem(remainder.c_str()))
+		{
+			if (extension.kind == "Window")
+			{
+				managedOpenWindows.insert(extension.id);
+			}
+			else
+			{
+				auto executed = InvokeEditorTool(extension);
+				if (!executed)
+				{
+					inspectorError = executed.error;
+				}
+			}
+		}
+	}
+	for (const String& submenu : submenus)
+	{
+		if (ImGui::BeginMenu(submenu.c_str()))
+		{
+			DrawManagedMenus(prefix + submenu);
+			ImGui::EndMenu();
+		}
+	}
+}
+
+Result<void> EditorApplication::OnStart()
+{
+	return startupAsset.scheme.empty() ? Result<void>{} : OpenEditorAsset(startupAsset);
+}
 
 Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, const std::filesystem::path& package)
 {
+	if (scriptCheckJob.valid() && scriptCheckJob.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+	{
+		return Result<void>::Failure("Wait for script discovery to finish before changing projects");
+	}
+	if (scriptBuildJob.valid() && scriptBuildJob.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+	{
+		return Result<void>::Failure("Wait for script compilation to finish before changing projects");
+	}
 	if (play.Active())
 	{
 		return Result<void>::Failure("Stop Play mode before changing projects");
@@ -96,6 +566,9 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 			return Result<void>::Failure(roots.error);
 		}
 		profile.engineDirectories = std::move(roots.value);
+#if defined(URSA_ENABLE_DOTNET)
+		profile.engineDirectories.push_back(std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path());
+#endif
 	}
 	else
 	{
@@ -137,17 +610,165 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	textureImportView.reset();
 	modelImportView.reset();
 	shaderImportView.reset();
+#if defined(URSA_ENABLE_DOTNET)
+	if (managedHost && editingScriptSession)
+	{
+		auto closed = managedHost->CloseScriptSession(editingScriptSession);
+		editingScriptSession = 0;
+		if (!closed)
+		{
+			return closed;
+		}
+	}
+#endif
+	if (project)
+	{
+		for (const auto& fallback : managedEditorFallbacks)
+		{
+			project->componentEditors.ReplaceEditor(fallback.first, fallback.second);
+		}
+		for (const String& type : registeredScriptComponentTypes)
+		{
+			project->componentEditors.UnregisterType(type);
+		}
+	}
+	managedExtensions.clear();
+	managedOpenWindows.clear();
+	managedEditorFallbacks.clear();
+	registeredScriptComponentTypes.clear();
 	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(files.value));
 	documents = std::move(documentsResult.value);
 	workspace = std::move(openedWorkspace);
+#if defined(URSA_ENABLE_DOTNET)
+	if (managedHost)
+	{
+		managedHost->SetFilesystem(workspace->Index().Filesystem());
+	}
+#endif
+	scriptCheckJob = {};
+	observedScriptSources.clear();
+	scriptBuildService.reset();
+	scriptAssetDatabase.reset();
+#if defined(URSA_ENABLE_DOTNET)
+	if (package.empty() && workspace->Database())
+	{
+		auto scriptDatabase = AssetDatabase::Open(workspace->Database()->Filesystem());
+		if (scriptDatabase)
+		{
+			scriptAssetDatabase = std::move(scriptDatabase.value);
+			auto service = ScriptBuildService::Open(scriptAssetDatabase->Filesystem(), *scriptAssetDatabase,
+			                                        std::filesystem::u8path(URSA_DOTNET_EXECUTABLE_PATH),
+			                                        std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH),
+			                                        std::filesystem::u8path(URSA_DOTNET_EDITOR_ASSEMBLY_PATH),
+			                                        std::filesystem::u8path(URSA_DOTNET_CATALOG_GENERATOR_PATH),
+			                                        std::filesystem::u8path(URSA_DOTNET_REFERENCE_PACK_PATH));
+			if (service)
+			{
+				scriptBuildService = std::move(service.value);
+			}
+			else
+			{
+				scriptBuildStatus = service.error;
+			}
+		}
+		else
+		{
+			scriptBuildStatus = scriptDatabase.error;
+		}
+	}
+#endif
 	activeEditorTool.clear();
 	workspaceError.clear();
 	URSA_LOG_INFO("Editor", "Opened project " + PathToUrsaString(workspace->ProjectRoot()));
 	return {};
 }
 
+Result<void> EditorApplication::CompileScripts()
+{
+#if defined(URSA_ENABLE_DOTNET)
+	if (!scriptBuildService || play.Active() || ScriptWorkPending())
+	{
+		return Result<void>::Failure("Script compilation requires an idle editing project");
+	}
+	ScriptBuildService* service = scriptBuildService.get();
+	scriptBuildJob = std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
+	scriptBuildStatus = "正在编译脚本……";
+	return {};
+#else
+	return Result<void>::Failure("This build does not enable .NET scripting");
+#endif
+}
+
 Result<void> EditorApplication::OnGui()
 {
+	if (!pendingManagedAsset.scheme.empty())
+	{
+		const VirtualPath path = std::move(pendingManagedAsset);
+		pendingManagedAsset = {};
+		auto opened = OpenEditorAsset(path);
+		if (!opened)
+		{
+			workspaceError = opened.error;
+		}
+	}
+	if (scriptBuildJob.valid() && scriptBuildJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	{
+		auto result = scriptBuildJob.get();
+		if (!result)
+		{
+			scriptBuildStatus = result.error;
+			runAfterScriptBuild = false;
+		}
+		else
+		{
+			scriptBuildStatus = result.value.succeeded ? "脚本编译成功。\n" + result.value.diagnostics
+			                                           : "脚本编译失败。\n" + result.value.diagnostics;
+			if (result.value.succeeded)
+			{
+				auto registered = ReloadEditorScripts();
+				if (!registered)
+				{
+					scriptBuildStatus += "\n" + registered.error;
+					runAfterScriptBuild = false;
+				}
+				else if (runAfterScriptBuild)
+				{
+					requestRun = documents && documents->Current() && documents->Current()->Id() == pendingRunDocument;
+				}
+			}
+			if (!result.value.succeeded)
+			{
+				runAfterScriptBuild = false;
+			}
+		}
+	}
+	if (scriptCheckJob.valid() && scriptCheckJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	{
+		auto checked = scriptCheckJob.get();
+		if (!checked)
+		{
+			scriptBuildStatus = checked.error;
+		}
+		else if (checked.value != observedScriptSources)
+		{
+			observedScriptSources = std::move(checked.value);
+			if (!play.Active() && !scriptBuildJob.valid())
+			{
+				ScriptBuildService* service = scriptBuildService.get();
+				scriptBuildJob =
+				    std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
+				scriptBuildStatus = "检测到脚本变化，正在后台编译……";
+			}
+		}
+	}
+	const auto checkTime = std::chrono::steady_clock::now();
+	if (scriptBuildService && !requestRun && !play.Active() && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
+	    checkTime >= nextScriptCheck)
+	{
+		ScriptBuildService* service = scriptBuildService.get();
+		scriptCheckJob = std::async(std::launch::async, [service] { return service->SourceFingerprint(); });
+		nextScriptCheck = checkTime + std::chrono::seconds(2);
+	}
 	if (ImGui::BeginMainMenuBar())
 	{
 		ImGui::TextUnformatted("Ursa Editor");
@@ -231,12 +852,50 @@ Result<void> EditorApplication::OnGui()
 			{
 				ImGui::EndMenu();
 			}
+			DrawManagedMenus("Tools");
 			ImGui::EndMenu();
 		}
-		const bool canRun = current && current->Kind() == ResourceKind::Scene && !documents->PromptPending();
-		ImGui::BeginDisabled(!play.Active() && !canRun);
-		if (ImGui::Button(play.Active() ? "Stop" : "Run"))
+		Set<String> managedMenuRoots;
+		for (const auto& extension : managedExtensions)
 		{
+			const String root = extension.path.substr(0, extension.path.find('/'));
+			if (!root.empty() && root != "Tools" && root != "Scripts" &&
+			    (extension.kind == "Menu" || extension.kind == "Window"))
+			{
+				managedMenuRoots.insert(root);
+			}
+		}
+		for (const String& root : managedMenuRoots)
+		{
+			if (ImGui::BeginMenu(root.c_str()))
+			{
+				DrawManagedMenus(root);
+				ImGui::EndMenu();
+			}
+		}
+		if (scriptBuildService && ImGui::BeginMenu("Scripts"))
+		{
+			const bool compiling = scriptBuildJob.valid() || scriptCheckJob.valid();
+			ImGui::BeginDisabled(compiling || play.Active());
+			if (ImGui::MenuItem("Compile Scripts"))
+			{
+				CompileScripts();
+			}
+			ImGui::EndDisabled();
+			DrawManagedMenus("Scripts");
+			ImGui::EndMenu();
+		}
+		const bool canRun = current && current->Kind() == ResourceKind::Scene && !documents->PromptPending() &&
+		                    !scriptBuildJob.valid() && !scriptCheckJob.valid();
+		if (requestRun && !canRun)
+		{
+			requestRun = false;
+		}
+		ImGui::BeginDisabled(!play.Active() && !canRun);
+		if (ImGui::Button(play.Active() ? "Stop" : "Run") || requestRun)
+		{
+			requestRun = false;
+			runAfterScriptBuild = false;
 			if (play.Active())
 			{
 				play.Stop();
@@ -245,11 +904,140 @@ Result<void> EditorApplication::OnGui()
 			}
 			else
 			{
-				auto draft = current->Payload<SceneDraft>();
+				bool scriptsReady = true;
+#if !defined(URSA_ENABLE_DOTNET)
+				if (current && current->Payload<SceneDraft>() &&
+				    HasManagedScriptComponent(current->Payload<SceneDraft>()->GetScene()))
+				{
+					scriptsReady = false;
+					scriptBuildStatus =
+					    "当前构建未启用 .NET 脚本，场景中的脚本数据已保留；启用脚本支持后才能进入 Run。";
+				}
+#endif
+				PlayContextSetup playSetup = project->playContextSetup;
+				if (scriptBuildService)
+				{
+					auto currentBuild = scriptBuildService->IsBuildCurrent(ScriptAssemblyGroup::Game);
+					scriptsReady = currentBuild && currentBuild.value;
+					if (!currentBuild)
+					{
+						scriptBuildStatus = currentBuild.error;
+					}
+					else if (!currentBuild.value)
+					{
+						ScriptBuildService* service = scriptBuildService.get();
+						scriptBuildJob = std::async(std::launch::async,
+						                            [service] { return service->Build(ScriptAssemblyGroup::Editor); });
+						runAfterScriptBuild = true;
+						pendingRunDocument = current->Id();
+						scriptBuildStatus = "正在编译最新脚本，成功后进入 Run……";
+					}
+#if defined(URSA_ENABLE_DOTNET)
+					if (scriptsReady && scriptAssetDatabase)
+					{
+						Vector<ScriptSourceAsset> sources = scriptAssetDatabase->ScriptSources();
+						const bool hasScriptComponent =
+						    current && current->Kind() == ResourceKind::Scene && current->Payload<SceneDraft>() &&
+						    HasManagedScriptComponent(current->Payload<SceneDraft>()->GetScene());
+						if (sources.empty() && hasScriptComponent)
+						{
+							scriptsReady = false;
+							scriptBuildStatus = "当前场景包含脚本组件，但项目没有可用的 C# 脚本源码。";
+						}
+						else if (!sources.empty())
+						{
+							const VirtualPath gameAssemblyPath =
+							    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Manifests/Game.json")
+							        .value;
+							auto assemblyBytes = scriptAssetDatabase->Filesystem().Read(gameAssemblyPath);
+							if (!assemblyBytes)
+							{
+								scriptsReady = false;
+								scriptBuildStatus = "无法读取当前游戏脚本程序集：" + assemblyBytes.error;
+							}
+							else
+							{
+								auto readyHost = EnsureManagedHost();
+								if (!readyHost)
+								{
+									scriptsReady = false;
+									scriptBuildStatus = readyHost.error;
+								}
+								if (scriptsReady && managedHost)
+								{
+									auto userPlaySetup = project->playContextSetup;
+									auto managed = managedHost;
+									auto activeWindow = window;
+									VirtualPath gameContent = gameAssemblyPath;
+									playSetup = [userPlaySetup, managed, gameContent, activeWindow](
+									                ComponentLoadContext& context) -> Result<std::shared_ptr<void>>
+									{
+										std::shared_ptr<void> projectServices;
+										if (userPlaySetup)
+										{
+											auto setup = userPlaySetup(context);
+											if (!setup)
+											{
+												return Result<std::shared_ptr<void>>::Failure(setup.error);
+											}
+											projectServices = std::move(setup.value);
+										}
+										auto session = std::make_shared<ManagedPlaySessionState>();
+										session->host = managed;
+										session->projectServices = std::move(projectServices);
+										auto domain = managed->CreateScriptSession(false);
+										if (!domain)
+										{
+											return Result<std::shared_ptr<void>>::Failure(domain.error);
+										}
+										session->sessionId = domain.value;
+										auto loaded = managed->LoadScriptContent(domain.value, gameContent);
+										if (!loaded)
+										{
+											return Result<std::shared_ptr<void>>::Failure(loaded.error);
+										}
+										auto validated = managed->ValidateScriptSession(domain.value);
+										if (!validated)
+										{
+											return Result<std::shared_ptr<void>>::Failure(validated.error);
+										}
+										context.SetSceneReadyCallback(
+										    [session, activeWindow](Scene& scene,
+										                            ComponentLoadContext& loadContext) -> Result<void>
+										    {
+											    session->sceneApi = std::make_unique<Scripting::ManagedSceneApi>(
+											        scene, &loadContext.Resources(),
+											        [activeWindow](const String& title)
+											        {
+												        if (activeWindow)
+												        {
+													        activeWindow->SetTitle(title);
+												        }
+											        });
+											    auto bound = session->host->BindScriptSession(session->sessionId,
+											                                                  *session->sceneApi);
+											    if (!bound)
+											    {
+												    return bound;
+											    }
+											    session->scriptRuntime =
+											        std::make_unique<Scripting::ManagedScriptRuntime>(
+											            scene, *session->host, *session->sceneApi, session->sessionId);
+											    return session->scriptRuntime->AttachSerializedComponents();
+										    });
+										return Result<std::shared_ptr<void>>::Success(session);
+									};
+								}
+							}
+						}
+					}
+#endif
+				}
+				auto draft = scriptsReady ? current->Payload<SceneDraft>() : nullptr;
 				if (draft)
 				{
-					auto started = play.Start(*draft, current->Id(), project->components, documents->Session(),
-					                          project->playContextSetup);
+					auto started =
+					    play.Start(*draft, current->Id(), project->components, documents->Session(), playSetup);
 					inspectorError = started ? String{} : started.error;
 					if (started)
 					{
@@ -259,6 +1047,20 @@ Result<void> EditorApplication::OnGui()
 			}
 		}
 		ImGui::EndDisabled();
+		if (!scriptBuildStatus.empty())
+		{
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Script Build"))
+			{
+				ImGui::OpenPopup("Script Build Diagnostics");
+			}
+			if (ImGui::BeginPopup("Script Build Diagnostics"))
+			{
+				ImGui::SetNextWindowSize({700.0f, 360.0f}, ImGuiCond_Appearing);
+				ImGui::TextUnformatted(scriptBuildStatus.c_str());
+				ImGui::EndPopup();
+			}
+		}
 		ImGui::Separator();
 		if (workspace)
 		{
@@ -331,6 +1133,28 @@ Result<void> EditorApplication::OnGui()
 			{
 				activeEditorTool.clear();
 			}
+		}
+	}
+	for (const auto& extension : managedExtensions)
+	{
+		if (extension.kind != "Window" || !managedOpenWindows.count(extension.id))
+		{
+			continue;
+		}
+		bool open = true;
+		const String title = extension.title + "###" + extension.id;
+		if (ImGui::Begin(title.c_str(), &open))
+		{
+			auto drawn = InvokeEditorTool(extension);
+			if (!drawn)
+			{
+				ImGui::TextWrapped("%s", drawn.error.c_str());
+			}
+		}
+		ImGui::End();
+		if (!open)
+		{
+			managedOpenWindows.erase(extension.id);
 		}
 	}
 	const ImGuiID dockspace = ImGui::DockSpaceOverViewport();
@@ -779,7 +1603,8 @@ Result<void> EditorApplication::OnGui()
 			else
 			{
 				auto inspected = DrawSceneInspector(*documents->Current(), hierarchy, *documents, *workspace,
-				                                    project->components, project->componentEditors, inspectorError);
+				                                    project->components, project->componentEditors, inspectorError,
+				                                    scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr);
 				if (!inspected)
 				{
 					workspaceError = inspected.error;
@@ -908,6 +1733,176 @@ Result<void> EditorApplication::OnGui()
 	return {};
 }
 
+Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<ManagedExtensionDescriptor>* extensions,
+                                                             UInt64 sessionId)
+{
+#if defined(URSA_ENABLE_DOTNET)
+	if (!scriptBuildService || !project)
+	{
+		return {};
+	}
+	ComponentEditors candidateEditors = project->componentEditors;
+	for (const auto& fallback : managedEditorFallbacks)
+	{
+		candidateEditors.ReplaceEditor(fallback.first, fallback.second);
+	}
+	ComponentRegistry candidateRegistry = project->components;
+	for (const String& oldType : registeredScriptComponentTypes)
+	{
+		candidateEditors.UnregisterType(oldType);
+	}
+	Map<String, nlohmann::json> constructorDefaults;
+	if (sessionId)
+	{
+		nlohmann::json defaultSnapshots = nlohmann::json::array();
+		for (const auto& type : scriptBuildService->ScriptTypes())
+		{
+			if (type.group != ScriptAssemblyGroup::Game)
+			{
+				continue;
+			}
+			defaultSnapshots.push_back({{"Id", ToStdString(type.scriptType)},
+			                            {"Payload",
+			                             {{"FormatVersion", 1u},
+			                              {"ScriptType", ToStdString(type.scriptType)},
+			                              {"Version", type.version},
+			                              {"Fields", nlohmann::json::object()}}}});
+		}
+		auto defaults = managedHost->PrepareScriptReload(sessionId, ToUrsaString(defaultSnapshots.dump()));
+		if (!defaults)
+		{
+			return Result<void>::Failure(defaults.error);
+		}
+		try
+		{
+			for (const auto& item : nlohmann::json::parse(ToStdString(defaults.value)))
+			{
+				constructorDefaults[ToUrsaString(item.at("Id").get<std::string>())] = item.at("Payload").at("Fields");
+			}
+		}
+		catch (const std::exception& error)
+		{
+			return Result<void>::Failure("Cannot read script constructor defaults: " + ToUrsaString(error.what()));
+		}
+	}
+	Set<String> currentTypes;
+	for (ScriptTypeDescriptor scriptType : scriptBuildService->ScriptTypes())
+	{
+		if (scriptType.group != ScriptAssemblyGroup::Game)
+		{
+			continue;
+		}
+		auto defaults = constructorDefaults.find(scriptType.scriptType);
+		if (defaults != constructorDefaults.end())
+		{
+			for (auto& field : scriptType.fields)
+			{
+				const auto value = defaults->second.find(ToStdString(field.name));
+				if (value != defaults->second.end())
+				{
+					field.defaultValueJson = ToUrsaString(value->dump());
+				}
+			}
+		}
+		Map<String, String> aliases;
+		for (const ScriptFieldTypeDescriptor& field : scriptType.fields)
+		{
+			for (const String& formerName : field.formerNames)
+			{
+				auto found = aliases.find(formerName);
+				if (found != aliases.end() && found->second != field.name)
+				{
+					return Result<void>::Failure("Former script field name maps to multiple current fields: " +
+					                             formerName);
+				}
+				aliases[formerName] = field.name;
+			}
+		}
+		auto replaced = candidateRegistry.ReplaceScriptFieldAliases(scriptType.scriptType, std::move(aliases));
+		if (!replaced)
+		{
+			return replaced;
+		}
+		auto registered = RegisterScriptComponentType(candidateEditors, scriptType);
+		if (!registered)
+		{
+			return registered;
+		}
+		currentTypes.insert(scriptType.clrTypeName);
+	}
+	Map<String, ComponentEditor> candidateFallbacks;
+	if (extensions)
+	{
+		for (const auto& extension : *extensions)
+		{
+			if (extension.kind != "Inspector")
+			{
+				continue;
+			}
+			String target = extension.target;
+			bool matchedScript = false;
+			for (const auto& scriptType : scriptBuildService->ScriptTypes())
+			{
+				if (scriptType.scriptType == target && scriptType.group == ScriptAssemblyGroup::Game)
+				{
+					target = scriptType.clrTypeName;
+					matchedScript = true;
+					break;
+				}
+			}
+			if (!matchedScript && (!candidateRegistry.Find(target) || !candidateEditors.FindType(target)))
+			{
+				return Result<void>::Failure("Custom Inspector target is not an exposed component: " +
+				                             extension.target);
+			}
+			if (const auto* previous = candidateEditors.Find(target))
+			{
+				candidateFallbacks[target] = *previous;
+			}
+			else
+			{
+				candidateFallbacks[target] = {};
+			}
+			const String extensionId = extension.id;
+			candidateEditors.ReplaceEditor(
+			    target,
+			    [this, extensionId, sessionId](Component& component, ComponentInspectorContext& selection,
+			                                   InspectorUI&) -> Result<bool>
+			    {
+				    if (!managedHost || managedHost->IsSessionFaulted())
+				    {
+					    return Result<bool>::Failure("Managed Editor environment is unavailable");
+				    }
+				    ManagedEditorContext context;
+				    context.document = documents ? documents->Current() : nullptr;
+				    context.documents = documents.get();
+				    context.workspace = workspace.get();
+				    context.registry = &project->components;
+				    context.target = &component;
+				    context.selection = selection;
+				    context.saveContext.scene = selection.scene;
+				    context.saveContext.materialId = [this](const std::shared_ptr<MaterialInstance>& material)
+				    { return documents->Session().IdentifyMaterial(material); };
+				    context.openAsset = [this](const VirtualPath& path)
+				    {
+					    pendingManagedAsset = path;
+					    return Result<void>{};
+				    };
+				    return InvokeManagedEditorExtension(*managedHost, sessionId, extensionId, context);
+			    });
+		}
+	}
+	managedEditorFallbacks = std::move(candidateFallbacks);
+	project->componentEditors = std::move(candidateEditors);
+	project->components = std::move(candidateRegistry);
+	registeredScriptComponentTypes = std::move(currentTypes);
+#else
+	(void)extensions;
+	(void)sessionId;
+#endif
+	return {};
+}
+
 Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, const String& title, bool visible,
                                     Ursa::UInt32 frameLimit)
 {
@@ -1018,10 +2013,22 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	{
 		result = projectSetup(*project);
 	}
+	if (result && scriptBuildService)
+	{
+		auto scriptTypes = RegisterScriptComponentTypes();
+		if (!scriptTypes)
+		{
+			scriptBuildStatus = scriptTypes.error;
+		}
+	}
 	if (result)
 	{
 		for (const auto& descriptor : project->componentEditors.Types())
 		{
+			if (registeredScriptComponentTypes.count(descriptor.type))
+			{
+				continue;
+			}
 			const auto* codec = project->components.Find(descriptor.type);
 			if (!codec || codec->version != descriptor.version)
 			{
@@ -1183,6 +2190,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	}
 
 	const auto idle = device->WaitIdle();
+	FinishScriptJobs();
 	play.Stop();
 	if (documents)
 	{
@@ -1195,6 +2203,19 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	}
 	textureImportView.reset();
 	modelImportView.reset();
+#if defined(URSA_ENABLE_DOTNET)
+	if (managedHost && editingScriptSession)
+	{
+		auto closed = managedHost->CloseScriptSession(editingScriptSession);
+		if (!closed)
+		{
+			URSA_LOG_ERROR("Script", closed.error);
+		}
+		editingScriptSession = 0;
+	}
+#endif
+	scriptBuildService.reset();
+	scriptAssetDatabase.reset();
 	documents.reset();
 	workspace.reset();
 	if (scenePreviewId != ImTextureID_Invalid)

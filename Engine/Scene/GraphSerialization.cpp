@@ -11,7 +11,7 @@ Result<void> GameObject::Serialize(ArchiveWriter& writer) const
 {
 	auto objectName = Name();
 	auto transform = GetLocalTransform();
-	auto active = IsEnabled();
+	auto active = ActiveSelf();
 	if (!objectName || !transform || !active)
 	{
 		return Result<void>::Failure("Invalid GameObject for serialization");
@@ -78,7 +78,7 @@ Result<void> GameObject::Deserialize(const ArchiveReader& reader, SerializationC
 	}
 	id = loadedId.value;
 	name = std::move(objectName.value);
-	enabled = active.value;
+	activeSelf = active.value;
 	return {};
 }
 

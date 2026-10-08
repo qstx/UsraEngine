@@ -184,7 +184,7 @@ Result<Json> EncodeSceneDocument(const String& path, ResourceId id, const Scene&
 		const GameObject::Ptr parentObject = object->Parent();
 		const auto local = object->GetLocalTransform();
 		const auto name = object->Name();
-		const auto enabled = object->IsEnabled();
+		const auto enabled = object->ActiveSelf();
 		const auto components = scene.ComponentsOf(object);
 		if (!objectId || !local || !name || !enabled || !components)
 		{

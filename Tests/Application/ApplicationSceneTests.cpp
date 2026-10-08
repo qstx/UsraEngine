@@ -15,7 +15,7 @@ public:
 	{
 	}
 
-	Ursa::Result<void> OnUpdate(const Ursa::FrameContext& context) override
+	Ursa::Result<void> Update(const Ursa::FrameContext& context) override
 	{
 		++updates;
 		if (!context.window || context.frameIndex != static_cast<Ursa::UInt64>(updates))

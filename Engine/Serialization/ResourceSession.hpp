@@ -4,6 +4,7 @@
 #include <Material/Material.hpp>
 #include <Animation/AnimationAssets.hpp>
 #include <Renderer3D/ModelMesh.hpp>
+#include <Serialization/AssetReference.hpp>
 #include <Serialization/ResourceIndex.hpp>
 #include <Shader/ShaderAsset.hpp>
 #include <functional>
@@ -52,6 +53,8 @@ public:
 	Result<std::shared_ptr<const Shader::ShaderAsset>> LoadShader(ResourceId id);
 
 	Result<ResourceId> IdentifyMaterial(const std::shared_ptr<MaterialInstance>& material) const;
+
+	Result<AssetReference> IdentifyMaterialReference(const std::shared_ptr<MaterialInstance>& material) const;
 
 	const ResourceIndex& Index() const
 	{

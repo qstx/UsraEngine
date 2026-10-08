@@ -27,3 +27,7 @@ if(MSVC)
 else()
   target_compile_options(UrsaRuntime PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+if(URSA_ENABLE_DOTNET)
+  add_subdirectory(Scripting)
+endif()

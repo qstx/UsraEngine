@@ -1,6 +1,9 @@
 #include <Scene/ComponentEditors.hpp>
 #include <Scene/Lighting.hpp>
 #include <Scene/RenderingComponents.hpp>
+#include <Core/StringInterop.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 
 namespace Ursa::Editor
@@ -44,6 +47,24 @@ Result<void> ComponentEditors::RegisterType(ComponentTypeDescriptor descriptor, 
 	return {};
 }
 
+void ComponentEditors::ReplaceEditor(const String& type, ComponentEditor editor)
+{
+	if (editor)
+	{
+		editors[type] = std::move(editor);
+	}
+	else
+	{
+		editors.erase(type);
+	}
+}
+
+void ComponentEditors::UnregisterType(const String& type)
+{
+	types.erase(type);
+	editors.erase(type);
+}
+
 const ComponentTypeDescriptor* ComponentEditors::FindType(const String& type) const
 {
 	auto found = types.find(type);
@@ -76,7 +97,8 @@ Result<void> ComponentEditors::CanCreate(const String& type, const ComponentInsp
 	{
 		for (Component* component : context.object->Components())
 		{
-			if (component->SerializationType() == type)
+			const auto* script = dynamic_cast<const Scripting::ScriptBehaviourComponent*>(component);
+			if ((script && script->TypeName() == type) || component->SerializationType() == type)
 			{
 				return Result<void>::Failure("This GameObject already has " + descriptor->displayName);
 			}
@@ -110,8 +132,11 @@ Result<Component*> ComponentEditors::Create(const String& type, ComponentInspect
 		}
 		return created;
 	}
-	if (!created.value || created.value->SerializationType() != type ||
-	    created.value->GetGameObject() != context.object)
+	const auto* script =
+	    created.value ? dynamic_cast<Ursa::Scripting::ScriptBehaviourComponent*>(created.value) : nullptr;
+	const bool typeMatches =
+	    created.value && (script ? script->TypeName() == type : created.value->SerializationType() == type);
+	if (!created.value || !typeMatches || created.value->GetGameObject() != context.object)
 	{
 		if (created.value && created.value->GetGameObject() == context.object)
 		{
@@ -154,5 +179,88 @@ Result<void> RegisterBuiltinComponentEditors(ComponentEditors& editors)
 		    {"ursa.PointLight", "Point Light", "Lighting", CreateBuiltinComponent<PointLightComponent>, {}});
 	}
 	return result;
+}
+
+Result<void> RegisterScriptComponentType(ComponentEditors& editors, const ScriptTypeDescriptor& scriptType)
+{
+	if (scriptType.group != ScriptAssemblyGroup::Game || scriptType.scriptType.empty() ||
+	    scriptType.clrTypeName.empty() || scriptType.version == 0)
+	{
+		return Result<void>::Failure("Script component requires a valid Game script type descriptor");
+	}
+	String displayName = scriptType.clrTypeName.substr(0, scriptType.clrTypeName.find(','));
+	const Size namespaceSeparator = displayName.rfind('.');
+	if (namespaceSeparator != String::npos)
+	{
+		displayName = displayName.substr(namespaceSeparator + 1);
+	}
+	ComponentTypeDescriptor descriptor;
+	descriptor.type = scriptType.clrTypeName;
+	descriptor.displayName = std::move(displayName);
+	descriptor.category = "Scripts";
+	descriptor.allowMultiple = true;
+	descriptor.version = scriptType.version;
+	descriptor.create = [scriptType](ComponentInspectorContext& context) -> Result<Component*>
+	{
+		auto added = context.object->AddComponent<Scripting::ScriptBehaviourComponent>(scriptType.clrTypeName);
+		if (!added)
+		{
+			return Result<Component*>::Failure(added.error);
+		}
+		nlohmann::json payload = nlohmann::json::object();
+		payload["FormatVersion"] = 1u;
+		payload["SourceGuid"] = ToStdString(scriptType.sourceGuid.ToString());
+		payload["LocalFileId"] = scriptType.localFileId;
+		payload["ScriptType"] = ToStdString(scriptType.scriptType);
+		payload["Version"] = scriptType.version;
+		payload["Fields"] = nlohmann::json::object();
+		payload["FieldTypes"] = nlohmann::json::object();
+		payload["FormerFieldNames"] = nlohmann::json::object();
+		for (const ScriptFieldTypeDescriptor& field : scriptType.fields)
+		{
+			try
+			{
+				payload["Fields"][ToStdString(field.name)] = nlohmann::json::parse(ToStdString(field.defaultValueJson));
+			}
+			catch (const nlohmann::json::exception& error)
+			{
+				context.object->RemoveComponent(added.value);
+				return Result<Component*>::Failure("Invalid default value for script field " + field.name + ": " +
+				                                   ToUrsaString(error.what()));
+			}
+			nlohmann::json enumNumericValues = nlohmann::json::array();
+			for (const String& enumValue : field.enumNumericValuesJson)
+			{
+				enumNumericValues.push_back(nlohmann::json::parse(ToStdString(enumValue)));
+			}
+			std::vector<std::string> enumValues;
+			for (const String& enumValue : field.enumValues)
+			{
+				enumValues.push_back(ToStdString(enumValue));
+			}
+			std::vector<std::string> formerNames;
+			for (const String& formerName : field.formerNames)
+			{
+				formerNames.push_back(ToStdString(formerName));
+			}
+			payload["FieldTypes"][ToStdString(field.name)] = {
+			    {"Kind", ToStdString(field.kind)},
+			    {"ElementKind", ToStdString(field.elementKind)},
+			    {"TypeName", ToStdString(field.typeName)},
+			    {"ElementTypeName", ToStdString(field.elementTypeName)},
+			    {"EnumValues", enumValues},
+			    {"EnumNumericValues", enumNumericValues},
+			    {"EnumUnderlyingType", ToStdString(field.enumUnderlyingType)},
+			    {"FormerNames", formerNames}};
+			if (!formerNames.empty())
+			{
+				payload["FormerFieldNames"][ToStdString(field.name)] = formerNames;
+			}
+		}
+		static_cast<Scripting::ScriptBehaviourComponent*>(added.value)
+		    ->SetSerializedPayload(ToUrsaString(payload.dump()));
+		return Result<Component*>::Success(added.value);
+	};
+	return editors.RegisterType(std::move(descriptor));
 }
 } // namespace Ursa::Editor

@@ -1,5 +1,6 @@
 #include <Serialization/ComponentRegistry.hpp>
 #include <Animation/AnimatorComponent.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
 
 namespace Ursa
 {
@@ -43,6 +44,12 @@ Result<void> RegisterBuiltinComponents(ComponentRegistry& registry)
 		result = registry.RegisterSerializable<PointLightComponent>(
 		    "ursa.PointLight", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
 		    { return owner->AddComponent<PointLightComponent>(); });
+	}
+	if (result)
+	{
+		result = registry.RegisterSerializable<Scripting::ScriptBehaviourComponent>(
+		    "ursa.ScriptBehaviour", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
+		    { return owner->AddComponent<Scripting::ScriptBehaviourComponent>(String{}); });
 	}
 	return result;
 }

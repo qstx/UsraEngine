@@ -166,7 +166,7 @@ void TestSceneCollection(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& r
 	    ReadFrameWith(device, [&](const Ursa::Rhi::TexturePtr& color)
 	                  { return renderer.RenderOffscreenModels(color, data.viewProjection, data.boxes); });
 	Expect(pixel(visible, 64, 32, 32)[1] > 100, "Scene world transform or color was not rendered");
-	done(scene.SetEnabled(parent, false));
+	done(scene.SetActive(parent, false));
 	const auto hiddenData = Take(scene.CollectRenderData(1.0f));
 	Expect(hiddenData.boxes.empty(), "Disabled parent still produced a box");
 	const auto hidden =

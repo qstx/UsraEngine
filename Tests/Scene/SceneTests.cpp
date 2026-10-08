@@ -82,10 +82,10 @@ void TestTransformAndActivation()
 	const auto world = Take(scene.WorldTransform(child));
 	ExpectNear(world.At(0, 3), 2.0f);
 	ExpectNear(world.At(2, 3), -1.0f);
-	done(scene.SetEnabled(parent, false));
-	Expect(!Take(scene.IsActive(child)), "Disabled parent did not disable child");
-	done(scene.SetEnabled(parent, true));
-	Expect(Take(scene.IsActive(child)), "Reenabled parent did not activate child");
+	done(scene.SetActive(parent, false));
+	Expect(!Take(scene.ActiveInHierarchy(child)), "Disabled parent did not disable child");
+	done(scene.SetActive(parent, true));
+	Expect(Take(scene.ActiveInHierarchy(child)), "Reenabled parent did not activate child");
 	done(scene.SetParent(child, other));
 	ExpectNear(Take(scene.WorldTransform(child)).At(0, 3), 1.0f);
 	ExpectNear(Take(scene.GetLocalTransform(child)).position.x, 1.0f);
@@ -99,25 +99,25 @@ public:
 	{
 	}
 
-	Ursa::Result<void> OnStart(const Ursa::FrameContext&) override
+	Ursa::Result<void> Start(const Ursa::FrameContext&) override
 	{
 		trace.push_back(name + ":start");
 		return Ursa::Result<void>{};
 	}
 
-	Ursa::Result<void> OnUpdate(const Ursa::FrameContext&) override
+	Ursa::Result<void> Update(const Ursa::FrameContext&) override
 	{
 		trace.push_back(name + ":update");
 		return {};
 	}
 
-	Ursa::Result<void> OnFixedUpdate(const Ursa::FrameContext&) override
+	Ursa::Result<void> FixedUpdate(const Ursa::FrameContext&) override
 	{
 		trace.push_back(name + ":fixed");
 		return {};
 	}
 
-	Ursa::Result<void> OnLateUpdate(const Ursa::FrameContext&) override
+	Ursa::Result<void> LateUpdate(const Ursa::FrameContext&) override
 	{
 		trace.push_back(name + ":late");
 		return {};
@@ -141,7 +141,7 @@ public:
 	{
 	}
 
-	Ursa::Result<void> OnStart(const Ursa::FrameContext&) override
+	Ursa::Result<void> Start(const Ursa::FrameContext&) override
 	{
 		if (!GetGameObject() || !TryGetScene())
 		{
@@ -151,7 +151,7 @@ public:
 		return {};
 	}
 
-	Ursa::Result<void> OnUpdate(const Ursa::FrameContext&) override
+	Ursa::Result<void> Update(const Ursa::FrameContext&) override
 	{
 		++updates;
 		if (action)
@@ -189,16 +189,16 @@ void TestComponents()
 	done(scene.Update({}));
 	done(scene.FixedUpdate({}));
 	done(scene.LateUpdate({}));
-	Expect(trace == Ursa::Vector<Ursa::String>({"a:start", "a:update", "b:start", "b:update", "c:start", "c:update",
+	Expect(trace == Ursa::Vector<Ursa::String>({"a:start", "b:start", "c:start", "a:update", "b:update", "c:update",
 	                                            "a:fixed", "b:fixed", "c:fixed", "a:late", "b:late", "c:late"}),
 	       "Component lifecycle order is wrong");
 	trace.clear();
 	done(scene.SetComponentEnabled(b, false));
-	done(scene.SetEnabled(parent, false));
+	done(scene.SetActive(parent, false));
 	scene.BeginFrame();
 	done(scene.Update({}));
 	Expect(trace.empty(), "Disabled hierarchy still updated");
-	done(scene.SetEnabled(parent, true));
+	done(scene.SetActive(parent, true));
 	done(scene.Update({}));
 	Expect(trace == Ursa::Vector<Ursa::String>({"a:update", "c:update"}), "Reenabled lifecycle was wrong");
 	done(scene.RemoveComponent(a));
@@ -209,6 +209,250 @@ void TestComponents()
 	       "Cleanup was not called once per component");
 }
 
+class LifecycleComponent final : public Ursa::Component
+{
+public:
+	LifecycleComponent(Ursa::Vector<Ursa::String>& trace, Ursa::String name) : trace(trace), name(std::move(name))
+	{
+	}
+
+	Ursa::Result<void> Awake(const Ursa::FrameContext&) override
+	{
+		trace.push_back(name + ":awake");
+		return {};
+	}
+
+	void OnEnable() override
+	{
+		trace.push_back(name + ":enable");
+	}
+
+	Ursa::Result<void> Start(const Ursa::FrameContext&) override
+	{
+		trace.push_back(name + ":start");
+		return {};
+	}
+
+	Ursa::Result<void> Update(const Ursa::FrameContext&) override
+	{
+		trace.push_back(name + ":update");
+		return {};
+	}
+
+	void OnDisable() override
+	{
+		trace.push_back(name + ":disable");
+	}
+
+	void OnDestroy() override
+	{
+		trace.push_back(name + ":destroy");
+	}
+
+	void OnRemove() override
+	{
+		trace.push_back(name + ":remove");
+	}
+
+private:
+	Ursa::Vector<Ursa::String>& trace;
+	Ursa::String name;
+};
+
+class RuntimeCreatorComponent final : public Ursa::Component
+{
+public:
+	RuntimeCreatorComponent(Ursa::Scene& scene, Ursa::Vector<Ursa::String>& trace) : scene(scene), trace(trace)
+	{
+	}
+
+	Ursa::Result<void> Start(const Ursa::FrameContext&) override
+	{
+		trace.push_back("creator:start");
+		return CreateChild("startChild");
+	}
+
+	Ursa::Result<void> Update(const Ursa::FrameContext&) override
+	{
+		if (!createdDuringUpdate)
+		{
+			createdDuringUpdate = true;
+			trace.push_back("creator:update");
+			return CreateChild("updateChild");
+		}
+		trace.push_back("creator:update");
+		return {};
+	}
+
+private:
+	Ursa::Result<void> CreateChild(const Ursa::String& name)
+	{
+		auto child = scene.CreateGameObject(name, GetGameObject());
+		if (!child)
+		{
+			return Ursa::Result<void>::Failure(child.error);
+		}
+		auto component = scene.AddComponent<LifecycleComponent>(child.value, trace, name);
+		if (!component)
+		{
+			return Ursa::Result<void>::Failure(component.error);
+		}
+		Expect(trace.size() >= 2 && trace[trace.size() - 2] == name + ":awake" && trace.back() == name + ":enable",
+		       "Runtime AddComponent returned before Awake/OnEnable");
+		return {};
+	}
+
+	Ursa::Scene& scene;
+	Ursa::Vector<Ursa::String>& trace;
+	bool createdDuringUpdate = false;
+};
+
+void TestNativeLifecycleTransitions()
+{
+	Ursa::Scene scene;
+	Ursa::Vector<Ursa::String> trace;
+	const auto root = Take(scene.CreateGameObject("Root"));
+	const auto inactiveChild = Take(scene.CreateGameObject("Inactive", root));
+	const auto activeId = Take(scene.AddComponent<LifecycleComponent>(root, trace, "active"));
+	const auto disabledId = Take(scene.AddComponent<LifecycleComponent>(root, trace, "disabled"));
+	Take(scene.AddComponent<LifecycleComponent>(inactiveChild, trace, "child"));
+	done(scene.SetComponentEnabled(disabledId, false));
+	done(scene.SetActive(inactiveChild, false));
+	Expect(!Take(scene.ActiveSelf(inactiveChild)) && !Take(scene.ActiveInHierarchy(inactiveChild)),
+	       "GameObject self and hierarchy activity were not reported separately");
+
+	scene.BeginFrame();
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>(
+	                    {"active:awake", "disabled:awake", "active:enable", "active:start", "active:update"}),
+	       "Initial lifecycle did not awaken disabled behaviours or defer inactive objects");
+
+	trace.clear();
+	done(scene.SetComponentEnabled(disabledId, true));
+	done(scene.SetActive(inactiveChild, true));
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"child:awake", "disabled:enable", "child:enable", "disabled:start",
+	                                            "child:start", "active:update", "disabled:update", "child:update"}),
+	       "First activation did not run Awake, OnEnable, and Start in order");
+
+	trace.clear();
+	done(scene.SetActive(root, false));
+	done(scene.SetActive(root, false));
+	Expect(!Take(scene.ActiveSelf(root)) && !Take(scene.ActiveInHierarchy(inactiveChild)),
+	       "Disabling the root did not update hierarchy activity");
+	done(scene.FixedUpdate({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"active:disable", "disabled:disable", "child:disable"}),
+	       "Disabling a parent did not disable its active behaviours exactly once");
+
+	trace.clear();
+	done(scene.SetActive(root, true));
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"active:enable", "disabled:enable", "child:enable", "active:update",
+	                                            "disabled:update", "child:update"}),
+	       "Reenabling a parent reran initialization or skipped the enable transition");
+	trace.clear();
+	done(scene.SetActive(inactiveChild, false));
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"child:disable", "active:update", "disabled:update"}),
+	       "Setting activeSelf false did not disable only the child hierarchy");
+	trace.clear();
+	done(scene.SetParent(inactiveChild));
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"active:update", "disabled:update"}),
+	       "Reparenting did not preserve activeSelf=false");
+	trace.clear();
+	done(scene.SetActive(inactiveChild, true));
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"child:enable", "active:update", "disabled:update", "child:update"}),
+	       "Enabling activeSelf did not activate the child behavior");
+
+	const auto inactiveParent = Take(scene.CreateGameObject("Other"));
+	done(scene.SetActive(inactiveParent, false));
+	trace.clear();
+	done(scene.SetParent(inactiveChild, inactiveParent));
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"child:disable", "active:update", "disabled:update"}),
+	       "Reparenting under an inactive ancestor did not disable the child behavior");
+	trace.clear();
+	done(scene.SetParent(inactiveChild, root));
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"child:enable", "active:update", "disabled:update", "child:update"}),
+	       "Reparenting under an active ancestor did not enable the child behavior");
+
+	trace.clear();
+	done(scene.DestroyGameObject(root));
+	Expect(trace == Ursa::Vector<Ursa::String>({"child:disable", "child:destroy", "child:remove", "active:disable",
+	                                            "active:destroy", "active:remove", "disabled:disable",
+	                                            "disabled:destroy", "disabled:remove"}),
+	       "Scene destruction did not deliver lifecycle events before component cleanup");
+	Expect(!scene.ContainsComponent(activeId), "Destroyed lifecycle component remained valid");
+}
+
+void TestDestructionCleanupRules()
+{
+	Ursa::Vector<Ursa::String> trace;
+	{
+		Ursa::Scene scene;
+		const auto root = Take(scene.CreateGameObject("Root"));
+		const auto inactive = Take(scene.CreateGameObject("Inactive", root));
+		Take(scene.AddComponent<LifecycleComponent>(inactive, trace, "neverActive"));
+		done(scene.SetActive(inactive, false));
+		scene.BeginFrame();
+		done(scene.Update({}));
+		trace.clear();
+		done(scene.DestroyGameObject(root));
+		Expect(trace == Ursa::Vector<Ursa::String>({"neverActive:remove"}),
+		       "An object that was never active received game destruction callbacks or skipped native cleanup");
+	}
+
+	trace.clear();
+	{
+		Ursa::Scene scene;
+		const auto root = Take(scene.CreateGameObject("Root"));
+		Take(scene.AddComponent<LifecycleComponent>(root, trace, "direct"));
+		scene.BeginFrame();
+		done(scene.Update({}));
+		trace.clear();
+		done(scene.SetActive(root, false));
+		done(scene.DestroyGameObject(root));
+		Expect(trace == Ursa::Vector<Ursa::String>({"direct:disable", "direct:destroy", "direct:remove"}),
+		       "Direct destruction did not disable and destroy once before releasing native resources");
+	}
+
+	trace.clear();
+	{
+		Ursa::Scene scene;
+		const auto root = Take(scene.CreateGameObject("Root"));
+		Take(scene.AddComponent<LifecycleComponent>(root, trace, "clear"));
+		scene.BeginFrame();
+		done(scene.Update({}));
+		trace.clear();
+		scene.Clear();
+		Expect(trace == Ursa::Vector<Ursa::String>({"clear:disable", "clear:destroy", "clear:remove"}),
+		       "Scene clear did not perform each lifecycle and native cleanup callback once");
+	}
+}
+
+void TestRuntimeCreationLifecycleBoundary()
+{
+	Ursa::Scene scene;
+	Ursa::Vector<Ursa::String> trace;
+	const auto root = Take(scene.CreateGameObject("Root"));
+	Take(scene.AddComponent<RuntimeCreatorComponent>(root, scene, trace));
+	scene.BeginFrame();
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"creator:start", "startChild:awake", "startChild:enable",
+	                                            "startChild:start", "creator:update", "updateChild:awake",
+	                                            "updateChild:enable", "startChild:update", "updateChild:start"}),
+	       "Runtime-created components did not initialize at the safe lifecycle boundary");
+
+	trace.clear();
+	scene.BeginFrame();
+	done(scene.Update({}));
+	Expect(trace == Ursa::Vector<Ursa::String>({"creator:update", "startChild:update", "updateChild:update"}),
+	       "Runtime-created components missed or repeated their first eligible update");
+}
+
 class ActionComponent final : public Ursa::Component
 {
 public:
@@ -216,7 +460,7 @@ public:
 	int* updates = nullptr;
 	int* removals = nullptr;
 
-	Ursa::Result<void> OnUpdate(const Ursa::FrameContext& context) override
+	Ursa::Result<void> Update(const Ursa::FrameContext& context) override
 	{
 		if (updates)
 		{
@@ -421,6 +665,9 @@ int main()
 		TestHierarchyAndGeneration();
 		TestTransformAndActivation();
 		TestComponents();
+		TestNativeLifecycleTransitions();
+		TestRuntimeCreationLifecycleBoundary();
+		TestDestructionCleanupRules();
 		TestDeferredChanges();
 		TestFrameContextAndErrors();
 		TestAttachGameObjectTree();

@@ -104,4 +104,51 @@ const ComponentCodec* ComponentRegistry::Find(const String& type) const
 	const auto found = codecs.find(type);
 	return found == codecs.end() ? nullptr : &found->second;
 }
+
+Result<void> ComponentRegistry::RegisterScriptFieldAlias(const String& scriptType, const String& formerName,
+                                                         const String& currentName)
+{
+	if (scriptType.empty() || formerName.empty() || currentName.empty() || formerName == currentName)
+	{
+		return Result<void>::Failure("Script field alias needs a type, former name, and current name");
+	}
+	auto& aliases = scriptFieldAliases[scriptType];
+	auto found = aliases.find(formerName);
+	if (found != aliases.end() && found->second != currentName)
+	{
+		return Result<void>::Failure("Conflicting FormerlySerializedAs mapping for " + scriptType + "." + formerName);
+	}
+	aliases[formerName] = currentName;
+	return {};
+}
+
+Result<void> ComponentRegistry::ReplaceScriptFieldAliases(const String& scriptType, Map<String, String> aliases)
+{
+	if (scriptType.empty())
+	{
+		return Result<void>::Failure("Script identity is empty");
+	}
+	for (const auto& alias : aliases)
+	{
+		if (alias.first.empty() || alias.second.empty() || alias.first == alias.second)
+		{
+			return Result<void>::Failure("Script field alias has an invalid old/current name");
+		}
+	}
+	if (aliases.empty())
+	{
+		scriptFieldAliases.erase(scriptType);
+	}
+	else
+	{
+		scriptFieldAliases[scriptType] = std::move(aliases);
+	}
+	return {};
+}
+
+Map<String, String> ComponentRegistry::ScriptFieldAliases(const String& scriptType) const
+{
+	auto found = scriptFieldAliases.find(scriptType);
+	return found == scriptFieldAliases.end() ? Map<String, String>{} : found->second;
+}
 } // namespace Ursa

@@ -29,6 +29,19 @@ Result<void> MountDirectories(VirtualFileSystem& filesystem, const String& schem
 Result<std::filesystem::path> WindowsLocalDataRoot()
 {
 	Ursa::Vector<wchar_t> buffer(32768);
+	const DWORD overrideLength =
+	    GetEnvironmentVariableW(L"URSA_USER_DATA_ROOT", buffer.data(), static_cast<DWORD>(buffer.size()));
+	if (overrideLength > 0)
+	{
+		if (overrideLength >= buffer.size())
+		{
+			return Result<std::filesystem::path>::Failure("URSA_USER_DATA_ROOT exceeds the supported path size");
+		}
+		const auto selected = std::filesystem::path(std::wstring(buffer.data(), overrideLength));
+		return selected.is_absolute()
+		           ? Result<std::filesystem::path>::Success(selected)
+		           : Result<std::filesystem::path>::Failure("URSA_USER_DATA_ROOT must be an absolute path");
+	}
 	const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", buffer.data(), static_cast<DWORD>(buffer.size()));
 	if (length == 0 || length >= buffer.size())
 	{

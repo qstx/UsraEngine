@@ -1018,6 +1018,38 @@ Vector<AssetRecord> AssetDatabase::Assets() const
 	return result;
 }
 
+Vector<ScriptSourceAsset> AssetDatabase::ScriptSources() const
+{
+	Vector<ScriptSourceAsset> result;
+	for (const auto& entry : assetsByPath)
+	{
+		if (entry.second.metadata.folder || !EndsWith(entry.first, ".cs"))
+		{
+			continue;
+		}
+		bool editorScript = false;
+		Ursa::Size begin = 0;
+		while (begin < entry.first.size())
+		{
+			const auto separator = entry.first.find('/', begin);
+			const Ursa::Size length = separator == String::npos ? entry.first.size() - begin : separator - begin;
+			if (length == 6 && entry.first.compare(begin, length, "Editor") == 0)
+			{
+				editorScript = true;
+				break;
+			}
+			if (separator == String::npos)
+			{
+				break;
+			}
+			begin = separator + 1;
+		}
+		result.push_back({entry.second.path, entry.second.metadata.guid,
+		                  editorScript ? ScriptAssemblyGroup::Editor : ScriptAssemblyGroup::Game});
+	}
+	return result;
+}
+
 Result<Vector<VirtualPath>> AssetDatabase::FilesFor(const VirtualPath& path, bool isFolder) const
 {
 	if (path.scheme != sourceScheme)

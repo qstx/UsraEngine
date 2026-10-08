@@ -17,6 +17,10 @@ file(GLOB_RECURSE URSA_EDITOR_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/Assets/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scene/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scene/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Serialization/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Serialization/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Tools/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Tools/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Ui/*.cpp"
@@ -50,7 +54,13 @@ endforeach()
 add_executable(UrsaEditor Launcher/Main.cpp)
 set_target_properties(UrsaEditor PROPERTIES FOLDER "Engine")
 target_link_libraries(UrsaEditor PRIVATE Ursa::Editor)
+ursa_attach_dotnet_host_runtime(UrsaEditor)
 add_dependencies(UrsaEditor UrsaEngineShaderAssets)
+if(NOT URSA_PROJECT_DIR STREQUAL "")
+  set_target_properties(UrsaEditor PROPERTIES
+    VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene"
+    VS_DEBUGGER_WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+endif()
 
 if(MSVC)
   target_compile_options(UrsaEditorCore PRIVATE /W4 /permissive-)

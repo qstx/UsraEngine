@@ -110,7 +110,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node)
 {
 	auto id = scene.PersistentId(node);
 	auto name = scene.GameObjectName(node);
-	auto enabled = scene.IsEnabled(node);
+	auto enabled = scene.ActiveSelf(node);
 	auto children = scene.ChildrenOf(node);
 	if (!id || !name || !enabled || !children)
 	{

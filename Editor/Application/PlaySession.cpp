@@ -44,11 +44,14 @@ Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, 
 	{
 		return Result<void>::Failure("Cannot clone edit scene: " + decoded.error);
 	}
+	auto sceneReady = context.NotifySceneReady(*decoded.value.scene);
+	if (!sceneReady)
+	{
+		return Result<void>::Failure("Cannot initialize the play scene: " + sceneReady.error);
+	}
 	services = std::move(preparedServices);
 	scene = std::move(decoded.value.scene);
-	scheduler.Reset();
-	frameIndex = 0;
-	elapsedSeconds = 0.0;
+	frameRunner.Reset();
 	return {};
 }
 
@@ -58,26 +61,7 @@ Result<void> PlaySession::Tick(Ursa::Float32 deltaSeconds, Window* window, Frame
 	{
 		return Result<void>::Failure("Play mode is not active");
 	}
-	const auto schedule = scheduler.Advance(deltaSeconds);
-	elapsedSeconds += schedule.deltaSeconds;
-	FrameContext context;
-	context.deltaSeconds = schedule.deltaSeconds;
-	context.fixedDeltaSeconds = scheduler.FixedSeconds();
-	context.elapsedSeconds = elapsedSeconds;
-	context.frameIndex = ++frameIndex;
-	context.window = window;
-	context.input = input;
-	scene->BeginFrame();
-	auto result = scene->Update(context);
-	for (Ursa::UInt32 step = 0; result && step < schedule.fixedSteps; ++step)
-	{
-		result = scene->FixedUpdate(context);
-	}
-	if (result)
-	{
-		result = scene->LateUpdate(context);
-	}
-	return result;
+	return frameRunner.Tick(*scene, deltaSeconds, window, input);
 }
 
 void PlaySession::Stop()
@@ -88,8 +72,6 @@ void PlaySession::Stop()
 	}
 	scene.reset();
 	services.reset();
-	scheduler.Reset();
-	frameIndex = 0;
-	elapsedSeconds = 0.0;
+	frameRunner.Reset();
 }
 } // namespace Ursa::Editor

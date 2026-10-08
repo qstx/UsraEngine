@@ -1,6 +1,7 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
 #include <Serialization/ResourceSession.hpp>
+#include <charconv>
 #include <Serialization/JsonArchiveInterop.hpp>
 #include <Serialization/SerializationContext.hpp>
 #include <Serialization/MaterialResource.hpp>
@@ -807,5 +808,37 @@ Result<ResourceId> ResourceSession::IdentifyMaterial(const std::shared_ptr<Mater
 		}
 	}
 	return Result<ResourceId>::Failure("Material object is not in this resource session");
+}
+
+Result<AssetReference>
+ResourceSession::IdentifyMaterialReference(const std::shared_ptr<MaterialInstance>& material) const
+{
+	for (const auto& entry : materials)
+	{
+		if (entry.second != material)
+		{
+			continue;
+		}
+		const Size separator = entry.first.find(':');
+		const String guidText = separator == String::npos ? entry.first : entry.first.substr(0, separator);
+		auto guid = ResourceId::Parse(guidText);
+		if (!guid)
+		{
+			return Result<AssetReference>::Failure(guid.error);
+		}
+		UInt64 localFileId = 0;
+		if (separator != String::npos)
+		{
+			const String localIdText = entry.first.substr(separator + 1);
+			const auto result =
+			    std::from_chars(localIdText.data(), localIdText.data() + localIdText.size(), localFileId);
+			if (result.ec != std::errc{} || result.ptr != localIdText.data() + localIdText.size())
+			{
+				return Result<AssetReference>::Failure("Material cache key has an invalid local file ID");
+			}
+		}
+		return Result<AssetReference>::Success({guid.value, localFileId});
+	}
+	return Result<AssetReference>::Failure("Material object is not in this resource session");
 }
 } // namespace Ursa

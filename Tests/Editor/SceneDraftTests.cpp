@@ -63,7 +63,7 @@ int main()
 		const auto last = Take(scene.CreateGameObject());
 		done(scene.SetGameObjectName(child, "Nested box"));
 		done(scene.SetGameObjectName(last, "Last"));
-		done(scene.SetEnabled(child, false));
+		done(scene.SetActive(child, false));
 		LocalTransform pose;
 		pose.position = {1, 2, 3};
 		done(scene.SetLocalTransform(child, pose));
@@ -80,7 +80,7 @@ int main()
 		auto loaded = reopened->Payload<Editor::SceneDraft>();
 		const auto loadedChild = Take(loaded->GetScene().GameObjectById(childId));
 		Expect(Take(loaded->GetScene().GameObjectName(loadedChild)) == "Nested box" &&
-		           !Take(loaded->GetScene().IsEnabled(loadedChild)) &&
+		           !Take(loaded->GetScene().ActiveSelf(loadedChild)) &&
 		           Take(loaded->GetScene().GetLocalTransform(loadedChild)).position.x == 1.f,
 		       "Scene hierarchy or transform did not round-trip");
 		Expect(Take(loaded->GetScene().PersistentId(loaded->GetScene().RootGameObjects().back())) == lastId,

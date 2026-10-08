@@ -14,7 +14,9 @@ file(GLOB_RECURSE URSA_ENGINE_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/Renderer3D/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Renderer3D/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Serialization/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/Serialization/*.hpp")
+  "${CMAKE_CURRENT_SOURCE_DIR}/Serialization/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/*.hpp")
 add_library(UrsaEngine STATIC ${URSA_ENGINE_SOURCES})
 add_library(Ursa::Engine ALIAS UrsaEngine)
 set_target_properties(UrsaEngine PROPERTIES FOLDER "Engine")

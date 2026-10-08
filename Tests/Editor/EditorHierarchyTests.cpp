@@ -53,7 +53,7 @@ int main()
 		done(scene.ReorderGameObject(second, 0));
 		done(scene.SetGameObjectName(first, "Root"));
 		done(scene.SetGameObjectName(child, "Child"));
-		done(scene.SetEnabled(child, false));
+		done(scene.SetActive(child, false));
 		Take(scene.AddComponent<BoxRenderComponent>(first));
 		const auto firstId = Take(scene.PersistentId(first));
 		const auto childId = Take(scene.PersistentId(child));
@@ -74,7 +74,7 @@ int main()
 		       "Root ID changed after save/reopen");
 		const auto reopenedChild = Take(loaded.scene->GameObjectById(childId));
 		Expect(Take(loaded.scene->GameObjectName(reopenedChild)) == "Child", "Child label was not restored");
-		Expect(!Take(loaded.scene->IsEnabled(reopenedChild)), "Child enabled state changed");
+		Expect(!Take(loaded.scene->ActiveSelf(reopenedChild)), "Child activeSelf state changed");
 		Expect(Take(loaded.scene->PersistentId(Take(hierarchy.SelectedGameObject(*loaded.scene)))) == childId,
 		       "Hierarchy selection did not survive scene replacement");
 

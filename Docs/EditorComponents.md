@@ -26,12 +26,14 @@ resource session, plus the same Editor-owned control API. Call
 EditorToolContext::MarkDirty() after a change. Tool windows exist only while the
 Editor is running and are not required by packaged game startup.
 
-Native C++ components and project extensions use these contracts directly. A
-future script runtime can adapt them using stable component IDs, serialized
-values and Editor handles. Script language/runtime integration and script asset
-compilation are separate work; scripts must not receive ImGui internals, RHI
-handles, or direct host-file access.
+Native Engine components use these contracts directly. Project behavior and
+project-specific Inspector, menu, and tool extensions are authored in C# under
+`Assets/Scripts/Editor/`. C# extensions receive serialized values and stable
+asset identities through `Ursa.Editor`; they do not receive ImGui internals,
+RHI handles, or direct host-file access.
 
-Demo/Editor/SnakeEditors.cpp shows custom component Inspector registration.
-UrsaComponentEditorsTests covers categories, factories, Scene/Prefab targets,
-missing services, Editor controls and tool dirty tracking.
+Demo's `Assets/Scripts/Editor/SnakeEditor.cs` defines Snake Inspector, menu, and
+window extensions. `UrsaProjectEditorExtensionsTests` verifies registration and
+reloading against the Demo project. `UrsaComponentEditorsTests` covers native
+categories, factories, Scene/Prefab targets, missing services, Editor controls,
+and tool dirty tracking.

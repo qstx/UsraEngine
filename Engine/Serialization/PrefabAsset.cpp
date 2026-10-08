@@ -87,7 +87,7 @@ EncodePrefabAssetDocument(const String& label, const PrefabAsset& asset, const C
 		}
 		auto name = object->Name();
 		auto local = object->GetLocalTransform();
-		auto enabled = object->IsEnabled();
+		auto enabled = object->ActiveSelf();
 		if (!name || !local || !enabled)
 		{
 			error = "Cannot inspect Prefab GameObject";
@@ -394,14 +394,14 @@ Result<GameObject::Ptr> PrefabAsset::Instantiate(
 	{
 		auto name = source->Name();
 		auto local = source->GetLocalTransform();
-		auto enabled = source->IsEnabled();
+		auto enabled = source->ActiveSelf();
 		if (!name || !local || !enabled)
 		{
 			return Result<GameObject::Ptr>::Failure("Cannot inspect PrefabAsset GameObject");
 		}
 		auto object = GameObject::Create(name.value);
 		auto setTransform = object->SetLocalTransform(local.value);
-		auto setEnabled = object->SetEnabled(enabled.value);
+		auto setEnabled = object->SetActive(enabled.value);
 		if (!setTransform || !setEnabled)
 		{
 			return Result<GameObject::Ptr>::Failure(!setTransform ? setTransform.error : setEnabled.error);

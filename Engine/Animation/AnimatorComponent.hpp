@@ -78,7 +78,7 @@ public:
 		return jointPalette;
 	}
 
-	Result<void> OnUpdate(const FrameContext& context) override;
+	Result<void> Update(const FrameContext& context) override;
 
 private:
 	Result<void> EvaluatePose();

@@ -75,6 +75,7 @@ AssetMetadata TakeMetadata(AssetDatabase& database, const char* path)
 
 void TestCreateMoveCopyAndRemove(const std::filesystem::path& root)
 {
+	std::filesystem::remove_all(root);
 	const auto assetsRoot = root / "Assets";
 	WriteSource(assetsRoot / "Models" / "Hero" / "mesh.fbx", "fbx-source");
 	WriteSource(assetsRoot / "Models" / "Hero" / "Textures" / "Albedo.png", "png-source");
@@ -85,7 +86,9 @@ void TestCreateMoveCopyAndRemove(const std::filesystem::path& root)
 	auto opened = AssetDatabase::Open(filesystem);
 	Expect(static_cast<bool>(opened), "Cannot open the AssetDatabase");
 	AssetDatabase& database = *opened.value;
-	Expect(static_cast<bool>(database.Refresh()), "AssetDatabase did not create missing metadata");
+	auto refreshed = database.Refresh();
+	Expect(static_cast<bool>(refreshed),
+	       ("AssetDatabase did not create missing metadata: " + ToStdString(refreshed.error)).c_str());
 
 	const ResourceId folderGuid = TakeMetadata(database, "prj:Models").guid;
 	const ResourceId fileGuid = TakeMetadata(database, "prj:Models/Hero/mesh.fbx").guid;
@@ -126,6 +129,7 @@ void TestCreateMoveCopyAndRemove(const std::filesystem::path& root)
 
 void TestDuplicateGuidRepair(const std::filesystem::path& root)
 {
+	std::filesystem::remove_all(root);
 	const auto assetsRoot = root / "Assets";
 	const ResourceId duplicateGuid = ResourceId::Generate();
 	WriteSource(assetsRoot / "A.txt", "first");
@@ -144,8 +148,69 @@ void TestDuplicateGuidRepair(const std::filesystem::path& root)
 	       "Duplicate repair changed the first asset or failed to assign a fresh GUID to the copy");
 }
 
+void TestScriptDiscoveryAndGrouping(const std::filesystem::path& root)
+{
+	std::filesystem::remove_all(root);
+	const auto assetsRoot = root / "Assets";
+	WriteSource(assetsRoot / "Scripts" / "PlayerMover.cs", "public sealed class PlayerMover { }");
+	WriteSource(assetsRoot / "Scripts" / "Editor" / "Tools" / "SceneTool.cs", "public sealed class SceneTool { }");
+	WriteSource(assetsRoot / "Scripts" / "Editorial" / "NotEditorScript.cs", "public sealed class NotEditorScript { }");
+	WriteSource(assetsRoot / "EditorTools.cs", "public sealed class EditorTools { }");
+	WriteSource(assetsRoot / "Scripts" / "Notes.txt", "not a C# script");
+
+	VirtualFileSystem filesystem;
+	Expect(static_cast<bool>(filesystem.Mount(projectScheme, assetsRoot, MountAccess::ReadWrite)),
+	       "Cannot mount script discovery fixture");
+	auto opened = AssetDatabase::Open(filesystem);
+	Expect(opened && static_cast<bool>(opened.value->Refresh()), "AssetDatabase did not discover C# source assets");
+	AssetDatabase& database = *opened.value;
+	const auto scriptSources = database.ScriptSources();
+	Expect(scriptSources.size() == 4, "Script discovery included non-CS files or missed C# source files");
+	const ResourceId playerGuid = TakeMetadata(database, "prj:Scripts/PlayerMover.cs").guid;
+	const ResourceId editorGuid = TakeMetadata(database, "prj:Scripts/Editor/Tools/SceneTool.cs").guid;
+	Expect(static_cast<bool>(filesystem.Exists(Path("prj:Scripts/PlayerMover.cs.meta")).value),
+	       "New C# source did not receive AssetDatabase metadata");
+	const auto findScript = [&database](const char* path) -> ScriptSourceAsset
+	{
+		for (const ScriptSourceAsset& script : database.ScriptSources())
+		{
+			if (ToStdString(script.path.ToString()) == path)
+			{
+				return script;
+			}
+		}
+		throw std::runtime_error(ToStdString(String("C# source was not discovered: ") + path));
+	};
+	Expect(findScript("prj:Scripts/PlayerMover.cs").group == ScriptAssemblyGroup::Game &&
+	           findScript("prj:Scripts/Editor/Tools/SceneTool.cs").group == ScriptAssemblyGroup::Editor &&
+	           findScript("prj:EditorTools.cs").group == ScriptAssemblyGroup::Game &&
+	           findScript("prj:Scripts/Editorial/NotEditorScript.cs").group == ScriptAssemblyGroup::Game,
+	       "Script grouping did not use the exact Editor directory segment");
+
+	Expect(
+	    static_cast<bool>(database.Move(Path("prj:Scripts/PlayerMover.cs"), Path("prj:Scripts/Editor/PlayerMover.cs"))),
+	    "Could not move a game script into the Editor group");
+	auto movedPlayer = findScript("prj:Scripts/Editor/PlayerMover.cs");
+	Expect(movedPlayer.guid == playerGuid && movedPlayer.group == ScriptAssemblyGroup::Editor,
+	       "Moving a script changed its GUID or retained its old compiler group");
+
+	Expect(static_cast<bool>(
+	           database.Move(Path("prj:Scripts/Editor/Tools/SceneTool.cs"), Path("prj:Scripts/Tools/SceneTool.cs"))),
+	       "Could not move an Editor script into the game group");
+	auto movedTool = findScript("prj:Scripts/Tools/SceneTool.cs");
+	Expect(movedTool.guid == editorGuid && movedTool.group == ScriptAssemblyGroup::Game,
+	       "Moving a script out of Editor changed its GUID or retained the Editor compiler group");
+
+	Expect(static_cast<bool>(database.Copy(Path("prj:Scripts/Editor/PlayerMover.cs"), Path("prj:Scripts/GameCopy.cs"))),
+	       "Could not copy a C# source asset");
+	auto copiedPlayer = findScript("prj:Scripts/GameCopy.cs");
+	Expect(copiedPlayer.guid != playerGuid && copiedPlayer.group == ScriptAssemblyGroup::Game,
+	       "Copied script source reused its GUID or inherited its Editor group");
+}
+
 void TestReadOnlyAndInvalidMetadata(const std::filesystem::path& root)
 {
+	std::filesystem::remove_all(root);
 	const auto readOnlyRoot = root / "ReadOnly";
 	WriteSource(readOnlyRoot / "NoMeta.txt", "source");
 	VirtualFileSystem readOnlyFilesystem;
@@ -167,6 +232,7 @@ void TestReadOnlyAndInvalidMetadata(const std::filesystem::path& root)
 
 void TestImportCache(const std::filesystem::path& root)
 {
+	std::filesystem::remove_all(root);
 	const auto assetsRoot = root / "Assets";
 	const auto libraryRoot = root / "Library";
 	WriteSource(assetsRoot / "Models" / "Robot.fbx", "robot-source-v1");
@@ -238,12 +304,14 @@ void TestImportCache(const std::filesystem::path& root)
 
 int main()
 {
+	const auto root = std::filesystem::temp_directory_path() /
+	                  ("UrsaAssetDatabaseTests-" + ToStdString(ResourceId::Generate().ToString()));
 	try
 	{
-		const auto root = std::filesystem::temp_directory_path() /
-		                  ("UrsaAssetDatabaseTests-" + ToStdString(ResourceId::Generate().ToString()));
+		std::filesystem::remove_all(root);
 		std::filesystem::create_directories(root);
 		TestCreateMoveCopyAndRemove(root / "Operations");
+		TestScriptDiscoveryAndGrouping(root / "Scripts");
 		TestDuplicateGuidRepair(root / "Duplicate");
 		TestReadOnlyAndInvalidMetadata(root / "Validation");
 		TestImportCache(root / "ImportCache");
@@ -252,7 +320,8 @@ int main()
 	}
 	catch (const std::exception& error)
 	{
-		std::cerr << error.what() << std::endl;
+		std::cerr << error.what() << " [fixture " << root.string() << "]" << std::endl;
+		std::filesystem::remove_all(root);
 		return 1;
 	}
 }

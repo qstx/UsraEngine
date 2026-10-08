@@ -1,6 +1,7 @@
 param(
     [switch]$Check,
-    [string]$ClangFormatPath
+    [string]$ClangFormatPath,
+    [string]$ProjectDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,6 +62,25 @@ foreach ($file in $files) {
         & $formatter -i --style=file $file.FullName
         if ($LASTEXITCODE -ne 0) {
             ++$failed
+        }
+    }
+}
+
+if ($ProjectDir) {
+    $projectRoot = (Resolve-Path -LiteralPath $ProjectDir).Path
+    $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $dotnet) {
+        throw 'dotnet was not found; configure a C# project before checking its formatting.'
+    }
+    foreach ($folder in @((Join-Path $repository 'Managed\Ursa.SnakeLogicTests'),
+                          (Join-Path $projectRoot 'Assets\Scripts'))) {
+        $arguments = @('format', 'whitespace', $folder, '--folder')
+        if ($Check) {
+            $arguments += '--verify-no-changes'
+        }
+        & $dotnet.Source @arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "C# formatting check failed for $folder."
         }
     }
 }
