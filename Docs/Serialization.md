@@ -56,7 +56,9 @@ Persist a `ResourceId`, never a pointer or runtime component handle. For referen
 within a graph, call `context.Defer(...)` during `Deserialize` and resolve with
 `context.Object<T>(id)` inside that callback. The loader registers every object
 and component before `ResolveReferences()`. This supports forward references.
-`SnakePresentation` is a working example referencing a GameObject by ID.
+Managed script fields use `GameObject` and `Component` persistent references;
+`ScriptFieldSchema` resolves them after the full object graph is restored. Demo's
+C# Snake controller is an example of a serialized behavior in a Scene.
 
 Resource dependencies load through `context.ResourceLoader()`; save-time resource
 identification uses `writer.Context()->Identify(object)`. Scene and PrefabAsset

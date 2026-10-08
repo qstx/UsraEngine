@@ -225,10 +225,6 @@ int main(int argc, char** argv)
 			{
 				profile.engineDirectories = {content / "Engine"};
 				profile.projectAssetsDirectory = content / "Project";
-				if (scenePath == "ScriptSample/ScriptPlayer.ursascene")
-				{
-					scenePath = "ScriptSample/ScriptPlayer.ursascene";
-				}
 			}
 			else
 			{
@@ -242,7 +238,6 @@ int main(int argc, char** argv)
 				profile.engineDirectories = Take(ResolveEngineAssetRoots());
 				profile.engineDirectories.insert(profile.engineDirectories.begin(), engineAssets);
 				profile.projectAssetsDirectory = project / "Assets";
-				scenePath = scenePath == "ScriptSample/ScriptPlayer.ursascene" ? "Snake/Snake.ursascene" : scenePath;
 				manifestPath = "lib:ScriptBuild/Manifests/Game.json";
 			}
 		}
