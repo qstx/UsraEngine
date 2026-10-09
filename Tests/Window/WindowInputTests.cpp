@@ -20,6 +20,7 @@ int main()
 	auto created = Ursa::Window::Create(320, 240, "Window input test", false);
 	Expect(static_cast<bool>(created), "Cannot create test window");
 	auto window = std::move(created.value);
+	Expect(window->Width() == 320 && window->Height() == 240, "Logical window size is incorrect");
 
 	auto empty = window->Subscribe({});
 	Expect(!empty, "Empty callback must be rejected");
@@ -69,6 +70,7 @@ int main()
 
 	window->Resize(400, 300);
 	window->PollEvents();
+	Expect(window->Width() == 400 && window->Height() == 300, "Logical window size did not update after resize");
 	window->Minimize();
 	window->PollEvents();
 	window->Restore();

@@ -119,6 +119,17 @@ void TestImagesFontsAndClipping(const DevicePtr& device)
 	bridge->UnregisterTexture(greenId);
 }
 
+void TestHighDpiDisplayScale(const DevicePtr& device)
+{
+	auto bridge = Take(Editor::ImGuiBridge::Create(device));
+	done(bridge->BeginFrame(1.f / 60.f, 640, 480, 1280, 960));
+	const ImGuiIO& io = ImGui::GetIO();
+	Expect(io.DisplaySize.x == 640 && io.DisplaySize.y == 480, "ImGui display size must use logical window units");
+	Expect(io.DisplayFramebufferScale.x == 2 && io.DisplayFramebufferScale.y == 2,
+	       "ImGui framebuffer scale must preserve the high-DPI ratio");
+	done(bridge->EndFrame());
+}
+
 void TestTextFieldPaste(const DevicePtr& device)
 {
 	auto window = Take(Window::Create(640, 480, "ImGui clipboard test", false));
@@ -185,6 +196,7 @@ int main()
 		desc.validation = true;
 #endif
 		auto device = Take(CreateDevice(desc));
+		TestHighDpiDisplayScale(device);
 		TestImagesFontsAndClipping(device);
 		TestTextFieldPaste(device);
 		done(device->WaitIdle());

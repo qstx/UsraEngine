@@ -2487,7 +2487,8 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		const auto now = std::chrono::steady_clock::now();
 		const Ursa::Float32 deltaSeconds = std::chrono::duration<Ursa::Float32>(now - previous).count();
 		previous = now;
-		result = gui->BeginFrame(deltaSeconds, window->FramebufferWidth(), window->FramebufferHeight());
+		result = gui->BeginFrame(deltaSeconds, window->Width(), window->Height(), window->FramebufferWidth(),
+		                         window->FramebufferHeight());
 		if (result)
 		{
 			result = OnFrame(deltaSeconds);

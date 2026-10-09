@@ -359,6 +359,20 @@ void Window::Restore()
 	glfwRestoreWindow(static_cast<GLFWwindow*>(handle));
 }
 
+Ursa::UInt32 Window::Width() const
+{
+	int w = 0, h = 0;
+	glfwGetWindowSize(static_cast<GLFWwindow*>(handle), &w, &h);
+	return static_cast<Ursa::UInt32>(w);
+}
+
+Ursa::UInt32 Window::Height() const
+{
+	int w = 0, h = 0;
+	glfwGetWindowSize(static_cast<GLFWwindow*>(handle), &w, &h);
+	return static_cast<Ursa::UInt32>(h);
+}
+
 Ursa::UInt32 Window::FramebufferWidth() const
 {
 	int w = 0, h = 0;

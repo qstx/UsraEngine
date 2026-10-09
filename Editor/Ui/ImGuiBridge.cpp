@@ -5,7 +5,6 @@
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
-#include <Vfs/UserDataStore.hpp>
 #include <Shader/ShaderAssetResource.hpp>
 #include <Shader/ShaderReflection.hpp>
 #include <Core/Log.hpp>
@@ -538,16 +537,26 @@ void ImGuiBridge::SetClipboardText(ImGuiContext* guiContext, const char* text)
 	}
 }
 
-Result<void> ImGuiBridge::BeginFrame(Ursa::Float32 deltaSeconds, Ursa::UInt32 width, Ursa::UInt32 height)
+Result<void> ImGuiBridge::BeginFrame(Ursa::Float32 deltaSeconds, Ursa::UInt32 width, Ursa::UInt32 height,
+                                     Ursa::UInt32 framebufferWidth, Ursa::UInt32 framebufferHeight)
 {
 	if (!width || !height)
 	{
 		return Result<void>::Failure("ImGui frame size must be positive");
 	}
+	if (!framebufferWidth)
+	{
+		framebufferWidth = width;
+	}
+	if (!framebufferHeight)
+	{
+		framebufferHeight = height;
+	}
 	ImGui::SetCurrentContext(context);
 	auto& io = ImGui::GetIO();
 	io.DisplaySize = ImVec2(static_cast<Ursa::Float32>(width), static_cast<Ursa::Float32>(height));
-	io.DisplayFramebufferScale = ImVec2(1, 1);
+	io.DisplayFramebufferScale = ImVec2(static_cast<Ursa::Float32>(framebufferWidth) / width,
+	                                    static_cast<Ursa::Float32>(framebufferHeight) / height);
 	io.DeltaTime = std::max(deltaSeconds, 0.00001f);
 	ImGui::NewFrame();
 	return {};
@@ -561,7 +570,12 @@ Result<void> ImGuiBridge::EndFrame()
 	{
 		size_t length = 0;
 		const auto* text = reinterpret_cast<const UInt8*>(ImGui::SaveIniSettingsToMemory(&length));
-		auto saved = UserDataStore(settingsFiles).SaveSettings(layoutSettingsName, Vector<UInt8>(text, text + length));
+		auto path = VirtualPath::Parse(String("user:Settings/") + layoutSettingsName);
+		if (!path)
+		{
+			return Result<void>::Failure(path.error);
+		}
+		auto saved = settingsFiles.WriteAtomic(path.value, Vector<UInt8>(text, text + length));
 		if (!saved)
 		{
 			return saved;

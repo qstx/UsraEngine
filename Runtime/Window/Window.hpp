@@ -157,6 +157,10 @@ public:
 
 	void Restore();
 
+	Ursa::UInt32 Width() const;
+
+	Ursa::UInt32 Height() const;
+
 	Ursa::UInt32 FramebufferWidth() const;
 
 	Ursa::UInt32 FramebufferHeight() const;

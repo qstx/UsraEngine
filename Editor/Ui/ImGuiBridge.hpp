@@ -22,7 +22,8 @@ public:
 
 	ImGuiBridge& operator=(const ImGuiBridge&) = delete;
 
-	Result<void> BeginFrame(Ursa::Float32 deltaSeconds, Ursa::UInt32 width, Ursa::UInt32 height);
+	Result<void> BeginFrame(Ursa::Float32 deltaSeconds, Ursa::UInt32 width, Ursa::UInt32 height,
+	                        Ursa::UInt32 framebufferWidth = 0, Ursa::UInt32 framebufferHeight = 0);
 
 	Result<void> EndFrame();
 
