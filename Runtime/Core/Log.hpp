@@ -4,6 +4,8 @@
 #include <Core/Types.hpp>
 #include <cstddef>
 #include <filesystem>
+#include <chrono>
+#include <functional>
 #include <Vfs/VirtualFileSystem.hpp>
 
 namespace Ursa
@@ -30,9 +32,26 @@ struct LogConfig
 	LogConfig();
 };
 
+struct LogContext
+{
+	String resourcePath;
+	String objectId;
+};
+
+struct LogRecord
+{
+	std::chrono::system_clock::time_point timestamp;
+	LogLevel level = LogLevel::Info;
+	String category;
+	String message;
+	LogContext context;
+};
+
 class Log final
 {
 public:
+	using Listener = std::function<void(const LogRecord&)>;
+
 	static LogLevel DefaultLevel() noexcept;
 
 	static void ConfigureConsoleEncoding() noexcept;
@@ -54,7 +73,12 @@ public:
 
 	static bool Enabled(LogLevel level) noexcept;
 
-	static void Write(LogLevel level, const char* module, const String& message) noexcept;
+	static Ursa::UInt64 Subscribe(Listener listener);
+
+	static void Unsubscribe(Ursa::UInt64 id) noexcept;
+
+	static void Write(LogLevel level, const char* module, const String& message,
+	                  const LogContext& context = {}) noexcept;
 };
 
 class LogSession final

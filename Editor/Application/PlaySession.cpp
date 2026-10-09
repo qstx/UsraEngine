@@ -61,6 +61,11 @@ Result<void> PlaySession::Tick(Ursa::Float32 deltaSeconds, Window* window, Frame
 	{
 		return Result<void>::Failure("Play mode is not active");
 	}
+	if (paused && !stepRequested)
+	{
+		return {};
+	}
+	stepRequested = false;
 	return frameRunner.Tick(*scene, deltaSeconds, window, input);
 }
 
@@ -73,5 +78,7 @@ void PlaySession::Stop()
 	scene.reset();
 	services.reset();
 	frameRunner.Reset();
+	paused = false;
+	stepRequested = false;
 }
 } // namespace Ursa::Editor

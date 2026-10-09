@@ -13,8 +13,8 @@ namespace Ursa::Editor
 class ImGuiBridge final
 {
 public:
-	static Result<std::unique_ptr<ImGuiBridge>> Create(Rhi::DevicePtr selectedDevice,
-	                                                   std::shared_ptr<Window> selectedWindow = {});
+	static Result<std::unique_ptr<ImGuiBridge>>
+	Create(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow = {}, const String& layoutKey = {});
 
 	~ImGuiBridge();
 
@@ -44,8 +44,11 @@ public:
 		return savedLayout;
 	}
 
+	Result<void> ClearSavedLayout();
+
 private:
-	explicit ImGuiBridge(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow);
+	explicit ImGuiBridge(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow,
+	                     const String& layoutKey);
 
 	Result<void> Initialize();
 
@@ -62,6 +65,7 @@ private:
 	Ursa::UInt64 subscription = 0;
 	ImGuiContext* context = nullptr;
 	String clipboardText;
+	String layoutSettingsName;
 	VirtualFileSystem settingsFiles;
 	bool savedLayout = false;
 	bool leftControl = false;

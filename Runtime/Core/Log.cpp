@@ -23,6 +23,10 @@ namespace
 std::mutex logMutex;
 std::shared_ptr<spdlog::logger> logger;
 std::atomic<LogLevel> minimumLevel{Log::DefaultLevel()};
+std::mutex listenerMutex;
+Map<Ursa::UInt64, Log::Listener> listeners;
+std::atomic<Ursa::UInt64> nextListener{1};
+thread_local bool notifyingListeners = false;
 
 bool valid(LogLevel level)
 {
@@ -270,11 +274,64 @@ bool Log::Enabled(LogLevel level) noexcept
 	return valid(level) && level != LogLevel::Off && level >= minimumLevel.load(std::memory_order_acquire);
 }
 
-void Log::Write(LogLevel level, const char* module, const String& message) noexcept
+Ursa::UInt64 Log::Subscribe(Listener listener)
+{
+	if (!listener)
+	{
+		return 0;
+	}
+	const Ursa::UInt64 id = nextListener.fetch_add(1, std::memory_order_relaxed);
+	std::lock_guard<std::mutex> lock(listenerMutex);
+	listeners.emplace(id, std::move(listener));
+	return id;
+}
+
+void Log::Unsubscribe(Ursa::UInt64 id) noexcept
+{
+	std::lock_guard<std::mutex> lock(listenerMutex);
+	listeners.erase(id);
+}
+
+void Log::Write(LogLevel level, const char* module, const String& message, const LogContext& context) noexcept
 {
 	if (!Enabled(level))
 	{
 		return;
+	}
+	try
+	{
+		if (!notifyingListeners)
+		{
+			Vector<Listener> snapshot;
+			{
+				std::lock_guard<std::mutex> lock(listenerMutex);
+				snapshot.reserve(listeners.size());
+				for (const auto& item : listeners)
+				{
+					snapshot.push_back(item.second);
+				}
+			}
+			if (!snapshot.empty())
+			{
+				const LogRecord record{std::chrono::system_clock::now(), level,
+				                       module ? String(module) : String("Unknown"), message, context};
+				notifyingListeners = true;
+				for (const Listener& listener : snapshot)
+				{
+					try
+					{
+						listener(record);
+					}
+					catch (...)
+					{
+					}
+				}
+				notifyingListeners = false;
+			}
+		}
+	}
+	catch (...)
+	{
 	}
 	std::lock_guard<std::mutex> lock(logMutex);
 	try

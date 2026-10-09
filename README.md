@@ -14,9 +14,11 @@ Initialize the top-level dependencies after checkout with `git submodule update 
 
 ## Source layout
 
-`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Renderer3D`, and `Engine/Serialization` contain the engine modules. `Editor/Application` and `Editor/Ui` contain the Editor loop and UI bridge. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Renderer3D/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. The Editor creates a generated, rebuildable `Library/` directory beside `Assets/`; keep it out of source control. Tests are grouped by module under `Tests/`.
+`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Renderer3D`, and `Engine/Serialization` contain the engine modules. Editor modules live under `Editor/Application`, `Editor/Assets`, `Editor/Console`, `Editor/Inspector`, `Editor/Scene`, `Editor/Ui`, and `Editor/Workspace`. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Renderer3D/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. The Editor creates a generated, rebuildable `Library/` directory beside `Assets/`; keep it out of source control. Tests are grouped by module under `Tests/`.
 
 CMake discovers `.cpp` and `.hpp` files within the listed module directories and checks for additions or removals during a build. New modules and test executables still need a CMake target or directory entry.
+
+For the Editor's menus, default layout, Project browser, Inspector, and Console, see [UrsaEditor 工作区](Docs/EditorWorkspace.md).
 
 ## Asset metadata
 
@@ -110,11 +112,13 @@ void inspectId(Ursa::ResourceId id) {
 git submodule update --init
 git submodule update --init --recursive third_party/imgui third_party/imguizmo
 cmake -S . -B Build -G "Visual Studio 17 2022" -A x64 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
-cmake --build Build --config Debug
+cmake --build Build --parallel --config Debug
 ctest --test-dir Build -C Debug --output-on-failure
-cmake --build Build --config Release
+cmake --build Build --parallel --config Release
 ctest --test-dir Build -C Release --output-on-failure
 ```
+
+`--parallel` without a job count lets CMake use the generator's default worker count. VS Code CMake Tools is also configured to choose the available worker count automatically.
 
 For a new clone, run the submodule update commands above before configuring CMake. A full recursive checkout may attempt EABase's unrelated test-only SSH submodules. CMake reads dependency sources from `third_party/`, including EABase through a local FetchContent source override; configuration does not download dependencies.
 
@@ -142,7 +146,7 @@ The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). For the C# Demo pro
 
 ```powershell
 cmake -S Engine -B Engine/Build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
-cmake --build Engine/Build --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
+cmake --build Engine/Build --parallel --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
 Engine/Build/Debug/UrsaScriptCompile.exe Demo Debug
 ctest --test-dir Engine/Build -C Debug --output-on-failure -R 'Ursa(Project|Snake)'
 ```
@@ -247,7 +251,7 @@ updates and explicit reload. Linked scenes retain source and instance IDs; use
 ### Build a package
 
 ```powershell
-cmake --build Build --config Debug --target UrsaEnginePackage
+cmake --build Build --parallel --config Debug --target UrsaEnginePackage
 ```
 
 The Engine-only package is `build/package/Content.pak`. Demo's `UrsaDemoPackage`
@@ -447,7 +451,7 @@ Remove-Item Env:Path -ErrorAction SilentlyContinue
 Remove-Item Env:PATH -ErrorAction SilentlyContinue
 $env:PATH = $savedPath
 cmake -S . -B Build -G "Visual Studio 17 2022" -A x64
-cmake --build Build --config Debug
+cmake --build Build --parallel --config Debug
 ```
 
 ## Unified serialization

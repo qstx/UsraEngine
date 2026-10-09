@@ -8,6 +8,11 @@
 #include <Window/Window.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Workspace/EditorDocuments.hpp>
+#include <Workspace/EditorSelectionContext.hpp>
+#include <Assets/ProjectBrowserModel.hpp>
+#include <Assets/ProjectBrowserPanel.hpp>
+#include <Inspector/AssetInspectorPanel.hpp>
+#include <Console/EditorConsolePanel.hpp>
 #include <Assets/MaterialPreview.hpp>
 #include <Assets/MaterialInspectors.hpp>
 #include <Assets/ShaderImportView.hpp>
@@ -16,8 +21,7 @@
 #include <Assets/ScriptBuildService.hpp>
 #include <Scripting/ManagedEditorBridge.hpp>
 #include <Scene/EditorHierarchy.hpp>
-#include <Scene/EditorScenePreview.hpp>
-#include <Scene/EditorGizmo.hpp>
+#include <Scene/SceneViewPanel.hpp>
 #include <Scene/ComponentEditors.hpp>
 #include <Tools/EditorTools.hpp>
 #include <Application/PlaySession.hpp>
@@ -140,6 +144,23 @@ protected:
 	}
 
 private:
+	void DrawMainMenuBar();
+
+	void DrawPlayToolbar(const EditorDocument* current);
+
+	Result<void> OpenProjectBrowserAsset(const ProjectBrowserEntry& asset);
+
+	Result<void> CreateProjectAsset(ResourceKind kind, MaterialType materialType = MaterialType::Unlit,
+	                                const String& requestedPath = {});
+
+	Result<void> CreateProjectFolder(const String& requestedName = {});
+
+	Result<void> RenameProjectAsset(const VirtualPath& source, const VirtualPath& destination);
+
+	Result<void> LoadPanelVisibility();
+
+	Result<void> SavePanelVisibility();
+
 	EditorProjectSetup projectSetup;
 	VirtualPath startupAsset;
 	std::unique_ptr<EditorProject> project;
@@ -149,18 +170,18 @@ private:
 	std::unique_ptr<ShaderImportView> shaderImportView;
 	std::unique_ptr<TextureImportView> textureImportView;
 	std::unique_ptr<ModelImportView> modelImportView;
-	std::unique_ptr<EditorScenePreview> scenePreview;
 	EditorHierarchy hierarchy;
-	Rhi::TexturePtr scenePreviewColor;
-	Rhi::SamplerPtr scenePreviewSampler;
-	ImTextureID scenePreviewId = ImTextureID_Invalid;
-	bool scenePreviewRendered = false;
 	ResourceId displayedSceneId;
-	GizmoOperation gizmoOperation = GizmoOperation::Translate;
+	std::unique_ptr<SceneViewPanel> sceneViewPanel;
 	PlaySession play;
 	bool viewportFocused = false;
 	std::unique_ptr<ProjectWorkspace> workspace;
 	std::unique_ptr<EditorDocuments> documents;
+	ProjectBrowserModel projectBrowser;
+	ProjectBrowserPanel projectBrowserPanel;
+	AssetInspectorPanel assetInspectorPanel;
+	EditorSelectionContext selectionContext;
+	EditorConsolePanel consolePanel;
 	std::unique_ptr<AssetDatabase> scriptAssetDatabase;
 	std::unique_ptr<ScriptBuildService> scriptBuildService;
 	std::shared_ptr<Ursa::Scripting::DotNetHost> managedHost;
@@ -178,10 +199,18 @@ private:
 	bool runAfterScriptBuild = false;
 	bool requestRun = false;
 	Set<String> registeredScriptComponentTypes;
-	Ursa::Array<char, 256> assetNameInput{};
+	Ursa::Array<char, 256> projectSearch{};
+	Ursa::Array<char, 128> folderNameInput{};
 	String workspaceError;
 	String inspectorError;
 	bool exitRequested = false;
 	bool dockLayoutInitialized = false;
+	bool showProjectPanel = true;
+	bool showHierarchyPanel = true;
+	bool showInspectorPanel = true;
+	bool showScenePanel = true;
+	bool showGamePanel = true;
+	bool showConsolePanel = true;
+	String savedPanelVisibility;
 };
 } // namespace Ursa::Editor

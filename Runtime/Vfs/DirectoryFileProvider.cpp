@@ -10,6 +10,8 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#undef CreateDirectory
+#undef RemoveDirectory
 #endif
 
 namespace Ursa
@@ -358,6 +360,89 @@ Result<void> DirectoryFileProvider::Append(const String& relativePath, const Vec
 	return output ? Result<void>{} : Result<void>::Failure("Cannot append to " + relativePath);
 }
 
+Result<void> DirectoryFileProvider::CreateDirectory(const String& relativePath)
+{
+	auto target = ResolveForWrite(relativePath);
+	if (!target)
+	{
+		return Result<void>::Failure(target.error);
+	}
+	std::error_code error;
+	std::filesystem::create_directories(target.value, error);
+	if (error)
+	{
+		return Result<void>::Failure("Cannot create directory " + relativePath + ": " + NativeError(error));
+	}
+	const auto canonical = std::filesystem::canonical(target.value, error);
+	if (error || !ContainedIn(root, canonical) || !std::filesystem::is_directory(canonical))
+	{
+		return Result<void>::Failure("Created directory escapes or is unavailable in its mount: " + relativePath);
+	}
+	return {};
+}
+
+Result<void> DirectoryFileProvider::RemoveDirectory(const String& relativePath, bool removeEmptyChildren)
+{
+	auto target = ResolveForWrite(relativePath);
+	if (!target)
+	{
+		return Result<void>::Failure(target.error);
+	}
+	std::error_code error;
+	if (!std::filesystem::exists(target.value, error))
+	{
+		return error ? Result<void>::Failure("Cannot inspect directory " + relativePath + ": " + NativeError(error))
+		             : Result<void>{};
+	}
+	if (!std::filesystem::is_directory(target.value, error) || error)
+	{
+		return Result<void>::Failure("Resource path is not a directory: " + relativePath);
+	}
+	Vector<std::filesystem::path> childDirectories;
+	if (removeEmptyChildren)
+	{
+		std::filesystem::recursive_directory_iterator iterator(target.value, std::filesystem::directory_options::none,
+		                                                       error);
+		const std::filesystem::recursive_directory_iterator end;
+		for (; !error && iterator != end; iterator.increment(error))
+		{
+			if (iterator->is_symlink(error))
+			{
+				iterator.disable_recursion_pending();
+				continue;
+			}
+			if (iterator->is_directory(error))
+			{
+				childDirectories.push_back(iterator->path());
+			}
+		}
+		if (error)
+		{
+			return Result<void>::Failure("Cannot enumerate directory " + relativePath + ": " + NativeError(error));
+		}
+		std::sort(childDirectories.begin(), childDirectories.end(),
+		          [](const std::filesystem::path& left, const std::filesystem::path& right)
+		          { return left.native().size() > right.native().size(); });
+	}
+	for (const std::filesystem::path& directory : childDirectories)
+	{
+		error.clear();
+		std::filesystem::remove(directory, error);
+		if (error)
+		{
+			return Result<void>::Failure("Cannot remove empty child directory under " + relativePath + ": " +
+			                             NativeError(error));
+		}
+	}
+	error.clear();
+	std::filesystem::remove(target.value, error);
+	if (error)
+	{
+		return Result<void>::Failure("Cannot remove empty directory " + relativePath + ": " + NativeError(error));
+	}
+	return {};
+}
+
 Result<std::filesystem::path> DirectoryFileProvider::ResolveToDisk(const String& relativePath) const
 {
 	auto path = Resolve(relativePath);
@@ -405,7 +490,7 @@ Result<void> DirectoryFileProvider::CheckWritable(const String& relativePath) co
 	std::error_code error;
 	if (std::filesystem::is_directory(target.value, error))
 	{
-		return Result<void>::Failure("Resource path is a directory: " + relativePath);
+		return {};
 	}
 	return {};
 }

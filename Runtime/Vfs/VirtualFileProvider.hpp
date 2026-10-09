@@ -34,6 +34,16 @@ public:
 	virtual Result<void> Append(const String& relativePath, const Vector<Ursa::UInt8>& bytes,
 	                            bool createDirectories) = 0;
 
+	virtual Result<void> CreateDirectory(const String&)
+	{
+		return Result<void>::Failure("Provider does not support directory creation");
+	}
+
+	virtual Result<void> RemoveDirectory(const String&, bool)
+	{
+		return Result<void>::Failure("Provider does not support directory removal");
+	}
+
 	virtual std::filesystem::path DirectoryRoot() const
 	{
 		return {};

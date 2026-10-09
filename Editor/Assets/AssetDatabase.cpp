@@ -175,6 +175,12 @@ bool IsPathWithin(const String& path, const String& directory)
 	       path[directory.size()] == '/';
 }
 
+String ParentRelativePath(const String& path)
+{
+	const auto separator = path.rfind('/');
+	return separator == String::npos ? String{} : path.substr(0, separator);
+}
+
 class FingerprintBuilder final
 {
 public:
@@ -544,7 +550,45 @@ Result<void> AssetDatabase::Refresh()
 
 	assetsByPath = std::move(candidateByPath);
 	pathsByGuid = std::move(candidatePathsByGuid);
+	++revision;
 	return {};
+}
+
+Result<void> AssetDatabase::CreateFolder(const VirtualPath& path)
+{
+	if (path.scheme != sourceScheme || path.relative.empty())
+	{
+		return Result<void>::Failure("Project folder path is invalid: " + path.ToString());
+	}
+	if (assetsByPath.find(path.relative) != assetsByPath.end())
+	{
+		return Result<void>::Failure("Project asset already exists: " + path.ToString());
+	}
+	const String parentPath = ParentRelativePath(path.relative);
+	const auto parent = assetsByPath.find(parentPath);
+	if (!parentPath.empty() && (parent == assetsByPath.end() || !parent->second.metadata.folder))
+	{
+		return Result<void>::Failure("Project folder parent does not exist: " + sourceScheme + ":" + parentPath);
+	}
+	AssetMetadata metadata;
+	metadata.guid = ResourceId::Generate();
+	metadata.folder = true;
+	auto written = WriteMetadata(path, metadata);
+	if (!written)
+	{
+		return written;
+	}
+	auto created = filesystem.CreateDirectory(path);
+	if (!created)
+	{
+		auto sidecar = SidecarPath(path);
+		if (sidecar)
+		{
+			filesystem.Remove(sidecar.value);
+		}
+		return created;
+	}
+	return Refresh();
 }
 
 Result<AssetMetadata> AssetDatabase::Metadata(const VirtualPath& path) const
@@ -1244,8 +1288,30 @@ Result<void> AssetDatabase::Move(const VirtualPath& source, const VirtualPath& d
 	{
 		return Result<void>::Failure("Asset is not indexed: " + source.ToString());
 	}
-	auto files = StageTransfer(source, destination, record->second.metadata.folder);
-	return files ? CommitTransfer(std::move(files.value), true, false) : Result<void>::Failure(files.error);
+	const bool isFolder = record->second.metadata.folder;
+	auto files = StageTransfer(source, destination, isFolder);
+	if (!files)
+	{
+		return Result<void>::Failure(files.error);
+	}
+	auto moved = CommitTransfer(std::move(files.value), true, false);
+	if (!moved || !isFolder)
+	{
+		return moved;
+	}
+	auto createdDirectory = filesystem.CreateDirectory(destination);
+	if (!createdDirectory)
+	{
+		return Result<void>::Failure("Folder assets moved but the destination directory could not be created: " +
+		                             createdDirectory.error);
+	}
+	auto removedDirectory = filesystem.RemoveDirectory(source, true);
+	if (!removedDirectory)
+	{
+		return Result<void>::Failure("Folder assets moved but the empty source directory could not be removed: " +
+		                             removedDirectory.error);
+	}
+	return {};
 }
 
 Result<void> AssetDatabase::Copy(const VirtualPath& source, const VirtualPath& destination)

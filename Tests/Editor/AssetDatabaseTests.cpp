@@ -89,6 +89,16 @@ void TestCreateMoveCopyAndRemove(const std::filesystem::path& root)
 	auto refreshed = database.Refresh();
 	Expect(static_cast<bool>(refreshed),
 	       ("AssetDatabase did not create missing metadata: " + ToStdString(refreshed.error)).c_str());
+	auto emptyFolder = database.CreateFolder(Path("prj:Models/Empty"));
+	Expect(static_cast<bool>(emptyFolder) && std::filesystem::is_directory(assetsRoot / "Models" / "Empty") &&
+	           TakeMetadata(database, "prj:Models/Empty").folder,
+	       "AssetDatabase did not create an indexed empty project folder");
+	const ResourceId emptyFolderGuid = TakeMetadata(database, "prj:Models/Empty").guid;
+	Expect(static_cast<bool>(database.Move(Path("prj:Models/Empty"), Path("prj:Models/RenamedEmpty"))) &&
+	           !std::filesystem::exists(assetsRoot / "Models" / "Empty") &&
+	           std::filesystem::is_directory(assetsRoot / "Models" / "RenamedEmpty") &&
+	           TakeMetadata(database, "prj:Models/RenamedEmpty").guid == emptyFolderGuid,
+	       "Renaming an empty folder did not preserve its GUID and directory");
 
 	const ResourceId folderGuid = TakeMetadata(database, "prj:Models").guid;
 	const ResourceId fileGuid = TakeMetadata(database, "prj:Models/Hero/mesh.fbx").guid;

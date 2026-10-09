@@ -79,6 +79,8 @@ public:
 
 	Result<void> Refresh();
 
+	Result<void> CreateFolder(const VirtualPath& path);
+
 	Result<AssetMetadata> Metadata(const VirtualPath& path) const;
 
 	Result<void> SetImporterSettings(const VirtualPath& path, const String& importer, Ursa::UInt32 importerVersion,
@@ -101,6 +103,11 @@ public:
 	                           const Vector<VirtualPath>& dependencies, const Vector<ImportedArtifact>& artifacts);
 
 	Vector<AssetRecord> Assets() const;
+
+	Ursa::UInt64 Revision() const
+	{
+		return revision;
+	}
 
 	Vector<ScriptSourceAsset> ScriptSources() const;
 
@@ -171,5 +178,6 @@ private:
 	Map<String, String> pathsByGuid;
 	Map<String, CachedImport> importsByGuid;
 	bool cacheLoaded = false;
+	Ursa::UInt64 revision = 0;
 };
 } // namespace Ursa::Editor

@@ -15,7 +15,7 @@
 
 ```powershell
 cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON
-cmake --build Build --config Debug
+cmake --build Build --parallel --config Debug
 ctest --test-dir Build -C Debug --output-on-failure
 ```
 

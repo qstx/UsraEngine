@@ -5,6 +5,7 @@
 #include <Assets/TextureDraft.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/SceneDraft.hpp>
+#include <Inspector/SceneInspectorPanel.hpp>
 #if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
@@ -17,6 +18,7 @@
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/PakArchive.hpp>
 #include <imgui_internal.h>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -636,9 +638,36 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	managedOpenWindows.clear();
 	managedEditorFallbacks.clear();
 	registeredScriptComponentTypes.clear();
+	activeEditorTool.clear();
+	pendingManagedAsset = {};
+	pendingRunDocument = {};
+	requestRun = false;
+	runAfterScriptBuild = false;
 	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(files.value));
 	documents = std::move(documentsResult.value);
 	workspace = std::move(openedWorkspace);
+	showProjectPanel = true;
+	showHierarchyPanel = true;
+	showInspectorPanel = true;
+	showScenePanel = true;
+	showGamePanel = true;
+	showConsolePanel = true;
+	savedPanelVisibility.clear();
+	auto loadedPanelState = LoadPanelVisibility();
+	if (!loadedPanelState)
+	{
+		workspaceError = loadedPanelState.error;
+	}
+	hierarchy.ClearSelection();
+	displayedSceneId = {};
+	selectionContext.Clear();
+	projectBrowser = ProjectBrowserModel{};
+	projectBrowserPanel.Reset();
+	auto browserRefreshed = projectBrowser.Refresh(*workspace);
+	if (!browserRefreshed)
+	{
+		return browserRefreshed;
+	}
 #if defined(URSA_ENABLE_DOTNET)
 	if (managedHost)
 	{
@@ -699,81 +728,272 @@ Result<void> EditorApplication::CompileScripts()
 #endif
 }
 
-Result<void> EditorApplication::OnGui()
+void EditorApplication::DrawMainMenuBar()
 {
-	if (!pendingManagedAsset.scheme.empty())
-	{
-		const VirtualPath path = std::move(pendingManagedAsset);
-		pendingManagedAsset = {};
-		auto opened = OpenEditorAsset(path);
-		if (!opened)
-		{
-			workspaceError = opened.error;
-		}
-	}
-	if (scriptBuildJob.valid() && scriptBuildJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-	{
-		auto result = scriptBuildJob.get();
-		if (!result)
-		{
-			scriptBuildStatus = result.error;
-			runAfterScriptBuild = false;
-		}
-		else
-		{
-			scriptBuildStatus = result.value.succeeded ? "脚本编译成功。\n" + result.value.diagnostics
-			                                           : "脚本编译失败。\n" + result.value.diagnostics;
-			if (result.value.succeeded)
-			{
-				auto registered = ReloadEditorScripts();
-				if (!registered)
-				{
-					scriptBuildStatus += "\n" + registered.error;
-					runAfterScriptBuild = false;
-				}
-				else if (runAfterScriptBuild)
-				{
-					requestRun = documents && documents->Current() && documents->Current()->Id() == pendingRunDocument;
-				}
-			}
-			if (!result.value.succeeded)
-			{
-				runAfterScriptBuild = false;
-			}
-		}
-	}
-	if (scriptCheckJob.valid() && scriptCheckJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-	{
-		auto checked = scriptCheckJob.get();
-		if (!checked)
-		{
-			scriptBuildStatus = checked.error;
-		}
-		else if (checked.value != observedScriptSources)
-		{
-			observedScriptSources = std::move(checked.value);
-			if (!play.Active() && !scriptBuildJob.valid())
-			{
-				ScriptBuildService* service = scriptBuildService.get();
-				scriptBuildJob =
-				    std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
-				scriptBuildStatus = "检测到脚本变化，正在后台编译……";
-			}
-		}
-	}
-	const auto checkTime = std::chrono::steady_clock::now();
-	if (scriptBuildService && !requestRun && !play.Active() && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
-	    checkTime >= nextScriptCheck)
-	{
-		ScriptBuildService* service = scriptBuildService.get();
-		scriptCheckJob = std::async(std::launch::async, [service] { return service->SourceFingerprint(); });
-		nextScriptCheck = checkTime + std::chrono::seconds(2);
-	}
 	if (ImGui::BeginMainMenuBar())
 	{
 		ImGui::TextUnformatted("Ursa Editor");
 		ImGui::Separator();
-		const auto* current = documents ? documents->Current() : nullptr;
+		EditorDocument* current = documents ? documents->Current() : nullptr;
+		if (ImGui::BeginMenu("File"))
+		{
+			ImGui::BeginDisabled(!documents || !current || play.Active());
+			if (ImGui::MenuItem("Save", "Ctrl+S"))
+			{
+				auto saved = documents->SaveCurrent();
+				workspaceError = saved ? String{} : saved.error;
+			}
+			if (ImGui::MenuItem("Close Document"))
+			{
+				auto closed = documents->RequestClose();
+				workspaceError = closed ? String{} : closed.error;
+			}
+			ImGui::EndDisabled();
+			ImGui::Separator();
+			if (ImGui::MenuItem("Exit"))
+			{
+				exitRequested = true;
+			}
+			DrawManagedMenus("File");
+			ImGui::EndMenu();
+		}
+		if (ImGui::BeginMenu("Edit"))
+		{
+			ImGui::BeginDisabled();
+			ImGui::MenuItem("Undo", "Ctrl+Z");
+			ImGui::MenuItem("Redo", "Ctrl+Y");
+			ImGui::EndDisabled();
+			DrawManagedMenus("Edit");
+			ImGui::EndMenu();
+		}
+		if (ImGui::BeginMenu("Assets"))
+		{
+			ImGui::BeginDisabled(!workspace || play.Active());
+			if (ImGui::MenuItem("Refresh", "Ctrl+R"))
+			{
+				auto refreshed = workspace->Refresh();
+				workspaceError = refreshed ? String{} : refreshed.error;
+				if (refreshed)
+				{
+					refreshed = projectBrowser.Refresh(*workspace);
+					workspaceError = refreshed ? String{} : refreshed.error;
+				}
+			}
+			if (ImGui::BeginMenu("Create"))
+			{
+				if (ImGui::MenuItem("Folder"))
+				{
+					auto created = CreateProjectFolder();
+					workspaceError = created ? String{} : created.error;
+				}
+				if (ImGui::MenuItem("Scene"))
+				{
+					auto created = CreateProjectAsset(ResourceKind::Scene);
+					workspaceError = created ? String{} : created.error;
+				}
+				if (ImGui::MenuItem("Prefab"))
+				{
+					auto created = CreateProjectAsset(ResourceKind::Prefab);
+					workspaceError = created ? String{} : created.error;
+				}
+				if (ImGui::MenuItem("Material"))
+				{
+					auto created = CreateProjectAsset(ResourceKind::Material);
+					workspaceError = created ? String{} : created.error;
+				}
+				if (ImGui::MenuItem("PBR Material"))
+				{
+					auto created = CreateProjectAsset(ResourceKind::Material, MaterialType::PbrMetallicRoughness);
+					workspaceError = created ? String{} : created.error;
+				}
+				if (ImGui::MenuItem("Texture"))
+				{
+					auto created = CreateProjectAsset(ResourceKind::Texture);
+					workspaceError = created ? String{} : created.error;
+				}
+				ImGui::EndMenu();
+			}
+			ImGui::BeginDisabled(selectionContext.kind != EditorSelectionKind::Asset || play.Active());
+			if (ImGui::MenuItem("Rename Selected"))
+			{
+				projectBrowserPanel.RequestRenameSelected();
+			}
+			ImGui::EndDisabled();
+			ImGui::EndDisabled();
+			DrawManagedMenus("Assets");
+			ImGui::EndMenu();
+		}
+		if (ImGui::BeginMenu("GameObject"))
+		{
+			const bool canCreateObject = current && current->Kind() == ResourceKind::Scene && !play.Active();
+			ImGui::BeginDisabled(!canCreateObject);
+			if (ImGui::MenuItem("Create Empty"))
+			{
+				auto draft = current->Payload<SceneDraft>();
+				auto& scene = draft->GetScene();
+				GameObject::Ptr parent;
+				auto selected = hierarchy.SelectedGameObject(scene);
+				if (selected)
+				{
+					parent = selected.value;
+				}
+				auto created = scene.CreateGameObject("GameObject", parent);
+				workspaceError = created ? String{} : created.error;
+				if (created)
+				{
+					hierarchy.Select(scene, created.value);
+					selectionContext.SelectGameObject(current->Id(), created.value->Id());
+					current->MarkDirty();
+				}
+			}
+			ImGui::EndDisabled();
+			DrawManagedMenus("GameObject");
+			ImGui::EndMenu();
+		}
+		if (ImGui::BeginMenu("Component"))
+		{
+			auto draft = current ? current->Payload<SceneDraft>() : nullptr;
+			GameObject::Ptr selectedObject;
+			ComponentInspectorContext context;
+			ComponentLoadContext* loadContext = nullptr;
+			std::unique_ptr<ComponentLoadContext> ownedLoadContext;
+			if (draft && current->Kind() == ResourceKind::Scene)
+			{
+				context.scene = &draft->GetScene();
+				auto selected = hierarchy.SelectedGameObject(*context.scene);
+				if (selected)
+				{
+					selectedObject = selected.value;
+					context.roots = context.scene->RootGameObjects();
+				}
+			}
+			else if (draft && current->Kind() == ResourceKind::Prefab)
+			{
+				context.prefab = draft->GetPrefabAsset();
+				if (context.prefab)
+				{
+					auto selected = hierarchy.SelectedGameObject(*context.prefab);
+					if (selected)
+					{
+						selectedObject = selected.value;
+						context.roots = {context.prefab->Root()};
+					}
+				}
+			}
+			if (draft && selectedObject && documents)
+			{
+				context.object = selectedObject;
+				ownedLoadContext = std::make_unique<ComponentLoadContext>(documents->Session());
+				loadContext = ownedLoadContext.get();
+				context.loadContext = loadContext;
+				if (draft->ContextSetup())
+				{
+					auto prepared = draft->ContextSetup()(*loadContext);
+					if (!prepared)
+					{
+						inspectorError = prepared.error;
+					}
+				}
+			}
+			Vector<ComponentTypeDescriptor> types = project->componentEditors.Types();
+			std::sort(types.begin(), types.end(),
+			          [](const auto& left, const auto& right)
+			          {
+				          return left.category == right.category ? left.displayName < right.displayName
+				                                                 : left.category < right.category;
+			          });
+			String category;
+			for (const auto& type : types)
+			{
+				if (type.category != category)
+				{
+					if (!category.empty())
+					{
+						ImGui::EndMenu();
+					}
+					category = type.category;
+					if (!ImGui::BeginMenu(category.c_str()))
+					{
+						category.clear();
+						continue;
+					}
+				}
+				auto available = selectedObject ? project->componentEditors.CanCreate(type.type, context)
+				                                : Result<void>::Failure("Select a GameObject first");
+				ImGui::BeginDisabled(!available || play.Active());
+				if (ImGui::MenuItem(type.displayName.c_str()))
+				{
+					auto created = project->componentEditors.Create(type.type, context);
+					workspaceError = created ? String{} : created.error;
+					if (created && current)
+					{
+						selectionContext.SelectGameObject(current->Id(), selectedObject->Id());
+						current->MarkDirty();
+					}
+				}
+				ImGui::EndDisabled();
+			}
+			if (!category.empty())
+			{
+				ImGui::EndMenu();
+			}
+			DrawManagedMenus("Component");
+			ImGui::EndMenu();
+		}
+		if (ImGui::BeginMenu("Window"))
+		{
+			if (ImGui::MenuItem("Reset Layout"))
+			{
+				auto cleared = gui->ClearSavedLayout();
+				workspaceError = cleared ? String{} : cleared.error;
+				if (cleared)
+				{
+					showProjectPanel = true;
+					showHierarchyPanel = true;
+					showInspectorPanel = true;
+					showScenePanel = true;
+					showGamePanel = true;
+					showConsolePanel = true;
+					savedPanelVisibility.clear();
+					ImGui::ClearIniSettings();
+					dockLayoutInitialized = false;
+				}
+			}
+			ImGui::Separator();
+			if (ImGui::MenuItem("Project", nullptr, showProjectPanel))
+			{
+				showProjectPanel = !showProjectPanel;
+			}
+			if (ImGui::MenuItem("Hierarchy", nullptr, showHierarchyPanel))
+			{
+				showHierarchyPanel = !showHierarchyPanel;
+			}
+			if (ImGui::MenuItem("Inspector", nullptr, showInspectorPanel))
+			{
+				showInspectorPanel = !showInspectorPanel;
+			}
+			if (ImGui::MenuItem("Scene", nullptr, showScenePanel))
+			{
+				showScenePanel = !showScenePanel;
+			}
+			if (ImGui::MenuItem("Game", nullptr, showGamePanel))
+			{
+				showGamePanel = !showGamePanel;
+			}
+			if (ImGui::MenuItem("Console", nullptr, showConsolePanel))
+			{
+				showConsolePanel = !showConsolePanel;
+			}
+			DrawManagedMenus("Window");
+			ImGui::EndMenu();
+		}
+		if (ImGui::BeginMenu("Help"))
+		{
+			ImGui::MenuItem("Ursa Editor Documentation", nullptr, false, false);
+			ImGui::MenuItem("About Ursa Editor", nullptr, false, false);
+			DrawManagedMenus("Help");
+			ImGui::EndMenu();
+		}
 		auto makeToolContext = [&]()
 		{
 			EditorToolContext context;
@@ -859,7 +1079,8 @@ Result<void> EditorApplication::OnGui()
 		for (const auto& extension : managedExtensions)
 		{
 			const String root = extension.path.substr(0, extension.path.find('/'));
-			if (!root.empty() && root != "Tools" && root != "Scripts" &&
+			if (!root.empty() && root != "Tools" && root != "Scripts" && root != "File" && root != "Edit" &&
+			    root != "Assets" && root != "GameObject" && root != "Component" && root != "Window" && root != "Help" &&
 			    (extension.kind == "Menu" || extension.kind == "Window"))
 			{
 				managedMenuRoots.insert(root);
@@ -885,182 +1106,6 @@ Result<void> EditorApplication::OnGui()
 			DrawManagedMenus("Scripts");
 			ImGui::EndMenu();
 		}
-		const bool canRun = current && current->Kind() == ResourceKind::Scene && !documents->PromptPending() &&
-		                    !scriptBuildJob.valid() && !scriptCheckJob.valid();
-		if (requestRun && !canRun)
-		{
-			requestRun = false;
-		}
-		ImGui::BeginDisabled(!play.Active() && !canRun);
-		if (ImGui::Button(play.Active() ? "Stop" : "Run") || requestRun)
-		{
-			requestRun = false;
-			runAfterScriptBuild = false;
-			if (play.Active())
-			{
-				play.Stop();
-				documents->SetSaveBlocked(false);
-				viewportFocused = false;
-			}
-			else
-			{
-				bool scriptsReady = true;
-#if !defined(URSA_ENABLE_DOTNET)
-				if (current && current->Payload<SceneDraft>() &&
-				    HasManagedScriptComponent(current->Payload<SceneDraft>()->GetScene()))
-				{
-					scriptsReady = false;
-					scriptBuildStatus =
-					    "当前构建未启用 .NET 脚本，场景中的脚本数据已保留；启用脚本支持后才能进入 Run。";
-				}
-#endif
-				PlayContextSetup playSetup = project->playContextSetup;
-				if (scriptBuildService)
-				{
-					auto currentBuild = scriptBuildService->IsBuildCurrent(ScriptAssemblyGroup::Game);
-					scriptsReady = currentBuild && currentBuild.value;
-					if (!currentBuild)
-					{
-						scriptBuildStatus = currentBuild.error;
-					}
-					else if (!currentBuild.value)
-					{
-						ScriptBuildService* service = scriptBuildService.get();
-						scriptBuildJob = std::async(std::launch::async,
-						                            [service] { return service->Build(ScriptAssemblyGroup::Editor); });
-						runAfterScriptBuild = true;
-						pendingRunDocument = current->Id();
-						scriptBuildStatus = "正在编译最新脚本，成功后进入 Run……";
-					}
-#if defined(URSA_ENABLE_DOTNET)
-					if (scriptsReady && scriptAssetDatabase)
-					{
-						Vector<ScriptSourceAsset> sources = scriptAssetDatabase->ScriptSources();
-						const bool hasScriptComponent =
-						    current && current->Kind() == ResourceKind::Scene && current->Payload<SceneDraft>() &&
-						    HasManagedScriptComponent(current->Payload<SceneDraft>()->GetScene());
-						if (sources.empty() && hasScriptComponent)
-						{
-							scriptsReady = false;
-							scriptBuildStatus = "当前场景包含脚本组件，但项目没有可用的 C# 脚本源码。";
-						}
-						else if (!sources.empty())
-						{
-							const VirtualPath gameAssemblyPath =
-							    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Manifests/Game.json")
-							        .value;
-							auto assemblyBytes = scriptAssetDatabase->Filesystem().Read(gameAssemblyPath);
-							if (!assemblyBytes)
-							{
-								scriptsReady = false;
-								scriptBuildStatus = "无法读取当前游戏脚本程序集：" + assemblyBytes.error;
-							}
-							else
-							{
-								auto readyHost = EnsureManagedHost();
-								if (!readyHost)
-								{
-									scriptsReady = false;
-									scriptBuildStatus = readyHost.error;
-								}
-								if (scriptsReady && managedHost)
-								{
-									auto userPlaySetup = project->playContextSetup;
-									auto managed = managedHost;
-									auto activeWindow = window;
-									VirtualPath gameContent = gameAssemblyPath;
-									playSetup = [userPlaySetup, managed, gameContent, activeWindow](
-									                ComponentLoadContext& context) -> Result<std::shared_ptr<void>>
-									{
-										std::shared_ptr<void> projectServices;
-										if (userPlaySetup)
-										{
-											auto setup = userPlaySetup(context);
-											if (!setup)
-											{
-												return Result<std::shared_ptr<void>>::Failure(setup.error);
-											}
-											projectServices = std::move(setup.value);
-										}
-										auto session = std::make_shared<ManagedPlaySessionState>();
-										session->host = managed;
-										session->projectServices = std::move(projectServices);
-										auto domain = managed->CreateScriptSession(false);
-										if (!domain)
-										{
-											return Result<std::shared_ptr<void>>::Failure(domain.error);
-										}
-										session->sessionId = domain.value;
-										auto loaded = managed->LoadScriptContent(domain.value, gameContent);
-										if (!loaded)
-										{
-											return Result<std::shared_ptr<void>>::Failure(loaded.error);
-										}
-										auto validated = managed->ValidateScriptSession(domain.value);
-										if (!validated)
-										{
-											return Result<std::shared_ptr<void>>::Failure(validated.error);
-										}
-										context.SetSceneReadyCallback(
-										    [session, activeWindow](Scene& scene,
-										                            ComponentLoadContext& loadContext) -> Result<void>
-										    {
-											    session->sceneApi = std::make_unique<Scripting::ManagedSceneApi>(
-											        scene, &loadContext.Resources(),
-											        [activeWindow](const String& title)
-											        {
-												        if (activeWindow)
-												        {
-													        activeWindow->SetTitle(title);
-												        }
-											        });
-											    auto bound = session->host->BindScriptSession(session->sessionId,
-											                                                  *session->sceneApi);
-											    if (!bound)
-											    {
-												    return bound;
-											    }
-											    session->scriptRuntime =
-											        std::make_unique<Scripting::ManagedScriptRuntime>(
-											            scene, *session->host, *session->sceneApi, session->sessionId);
-											    return session->scriptRuntime->AttachSerializedComponents();
-										    });
-										return Result<std::shared_ptr<void>>::Success(session);
-									};
-								}
-							}
-						}
-					}
-#endif
-				}
-				auto draft = scriptsReady ? current->Payload<SceneDraft>() : nullptr;
-				if (draft)
-				{
-					auto started =
-					    play.Start(*draft, current->Id(), project->components, documents->Session(), playSetup);
-					inspectorError = started ? String{} : started.error;
-					if (started)
-					{
-						documents->SetSaveBlocked(true);
-					}
-				}
-			}
-		}
-		ImGui::EndDisabled();
-		if (!scriptBuildStatus.empty())
-		{
-			ImGui::SameLine();
-			if (ImGui::SmallButton("Script Build"))
-			{
-				ImGui::OpenPopup("Script Build Diagnostics");
-			}
-			if (ImGui::BeginPopup("Script Build Diagnostics"))
-			{
-				ImGui::SetNextWindowSize({700.0f, 360.0f}, ImGuiCond_Appearing);
-				ImGui::TextUnformatted(scriptBuildStatus.c_str());
-				ImGui::EndPopup();
-			}
-		}
 		ImGui::Separator();
 		if (workspace)
 		{
@@ -1069,6 +1114,569 @@ Result<void> EditorApplication::OnGui()
 		}
 		ImGui::EndMainMenuBar();
 	}
+	const auto* current = documents ? documents->Current() : nullptr;
+	DrawPlayToolbar(current);
+}
+
+Result<void> EditorApplication::OpenProjectBrowserAsset(const ProjectBrowserEntry& asset)
+{
+	if (!workspace || !documents || asset.folder)
+	{
+		return Result<void>::Failure("Project asset cannot be opened in the current workspace");
+	}
+	projectBrowser.SelectAsset(asset.path);
+	selectionContext.SelectAsset(asset.path);
+	const auto openDocument = [&](Result<std::unique_ptr<EditorDocument>> opened) -> Result<void>
+	{
+		if (!opened)
+		{
+			return Result<void>::Failure(opened.error);
+		}
+		return documents->RequestOpen(std::move(opened.value));
+	};
+	if (asset.kind)
+	{
+		switch (*asset.kind)
+		{
+			case ResourceKind::Texture:
+				return openDocument(OpenTextureDocument(asset.path, workspace->Index()));
+			case ResourceKind::Material:
+				return openDocument(OpenMaterialDocument(asset.path, documents->Session(), *workspace));
+			case ResourceKind::Scene:
+			case ResourceKind::Prefab:
+				return openDocument(OpenSceneDocument(asset.path, *asset.kind, project->components,
+				                                      documents->Session(), project->editContextSetup));
+			case ResourceKind::Shader:
+			{
+				auto opened = ShaderImportView::Open(workspace->Index().Filesystem(), asset.path);
+				if (!opened)
+				{
+					return Result<void>::Failure(opened.error);
+				}
+				shaderImportView = std::move(opened.value);
+				return {};
+			}
+		}
+	}
+	if (IsTextureSource(asset.path) && workspace->Database())
+	{
+		auto settings = TextureImporter::Settings(*workspace->Database(), asset.path);
+		auto opened = settings ? TextureImportView::Open(asset.path, settings.value)
+		                       : Result<std::unique_ptr<TextureImportView>>::Failure(settings.error);
+		if (!opened)
+		{
+			return Result<void>::Failure(opened.error);
+		}
+		if (textureImportView && gui)
+		{
+			textureImportView->Close(*gui);
+		}
+		textureImportView = std::move(opened.value);
+		return textureImportView->Reimport(*workspace->Database(), device, *gui);
+	}
+	if (IsModelSource(asset.path) && workspace->Database())
+	{
+		auto settings = ModelImporter::Settings(*workspace->Database(), asset.path);
+		auto opened = settings ? ModelImportView::Open(asset.path, settings.value)
+		                       : Result<std::unique_ptr<ModelImportView>>::Failure(settings.error);
+		if (!opened)
+		{
+			return Result<void>::Failure(opened.error);
+		}
+		modelImportView = std::move(opened.value);
+		return modelImportView->Reimport(*workspace->Database());
+	}
+	return Result<void>::Failure("No editor is registered for " + asset.path.ToString());
+}
+
+Result<void> EditorApplication::RenameProjectAsset(const VirtualPath& source, const VirtualPath& destination)
+{
+	if (!workspace || !workspace->Database())
+	{
+		return Result<void>::Failure("Project AssetDatabase is unavailable");
+	}
+	Result<void> renamed;
+	if (documents && documents->Current() && documents->Current()->Path() == source)
+	{
+		renamed = documents->RenameCurrent(destination);
+	}
+	else
+	{
+		renamed = workspace->Database()->Move(source, destination);
+	}
+	if (!renamed)
+	{
+		return renamed;
+	}
+	auto refreshed = workspace->Refresh();
+	if (!refreshed)
+	{
+		return refreshed;
+	}
+	refreshed = projectBrowser.Refresh(*workspace);
+	if (!refreshed)
+	{
+		return refreshed;
+	}
+	projectBrowser.SelectAsset(destination);
+	selectionContext.SelectAsset(destination);
+	return {};
+}
+
+Result<void> EditorApplication::CreateProjectAsset(ResourceKind kind, MaterialType materialType,
+                                                   const String& requestedPath)
+{
+	if (!documents || !workspace || play.Active())
+	{
+		return Result<void>::Failure("Create an asset after opening a project and stopping Play mode");
+	}
+	String relativePath = requestedPath;
+	if (relativePath.empty())
+	{
+		const char* filename = kind == ResourceKind::Scene     ? "NewScene.ursascene"
+		                       : kind == ResourceKind::Prefab  ? "NewPrefab.ursaprefab"
+		                       : kind == ResourceKind::Texture ? "NewTexture.ursatex"
+		                                                       : "NewMaterial.ursamat";
+		relativePath =
+		    projectBrowser.CurrentFolder().empty() ? String(filename) : projectBrowser.CurrentFolder() + "/" + filename;
+	}
+	auto path = ProjectAssetPath(relativePath.c_str());
+	if (!path)
+	{
+		return Result<void>::Failure(path.error);
+	}
+	Result<std::unique_ptr<EditorDocument>> created =
+	    Result<std::unique_ptr<EditorDocument>>::Failure("Unsupported Project asset kind");
+	if (kind == ResourceKind::Scene || kind == ResourceKind::Prefab)
+	{
+		created =
+		    NewSceneDocument(path.value, kind, project->components, documents->Session(), project->editContextSetup);
+	}
+	else if (kind == ResourceKind::Texture)
+	{
+		created = NewTextureDocument(path.value);
+	}
+	else if (kind == ResourceKind::Material)
+	{
+		created = NewMaterialDocument(path.value, materialType, *workspace);
+	}
+	if (!created)
+	{
+		return Result<void>::Failure(created.error);
+	}
+	auto opened = documents->RequestOpen(std::move(created.value));
+	return opened ? Result<void>{} : opened;
+}
+
+Result<void> EditorApplication::CreateProjectFolder(const String& requestedName)
+{
+	if (!workspace || !workspace->Database() || play.Active())
+	{
+		return Result<void>::Failure("Create a folder after opening a project and stopping Play mode");
+	}
+	String folderName = requestedName.empty() ? String(folderNameInput.data()) : requestedName;
+	if (folderName.empty())
+	{
+		folderName = "New Folder";
+	}
+	if (folderName.find('/') == String::npos && !projectBrowser.CurrentFolder().empty())
+	{
+		folderName = projectBrowser.CurrentFolder() + "/" + folderName;
+	}
+	auto path = ProjectAssetPath(folderName.c_str());
+	if (!path)
+	{
+		return Result<void>::Failure(path.error);
+	}
+	auto created = workspace->Database()->CreateFolder(path.value);
+	if (!created)
+	{
+		return created;
+	}
+	auto refreshed = workspace->Refresh();
+	if (!refreshed)
+	{
+		return refreshed;
+	}
+	return projectBrowser.Refresh(*workspace);
+}
+
+Result<void> EditorApplication::LoadPanelVisibility()
+{
+	if (!workspace)
+	{
+		return {};
+	}
+	const auto path = VirtualPath::Parse(String(editorLibraryScheme) + ":Editor/Workspace/PanelVisibility.json");
+	if (!path)
+	{
+		return Result<void>::Failure(path.error);
+	}
+	auto exists = workspace->Index().Filesystem().Exists(path.value);
+	if (!exists)
+	{
+		return Result<void>::Failure(exists.error);
+	}
+	if (!exists.value)
+	{
+		savedPanelVisibility.clear();
+		return {};
+	}
+	auto text = workspace->Index().Filesystem().ReadText(path.value);
+	if (!text)
+	{
+		return Result<void>::Failure(text.error);
+	}
+	try
+	{
+		const nlohmann::json state = nlohmann::json::parse(ToStdString(text.value));
+		if (!state.is_object())
+		{
+			return Result<void>::Failure("Editor panel state must be a JSON object");
+		}
+		auto readFlag = [&](const char* name, bool& value)
+		{
+			if (state.contains(name) && state[name].is_boolean())
+			{
+				value = state[name].get<bool>();
+			}
+		};
+		readFlag("project", showProjectPanel);
+		readFlag("hierarchy", showHierarchyPanel);
+		readFlag("inspector", showInspectorPanel);
+		readFlag("scene", showScenePanel);
+		readFlag("game", showGamePanel);
+		readFlag("console", showConsolePanel);
+		savedPanelVisibility = ToUrsaString(state.dump());
+		return {};
+	}
+	catch (const nlohmann::json::exception& error)
+	{
+		return Result<void>::Failure("Cannot parse Editor panel state: " + ToUrsaString(error.what()));
+	}
+}
+
+Result<void> EditorApplication::SavePanelVisibility()
+{
+	if (!workspace)
+	{
+		return {};
+	}
+	const nlohmann::json state = {{"project", showProjectPanel},     {"hierarchy", showHierarchyPanel},
+	                              {"inspector", showInspectorPanel}, {"scene", showScenePanel},
+	                              {"game", showGamePanel},           {"console", showConsolePanel}};
+	const String encoded = ToUrsaString(state.dump());
+	if (encoded == savedPanelVisibility)
+	{
+		return {};
+	}
+	const auto path = VirtualPath::Parse(String(editorLibraryScheme) + ":Editor/Workspace/PanelVisibility.json");
+	if (!path)
+	{
+		return Result<void>::Failure(path.error);
+	}
+	const std::string native = ToStdString(encoded);
+	Vector<UInt8> bytes;
+	bytes.reserve(native.size());
+	for (unsigned char character : native)
+	{
+		bytes.push_back(character);
+	}
+	auto written = workspace->Index().Filesystem().WriteAtomic(path.value, bytes);
+	if (written)
+	{
+		savedPanelVisibility = encoded;
+	}
+	return written;
+}
+
+void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
+{
+	const auto* selectedDocument = current;
+	const ImGuiViewport* viewport = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_Always);
+	ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, 36.0f), ImGuiCond_Always);
+	constexpr ImGuiWindowFlags toolbarFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+	                                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+	                                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+	ImGui::Begin("##EditorToolbar", nullptr, toolbarFlags);
+	ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowWidth() - 180.0f) * 0.5f));
+	const bool canRun = selectedDocument && selectedDocument->Kind() == ResourceKind::Scene &&
+	                    !documents->PromptPending() && !scriptBuildJob.valid() && !scriptCheckJob.valid();
+	if (requestRun && !canRun)
+	{
+		requestRun = false;
+	}
+	ImGui::BeginDisabled(!play.Active() && !canRun);
+	if (ImGui::Button(play.Active() ? "Stop" : "Play") || requestRun)
+	{
+		requestRun = false;
+		runAfterScriptBuild = false;
+		if (play.Active())
+		{
+			play.Stop();
+			documents->SetSaveBlocked(false);
+			viewportFocused = false;
+		}
+		else
+		{
+			bool scriptsReady = true;
+#if !defined(URSA_ENABLE_DOTNET)
+			if (selectedDocument && selectedDocument->Payload<SceneDraft>() &&
+			    HasManagedScriptComponent(selectedDocument->Payload<SceneDraft>()->GetScene()))
+			{
+				scriptsReady = false;
+				scriptBuildStatus = "当前构建未启用 .NET 脚本，场景中的脚本数据已保留；启用脚本支持后才能进入 Run。";
+			}
+#endif
+			PlayContextSetup playSetup = project->playContextSetup;
+			if (scriptBuildService)
+			{
+				auto selectedDocumentBuild = scriptBuildService->IsBuildCurrent(ScriptAssemblyGroup::Game);
+				scriptsReady = selectedDocumentBuild && selectedDocumentBuild.value;
+				if (!selectedDocumentBuild)
+				{
+					scriptBuildStatus = selectedDocumentBuild.error;
+				}
+				else if (!selectedDocumentBuild.value)
+				{
+					ScriptBuildService* service = scriptBuildService.get();
+					scriptBuildJob = std::async(std::launch::async,
+					                            [service] { return service->Build(ScriptAssemblyGroup::Editor); });
+					runAfterScriptBuild = true;
+					pendingRunDocument = selectedDocument->Id();
+					scriptBuildStatus = "正在编译最新脚本，成功后进入 Run……";
+				}
+#if defined(URSA_ENABLE_DOTNET)
+				if (scriptsReady && scriptAssetDatabase)
+				{
+					Vector<ScriptSourceAsset> sources = scriptAssetDatabase->ScriptSources();
+					const bool hasScriptComponent =
+					    selectedDocument && selectedDocument->Kind() == ResourceKind::Scene &&
+					    selectedDocument->Payload<SceneDraft>() &&
+					    HasManagedScriptComponent(selectedDocument->Payload<SceneDraft>()->GetScene());
+					if (sources.empty() && hasScriptComponent)
+					{
+						scriptsReady = false;
+						scriptBuildStatus = "当前场景包含脚本组件，但项目没有可用的 C# 脚本源码。";
+					}
+					else if (!sources.empty())
+					{
+						const VirtualPath gameAssemblyPath =
+						    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Manifests/Game.json").value;
+						auto assemblyBytes = scriptAssetDatabase->Filesystem().Read(gameAssemblyPath);
+						if (!assemblyBytes)
+						{
+							scriptsReady = false;
+							scriptBuildStatus = "无法读取当前游戏脚本程序集：" + assemblyBytes.error;
+						}
+						else
+						{
+							auto readyHost = EnsureManagedHost();
+							if (!readyHost)
+							{
+								scriptsReady = false;
+								scriptBuildStatus = readyHost.error;
+							}
+							if (scriptsReady && managedHost)
+							{
+								auto userPlaySetup = project->playContextSetup;
+								auto managed = managedHost;
+								auto activeWindow = window;
+								VirtualPath gameContent = gameAssemblyPath;
+								playSetup = [userPlaySetup, managed, gameContent, activeWindow](
+								                ComponentLoadContext& context) -> Result<std::shared_ptr<void>>
+								{
+									std::shared_ptr<void> projectServices;
+									if (userPlaySetup)
+									{
+										auto setup = userPlaySetup(context);
+										if (!setup)
+										{
+											return Result<std::shared_ptr<void>>::Failure(setup.error);
+										}
+										projectServices = std::move(setup.value);
+									}
+									auto session = std::make_shared<ManagedPlaySessionState>();
+									session->host = managed;
+									session->projectServices = std::move(projectServices);
+									auto domain = managed->CreateScriptSession(false);
+									if (!domain)
+									{
+										return Result<std::shared_ptr<void>>::Failure(domain.error);
+									}
+									session->sessionId = domain.value;
+									auto loaded = managed->LoadScriptContent(domain.value, gameContent);
+									if (!loaded)
+									{
+										return Result<std::shared_ptr<void>>::Failure(loaded.error);
+									}
+									auto validated = managed->ValidateScriptSession(domain.value);
+									if (!validated)
+									{
+										return Result<std::shared_ptr<void>>::Failure(validated.error);
+									}
+									context.SetSceneReadyCallback(
+									    [session, activeWindow](Scene& scene,
+									                            ComponentLoadContext& loadContext) -> Result<void>
+									    {
+										    session->sceneApi = std::make_unique<Scripting::ManagedSceneApi>(
+										        scene, &loadContext.Resources(),
+										        [activeWindow](const String& title)
+										        {
+											        if (activeWindow)
+											        {
+												        activeWindow->SetTitle(title);
+											        }
+										        });
+										    auto bound = session->host->BindScriptSession(session->sessionId,
+										                                                  *session->sceneApi);
+										    if (!bound)
+										    {
+											    return bound;
+										    }
+										    session->scriptRuntime = std::make_unique<Scripting::ManagedScriptRuntime>(
+										        scene, *session->host, *session->sceneApi, session->sessionId);
+										    return session->scriptRuntime->AttachSerializedComponents();
+									    });
+									return Result<std::shared_ptr<void>>::Success(session);
+								};
+							}
+						}
+					}
+				}
+#endif
+			}
+			auto draft = scriptsReady ? selectedDocument->Payload<SceneDraft>() : nullptr;
+			if (draft)
+			{
+				auto started =
+				    play.Start(*draft, selectedDocument->Id(), project->components, documents->Session(), playSetup);
+				inspectorError = started ? String{} : started.error;
+				if (started)
+				{
+					documents->SetSaveBlocked(true);
+				}
+			}
+		}
+	}
+	ImGui::EndDisabled();
+	if (play.Active())
+	{
+		ImGui::SameLine();
+		if (ImGui::Button(play.Paused() ? "Resume" : "Pause"))
+		{
+			if (play.Paused())
+			{
+				play.Resume();
+			}
+			else
+			{
+				play.Pause();
+			}
+		}
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!play.Paused());
+		if (ImGui::Button("Step"))
+		{
+			play.Step();
+		}
+		ImGui::EndDisabled();
+	}
+	if (!scriptBuildStatus.empty())
+	{
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Script Build"))
+		{
+			ImGui::OpenPopup("Script Build Diagnostics");
+		}
+		if (ImGui::BeginPopup("Script Build Diagnostics"))
+		{
+			ImGui::SetNextWindowSize({700.0f, 360.0f}, ImGuiCond_Appearing);
+			ImGui::TextUnformatted(scriptBuildStatus.c_str());
+			ImGui::EndPopup();
+		}
+	}
+	ImGui::End();
+}
+
+Result<void> EditorApplication::OnGui()
+{
+	selectionContext.SetActiveDocument(documents && documents->Current() ? documents->Current()->Id() : ResourceId{});
+	if (!pendingManagedAsset.scheme.empty())
+	{
+		const VirtualPath path = std::move(pendingManagedAsset);
+		pendingManagedAsset = {};
+		auto opened = OpenEditorAsset(path);
+		if (!opened)
+		{
+			workspaceError = opened.error;
+		}
+	}
+	if (scriptBuildJob.valid() && scriptBuildJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	{
+		auto result = scriptBuildJob.get();
+		if (!result)
+		{
+			scriptBuildStatus = result.error;
+			runAfterScriptBuild = false;
+		}
+		else
+		{
+			scriptBuildStatus = result.value.succeeded ? "脚本编译成功。\n" + result.value.diagnostics
+			                                           : "脚本编译失败。\n" + result.value.diagnostics;
+			if (result.value.succeeded)
+			{
+				auto registered = ReloadEditorScripts();
+				if (!registered)
+				{
+					scriptBuildStatus += "\n" + registered.error;
+					runAfterScriptBuild = false;
+				}
+				else if (runAfterScriptBuild)
+				{
+					requestRun = documents && documents->Current() && documents->Current()->Id() == pendingRunDocument;
+				}
+			}
+			if (!result.value.succeeded)
+			{
+				runAfterScriptBuild = false;
+			}
+		}
+	}
+	if (scriptCheckJob.valid() && scriptCheckJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	{
+		auto checked = scriptCheckJob.get();
+		if (!checked)
+		{
+			scriptBuildStatus = checked.error;
+		}
+		else if (checked.value != observedScriptSources)
+		{
+			observedScriptSources = std::move(checked.value);
+			if (!play.Active() && !scriptBuildJob.valid())
+			{
+				ScriptBuildService* service = scriptBuildService.get();
+				scriptBuildJob =
+				    std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
+				scriptBuildStatus = "检测到脚本变化，正在后台编译……";
+			}
+		}
+	}
+	if (selectionContext.kind == EditorSelectionKind::Asset && documents && documents->Current() &&
+	    documents->Current()->Path() == selectionContext.assetPath)
+	{
+		selectionContext.Clear();
+	}
+	const auto checkTime = std::chrono::steady_clock::now();
+	if (scriptBuildService && !requestRun && !play.Active() && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
+	    checkTime >= nextScriptCheck)
+	{
+		ScriptBuildService* service = scriptBuildService.get();
+		scriptCheckJob = std::async(std::launch::async, [service] { return service->SourceFingerprint(); });
+		nextScriptCheck = checkTime + std::chrono::seconds(2);
+	}
+	DrawMainMenuBar();
 	if (!activeEditorTool.empty())
 	{
 		const auto* tool = project->tools.Find(activeEditorTool);
@@ -1157,303 +1765,79 @@ Result<void> EditorApplication::OnGui()
 			managedOpenWindows.erase(extension.id);
 		}
 	}
-	const ImGuiID dockspace = ImGui::DockSpaceOverViewport();
+	const ImGuiViewport* viewport = ImGui::GetMainViewport();
+	constexpr Ursa::Float32 toolbarHeight = 36.0f;
+	const ImVec2 dockspacePosition(viewport->WorkPos.x, viewport->WorkPos.y + toolbarHeight);
+	const ImVec2 dockspaceSize(viewport->WorkSize.x, std::max(1.0f, viewport->WorkSize.y - toolbarHeight));
+	ImGui::SetNextWindowPos(dockspacePosition, ImGuiCond_Always);
+	ImGui::SetNextWindowSize(dockspaceSize, ImGuiCond_Always);
+	constexpr ImGuiWindowFlags dockspaceHostFlags =
+	    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+	    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
+	    ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+	ImGui::Begin("##UrsaEditorDockspaceHost", nullptr, dockspaceHostFlags);
+	const ImGuiID dockspace = ImGui::GetID("UrsaEditorDockspace");
+	ImGui::DockSpace(dockspace, ImGui::GetContentRegionAvail());
 	if (!dockLayoutInitialized)
 	{
 		ImGui::DockBuilderRemoveNode(dockspace);
 		ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
-		ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
+		ImGui::DockBuilderSetNodeSize(dockspace, dockspaceSize);
+		ImGuiID inspectorDock = 0;
+		ImGuiID leftDock = 0;
+		ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Right, 0.25f, &inspectorDock, &leftDock);
 		ImGuiID projectDock = 0;
 		ImGuiID upperDock = 0;
-		ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Down, 0.25f, &projectDock, &upperDock);
+		ImGui::DockBuilderSplitNode(leftDock, ImGuiDir_Down, 0.28f, &projectDock, &upperDock);
 		ImGuiID hierarchyDock = 0;
-		ImGuiID workspaceDock = 0;
-		ImGui::DockBuilderSplitNode(upperDock, ImGuiDir_Left, 0.20f, &hierarchyDock, &workspaceDock);
-		ImGuiID inspectorDock = 0;
-		ImGuiID viewportDock = 0;
-		ImGui::DockBuilderSplitNode(workspaceDock, ImGuiDir_Right, 0.30f, &inspectorDock, &viewportDock);
+		ImGuiID sceneDock = 0;
+		ImGui::DockBuilderSplitNode(upperDock, ImGuiDir_Left, 0.23f, &hierarchyDock, &sceneDock);
 		ImGui::DockBuilderDockWindow("Project", projectDock);
+		ImGui::DockBuilderDockWindow("Console", projectDock);
 		ImGui::DockBuilderDockWindow("Hierarchy", hierarchyDock);
-		ImGui::DockBuilderDockWindow("Viewport", viewportDock);
-		ImGui::DockBuilderDockWindow("Material Preview", viewportDock);
+		ImGui::DockBuilderDockWindow("Scene", sceneDock);
+		ImGui::DockBuilderDockWindow("Game", sceneDock);
 		ImGui::DockBuilderDockWindow("Inspector", inspectorDock);
 		ImGui::DockBuilderFinish(dockspace);
 		dockLayoutInitialized = true;
 	}
-	ImGui::Begin("Project");
-	ImGui::BeginDisabled(play.Active());
-	if (workspace)
+	ImGui::End();
+	if (workspace && showProjectPanel)
 	{
-		const auto root = PathToUrsaString(workspace->ProjectRoot());
-		ImGui::TextWrapped("Assets: %s", root.c_str());
-	}
-	if (!workspaceError.empty())
-	{
-		ImGui::TextWrapped("%s", workspaceError.c_str());
-	}
-	if (workspace)
-	{
-		if (ImGui::Button("Refresh assets"))
+		ProjectBrowserActions actions;
+		actions.refresh = [this]()
 		{
 			auto refreshed = workspace->Refresh();
-			workspaceError = refreshed ? String{} : refreshed.error;
-		}
-		if (documents)
+			if (refreshed)
+			{
+				refreshed = projectBrowser.Refresh(*workspace);
+			}
+			if (refreshed && projectBrowser.SelectedAsset().scheme.empty() &&
+			    selectionContext.kind == EditorSelectionKind::Asset)
+			{
+				selectionContext.Clear();
+			}
+			return refreshed;
+		};
+		actions.createFolder = [this](const String& name) { return CreateProjectFolder(name); };
+		actions.createAsset = [this](ResourceKind kind, MaterialType materialType, const String& name)
+		{ return CreateProjectAsset(kind, materialType, name); };
+		actions.renameAsset = [this](const VirtualPath& source, const VirtualPath& destination)
+		{ return RenameProjectAsset(source, destination); };
+		actions.openAsset = [this](const ProjectBrowserEntry& asset) { return OpenProjectBrowserAsset(asset); };
+		auto drawn = projectBrowserPanel.Draw(*workspace, projectBrowser, selectionContext, hierarchy, showProjectPanel,
+		                                      play.Active(), workspaceError, actions);
+		if (!drawn)
 		{
-			ImGui::InputText("Asset path", assetNameInput.data(), assetNameInput.size());
-			if (documents->Current() && ImGui::Button("Rename current asset"))
-			{
-				auto path = ProjectAssetPath(assetNameInput.data());
-				auto renamed = path ? documents->RenameCurrent(path.value) : Result<void>::Failure(path.error);
-				workspaceError = renamed ? String{} : renamed.error;
-			}
-			if (ImGui::Button("New texture"))
-			{
-				auto target = ProjectAssetPath(assetNameInput.data());
-				auto created = target ? NewTextureDocument(target.value)
-				                      : Result<std::unique_ptr<EditorDocument>>::Failure(target.error);
-				if (created)
-				{
-					auto opened = documents->RequestOpen(std::move(created.value));
-					workspaceError = opened ? String{} : opened.error;
-				}
-				else
-				{
-					workspaceError = created.error;
-				}
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("New Unlit"))
-			{
-				auto target = ProjectAssetPath(assetNameInput.data());
-				auto created = target ? NewMaterialDocument(target.value, MaterialType::Unlit, *workspace)
-				                      : Result<std::unique_ptr<EditorDocument>>::Failure(target.error);
-				if (created)
-				{
-					auto opened = documents->RequestOpen(std::move(created.value));
-					workspaceError = opened ? String{} : opened.error;
-				}
-				else
-				{
-					workspaceError = created.error;
-				}
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("New PBR"))
-			{
-				auto target = ProjectAssetPath(assetNameInput.data());
-				auto created = target
-				                   ? NewMaterialDocument(target.value, MaterialType::PbrMetallicRoughness, *workspace)
-				                   : Result<std::unique_ptr<EditorDocument>>::Failure(target.error);
-				if (created)
-				{
-					auto opened = documents->RequestOpen(std::move(created.value));
-					workspaceError = opened ? String{} : opened.error;
-				}
-				else
-				{
-					workspaceError = created.error;
-				}
-			}
-			ImGui::SameLine();
-			const bool newScene = ImGui::Button("New Scene");
-			ImGui::SameLine();
-			const bool newPrefab = ImGui::Button("New Prefab");
-			if (newScene || newPrefab)
-			{
-				const ResourceKind kind = newScene ? ResourceKind::Scene : ResourceKind::Prefab;
-				auto target = ProjectAssetPath(assetNameInput.data());
-				auto created = target ? NewSceneDocument(target.value, kind, project->components, documents->Session(),
-				                                         project->editContextSetup)
-				                      : Result<std::unique_ptr<EditorDocument>>::Failure(target.error);
-				if (created)
-				{
-					auto opened = documents->RequestOpen(std::move(created.value));
-					workspaceError = opened ? String{} : opened.error;
-				}
-				else
-				{
-					workspaceError = created.error;
-				}
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Save") && documents->Current())
-			{
-				auto saved = documents->SaveCurrent();
-				workspaceError = saved ? String{} : saved.error;
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Close document"))
-			{
-				auto closed = documents->RequestClose();
-				workspaceError = closed ? String{} : closed.error;
-			}
-			if (documents->Current())
-			{
-				ImGui::Text("Open: %s%s", documents->Current()->Path().ToString().c_str(),
-				            documents->Current()->Dirty() ? " *" : "");
-			}
-		}
-		for (const auto& entry : workspace->Resources())
-		{
-			const bool writable = static_cast<bool>(workspace->Index().Filesystem().CheckWritable(entry.location.path));
-			ImGui::PushID(entry.id.ToString().c_str());
-			ImGui::TextUnformatted(writable ? "[Project]" : "[Engine]");
-			ImGui::SameLine();
-			const auto name = AssetDisplayPath(entry.location.path);
-			if (ImGui::Selectable(name.c_str()) && documents)
-			{
-				if (entry.location.kind == ResourceKind::Texture)
-				{
-					auto opened = OpenTextureDocument(entry.location.path, workspace->Index());
-					if (opened)
-					{
-						auto switched = documents->RequestOpen(std::move(opened.value));
-						workspaceError = switched ? String{} : switched.error;
-					}
-					else
-					{
-						workspaceError = opened.error;
-					}
-				}
-				else if (entry.location.kind == ResourceKind::Material)
-				{
-					auto opened = OpenMaterialDocument(entry.location.path, documents->Session(), *workspace);
-					if (opened)
-					{
-						auto switched = documents->RequestOpen(std::move(opened.value));
-						workspaceError = switched ? String{} : switched.error;
-					}
-					else
-					{
-						workspaceError = opened.error;
-					}
-				}
-				else if (entry.location.kind == ResourceKind::Scene || entry.location.kind == ResourceKind::Prefab)
-				{
-					auto opened = OpenSceneDocument(entry.location.path, entry.location.kind, project->components,
-					                                documents->Session(), project->editContextSetup);
-					if (opened)
-					{
-						auto switched = documents->RequestOpen(std::move(opened.value));
-						workspaceError = switched ? String{} : switched.error;
-					}
-					else
-					{
-						workspaceError = opened.error;
-					}
-				}
-				else
-				{
-					workspaceError = "This asset type is not yet editable";
-				}
-			}
-			ImGui::SameLine();
-			ImGui::TextDisabled("%s", entry.id.ToString().c_str());
-			ImGui::PopID();
-		}
-		for (const AssetRecord& asset : workspace->Assets())
-		{
-			if (!asset.metadata.folder &&
-			    (std::filesystem::u8path(ToStdString(asset.path.relative)).extension() == ".ursashader" ||
-			     ResourceKindForPath(asset.path)))
-			{
-				continue;
-			}
-			const String pathText = AssetDisplayPath(asset.path);
-			const String itemId = asset.metadata.guid.ToString();
-			ImGui::PushID(itemId.c_str());
-			ImGui::TextUnformatted(asset.metadata.folder ? "[Project Folder]" : "[Project Source]");
-			ImGui::SameLine();
-			if (ImGui::Selectable(pathText.c_str()) && !asset.metadata.folder)
-			{
-				if (IsTextureSource(asset.path) && workspace->Database())
-				{
-					auto settings = TextureImporter::Settings(*workspace->Database(), asset.path);
-					auto opened = settings ? TextureImportView::Open(asset.path, settings.value)
-					                       : Result<std::unique_ptr<TextureImportView>>::Failure(settings.error);
-					if (opened)
-					{
-						if (textureImportView && gui)
-						{
-							textureImportView->Close(*gui);
-						}
-						textureImportView = std::move(opened.value);
-						auto imported = textureImportView->Reimport(*workspace->Database(), device, *gui);
-						workspaceError = imported ? String{} : imported.error;
-					}
-					else
-					{
-						workspaceError = opened.error;
-					}
-				}
-				else if (IsModelSource(asset.path) && workspace->Database())
-				{
-					auto settings = ModelImporter::Settings(*workspace->Database(), asset.path);
-					auto opened = settings ? ModelImportView::Open(asset.path, settings.value)
-					                       : Result<std::unique_ptr<ModelImportView>>::Failure(settings.error);
-					if (opened)
-					{
-						modelImportView = std::move(opened.value);
-						auto imported = modelImportView->Reimport(*workspace->Database());
-						workspaceError = imported ? String{} : imported.error;
-					}
-					else
-					{
-						workspaceError = opened.error;
-					}
-				}
-				else
-				{
-					workspaceError = "No importer is registered for " + pathText;
-				}
-			}
-			ImGui::SameLine();
-			ImGui::TextDisabled("%s", itemId.c_str());
-			ImGui::PopID();
-		}
-		for (const String& scheme : {String(projectResourceScheme), String(engineResourceScheme)})
-		{
-			if (!workspace->Index().Filesystem().IsMounted(scheme))
-			{
-				continue;
-			}
-			auto files = workspace->Index().Filesystem().List(scheme);
-			if (!files)
-			{
-				workspaceError = files.error;
-				continue;
-			}
-			for (const VirtualFileEntry& file : files.value)
-			{
-				if (std::filesystem::u8path(ToStdString(file.path.relative)).extension() != ".ursashader")
-				{
-					continue;
-				}
-				const String pathText = AssetDisplayPath(file.path);
-				ImGui::PushID(pathText.c_str());
-				ImGui::TextUnformatted(file.path.scheme == projectResourceScheme ? "[Project Shader Source]"
-				                                                                 : "[Engine Shader Source]");
-				ImGui::SameLine();
-				if (ImGui::Selectable(pathText.c_str()))
-				{
-					auto opened = ShaderImportView::Open(workspace->Index().Filesystem(), file.path);
-					if (opened)
-					{
-						shaderImportView = std::move(opened.value);
-						inspectorError.clear();
-					}
-					else
-					{
-						workspaceError = opened.error;
-					}
-				}
-				ImGui::PopID();
-			}
+			workspaceError = drawn.error;
 		}
 	}
-	ImGui::EndDisabled();
-	ImGui::End();
+	else if (showProjectPanel)
+	{
+		ImGui::Begin("Project", &showProjectPanel);
+		ImGui::TextDisabled("Open a project to browse its Assets folder.");
+		ImGui::End();
+	}
 	if (shaderImportView && workspace)
 	{
 		ImGui::Begin("Shader Import");
@@ -1527,7 +1911,8 @@ Result<void> EditorApplication::OnGui()
 			inspectorError = drawn.error;
 		}
 	}
-	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Texture)
+	if (selectionContext.kind != EditorSelectionKind::Asset && documents && documents->Current() &&
+	    documents->Current()->Kind() == ResourceKind::Texture)
 	{
 		auto inspected = DrawTextureInspector(*documents->Current(), inspectorError);
 		if (!inspected)
@@ -1535,7 +1920,8 @@ Result<void> EditorApplication::OnGui()
 			workspaceError = inspected.error;
 		}
 	}
-	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Material)
+	if (selectionContext.kind != EditorSelectionKind::Asset && documents && documents->Current() &&
+	    documents->Current()->Kind() == ResourceKind::Material)
 	{
 		ImGuiInspectorUI materialInspectorUi;
 		auto inspected = DrawMaterialInspector(*documents->Current(), *documents, *workspace, inspectorError,
@@ -1566,169 +1952,221 @@ Result<void> EditorApplication::OnGui()
 		if (displayedSceneId != documents->Current()->Id())
 		{
 			hierarchy.ClearSelection();
+			if (selectionContext.kind == EditorSelectionKind::GameObject &&
+			    selectionContext.documentId != documents->Current()->Id())
+			{
+				selectionContext.Clear();
+			}
 			displayedSceneId = documents->Current()->Id();
 		}
 		auto draft = documents->Current()->Payload<SceneDraft>();
 		if (draft)
 		{
-			ImGui::Begin("Viewport");
-			if (ImGui::Button("Translate"))
-			{
-				gizmoOperation = GizmoOperation::Translate;
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Rotate"))
-			{
-				gizmoOperation = GizmoOperation::Rotate;
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Scale"))
-			{
-				gizmoOperation = GizmoOperation::Scale;
-			}
-			ImGui::End();
 			if (play.Active())
 			{
 				ImGui::BeginDisabled();
-				auto hierarchyResult = hierarchy.Draw(*play.GetScene());
+				auto hierarchyResult = hierarchy.Draw(*play.GetScene(), &showHierarchyPanel);
 				ImGui::EndDisabled();
 				if (!hierarchyResult)
 				{
 					inspectorError = hierarchyResult.error;
 				}
-				ImGui::Begin("Inspector");
-				ImGui::TextUnformatted("Play mode: scene changes are temporary");
-				ImGui::End();
+				if (hierarchy.SelectedId())
+				{
+					selectionContext.SelectGameObject(documents->Current()->Id(), hierarchy.SelectedId());
+				}
+				if (showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset)
+				{
+					ImGui::Begin("Inspector", &showInspectorPanel);
+					ImGui::TextUnformatted("Play mode: scene changes are temporary");
+					ImGui::End();
+				}
 			}
 			else
 			{
-				auto inspected = DrawSceneInspector(*documents->Current(), hierarchy, *documents, *workspace,
-				                                    project->components, project->componentEditors, inspectorError,
-				                                    scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr);
+				auto inspected = DrawSceneInspector(
+				    *documents->Current(), hierarchy, *documents, *workspace, project->components,
+				    project->componentEditors, inspectorError,
+				    scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr, &showHierarchyPanel,
+				    &showInspectorPanel, selectionContext.kind != EditorSelectionKind::Asset && showInspectorPanel);
 				if (!inspected)
 				{
 					workspaceError = inspected.error;
 				}
-			}
-			auto command = device->CreateCommandList();
-			Result<void> previewResult = command ? command.value->Begin() : Result<void>::Failure(command.error);
-			if (previewResult)
-			{
-				const auto initial =
-				    scenePreviewRendered ? Rhi::ResourceState::ShaderRead : Rhi::ResourceState::Undefined;
-				previewResult = play.Active()
-				                    ? scenePreview->RecordGame(*play.GetScene(), command.value, scenePreviewColor,
-				                                               initial, Rhi::ResourceState::ShaderRead)
-				                    : scenePreview->Record(draft->GetScene(), command.value, scenePreviewColor, initial,
-				                                           Rhi::ResourceState::ShaderRead);
-			}
-			if (previewResult)
-			{
-				previewResult = command.value->End();
-			}
-			if (previewResult)
-			{
-				auto submitted = device->Submit(command.value);
-				previewResult = submitted ? submitted.value->Wait() : Result<void>::Failure(submitted.error);
-			}
-			if (previewResult)
-			{
-				scenePreviewRendered = true;
-			}
-			else
-			{
-				inspectorError = previewResult.error;
-			}
-			ImGui::Begin("Viewport");
-			if (previewResult)
-			{
-				const ImVec2 available = ImGui::GetContentRegionAvail();
-				const Ursa::Float32 imageSize = std::max(1.f, std::min(available.x, available.y));
-				const ImVec2 position = ImGui::GetCursorScreenPos();
-				ImGui::Image(scenePreviewId, ImVec2(imageSize, imageSize));
-				viewportFocused = play.Active() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-				                  ImGui::IsItemHovered();
-				GameObject::Ptr gizmoTarget;
-				ResourceId prefabObjectId;
-				if (draft->Kind() == ResourceKind::Prefab && draft->GetPrefabAsset())
+				if (selectionContext.kind != EditorSelectionKind::Asset)
 				{
-					auto selectedAssetObject = hierarchy.SelectedGameObject(*draft->GetPrefabAsset());
-					if (selectedAssetObject)
+					if (hierarchy.SelectedId())
 					{
-						prefabObjectId = selectedAssetObject.value->Id();
-						auto selectedPreviewObject = draft->PreviewGameObject(prefabObjectId);
-						if (selectedPreviewObject)
-						{
-							gizmoTarget = selectedPreviewObject.value;
-						}
+						selectionContext.SelectGameObject(documents->Current()->Id(), hierarchy.SelectedId());
 					}
-				}
-				else
-				{
-					auto selected = hierarchy.SelectedGameObject(draft->GetScene());
-					if (selected)
+					else
 					{
-						gizmoTarget = selected.value;
-					}
-				}
-				if (gizmoTarget && !play.Active())
-				{
-					auto manipulated = DrawGizmo(draft->GetScene(), gizmoTarget, scenePreview->GetCamera(),
-					                             {position.x, position.y, imageSize, imageSize}, gizmoOperation);
-					if (manipulated && manipulated.value)
-					{
-						if (prefabObjectId)
-						{
-							auto synced = draft->SyncPrefabTransform(prefabObjectId);
-							if (synced)
-							{
-								synced = draft->RefreshPrefabPreview();
-							}
-							if (!synced)
-							{
-								inspectorError = synced.error;
-							}
-						}
-						documents->Current()->MarkDirty();
-					}
-					else if (!manipulated)
-					{
-						inspectorError = manipulated.error;
+						selectionContext.Clear();
 					}
 				}
 			}
-			ImGui::End();
+			auto drawn = sceneViewPanel->Draw(*draft, *documents->Current(), hierarchy, play, showScenePanel,
+			                                  showGamePanel, viewportFocused, inspectorError);
+			if (!drawn)
+			{
+				inspectorError = drawn.error;
+			}
 		}
 	}
 	else
 	{
 		displayedSceneId = {};
+		hierarchy.ClearSelection();
+		if (selectionContext.kind == EditorSelectionKind::GameObject)
+		{
+			selectionContext.Clear();
+		}
 	}
 	const bool sceneOpen =
 	    documents && documents->Current() &&
 	    (documents->Current()->Kind() == ResourceKind::Scene || documents->Current()->Kind() == ResourceKind::Prefab);
 	if (!sceneOpen)
 	{
-		ImGui::Begin("Hierarchy");
-		ImGui::TextDisabled("Open a scene or Prefab from Project.");
-		ImGui::End();
-		ImGui::Begin("Viewport");
-		ImGui::TextDisabled("Open a scene to view and edit it.");
-		ImGui::End();
+		hierarchy.DrawEmpty(&showHierarchyPanel);
+		if (sceneViewPanel)
+		{
+			sceneViewPanel->DrawEmpty(showScenePanel, showGamePanel);
+		}
 	}
 	const bool assetInspectorOpen = documents && documents->Current() &&
 	                                    (documents->Current()->Kind() == ResourceKind::Material ||
 	                                     documents->Current()->Kind() == ResourceKind::Texture) ||
 	                                modelImportView != nullptr;
-	if (!sceneOpen && !assetInspectorOpen)
+	if (!sceneOpen && !assetInspectorOpen && selectionContext.kind != EditorSelectionKind::Asset)
 	{
-		ImGui::Begin("Inspector");
-		ImGui::TextDisabled("Select a node in Hierarchy to edit its properties.");
-		ImGui::End();
+		if (showInspectorPanel)
+		{
+			ImGui::Begin("Inspector", &showInspectorPanel);
+			ImGui::TextDisabled("Select a node in Hierarchy to edit its properties.");
+			ImGui::End();
+		}
 	}
+	if (workspace)
+	{
+		assetInspectorPanel.Draw(*workspace, projectBrowser, selectionContext, showInspectorPanel,
+		                         [this](const ProjectBrowserEntry& asset)
+		                         {
+			                         auto opened = OpenProjectBrowserAsset(asset);
+			                         workspaceError = opened ? String{} : opened.error;
+			                         return opened;
+		                         });
+	}
+	consolePanel.Draw(showConsolePanel, inspectorError,
+	                  [this](const LogRecord& record) -> Result<void>
+	                  {
+		                  Result<void> resourceResult;
+		                  VirtualPath resourcePath;
+		                  if (!record.context.resourcePath.empty())
+		                  {
+			                  auto parsedPath = VirtualPath::Parse(record.context.resourcePath);
+			                  if (!parsedPath)
+			                  {
+				                  return Result<void>::Failure(parsedPath.error);
+			                  }
+			                  resourcePath = parsedPath.value;
+			                  if (resourcePath.scheme == projectResourceScheme)
+			                  {
+				                  if (const auto* asset = projectBrowser.Find(resourcePath))
+				                  {
+					                  const Size separator =
+					                      asset->folder ? String::npos : asset->path.relative.rfind('/');
+					                  const String parent = asset->folder ? asset->path.relative
+					                                        : separator == String::npos
+					                                            ? String{}
+					                                            : asset->path.relative.substr(0, separator);
+					                  projectBrowser.NavigateTo(parent);
+				                  }
+				                  selectionContext.SelectAsset(resourcePath);
+				                  resourceResult = OpenEditorAsset(resourcePath);
+			                  }
+			                  else
+			                  {
+				                  resourceResult = OpenEditorAsset(resourcePath);
+			                  }
+			                  if (!resourceResult || record.context.objectId.empty())
+			                  {
+				                  return resourceResult;
+			                  }
+		                  }
+		                  if (!record.context.objectId.empty() && documents && documents->Current() &&
+		                      (documents->Current()->Kind() == ResourceKind::Scene ||
+		                       documents->Current()->Kind() == ResourceKind::Prefab))
+		                  {
+			                  auto id = ResourceId::Parse(record.context.objectId);
+			                  auto draft = documents->Current()->Payload<SceneDraft>();
+			                  if (!id || !draft)
+			                  {
+				                  return Result<void>::Failure(id ? "No scene document is open" : id.error);
+			                  }
+			                  if (!resourcePath.scheme.empty() && documents->Current()->Path() != resourcePath)
+			                  {
+				                  return resourceResult;
+			                  }
+			                  if (documents->Current()->Kind() == ResourceKind::Scene)
+			                  {
+				                  auto object = draft->GetScene().GameObjectById(id.value);
+				                  if (!object)
+				                  {
+					                  return Result<void>::Failure(object.error);
+				                  }
+				                  auto selected = hierarchy.Select(draft->GetScene(), object.value);
+				                  if (selected)
+				                  {
+					                  selectionContext.SelectGameObject(documents->Current()->Id(), id.value);
+				                  }
+				                  return selected;
+			                  }
+			                  auto prefab = draft->GetPrefabAsset();
+			                  if (!prefab || !prefab->Root())
+			                  {
+				                  return Result<void>::Failure("Prefab document has no GameObject hierarchy");
+			                  }
+			                  std::function<GameObject::Ptr(const GameObject::Ptr&)> findObject =
+			                      [&](const GameObject::Ptr& candidate)
+			                  {
+				                  if (candidate->Id() == id.value)
+				                  {
+					                  return candidate;
+				                  }
+				                  for (const GameObject::Ptr& child : candidate->Children())
+				                  {
+					                  auto found = findObject(child);
+					                  if (found)
+					                  {
+						                  return found;
+					                  }
+				                  }
+				                  return GameObject::Ptr{};
+			                  };
+			                  auto object = findObject(prefab->Root());
+			                  if (!object)
+			                  {
+				                  return Result<void>::Failure("GameObject is not present in the Prefab");
+			                  }
+			                  auto selected = hierarchy.Select(*prefab, object);
+			                  if (selected)
+			                  {
+				                  selectionContext.SelectGameObject(documents->Current()->Id(), id.value);
+			                  }
+			                  return selected;
+		                  }
+		                  return resourcePath.scheme.empty()
+		                             ? Result<void>::Failure("Log entry has no navigable resource or object context")
+		                             : resourceResult;
+	                  });
 	if (documents)
 	{
 		documents->DrawUnsavedPrompt();
+	}
+	auto panelStateSaved = SavePanelVisibility();
+	if (!panelStateSaved)
+	{
+		workspaceError = panelStateSaved.error;
 	}
 	return {};
 }
@@ -1906,10 +2344,6 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, const String& title, bool visible,
                                     Ursa::UInt32 frameLimit)
 {
-	if (!assetNameInput[0])
-	{
-		std::snprintf(assetNameInput.data(), assetNameInput.size(), "%s", "texture.ursatex");
-	}
 	auto windowResult = Window::Create(width, height, title, visible);
 	if (!windowResult)
 	{
@@ -1939,7 +2373,8 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	}
 	swapchain = std::move(swapchainResult.value);
 
-	auto guiResult = ImGuiBridge::Create(device, window);
+	auto guiResult =
+	    ImGuiBridge::Create(device, window, workspace ? PathToUrsaString(workspace->ProjectRoot()) : String{});
 	if (!guiResult)
 	{
 		swapchain.reset();
@@ -1949,7 +2384,6 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	}
 	gui = std::move(guiResult.value);
 	dockLayoutInitialized = gui->HasSavedLayout();
-	dockLayoutInitialized = false;
 	auto materialPreviewResult = MaterialPreview::Create(device, *gui);
 	if (!materialPreviewResult)
 	{
@@ -1960,48 +2394,17 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		return Result<void>::Failure(materialPreviewResult.error);
 	}
 	materialPreview = std::move(materialPreviewResult.value);
-	auto scenePreviewResult = EditorScenePreview::Create(device);
-	if (!scenePreviewResult)
+	auto scenePanelResult = SceneViewPanel::Create(device, *gui);
+	if (!scenePanelResult)
 	{
 		materialPreview.reset();
 		gui.reset();
 		swapchain.reset();
 		device.reset();
 		window.reset();
-		return Result<void>::Failure(scenePreviewResult.error);
+		return Result<void>::Failure(scenePanelResult.error);
 	}
-	scenePreview = std::move(scenePreviewResult.value);
-	auto sceneColorResult = device->CreateTexture(
-	    {512, 512, Rhi::Format::RgbA8Unorm, Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled});
-	auto sceneSamplerResult = device->CreateSampler({true, false});
-	if (!sceneColorResult || !sceneSamplerResult)
-	{
-		const String error = !sceneColorResult ? sceneColorResult.error : sceneSamplerResult.error;
-		scenePreview.reset();
-		materialPreview.reset();
-		gui.reset();
-		swapchain.reset();
-		device.reset();
-		window.reset();
-		return Result<void>::Failure(error);
-	}
-	scenePreviewColor = std::move(sceneColorResult.value);
-	scenePreviewSampler = std::move(sceneSamplerResult.value);
-	auto sceneImageResult = gui->RegisterTexture(scenePreviewColor, scenePreviewSampler);
-	if (!sceneImageResult)
-	{
-		const String error = sceneImageResult.error;
-		scenePreviewColor.reset();
-		scenePreviewSampler.reset();
-		scenePreview.reset();
-		materialPreview.reset();
-		gui.reset();
-		swapchain.reset();
-		device.reset();
-		window.reset();
-		return Result<void>::Failure(error);
-	}
-	scenePreviewId = sceneImageResult.value;
+	sceneViewPanel = std::move(scenePanelResult.value);
 
 	project = std::make_unique<EditorProject>();
 	auto result = RegisterBuiltinComponents(project->components);
@@ -2218,14 +2621,10 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	scriptAssetDatabase.reset();
 	documents.reset();
 	workspace.reset();
-	if (scenePreviewId != ImTextureID_Invalid)
-	{
-		gui->UnregisterTexture(scenePreviewId);
-	}
-	scenePreviewId = ImTextureID_Invalid;
-	scenePreviewColor.reset();
-	scenePreviewSampler.reset();
-	scenePreview.reset();
+	projectBrowser = ProjectBrowserModel{};
+	selectionContext.Clear();
+	hierarchy.ClearSelection();
+	sceneViewPanel.reset();
 	materialPreview.reset();
 	gui.reset();
 	project.reset();

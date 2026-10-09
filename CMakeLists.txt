@@ -361,6 +361,10 @@ if(URSA_BUILD_TESTS)
     add_test(NAME UrsaAssetDatabaseTests COMMAND UrsaAssetDatabaseTests)
     set_tests_properties(UrsaAssetDatabaseTests PROPERTIES
       ENVIRONMENT "TEMP=${CMAKE_BINARY_DIR}/temp;TMP=${CMAKE_BINARY_DIR}/temp")
+
+    add_executable(UrsaProjectBrowserModelTests Tests/Editor/ProjectBrowserModelTests.cpp)
+    target_link_libraries(UrsaProjectBrowserModelTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaProjectBrowserModelTests COMMAND UrsaProjectBrowserModelTests)
     if(URSA_ENABLE_DOTNET)
       add_executable(UrsaManagedEditorWorkflowTests Tests/Editor/ManagedEditorWorkflowTests.cpp)
       target_link_libraries(UrsaManagedEditorWorkflowTests PRIVATE Ursa::Editor)

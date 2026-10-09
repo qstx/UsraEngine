@@ -14,8 +14,8 @@
 
 ```powershell
 cmake -S Engine -B Engine/Build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
-cmake --build Engine/Build --config Debug --target UrsaEngineResources
-cmake --build Engine/Build --config Release --target UrsaEngineResources
+cmake --build Engine/Build --parallel --config Debug --target UrsaEngineResources
+cmake --build Engine/Build --parallel --config Release --target UrsaEngineResources
 ```
 
 Editor、Player 和需要内置资源的工具与测试目标会自动准备资源。直接构建 Editor 或打包目标也会得到托管引导文件。兼容目标 `UrsaEngineShaderAssets` 转发到完整资源准备流程。
@@ -33,7 +33,7 @@ Editor、Player 和需要内置资源的工具与测试目标会自动准备资�
 
 ```powershell
 Remove-Item -LiteralPath Engine/Build/Resources/Debug/Shaders/Editor/ImGui.ursashaderasset
-cmake --build Engine/Build --config Debug --target UrsaEditor
+cmake --build Engine/Build --parallel --config Debug --target UrsaEditor
 ```
 
 ## 配置迁移

@@ -22,18 +22,21 @@ protected:
 		}
 		auto* project = ImGui::FindWindowByName("Project");
 		auto* hierarchy = ImGui::FindWindowByName("Hierarchy");
-		auto* viewport = ImGui::FindWindowByName("Viewport");
+		auto* scene = ImGui::FindWindowByName("Scene");
+		auto* game = ImGui::FindWindowByName("Game");
+		auto* console = ImGui::FindWindowByName("Console");
 		auto* inspector = ImGui::FindWindowByName("Inspector");
-		if (!project || !hierarchy || !viewport || !inspector)
+		if (!project || !hierarchy || !scene || !game || !console || !inspector)
 		{
 			return Ursa::Result<void>::Failure("Editor workspace is missing a panel");
 		}
-		if (!project->DockNode || !hierarchy->DockNode || !viewport->DockNode || !inspector->DockNode)
+		if (!project->DockNode || !hierarchy->DockNode || !scene->DockNode || !game->DockNode || !console->DockNode ||
+		    !inspector->DockNode)
 		{
 			return Ursa::Result<void>::Failure("Editor workspace panels are not docked");
 		}
-		if (!(hierarchy->Pos.x < viewport->Pos.x && viewport->Pos.x < inspector->Pos.x &&
-		      project->Pos.y > viewport->Pos.y))
+		if (!(hierarchy->Pos.x < scene->Pos.x && scene->Pos.x < inspector->Pos.x && project->Pos.y > scene->Pos.y &&
+		      console->DockNode == project->DockNode && game->DockNode == scene->DockNode))
 		{
 			return Ursa::Result<void>::Failure("Editor workspace panel arrangement is incorrect");
 		}

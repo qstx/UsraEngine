@@ -41,7 +41,15 @@ void Run(const std::filesystem::path& root)
 #else
 	Expect(Log::DefaultLevel() == LogLevel::Info, "Release default level is wrong");
 #endif
-	Log::Write(LogLevel::Error, "Bootstrap", "message before initialization");
+	Vector<LogRecord> observedRecords;
+	const Ursa::UInt64 listener =
+	    Log::Subscribe([&observedRecords](const LogRecord& record) { observedRecords.push_back(record); });
+	Log::Write(LogLevel::Error, "Bootstrap", "message before initialization",
+	           {"prj:Textures/Albedo.png", "11111111-1111-4111-8111-111111111111"});
+	Expect(listener != 0 && observedRecords.size() == 1 && observedRecords.back().category == "Bootstrap" &&
+	           observedRecords.back().context.resourcePath == "prj:Textures/Albedo.png" &&
+	           observedRecords.back().context.objectId == "11111111-1111-4111-8111-111111111111",
+	       "Log listener did not receive the structured resource and object context");
 
 	const auto blocked = root / "blocked";
 	{
@@ -63,6 +71,12 @@ void Run(const std::filesystem::path& root)
 	auto initialized = Log::Initialize(root / "LogTests.exe", config);
 	Expect(static_cast<bool>(initialized) && Log::Initialized(), "Log initialization failed");
 	Expect(Log::Level() == LogLevel::Trace, "Configured log level was lost");
+	Log::Write(LogLevel::Info, "Console", "visible log entry");
+	Expect(observedRecords.size() == 2 && observedRecords.back().message == "visible log entry",
+	       "Log listener did not receive initialized logger entries");
+	Log::Unsubscribe(listener);
+	Log::Write(LogLevel::Info, "Console", "unsubscribed log entry");
+	Expect(observedRecords.size() == 2, "Log listener remained active after unsubscription");
 	URSA_LOG_TRACE("Runtime", "trace message");
 	URSA_LOG_DEBUG("Runtime", "debug message");
 	URSA_LOG_INFO("Runtime", "info message");

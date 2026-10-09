@@ -241,6 +241,26 @@ Result<void> VirtualFileSystem::Append(const VirtualPath& path, const Vector<Urs
 	return entry.value->provider->Append(path.relative, bytes, createDirectories);
 }
 
+Result<void> VirtualFileSystem::CreateDirectory(const VirtualPath& path)
+{
+	const auto entry = ResolveWriteProvider(path);
+	if (!entry)
+	{
+		return Result<void>::Failure(entry.error);
+	}
+	return entry.value->provider->CreateDirectory(path.relative);
+}
+
+Result<void> VirtualFileSystem::RemoveDirectory(const VirtualPath& path, bool removeEmptyChildren)
+{
+	const auto entry = ResolveWriteProvider(path);
+	if (!entry)
+	{
+		return Result<void>::Failure(entry.error);
+	}
+	return entry.value->provider->RemoveDirectory(path.relative, removeEmptyChildren);
+}
+
 Result<Vector<VirtualFileEntry>> VirtualFileSystem::List(const String& scheme) const
 {
 	const auto* mounted = FindMount(scheme);

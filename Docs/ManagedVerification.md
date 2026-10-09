@@ -4,7 +4,7 @@ The project integration build uses the Engine CMake entry point:
 
 ```powershell
 cmake -S Engine -B Engine/Build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
-cmake --build Engine/Build --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
+cmake --build Engine/Build --parallel --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
 ctest --test-dir Engine/Build -C Debug --output-on-failure -R 'Ursa(Project|Snake)'
 ```
 

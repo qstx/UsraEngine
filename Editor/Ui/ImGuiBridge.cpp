@@ -12,12 +12,30 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 
 namespace Ursa::Editor
 {
 namespace
 {
+String LayoutSettingsName(const String& layoutKey)
+{
+	if (layoutKey.empty())
+	{
+		return "EditorLayout.ini";
+	}
+	Ursa::UInt64 hash = 14695981039346656037ull;
+	for (unsigned char character : layoutKey)
+	{
+		hash = (hash ^ character) * 1099511628211ull;
+	}
+	std::ostringstream filename;
+	filename << "EditorLayout/" << std::hex << std::setfill('0') << std::setw(16) << hash << ".ini";
+	return ToUrsaString(filename.str());
+}
+
 struct GuiVertex
 {
 	Ursa::Float32 position[2];
@@ -193,19 +211,21 @@ ImGuiKey ToImGuiKey(Key key)
 
 } // namespace
 
-ImGuiBridge::ImGuiBridge(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow)
-    : device(std::move(selectedDevice)), window(std::move(selectedWindow))
+ImGuiBridge::ImGuiBridge(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow, const String& layoutKey)
+    : device(std::move(selectedDevice)), window(std::move(selectedWindow)),
+      layoutSettingsName(LayoutSettingsName(layoutKey))
 {
 }
 
-Result<std::unique_ptr<ImGuiBridge>> ImGuiBridge::Create(Rhi::DevicePtr selectedDevice,
-                                                         std::shared_ptr<Window> selectedWindow)
+Result<std::unique_ptr<ImGuiBridge>>
+ImGuiBridge::Create(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow, const String& layoutKey)
 {
 	if (!selectedDevice)
 	{
 		return Result<std::unique_ptr<ImGuiBridge>>::Failure("ImGui RHI bridge requires a device");
 	}
-	auto bridge = std::unique_ptr<ImGuiBridge>(new ImGuiBridge(std::move(selectedDevice), std::move(selectedWindow)));
+	auto bridge =
+	    std::unique_ptr<ImGuiBridge>(new ImGuiBridge(std::move(selectedDevice), std::move(selectedWindow), layoutKey));
 	auto initialized = bridge->Initialize();
 	if (!initialized)
 	{
@@ -243,15 +263,19 @@ Result<void> ImGuiBridge::Initialize()
 		{
 			return mounted;
 		}
-		auto path = VirtualPath::Parse("user:Settings/EditorLayout.ini").value;
-		auto exists = settingsFiles.Exists(path);
+		auto path = VirtualPath::Parse(String("user:Settings/") + layoutSettingsName);
+		if (!path)
+		{
+			return Result<void>::Failure(path.error);
+		}
+		auto exists = settingsFiles.Exists(path.value);
 		if (!exists)
 		{
 			return Result<void>::Failure(exists.error);
 		}
 		if (exists.value)
 		{
-			auto bytes = settingsFiles.Read(path);
+			auto bytes = settingsFiles.Read(path.value);
 			if (!bytes)
 			{
 				return Result<void>::Failure(bytes.error);
@@ -537,7 +561,7 @@ Result<void> ImGuiBridge::EndFrame()
 	{
 		size_t length = 0;
 		const auto* text = reinterpret_cast<const UInt8*>(ImGui::SaveIniSettingsToMemory(&length));
-		auto saved = UserDataStore(settingsFiles).SaveSettings("EditorLayout.ini", Vector<UInt8>(text, text + length));
+		auto saved = UserDataStore(settingsFiles).SaveSettings(layoutSettingsName, Vector<UInt8>(text, text + length));
 		if (!saved)
 		{
 			return saved;
@@ -545,6 +569,35 @@ Result<void> ImGuiBridge::EndFrame()
 		ImGui::GetIO().WantSaveIniSettings = false;
 	}
 	return UpdateAtlas();
+}
+
+Result<void> ImGuiBridge::ClearSavedLayout()
+{
+	if (!settingsFiles.IsMounted(userDataScheme))
+	{
+		savedLayout = false;
+		return {};
+	}
+	auto path = VirtualPath::Parse(String("user:Settings/") + layoutSettingsName);
+	if (!path)
+	{
+		return Result<void>::Failure(path.error);
+	}
+	auto exists = settingsFiles.Exists(path.value);
+	if (!exists)
+	{
+		return Result<void>::Failure(exists.error);
+	}
+	if (exists.value)
+	{
+		auto removed = settingsFiles.Remove(path.value);
+		if (!removed)
+		{
+			return removed;
+		}
+	}
+	savedLayout = false;
+	return {};
 }
 
 Result<ImTextureID> ImGuiBridge::RegisterTexture(Rhi::TexturePtr texture, Rhi::SamplerPtr sampler)

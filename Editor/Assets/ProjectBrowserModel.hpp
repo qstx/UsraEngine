@@ -1,0 +1,56 @@
+#pragma once
+
+#include <Assets/AssetDatabase.hpp>
+#include <Workspace/ProjectWorkspace.hpp>
+#include <optional>
+
+namespace Ursa::Editor
+{
+struct ProjectBrowserEntry
+{
+	VirtualPath path;
+	ResourceId guid;
+	String name;
+	bool folder = false;
+	std::optional<ResourceKind> kind;
+};
+
+class ProjectBrowserModel final
+{
+public:
+	Result<void> Refresh(const ProjectWorkspace& workspace);
+
+	Result<void> NavigateTo(const String& relativePath);
+
+	void SelectAsset(const VirtualPath& path);
+
+	void ClearAssetSelection();
+
+	const String& CurrentFolder() const
+	{
+		return currentFolder;
+	}
+
+	const VirtualPath& SelectedAsset() const
+	{
+		return selectedAsset;
+	}
+
+	Vector<ProjectBrowserEntry> ChildFolders(const String& folder) const;
+
+	Vector<ProjectBrowserEntry> ChildAssets(const String& folder, const String& search = {}) const;
+
+	const ProjectBrowserEntry* Find(const VirtualPath& path) const;
+
+	bool NeedsRefresh(const ProjectWorkspace& workspace) const;
+
+private:
+	void AddChild(const String& parent, const ProjectBrowserEntry& entry);
+
+	Map<String, ProjectBrowserEntry> entries;
+	Map<String, Vector<String>> childrenByFolder;
+	String currentFolder;
+	VirtualPath selectedAsset;
+	Ursa::UInt64 assetDatabaseRevision = 0;
+};
+} // namespace Ursa::Editor

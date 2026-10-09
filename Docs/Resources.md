@@ -92,7 +92,7 @@ the package explicitly at startup.
 From the workspace root after configuring Engine with `-DURSA_PROJECT_DIR=Demo`:
 
 ```powershell
-cmake --build Engine/Build --config Debug --target UrsaPak UrsaScriptPlayer UrsaEditor
+cmake --build Engine/Build --parallel --config Debug --target UrsaPak UrsaScriptPlayer UrsaEditor
 Engine/Build/Debug/UrsaScriptCompile.exe Demo Debug
 Engine/Build/Debug/UrsaPak.exe --engine Engine/Assets --engine-generated Engine/Build/Resources/Debug `
   --project Demo/Assets --library Demo/Library --configuration Debug `

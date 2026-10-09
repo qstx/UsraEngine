@@ -109,8 +109,4 @@ Result<std::unique_ptr<EditorDocument>> OpenSceneDocument(const VirtualPath& pat
                                                           ComponentRegistry& registry, ResourceSession& resources,
                                                           const EditContextSetup& setup = {});
 
-Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hierarchy, EditorDocuments& documents,
-                                const ProjectWorkspace& workspace, ComponentRegistry& registry,
-                                ComponentEditors& componentEditors, String& diagnostic,
-                                const Vector<ScriptTypeDescriptor>* scriptTypes = nullptr);
 } // namespace Ursa::Editor

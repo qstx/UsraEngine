@@ -19,11 +19,34 @@ public:
 
 	Result<void> Tick(Ursa::Float32 deltaSeconds, Window* window, FrameInput input);
 
+	void Pause()
+	{
+		paused = true;
+	}
+
+	void Resume()
+	{
+		paused = false;
+	}
+
+	void Step()
+	{
+		if (paused)
+		{
+			stepRequested = true;
+		}
+	}
+
 	void Stop();
 
 	bool Active() const
 	{
 		return static_cast<bool>(scene);
+	}
+
+	bool Paused() const
+	{
+		return paused;
 	}
 
 	Scene* GetScene()
@@ -45,5 +68,7 @@ private:
 	std::shared_ptr<void> services;
 	std::unique_ptr<Scene> scene;
 	SceneFrameRunner frameRunner;
+	bool paused = false;
+	bool stepRequested = false;
 };
 } // namespace Ursa::Editor

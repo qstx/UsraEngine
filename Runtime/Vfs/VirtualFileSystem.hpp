@@ -68,6 +68,10 @@ public:
 
 	Result<void> Append(const VirtualPath& path, const Vector<Ursa::UInt8>& bytes, bool createDirectories = true);
 
+	Result<void> CreateDirectory(const VirtualPath& path);
+
+	Result<void> RemoveDirectory(const VirtualPath& path, bool removeEmptyChildren = false);
+
 	Result<void> Remove(const VirtualPath& path);
 
 	Result<void> Rename(const VirtualPath& source, const VirtualPath& destination);
