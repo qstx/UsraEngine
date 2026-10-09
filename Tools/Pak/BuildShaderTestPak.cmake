@@ -4,6 +4,7 @@ execute_process(
   COMMAND "${URSA_PAK_EXECUTABLE}"
     --engine "${URSA_ENGINE_ASSET_SOURCE}"
     --engine-generated "${URSA_ENGINE_ASSET_MIRROR}"
+    --configuration "${URSA_CONFIGURATION}"
     --output "${URSA_SHADER_PAK_PATH}"
   RESULT_VARIABLE result
   OUTPUT_VARIABLE output

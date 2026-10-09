@@ -40,20 +40,21 @@ file(GLOB_RECURSE URSA_SHADER_SOURCE_FILES CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/Assets/Shaders/*.hlsli"
   "${PROJECT_SOURCE_DIR}/Assets/Shaders/*.hlsl"
   "${PROJECT_SOURCE_DIR}/Assets/*.ursamat")
-set(URSA_SHADER_IMPORT_STAMP "${CMAKE_CURRENT_BINARY_DIR}/shader-import.stamp")
-set(URSA_SHADER_IMPORT_CACHE "${URSA_ASSET_CACHE_DIR}/ShaderImportCache")
-add_custom_command(OUTPUT "${URSA_SHADER_IMPORT_STAMP}"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${URSA_ASSET_MIRROR_DIR}"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${URSA_SHADER_IMPORT_CACHE}"
-  COMMAND $<TARGET_FILE:UrsaShaderImporter>
-    --source-root "${PROJECT_SOURCE_DIR}/Assets"
-    --output-root "${URSA_ASSET_MIRROR_DIR}"
-    --cache-root "${URSA_SHADER_IMPORT_CACHE}"
-    --dxc "${URSA_DXC_EXECUTABLE}"
-    --spirv-val "${URSA_SPIRV_VAL_EXECUTABLE}"
-    --spirv-cross "${URSA_SPIRV_CROSS_EXECUTABLE}"
-  COMMAND ${CMAKE_COMMAND} -E touch "${URSA_SHADER_IMPORT_STAMP}"
+set(URSA_RESOURCE_MANAGED_ARGUMENTS)
+if(URSA_ENABLE_DOTNET)
+  list(APPEND URSA_RESOURCE_MANAGED_ARGUMENTS "-DMANAGED_ROOT=${URSA_MANAGED_OUTPUT_DIR}")
+endif()
+add_custom_target(UrsaEngineResources ALL
+  COMMAND "${CMAKE_COMMAND}"
+    "-DIMPORTER=$<TARGET_FILE:UrsaShaderImporter>" "-DSOURCE_ROOT=${PROJECT_SOURCE_DIR}/Assets"
+    "-DOUTPUT_ROOT=${URSA_ENGINE_RESOURCES_DIR}" "-DCACHE_ROOT=${URSA_SHADER_COMPILE_CACHE_DIR}"
+    "-DCONFIGURATION=$<CONFIG>" "-DDXC=${URSA_DXC_EXECUTABLE}"
+    "-DSPIRV_VAL=${URSA_SPIRV_VAL_EXECUTABLE}" "-DSPIRV_CROSS=${URSA_SPIRV_CROSS_EXECUTABLE}"
+    ${URSA_RESOURCE_MANAGED_ARGUMENTS} -P "${PROJECT_SOURCE_DIR}/Tools/PrepareResources.cmake"
   DEPENDS UrsaShaderImporter ${URSA_SHADER_SOURCE_FILES}
   VERBATIM)
-add_custom_target(UrsaEngineShaderAssets ALL DEPENDS "${URSA_SHADER_IMPORT_STAMP}")
-set_target_properties(UrsaEngineShaderAssets PROPERTIES FOLDER "Assets")
+if(URSA_ENABLE_DOTNET)
+  add_dependencies(UrsaEngineResources UrsaManagedHostAssemblies)
+endif()
+add_custom_target(UrsaEngineShaderAssets DEPENDS UrsaEngineResources)
+set_target_properties(UrsaEngineResources UrsaEngineShaderAssets PROPERTIES FOLDER "Assets")

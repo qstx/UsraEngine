@@ -21,6 +21,7 @@ The Engine CMake project exposes `UrsaEngineFormatCheck`. A Demo build exposes `
 - Use PascalCase for namespaces (`Ursa`, `Ursa::Rhi`, `Ursa::Editor`, `Ursa::Demo`).
 - Use camelCase for fields, parameters, and local variables (`activeCamera`, `deltaSeconds`). Boolean values do not need a special prefix.
 - Do not shadow members with parameters or local variables. Use distinct role-based names (`newWidth`, `selectedDevice`, `resourceSession`), including in constructors, and assign runtime state to the intended member.
+- Keep Debug and Release builds free of compiler warnings. `URSA_WARNINGS_AS_ERRORS` defaults to `ON` for first-party native targets and Engine-managed C# builds; resolve the warning's cause before merging changes. Third-party targets keep their upstream warning settings.
 - Do not add category prefixes such as `F`, `E`, `T`, or `I` to type names. Use `URSA_` followed by uppercase words for macros.
 - Keep spelling required by third-party hooks and APIs at integration boundaries.
 - Keep serialized JSON keys, persistent component type strings, resource IDs, and file extensions stable when renaming C++ symbols.

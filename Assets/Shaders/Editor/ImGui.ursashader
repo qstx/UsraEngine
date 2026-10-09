@@ -1,0 +1,43 @@
+Shader "Ursa/Internal/ImGui"
+{
+	ID "10000000-0000-4000-8000-000000000003"
+	Version 1
+	HLSLINCLUDE
+Texture2D<float4> imageTexture : register(t0);
+SamplerState imageSampler : register(s0);
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaForward" }
+		Pass
+		{
+			Name "ImGui"
+			Cull Off
+			ZWrite Off
+			ZTest Off
+			Blend SrcAlpha OneMinusSrcAlpha
+			HLSLPROGRAM
+#pragma vertex VSMain
+#pragma fragment PSMain
+struct VertexOutput
+{
+	float4 position : SV_Position;
+	float2 uv : TEXCOORD0;
+	float4 color : COLOR0;
+};
+VertexOutput VSMain(float2 position : POSITION0, float2 uv : TEXCOORD0, float4 color : COLOR0)
+{
+	VertexOutput output;
+	output.position = float4(position, 0.0, 1.0);
+	output.uv = uv;
+	output.color = color;
+	return output;
+}
+float4 PSMain(VertexOutput input) : SV_Target0
+{
+	return input.color * imageTexture.Sample(imageSampler, input.uv);
+}
+ENDHLSL
+		}
+	}
+}

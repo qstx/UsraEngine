@@ -481,7 +481,10 @@ Result<CompiledShaderStage> DxcShaderCompiler::Compile(const ShaderCompileReques
 	}
 	try
 	{
-		nlohmann::json::parse(reflection.value.begin(), reflection.value.end());
+		if (!nlohmann::json::parse(reflection.value.begin(), reflection.value.end()).is_object())
+		{
+			return Result<CompiledShaderStage>::Failure(Diagnostic(request, "SPIR-V reflection must be a JSON object"));
+		}
 	}
 	catch (const nlohmann::json::exception& exception)
 	{

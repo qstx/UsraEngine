@@ -178,7 +178,10 @@ Result<CompiledShaderStage> ReadCache(const VirtualFileSystem& filesystem, const
 				return Result<CompiledShaderStage>::Failure("Shader compile cache keyword metadata is stale");
 			}
 		}
-		nlohmann::json::parse(reflection.value.begin(), reflection.value.end());
+		if (!nlohmann::json::parse(reflection.value.begin(), reflection.value.end()).is_object())
+		{
+			return Result<CompiledShaderStage>::Failure("Shader compile cache reflection must be a JSON object");
+		}
 		return Result<CompiledShaderStage>::Success({request.entryPoint.stage,
 		                                             request.entryPoint.name,
 		                                             std::move(bytecode.value),

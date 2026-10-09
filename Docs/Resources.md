@@ -92,14 +92,14 @@ the package explicitly at startup.
 From the workspace root after configuring Engine with `-DURSA_PROJECT_DIR=Demo`:
 
 ```powershell
-cmake --build Engine/build --config Debug --target UrsaPak UrsaScriptPlayer UrsaEditor
-Engine/build/Debug/UrsaScriptCompile.exe Demo Debug
-Engine/build/Debug/UrsaPak.exe --engine Engine/Assets --engine-generated Engine/cache/assets `
+cmake --build Engine/Build --config Debug --target UrsaPak UrsaScriptPlayer UrsaEditor
+Engine/Build/Debug/UrsaScriptCompile.exe Demo Debug
+Engine/Build/Debug/UrsaPak.exe --engine Engine/Assets --engine-generated Engine/Build/Resources/Debug `
   --project Demo/Assets --library Demo/Library --configuration Debug `
-  --output Engine/build/package/Content.pak
-Engine/build/Debug/UrsaScriptPlayer.exe --project Demo --scene Snake/Snake.ursascene
-Engine/build/Debug/UrsaScriptPlayer.exe --pak Engine/build/package/Content.pak --scene Snake/Snake.ursascene
-Engine/build/editor/Debug/UrsaEditor.exe --project Demo --scene Snake/Snake.ursascene
+  --output Engine/Build/Package/Debug/Content.pak
+Engine/Build/Debug/UrsaScriptPlayer.exe --project Demo --scene Snake/Snake.ursascene
+Engine/Build/Debug/UrsaScriptPlayer.exe --pak Engine/Build/Package/Debug/Content.pak --scene Snake/Snake.ursascene
+Engine/Build/Editor/Debug/UrsaEditor.exe --project Demo --scene Snake/Snake.ursascene
 ```
 
 When invoking `UrsaPak` directly for a project, pass `--library <Project/Library>`

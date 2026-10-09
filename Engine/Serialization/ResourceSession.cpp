@@ -460,17 +460,17 @@ Result<ModelMeshPtr> ResourceSession::LoadMesh(ResourceId modelGuid, Ursa::UInt6
 	mesh->indices.reserve(static_cast<Ursa::Size>(indexCount));
 	for (Ursa::Size offset = 0; offset < indexBytes.value.size(); offset += sizeof(Ursa::UInt32))
 	{
-		Ursa::UInt32 index = 0;
+		Ursa::UInt32 vertexIndex = 0;
 		for (Ursa::UInt32 byte = 0; byte < sizeof(Ursa::UInt32); ++byte)
 		{
-			index |= static_cast<Ursa::UInt32>(indexBytes.value[offset + byte]) << (byte * 8);
+			vertexIndex |= static_cast<Ursa::UInt32>(indexBytes.value[offset + byte]) << (byte * 8);
 		}
-		if (index >= vertexCount)
+		if (vertexIndex >= vertexCount)
 		{
 			return Result<ModelMeshPtr>::Failure("Imported mesh index is outside its vertex range at " +
 			                                     path.value.ToString());
 		}
-		mesh->indices.push_back(index);
+		mesh->indices.push_back(vertexIndex);
 	}
 	if (document.value.contains("materialLocalFileId") && document.value["materialLocalFileId"].is_number_unsigned())
 	{
@@ -589,10 +589,10 @@ Result<std::shared_ptr<const ModelSkeleton>> ResourceSession::LoadSkeleton(Resou
 	auto skeleton = std::make_shared<ModelSkeleton>();
 	skeleton->modelGuid = modelGuid;
 	skeleton->localFileId = localFileId;
-	for (Ursa::Size index = 0; index < document.value["joints"].size(); ++index)
+	for (Ursa::Size jointIndex = 0; jointIndex < document.value["joints"].size(); ++jointIndex)
 	{
-		const Json& jointDocument = document.value["joints"][index];
-		if (!jointDocument.is_object() || jointDocument.value("index", Ursa::UInt32{UINT32_MAX}) != index ||
+		const Json& jointDocument = document.value["joints"][jointIndex];
+		if (!jointDocument.is_object() || jointDocument.value("index", Ursa::UInt32{UINT32_MAX}) != jointIndex ||
 		    !jointDocument.contains("nodeLocalFileId") || !jointDocument["nodeLocalFileId"].is_number_unsigned() ||
 		    !jointDocument.contains("name") || !jointDocument["name"].is_string() ||
 		    !jointDocument.contains("bindLocalTransform") || !jointDocument.contains("inverseBindMatrix"))
@@ -606,7 +606,7 @@ Result<std::shared_ptr<const ModelSkeleton>> ResourceSession::LoadSkeleton(Resou
 		if (jointDocument["parentJointIndex"].is_number_unsigned())
 		{
 			const Ursa::UInt64 parent = jointDocument["parentJointIndex"].get<Ursa::UInt64>();
-			if (parent >= index)
+			if (parent >= jointIndex)
 			{
 				return Result<std::shared_ptr<const ModelSkeleton>>::Failure(
 				    "Model skeleton parent order is invalid at " + path.value.ToString());
@@ -698,12 +698,12 @@ Result<std::shared_ptr<const AnimationClip>> ResourceSession::LoadAnimationClip(
 			}
 			for (const Json& keyDocument : channelDocument[field])
 			{
-				auto key = ReadVectorKey(keyDocument, path.value.ToString());
-				if (!key)
+				auto vectorKey = ReadVectorKey(keyDocument, path.value.ToString());
+				if (!vectorKey)
 				{
-					return Result<std::shared_ptr<const AnimationClip>>::Failure(key.error);
+					return Result<std::shared_ptr<const AnimationClip>>::Failure(vectorKey.error);
 				}
-				(field[0] == 'p' ? channel.positions : channel.scales).push_back(std::move(key.value));
+				(field[0] == 'p' ? channel.positions : channel.scales).push_back(std::move(vectorKey.value));
 			}
 		}
 		if (!channelDocument.contains("rotationKeys") || !channelDocument["rotationKeys"].is_array())
@@ -713,12 +713,12 @@ Result<std::shared_ptr<const AnimationClip>> ResourceSession::LoadAnimationClip(
 		}
 		for (const Json& keyDocument : channelDocument["rotationKeys"])
 		{
-			auto key = ReadRotationKey(keyDocument, path.value.ToString());
-			if (!key)
+			auto rotationKey = ReadRotationKey(keyDocument, path.value.ToString());
+			if (!rotationKey)
 			{
-				return Result<std::shared_ptr<const AnimationClip>>::Failure(key.error);
+				return Result<std::shared_ptr<const AnimationClip>>::Failure(rotationKey.error);
 			}
-			channel.rotations.push_back(std::move(key.value));
+			channel.rotations.push_back(std::move(rotationKey.value));
 		}
 		clip->channels.push_back(std::move(channel));
 	}

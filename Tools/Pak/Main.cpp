@@ -1,5 +1,6 @@
 #include <Vfs/PakBuilder.hpp>
 #include <Vfs/PakArchive.hpp>
+#include <Vfs/BuildResourceManifest.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Core/StringInterop.hpp>
@@ -37,6 +38,10 @@ String Lowered(String value)
 
 bool IsSourceOnlyAsset(const VirtualPath& path)
 {
+	if (path.relative == "BuildManifest.json")
+	{
+		return true;
+	}
 	const auto dot = path.relative.rfind('.');
 	if (dot == String::npos)
 	{
@@ -45,7 +50,8 @@ bool IsSourceOnlyAsset(const VirtualPath& path)
 	const String extension = Lowered(path.relative.substr(dot));
 	return extension == ".meta" || extension == ".fbx" || extension == ".obj" || extension == ".mtl" ||
 	       extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".ursashader" ||
-	       extension == ".hlsl" || extension == ".hlsli" || extension == ".cs" || extension == ".csproj";
+	       extension == ".hlsl" || extension == ".hlsli" || extension == ".vert" || extension == ".frag" ||
+	       extension == ".comp" || extension == ".glsl" || extension == ".cs" || extension == ".csproj";
 }
 
 bool HasScriptSources(const VirtualFileSystem& filesystem)
@@ -197,28 +203,6 @@ Result<void> StageManagedPlayer(VirtualFileSystem& source, VirtualFileSystem& pa
 	{
 		return Result<void>::Failure("Invalid managed Player content: " + ToUrsaString(error.what()));
 	}
-	const auto managedRoot = std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path();
-	VirtualFileSystem bootstrap;
-	auto mounted = bootstrap.Mount(engineScheme, managedRoot, MountAccess::ReadOnly);
-	if (!mounted)
-	{
-		return mounted;
-	}
-	for (const String name : {"Ursa.ManagedHost.dll", "Ursa.ManagedHost.deps.json",
-	                          "Ursa.ManagedHost.runtimeconfig.json", "Ursa.Runtime.dll"})
-	{
-		const VirtualPath path = VirtualPath::Parse(String(engineScheme) + ":Managed/" + name).value;
-		auto bytes = bootstrap.Read(VirtualPath::Parse(String(engineScheme) + ":" + name).value);
-		if (!bytes)
-		{
-			return Result<void>::Failure(bytes.error);
-		}
-		auto saved = package.WriteAtomic(path, bytes.value);
-		if (!saved)
-		{
-			return saved;
-		}
-	}
 	return {};
 }
 #endif
@@ -339,11 +323,13 @@ int main(int argc, char** argv)
 	using namespace Ursa;
 	VirtualFileSystem source;
 	Vector<std::filesystem::path> engineDirectories;
+	Vector<std::filesystem::path> sourceEngineDirectories;
+	Vector<std::filesystem::path> generatedEngineDirectories;
 	std::filesystem::path projectDirectory;
 	std::filesystem::path libraryDirectory;
 	std::filesystem::path output;
 	std::filesystem::path looseOutput;
-	String scriptConfiguration = "Debug";
+	String scriptConfiguration = URSA_BUILD_CONFIGURATION;
 	for (int index = 1; index < argc; ++index)
 	{
 		const std::string option = argv[index];
@@ -378,6 +364,7 @@ int main(int argc, char** argv)
 		else if (option == "--engine" || option == "--engine-generated")
 		{
 			engineDirectories.push_back(path);
+			(option == "--engine" ? sourceEngineDirectories : generatedEngineDirectories).push_back(path);
 		}
 		else
 		{
@@ -422,6 +409,43 @@ int main(int argc, char** argv)
 				          << entry.path.ToString().c_str() << '\n';
 				return 1;
 			}
+		}
+	}
+	VirtualFileSystem engineInputs;
+	for (const auto& directory : sourceEngineDirectories)
+	{
+		auto mounted = engineInputs.Mount("source", directory, MountAccess::ReadOnly);
+		if (!mounted)
+		{
+			std::cerr << mounted.error.c_str() << '\n';
+			return 1;
+		}
+	}
+	for (const auto& directory : generatedEngineDirectories)
+	{
+		VirtualFileSystem generated;
+		auto mounted = generated.Mount("built", directory, MountAccess::ReadOnly);
+		if (!mounted)
+		{
+			std::cerr << mounted.error.c_str() << '\n';
+			return 1;
+		}
+		auto valid = ValidateBuildResources(generated, "built", scriptConfiguration, HasScriptSources(source),
+		                                    sourceEngineDirectories.empty() ? nullptr : &engineInputs);
+		if (!valid)
+		{
+			std::cerr << valid.error.c_str() << '\n';
+			return 1;
+		}
+	}
+	if (generatedEngineDirectories.empty())
+	{
+		auto files = engineInputs.List("source");
+		if (files && std::any_of(files.value.begin(), files.value.end(), [](const auto& entry)
+		                         { return PathFromUrsaString(entry.path.relative).extension() == ".ursashader"; }))
+		{
+			std::cerr << "Engine Shader sources require --engine-generated Resources/<configuration>\n";
+			return 1;
 		}
 	}
 	VirtualFileSystem packageSource;

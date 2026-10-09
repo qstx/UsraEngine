@@ -14,9 +14,9 @@
 从 `Engine` 目录配置：
 
 ```powershell
-cmake -S . -B build -DURSA_ENABLE_DOTNET=ON
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
+cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON
+cmake --build Build --config Debug
+ctest --test-dir Build -C Debug --output-on-failure
 ```
 
 发布构建将 `Debug` 替换为 `Release`。若要验证不依赖 .NET 的原生构建，配置时使用 `-DURSA_ENABLE_DOTNET=OFF`。
@@ -24,12 +24,12 @@ ctest --test-dir build -C Debug --output-on-failure
 配置会通过 `dotnet --list-sdks` 和 `dotnet --list-runtimes` 检查 SDK 与运行时，并根据已安装的 .NET 10 运行时定位 Windows x64 host pack。若机器上存在多个 `dotnet.exe`，可显式指定：
 
 ```powershell
-cmake -S . -B build -DURSA_ENABLE_DOTNET=ON -DURSA_DOTNET_EXECUTABLE="C:/Program Files/dotnet/dotnet.exe"
+cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON -DURSA_DOTNET_EXECUTABLE="C:/Program Files/dotnet/dotnet.exe"
 ```
 
 切换 `dotnet.exe` 后若 CMake 仍使用旧路径，请在重新配置时增加 `-UURSA_DOTNET_EXECUTABLE`，清除缓存的程序路径。
 
-启用后，CMake 会验证 host pack 中的 `nethost.h`、`hostfxr.h`、`coreclr_delegates.h`、`nethost.lib` 和 `nethost.dll`。托管工程构建在 `Engine/build/runtime/Scripting/Managed/Source` 的构建暂存目录中进行；程序集输出到 `Engine/build/Managed/<配置>`，不会把 `bin/` 或 `obj/` 写入源码目录。原生宿主目标链接 `nethost.lib`，可执行程序旁会复制对应的 `nethost.dll`。
+启用后，CMake 会验证 host pack 中的 `nethost.h`、`hostfxr.h`、`coreclr_delegates.h`、`nethost.lib` 和 `nethost.dll`。托管工程构建在 `Engine/Build/runtime/Scripting/Managed/Source` 的构建暂存目录中进行；程序集输出到 `Engine/Build/Managed/<配置>`，不会把 `bin/` 或 `obj/` 写入源码目录。原生宿主目标链接 `nethost.lib`，可执行程序旁会复制对应的 `nethost.dll`。
 
 ## VFS 与原生宿主边界
 

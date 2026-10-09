@@ -5,9 +5,9 @@
 从工作区根目录配置 Engine，并指定 C# 项目目录：
 
 ```powershell
-cmake -S Engine -B Engine/build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
-cmake --build Engine/build --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
-Engine/build/Debug/UrsaScriptCompile.exe Demo Debug
+cmake -S Engine -B Engine/Build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
+cmake --build Engine/Build --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
+Engine/Build/Debug/UrsaScriptCompile.exe Demo Debug
 ```
 
 脚本程序集和 Editor 扩展清单位于项目 `Library/ScriptBuild/` 下。脚本发生变化后必须重新成功编译；`UrsaPak` 会拒绝过期或失败的脚本输入。Release 发布需对构建、脚本编译和打包都使用 Release 配置。
@@ -15,12 +15,12 @@ Engine/build/Debug/UrsaScriptCompile.exe Demo Debug
 ## 创建单包
 
 ```powershell
-Engine/build/Debug/UrsaPak.exe `
+Engine/Build/Debug/UrsaPak.exe `
   --engine Engine/Assets `
-  --engine-generated Engine/cache/assets `
+  --engine-generated Engine/Build/Resources/Debug `
   --project Demo/Assets --library Demo/Library `
   --configuration Debug `
-  --output Engine/build/package/Content.pak
+  --output Engine/Build/Package/Debug/Content.pak
 ```
 
 包内包含 Engine 与项目资源、导入后的模型/纹理，以及当前 Game 程序集。包内 `ursa:` 和 `prj:` 只读；日志、设置和存档通过 `user:` 挂载写入。
@@ -30,9 +30,9 @@ Engine/build/Debug/UrsaPak.exe `
 从工作区根目录使用 loose project 或 pak：
 
 ```powershell
-Engine/build/Debug/UrsaScriptPlayer.exe --project Demo --scene Snake/Snake.ursascene
-Engine/build/Debug/UrsaScriptPlayer.exe --project Demo --scene MaterialShowcase.ursascene
-Engine/build/Debug/UrsaScriptPlayer.exe --pak Engine/build/package/Content.pak --scene Snake/Snake.ursascene
+Engine/Build/Debug/UrsaScriptPlayer.exe --project Demo --scene Snake/Snake.ursascene
+Engine/Build/Debug/UrsaScriptPlayer.exe --project Demo --scene MaterialShowcase.ursascene
+Engine/Build/Debug/UrsaScriptPlayer.exe --pak Engine/Build/Package/Debug/Content.pak --scene Snake/Snake.ursascene
 ```
 
 Player 也接受 `--content <目录>` 读取已部署的 loose `Content/Engine` 与 `Content/Project` 结构。`--scene` 路径相对于项目 `Assets/`，pak 模式下相对于 `prj:`。

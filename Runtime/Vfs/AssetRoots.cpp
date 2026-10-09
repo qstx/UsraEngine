@@ -1,6 +1,7 @@
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
 #include <Vfs/AssetRoots.hpp>
+#include <Vfs/BuildResourceManifest.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/PakArchive.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
@@ -41,8 +42,8 @@ std::filesystem::path EngineAssetSource()
 
 std::filesystem::path EngineAssetMirror()
 {
-#ifdef URSA_ASSET_MIRROR_DIR
-	return std::filesystem::u8path(URSA_ASSET_MIRROR_DIR);
+#ifdef URSA_ENGINE_RESOURCES_DIR
+	return std::filesystem::u8path(URSA_ENGINE_RESOURCES_DIR);
 #else
 	return {};
 #endif
@@ -105,6 +106,34 @@ Result<Vector<std::filesystem::path>> ResolveEngineAssetRoots(const std::filesys
 
 	const auto source = EngineAssetSource();
 	const auto mirror = EngineAssetMirror();
+	if (!IsReadableDirectory(mirror))
+	{
+		return Result<Vector<std::filesystem::path>>::Failure(
+		    String("Missing engine resources for ") + URSA_BUILD_CONFIGURATION + " at " + PathToUrsaString(mirror) +
+		    "; build UrsaEngineResources for this configuration");
+	}
+	VirtualFileSystem generated;
+	auto mountedGenerated = generated.Mount(engineScheme, mirror, MountAccess::ReadOnly);
+	if (!mountedGenerated)
+	{
+		return Result<Vector<std::filesystem::path>>::Failure(mountedGenerated.error);
+	}
+	VirtualFileSystem inputs;
+	const VirtualFileSystem* sourceFiles = nullptr;
+	if (IsReadableDirectory(source))
+	{
+		auto mountedSource = inputs.Mount("source", source, MountAccess::ReadOnly);
+		if (!mountedSource)
+		{
+			return Result<Vector<std::filesystem::path>>::Failure(mountedSource.error);
+		}
+		sourceFiles = &inputs;
+	}
+	auto validated = ValidateBuildResources(generated, engineScheme, URSA_BUILD_CONFIGURATION, false, sourceFiles);
+	if (!validated)
+	{
+		return Result<Vector<std::filesystem::path>>::Failure(validated.error);
+	}
 	Vector<std::filesystem::path> roots;
 	if (IsReadableDirectory(source))
 	{

@@ -75,6 +75,14 @@ private:
 	Rhi::LayoutPtr layout;
 	Rhi::ShaderPtr vertexShader;
 	Rhi::ShaderPtr fragmentShader;
+	Ursa::UInt32 textureBinding = 0;
+	Ursa::UInt32 samplerBinding = 0;
+	Rhi::BlendState blendState;
+	Rhi::CullMode cullMode = Rhi::CullMode::None;
+	Rhi::Compare depthCompare = Rhi::Compare::Less;
+	bool blendEnabled = false;
+	bool depthTestEnabled = false;
+	bool depthWriteEnabled = false;
 	Rhi::SamplerPtr atlasSampler;
 	Rhi::BufferPtr vertexBuffer;
 	Rhi::BufferPtr indexBuffer;

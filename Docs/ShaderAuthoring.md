@@ -1,5 +1,7 @@
 # Shader authoring
 
+引擎内置 Shader 产物位于 `Build/Resources/<配置>`，编译缓存位于 `Build/Intermediate/ShaderCompileCache`；项目 Shader 使用项目 Library。删除生成文件后的恢复流程见 [构建资源与项目缓存](BuildResources.md)。
+
 Ursa shader source uses the versioned `.ursashader` format and declares a stable resource `ID` alongside its name. The syntax follows common Unity ShaderLab structure, while the program blocks contain HLSL compiled by the Engine's offline importer. Unity `.shader` files and Shader Graph assets are not imported.
 
 The canonical sample is [Unlit.ursashader](../Assets/Shaders/Examples/Unlit.ursashader), with its shared function in [Common.hlsli](../Assets/Shaders/Examples/Common.hlsli). `UrsaShaderExampleImportTests` imports the asset through VFS, resolves its include, and compiles every declared stage for Vulkan.

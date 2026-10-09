@@ -536,15 +536,17 @@ Result<ShaderAsset> DecodeShader(const Json& document)
 			{
 				return Result<ShaderAsset>::Failure("Invalid Shader Pass metadata");
 			}
-			auto tags = DecodeTags(passValue["tags"]);
-			auto states = DecodeStates(passValue["renderStates"]);
+			auto passTags = DecodeTags(passValue["tags"]);
+			auto passStates = DecodeStates(passValue["renderStates"]);
 			auto reused = StringArray(passValue, "reusedPasses");
-			if (!tags || !states || !reused)
+			if (!passTags || !passStates || !reused)
 			{
-				return Result<ShaderAsset>::Failure(!tags ? tags.error : !states ? states.error : reused.error);
+				return Result<ShaderAsset>::Failure(!passTags     ? passTags.error
+				                                    : !passStates ? passStates.error
+				                                                  : reused.error);
 			}
-			pass.tags = std::move(tags.value);
-			pass.renderStates = std::move(states.value);
+			pass.tags = std::move(passTags.value);
+			pass.renderStates = std::move(passStates.value);
 			pass.reusedPasses = std::move(reused.value);
 			for (const Json& variantValue : passValue["variants"])
 			{

@@ -15,10 +15,12 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${URSA_RUNTIME_SOURCES})
 target_include_directories(UrsaRuntime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(UrsaRuntime PUBLIC cxx_std_17)
 target_link_libraries(UrsaRuntime PUBLIC EASTL PRIVATE glfw Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator spdlog::spdlog)
+target_link_libraries(UrsaRuntime PRIVATE nlohmann_json::nlohmann_json)
 target_compile_definitions(UrsaRuntime PRIVATE GLFW_INCLUDE_NONE)
 target_compile_definitions(UrsaRuntime PRIVATE
   URSA_ENGINE_ASSET_SOURCE_DIR="${PROJECT_SOURCE_DIR}/Assets"
-  URSA_ASSET_MIRROR_DIR="${URSA_ASSET_MIRROR_DIR}")
+  URSA_ENGINE_RESOURCES_DIR="${URSA_ENGINE_RESOURCES_DIR}"
+  URSA_BUILD_CONFIGURATION="$<CONFIG>")
 
 if(MSVC)
   target_compile_definitions(UrsaRuntime PRIVATE _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING)

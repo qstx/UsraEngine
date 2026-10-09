@@ -38,24 +38,11 @@ target_compile_definitions(UrsaEditorCore PRIVATE
   URSA_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
   URSA_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
 
-foreach(shader IN ITEMS ImGui.vert ImGui.frag)
-  set(input "${CMAKE_CURRENT_SOURCE_DIR}/Ui/Shaders/${shader}")
-  set(output "${URSA_ASSET_MIRROR_DIR}/Shaders/Ui/${shader}.spv")
-  add_custom_command(OUTPUT "${output}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${URSA_ASSET_MIRROR_DIR}/Shaders/Ui"
-    COMMAND Vulkan::glslc "${input}" -o "${output}"
-    DEPENDS "${input}" VERBATIM)
-  target_sources(UrsaEditorCore PRIVATE "${input}" "${output}")
-  set_source_files_properties("${input}" PROPERTIES HEADER_FILE_ONLY TRUE)
-  set_source_files_properties("${output}" PROPERTIES GENERATED TRUE HEADER_FILE_ONLY TRUE)
-  source_group("Generated Shaders" FILES "${output}")
-endforeach()
-
 add_executable(UrsaEditor Launcher/Main.cpp)
 set_target_properties(UrsaEditor PROPERTIES FOLDER "Engine")
 target_link_libraries(UrsaEditor PRIVATE Ursa::Editor)
 ursa_attach_dotnet_host_runtime(UrsaEditor)
-add_dependencies(UrsaEditor UrsaEngineShaderAssets)
+add_dependencies(UrsaEditor UrsaEngineResources)
 if(NOT URSA_PROJECT_DIR STREQUAL "")
   set_target_properties(UrsaEditor PROPERTIES
     VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene"

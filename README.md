@@ -40,8 +40,8 @@ Before switching an existing asset root to the new identity format, back up the
 project and run the migration tool once per asset root:
 
 ```powershell
-Engine/build/Debug/UrsaAssetMigrate.exe --assets Engine/Assets --library Engine/Library
-Engine/build/Debug/UrsaAssetMigrate.exe --assets Demo/Assets --library Demo/Library
+Engine/Build/Debug/UrsaAssetMigrate.exe --assets Engine/Assets --library Engine/Library
+Engine/Build/Debug/UrsaAssetMigrate.exe --assets Demo/Assets --library Demo/Library
 ```
 
 The tool seeds `.meta` GUIDs from IDs embedded in supported `.ursa*` resources,
@@ -109,11 +109,11 @@ void inspectId(Ursa::ResourceId id) {
 ```powershell
 git submodule update --init
 git submodule update --init --recursive third_party/imgui third_party/imguizmo
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+cmake -S . -B Build -G "Visual Studio 17 2022" -A x64 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build Build --config Debug
+ctest --test-dir Build -C Debug --output-on-failure
+cmake --build Build --config Release
+ctest --test-dir Build -C Release --output-on-failure
 ```
 
 For a new clone, run the submodule update commands above before configuring CMake. A full recursive checkout may attempt EABase's unrelated test-only SSH submodules. CMake reads dependency sources from `third_party/`, including EABase through a local FetchContent source override; configuration does not download dependencies.
@@ -141,10 +141,10 @@ The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). For the C# Demo pro
 在工作区根目录配置并构建 Demo：
 
 ```powershell
-cmake -S Engine -B Engine/build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
-cmake --build Engine/build --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
-Engine/build/Debug/UrsaScriptCompile.exe Demo Debug
-ctest --test-dir Engine/build -C Debug --output-on-failure -R 'Ursa(Project|Snake)'
+cmake -S Engine -B Engine/Build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
+cmake --build Engine/Build --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
+Engine/Build/Debug/UrsaScriptCompile.exe Demo Debug
+ctest --test-dir Engine/Build -C Debug --output-on-failure -R 'Ursa(Project|Snake)'
 ```
 
 在 Demo 中运行独立 Player 可使用 `UrsaScriptPlayer --project Demo --scene Snake/Snake.ursascene`，也可通过 `--pak Content.pak` 运行打包内容。Engine 的 `URSA_PROJECT_DIR` 选项启用针对项目资源的 Scene/Prefab、导入、脚本、Editor、运行时和打包集成测试。
@@ -173,11 +173,13 @@ Code uses the repository's `.clang-format` rules, including one blank line betwe
 
 ## Virtual file system
 
+引擎生成资源按配置存放于 `Build/Resources/<配置>`，编译缓存位于 `Build/Intermediate/ShaderCompileCache`。项目导入与脚本数据归属项目 Library。旧配置迁移、缺失文件恢复及打包说明见 [构建资源与项目缓存](Docs/BuildResources.md)。
+
 `<Vfs/VirtualFileSystem.hpp>` addresses runtime content through `scheme:relative/path` virtual paths. The directory provider is used in Editor and loose development runs; a Pak provider serves packaged content. Reads, range reads, listing, atomic writes, and appends all pass through the VFS provider interface. `VirtualPath::Parse` rejects host drive letters, absolute paths, and any `..` segment. The directory provider checks canonical paths against its mount root, including Windows junctions.
 
 ```text
-ursa:Shaders/Renderer3D/Cube.vert      -> Engine source asset directory
-ursa:Shaders/Renderer3D/Cube.vert.spv  -> generated Engine asset directory
+ursa:Shaders/Renderer3D/Unlit.ursashader       -> Engine/Assets
+ursa:Shaders/Renderer3D/Unlit.ursashaderasset  -> Build/Resources/<configuration>
 prj:Snake/Snake.ursascene              -> selected project's Assets directory
 user:Logs/UrsaEditor.log                 -> per-user application data directory
 ```
@@ -202,7 +204,7 @@ Ursa::Result<void> OpenEditorResources(const std::filesystem::path &engineAssets
     if (!vfs)
         return Ursa::Result<void>::Failure(vfs.error);
 
-    auto shader = Ursa::VirtualPath::Parse("ursa:Shaders/Renderer3D/Cube.vert.spv");
+    auto shader = Ursa::VirtualPath::Parse("ursa:Shaders/Renderer3D/Unlit.ursashaderasset");
     if (!shader)
         return Ursa::Result<void>::Failure(shader.error);
     auto bytes = vfs.value.Read(shader.value);
@@ -245,7 +247,7 @@ updates and explicit reload. Linked scenes retain source and instance IDs; use
 ### Build a package
 
 ```powershell
-cmake --build build --config Debug --target UrsaEnginePackage
+cmake --build Build --config Debug --target UrsaEnginePackage
 ```
 
 The Engine-only package is `build/package/Content.pak`. Demo's `UrsaDemoPackage`
@@ -444,8 +446,8 @@ $savedPath = $env:PATH
 Remove-Item Env:Path -ErrorAction SilentlyContinue
 Remove-Item Env:PATH -ErrorAction SilentlyContinue
 $env:PATH = $savedPath
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Debug
+cmake -S . -B Build -G "Visual Studio 17 2022" -A x64
+cmake --build Build --config Debug
 ```
 
 ## Unified serialization

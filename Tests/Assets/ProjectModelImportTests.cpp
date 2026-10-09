@@ -188,10 +188,11 @@ std::filesystem::path BuildPackage(const std::filesystem::path& root, const std:
 	const auto outputDirectory = root / packageName;
 	const auto packagePath = outputDirectory / "Content.pak";
 	std::filesystem::create_directories(outputDirectory);
-	const std::string command =
-	    std::string("\"") + URSA_PAK_EXECUTABLE + "\" --engine \"" + URSA_DEMO_ENGINE_ASSET_PATH +
-	    "\" --engine-generated \"" + URSA_DEMO_ENGINE_GENERATED_ASSET_PATH + "\" --project \"" + assetsRoot.string() +
-	    "\" --library \"" + libraryRoot.string() + "\" --output \"" + packagePath.string() + "\"";
+	const std::string command = std::string("\"") + URSA_PAK_EXECUTABLE + "\" --engine \"" +
+	                            URSA_DEMO_ENGINE_ASSET_PATH + "\" --engine-generated \"" +
+	                            URSA_DEMO_ENGINE_GENERATED_ASSET_PATH + "\" --project \"" + assetsRoot.string() +
+	                            "\" --library \"" + libraryRoot.string() + "\" --configuration " +
+	                            URSA_TEST_CONFIGURATION + " --output \"" + packagePath.string() + "\"";
 	Expect(RunProcess(command) == 0, "UrsaPak could not package imported runtime assets");
 	return packagePath;
 }

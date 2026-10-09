@@ -6,6 +6,8 @@
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
 #include <Vfs/UserDataStore.hpp>
+#include <Shader/ShaderAssetResource.hpp>
+#include <Shader/ShaderReflection.hpp>
 #include <Core/Log.hpp>
 #include <algorithm>
 #include <cmath>
@@ -22,6 +24,60 @@ struct GuiVertex
 	Ursa::Float32 uv[2];
 	Ursa::Float32 color[4];
 };
+
+Result<void> ApplyImGuiRenderState(const Shader::RenderStateDeclaration& state, Rhi::BlendState& blendState,
+                                   Rhi::CullMode& cullMode, bool& blendEnabled, bool& depthTestEnabled,
+                                   bool& depthWriteEnabled)
+{
+	if (state.name == "Blend")
+	{
+		if (state.value == "Off")
+		{
+			blendEnabled = false;
+			blendState.enabled = false;
+			return {};
+		}
+		if (state.value != "SrcAlpha OneMinusSrcAlpha")
+		{
+			return Result<void>::Failure("Unsupported ImGui Shader Blend state: " + state.value);
+		}
+		blendEnabled = true;
+		blendState.enabled = true;
+		blendState.sourceColor = Rhi::BlendFactor::SourceAlpha;
+		blendState.destinationColor = Rhi::BlendFactor::OneMinusSourceAlpha;
+		blendState.sourceAlpha = Rhi::BlendFactor::SourceAlpha;
+		blendState.destinationAlpha = Rhi::BlendFactor::OneMinusSourceAlpha;
+		return {};
+	}
+	if (state.name == "Cull")
+	{
+		if (state.value == "Off")
+		{
+			cullMode = Rhi::CullMode::None;
+			return {};
+		}
+		return Result<void>::Failure("Unsupported ImGui Shader Cull state: " + state.value);
+	}
+	if (state.name == "ZTest")
+	{
+		if (state.value == "Off" || state.value == "Disabled")
+		{
+			depthTestEnabled = false;
+			return {};
+		}
+		return Result<void>::Failure("Unsupported ImGui Shader ZTest state: " + state.value);
+	}
+	if (state.name == "ZWrite")
+	{
+		if (state.value == "Off")
+		{
+			depthWriteEnabled = false;
+			return {};
+		}
+		return Result<void>::Failure("Unsupported ImGui Shader ZWrite state: " + state.value);
+	}
+	return Result<void>::Failure("Unsupported ImGui Shader render state: " + state.name);
+}
 
 ImGuiKey ToImGuiKey(Key key)
 {
@@ -135,24 +191,6 @@ ImGuiKey ToImGuiKey(Key key)
 	return ImGuiKey_None;
 }
 
-Result<Vector<Ursa::UInt8>> ReadShader(const VirtualFileSystem& files, const char* name)
-{
-	auto path = VirtualPath::Parse(String(engineScheme) + ":Shaders/Ui/" + name + ".spv");
-	if (!path)
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure(path.error);
-	}
-	auto bytes = files.Read(path.value);
-	if (!bytes)
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure(bytes.error);
-	}
-	if (bytes.value.empty())
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure(String("Empty Editor shader: ") + name);
-	}
-	return bytes;
-}
 } // namespace
 
 ImGuiBridge::ImGuiBridge(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow)
@@ -229,41 +267,114 @@ Result<void> ImGuiBridge::Initialize()
 		platform.Platform_GetClipboardTextFn = &ImGuiBridge::GetClipboardText;
 		platform.Platform_SetClipboardTextFn = &ImGuiBridge::SetClipboardText;
 	}
-	auto layoutResult = device->CreateBindGroupLayout({{0, Rhi::BindingType::CombinedImageSampler, 1, 2}});
-	if (!layoutResult)
-	{
-		return Result<void>::Failure(layoutResult.error);
-	}
-	layout = std::move(layoutResult.value);
 	auto engineFiles = OpenEngineFileSystem();
 	if (!engineFiles)
 	{
 		return Result<void>::Failure(engineFiles.error);
 	}
-	auto vertexCode = ReadShader(engineFiles.value, "ImGui.vert");
-	if (!vertexCode)
+	auto shaderPath = VirtualPath::Parse(String(engineScheme) + ":Shaders/Editor/ImGui.ursashaderasset");
+	if (!shaderPath)
 	{
-		return Result<void>::Failure(vertexCode.error);
+		return Result<void>::Failure(shaderPath.error);
 	}
-	auto fragmentCode = ReadShader(engineFiles.value, "ImGui.frag");
-	if (!fragmentCode)
+	auto shader = Shader::LoadShaderAssetResource(engineFiles.value, shaderPath.value);
+	if (!shader)
 	{
-		return Result<void>::Failure(fragmentCode.error);
+		return Result<void>::Failure(shader.error);
 	}
-	auto vertex =
-	    device->CreateShader({Rhi::ShaderStage::Vertex, Rhi::ShaderFormat::Spirv, std::move(vertexCode.value)});
-	if (!vertex)
+	if (shader.value.subShaders.empty() || shader.value.subShaders.front().passes.empty() ||
+	    shader.value.subShaders.front().passes.front().variants.empty())
 	{
-		return Result<void>::Failure(vertex.error);
+		return Result<void>::Failure("Imported ImGui Shader has no compiled graphics Pass");
 	}
-	vertexShader = std::move(vertex.value);
-	auto fragment =
-	    device->CreateShader({Rhi::ShaderStage::Fragment, Rhi::ShaderFormat::Spirv, std::move(fragmentCode.value)});
-	if (!fragment)
+	const auto& subShader = shader.value.subShaders.front();
+	const auto& pass = subShader.passes.front();
+	const auto& variant = pass.variants.front();
+	for (const Shader::RenderStateDeclaration& state : subShader.renderStates)
 	{
-		return Result<void>::Failure(fragment.error);
+		auto applied =
+		    ApplyImGuiRenderState(state, blendState, cullMode, blendEnabled, depthTestEnabled, depthWriteEnabled);
+		if (!applied)
+		{
+			return applied;
+		}
 	}
-	fragmentShader = std::move(fragment.value);
+	for (const Shader::RenderStateDeclaration& state : pass.renderStates)
+	{
+		auto applied =
+		    ApplyImGuiRenderState(state, blendState, cullMode, blendEnabled, depthTestEnabled, depthWriteEnabled);
+		if (!applied)
+		{
+			return applied;
+		}
+	}
+	auto reflection = Shader::BuildShaderBindingLayout(shader.value, variant);
+	if (!reflection)
+	{
+		return Result<void>::Failure(reflection.error);
+	}
+	for (const Rhi::LayoutBinding& binding : reflection.value.descriptors)
+	{
+		if (binding.type == Rhi::BindingType::SampledTexture)
+		{
+			textureBinding = binding.binding;
+		}
+		else if (binding.type == Rhi::BindingType::Sampler)
+		{
+			samplerBinding = binding.binding;
+		}
+		else
+		{
+			return Result<void>::Failure("ImGui Shader declares an unsupported descriptor type");
+		}
+	}
+	if (reflection.value.descriptors.size() != 2)
+	{
+		return Result<void>::Failure("ImGui Shader must declare one texture and one sampler");
+	}
+	auto layoutResult = Shader::CreateShaderBindGroupLayout(reflection.value, *device);
+	if (!layoutResult)
+	{
+		return Result<void>::Failure(layoutResult.error);
+	}
+	layout = std::move(layoutResult.value);
+	for (const Shader::ShaderStageAsset& stage : variant.stages)
+	{
+		if (stage.target != Shader::ShaderTarget::VulkanSpirv)
+		{
+			return Result<void>::Failure("ImGui Shader has no Vulkan SPIR-V stage");
+		}
+		Rhi::ShaderStage stageType;
+		if (stage.stage == Shader::ProgramStage::Vertex)
+		{
+			stageType = Rhi::ShaderStage::Vertex;
+		}
+		else if (stage.stage == Shader::ProgramStage::Fragment)
+		{
+			stageType = Rhi::ShaderStage::Fragment;
+		}
+		else
+		{
+			return Result<void>::Failure("ImGui Shader cannot contain a compute stage");
+		}
+		auto created = device->CreateShader({stageType, Rhi::ShaderFormat::Spirv, stage.spirv, stage.entryPoint});
+		if (!created)
+		{
+			return Result<void>::Failure(created.error);
+		}
+		if (stage.stage == Shader::ProgramStage::Vertex)
+		{
+			vertexShader = std::move(created.value);
+		}
+		else
+		{
+			fragmentShader = std::move(created.value);
+		}
+	}
+	if (!vertexShader || !fragmentShader)
+	{
+		return Result<void>::Failure("ImGui Shader requires vertex and fragment stages");
+	}
 	auto sampler = device->CreateSampler({true, false});
 	if (!sampler)
 	{
@@ -446,7 +557,10 @@ Result<ImTextureID> ImGuiBridge::RegisterTexture(Rhi::TexturePtr texture, Rhi::S
 	{
 		return Result<ImTextureID>::Failure("ImGui image texture must have Sampled usage");
 	}
-	auto group = device->CreateBindGroup({layout, {{0, {}, std::move(texture), std::move(sampler)}}});
+	Vector<Rhi::BindingResource> resources;
+	resources.push_back({textureBinding, {}, std::move(texture), {}});
+	resources.push_back({samplerBinding, {}, {}, std::move(sampler)});
+	auto group = device->CreateBindGroup({layout, std::move(resources)});
 	if (!group)
 	{
 		return Result<ImTextureID>::Failure(group.error);
@@ -615,8 +729,12 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 		desc.fragment = fragmentShader;
 		desc.layout = layout;
 		desc.colorFormat = colorFormat;
-		desc.blend = true;
-		desc.cullBack = false;
+		desc.blend = blendEnabled;
+		desc.blendState = blendState;
+		desc.cullMode = cullMode;
+		desc.depthTest = depthTestEnabled;
+		desc.depthWrite = depthWriteEnabled;
+		desc.depthCompare = depthCompare;
 		desc.vertexStride = sizeof(GuiVertex);
 		desc.attributes = {
 		    {0, 0, Rhi::VertexFormat::Float2}, {1, 8, Rhi::VertexFormat::Float2}, {2, 16, Rhi::VertexFormat::Float4}};
