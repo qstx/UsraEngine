@@ -8,6 +8,7 @@
 #include <Vfs/PakArchive.hpp>
 #include <Vfs/UserDataStore.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
+#include <Vfs/AssetRoots.hpp>
 #include <nlohmann/json.hpp>
 #include <Core/StringInterop.hpp>
 #include <iostream>
@@ -106,6 +107,25 @@ int main()
 		VirtualFileSystem output;
 		Done(output.Mount("output", root / "Output", MountAccess::ReadWrite));
 		Done(PakBuilder::Build(source, {projectScheme}, output, Path("output:Content.pak")));
+
+		VirtualFileSystem engineAssets;
+		Done(engineAssets.Mount(engineScheme, std::filesystem::u8path(URSA_TEST_ENGINE_ASSET_ROOT),
+		                        MountAccess::ReadOnly));
+		const VirtualPath editorFontPath = Path("ursa:Fonts/Editor/NotoSansSC-VF.ttf");
+		const VirtualPath editorFontLicensePath = Path("ursa:Fonts/Editor/OFL.txt");
+		const auto editorFontBytes = Take(engineAssets.Read(editorFontPath));
+		const auto editorFontLicense = Take(engineAssets.ReadText(editorFontLicensePath));
+		Expect(editorFontBytes.size() > 10 * 1024 * 1024 &&
+		           ToStdString(editorFontLicense).find("SIL Open Font License, Version 1.1") != std::string::npos,
+		       "Engine CJK font or its redistribution license is missing from the loose resource mount");
+		Done(PakBuilder::Build(engineAssets, {engineScheme}, output, Path("output:EngineContent.pak")));
+		auto engineArchive = Take(PakArchive::Open(root / "Output" / "EngineContent.pak"));
+		VirtualFileSystem packagedEngineAssets;
+		Done(engineArchive->Mount(packagedEngineAssets));
+		Expect(Take(packagedEngineAssets.Read(editorFontPath)) == editorFontBytes &&
+		           Take(packagedEngineAssets.ReadText(editorFontLicensePath)) == editorFontLicense,
+		       "Engine CJK font or license was not preserved in the Pak resource mount");
+
 		auto archive = Take(PakArchive::Open(root / "Output" / "Content.pak"));
 		Expect(archive->VerifiedBlockCount() == 0, "Mount scanned Pak payloads");
 		VirtualFileSystem packed;

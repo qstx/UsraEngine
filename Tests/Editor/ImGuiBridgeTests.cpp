@@ -1,7 +1,10 @@
 #include <Core/Containers.hpp>
+#include <Core/Log.hpp>
 #include <Core/Types.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Core/StringInterop.hpp>
+#include <Vfs/AssetRoots.hpp>
+#include <Vfs/MemoryFileProvider.hpp>
 #include <iostream>
 #include <stdexcept>
 
@@ -42,6 +45,12 @@ int clipboardReads = 0;
 void TestImagesFontsAndClipping(const DevicePtr& device)
 {
 	auto bridge = Take(Editor::ImGuiBridge::Create(device));
+	ImGui::SetCurrentContext(bridge->Context());
+	const ImFont* defaultFont = ImGui::GetIO().FontDefault;
+	Expect(defaultFont && String(defaultFont->GetDebugName()) == "Noto Sans SC",
+	       "Bundled Chinese font is not the default Editor font");
+	Expect(defaultFont->Sources.Size > 0 && defaultFont->Sources[0]->RasterizerMultiply >= 1.5f,
+	       "Default Editor font contrast was not raised for small interface text");
 	auto sampler = Take(device->CreateSampler({false, false}));
 	auto red = Take(
 	    device->CreateTexture({1, 1, Format::RgbA8Unorm, TextureUsage::Sampled | TextureUsage::TransferDestination}));
@@ -74,7 +83,10 @@ void TestImagesFontsAndClipping(const DevicePtr& device)
 	draw->AddRectFilled(ImVec2(42, 2), ImVec2(60, 18), IM_COL32(0, 0, 255, 255));
 	draw->PopClipRect();
 	draw->AddText(ImVec2(2, 30), IM_COL32(255, 255, 255, 255), "A");
+	draw->AddText(ImVec2(2, 45), IM_COL32(255, 255, 255, 255), u8"中");
 	done(bridge->EndFrame());
+	Expect(ImGui::GetFont()->GetFontBaked(ImGui::GetFontSize())->FindGlyphNoFallback(0x4E2D) != nullptr,
+	       "Dynamic Chinese glyph was not loaded into the Editor font atlas");
 
 	auto color = Take(device->CreateTexture(
 	    {width, height, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
@@ -115,6 +127,15 @@ void TestImagesFontsAndClipping(const DevicePtr& device)
 		}
 	}
 	Expect(textVisible, "ImGui font glyph did not render");
+	Ursa::Size chinesePixels = 0;
+	for (Ursa::UInt32 y = 44; y < height; ++y)
+	{
+		for (Ursa::UInt32 x = 2; x < 24; ++x)
+		{
+			chinesePixels += channel(x, y, 0) > 80 && channel(x, y, 1) > 80 && channel(x, y, 2) > 80;
+		}
+	}
+	Expect(chinesePixels > 8, "Chinese fallback glyph did not render to the RHI target");
 	bridge->UnregisterTexture(redId);
 	bridge->UnregisterTexture(greenId);
 }
@@ -128,6 +149,43 @@ void TestHighDpiDisplayScale(const DevicePtr& device)
 	Expect(io.DisplayFramebufferScale.x == 2 && io.DisplayFramebufferScale.y == 2,
 	       "ImGui framebuffer scale must preserve the high-DPI ratio");
 	done(bridge->EndFrame());
+}
+
+void TestMissingEditorFontFallback(const DevicePtr& device)
+{
+	auto engineFiles = Take(OpenEngineFileSystem());
+	auto entries = Take(engineFiles.List(engineScheme));
+	auto memory = std::make_shared<MemoryFileProvider>();
+	for (const VirtualFileEntry& entry : entries)
+	{
+		if (entry.path.relative == "Fonts/Editor/NotoSansSC-VF.ttf")
+		{
+			continue;
+		}
+		auto bytes = Take(engineFiles.Read(entry.path));
+		done(memory->WriteAtomic(entry.path.relative, bytes, true));
+	}
+	VirtualFileSystem fontlessFiles;
+	done(fontlessFiles.MountProvider(engineScheme, memory, MountAccess::ReadOnly));
+	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(std::move(fontlessFiles)));
+	bool diagnosed = false;
+	const UInt64 listener = Log::Subscribe(
+	    [&](const LogRecord& record)
+	    {
+		    diagnosed |= record.category == "Editor" &&
+		                 record.message.find("Unable to load the bundled Editor default font") != String::npos;
+	    });
+	auto bridge = Editor::ImGuiBridge::Create(device);
+	Log::Unsubscribe(listener);
+	ConfigureEngineFileSystem({});
+	Expect(static_cast<bool>(bridge), "Editor startup failed when the bundled Chinese font was missing");
+	Expect(diagnosed, "Missing Editor font did not produce a diagnostic");
+	ImGui::SetCurrentContext(bridge.value->Context());
+	Expect(ImGui::GetIO().FontDefault && String(ImGui::GetIO().FontDefault->GetDebugName()) != "Noto Sans SC",
+	       "Missing Engine font did not retain the embedded ImGui default font");
+	done(bridge.value->BeginFrame(1.f / 60.f, 64, 64));
+	ImGui::GetBackgroundDrawList()->AddText(ImVec2(2, 2), IM_COL32(255, 255, 255, 255), "Editor fallback");
+	done(bridge.value->EndFrame());
 }
 
 void TestTextFieldPaste(const DevicePtr& device)
@@ -197,6 +255,7 @@ int main()
 #endif
 		auto device = Take(CreateDevice(desc));
 		TestHighDpiDisplayScale(device);
+		TestMissingEditorFontFallback(device);
 		TestImagesFontsAndClipping(device);
 		TestTextFieldPaste(device);
 		done(device->WaitIdle());

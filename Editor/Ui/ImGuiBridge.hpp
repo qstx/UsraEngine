@@ -89,6 +89,7 @@ private:
 	bool depthTestEnabled = false;
 	bool depthWriteEnabled = false;
 	Rhi::SamplerPtr atlasSampler;
+	Vector<Ursa::UInt8> editorFontBytes;
 	Rhi::BufferPtr vertexBuffer;
 	Rhi::BufferPtr indexBuffer;
 	UnorderedMap<int, Rhi::PipelinePtr> pipelines;

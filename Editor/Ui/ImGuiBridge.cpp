@@ -295,6 +295,47 @@ Result<void> ImGuiBridge::Initialize()
 	{
 		return Result<void>::Failure(engineFiles.error);
 	}
+	const auto editorFontPath = VirtualPath::Parse("ursa:Fonts/Editor/NotoSansSC-VF.ttf");
+	if (!editorFontPath)
+	{
+		return Result<void>::Failure(editorFontPath.error);
+	}
+	auto fontBytes = engineFiles.value.Read(editorFontPath.value);
+	if (!fontBytes || fontBytes.value.empty() ||
+	    fontBytes.value.size() > static_cast<Ursa::Size>((std::numeric_limits<int>::max)()))
+	{
+		URSA_LOG_WARN("Editor", "Unable to load the bundled Editor default font: " +
+		                            (fontBytes ? String("font file is empty or too large") : fontBytes.error));
+	}
+	else
+	{
+		editorFontBytes = std::move(fontBytes.value);
+		ImFontConfig editorFontConfig{};
+		std::memcpy(editorFontConfig.Name, "Noto Sans SC", sizeof("Noto Sans SC"));
+		editorFontConfig.FontDataOwnedByAtlas = false;
+		editorFontConfig.RasterizerMultiply = 1.5f;
+		io.FontDefault = io.Fonts->AddFontFromMemoryTTF(
+		    editorFontBytes.data(), static_cast<int>(editorFontBytes.size()), 0.0f, &editorFontConfig);
+		if (io.FontDefault)
+		{
+			ImFontConfig embeddedFallbackConfig{};
+			embeddedFallbackConfig.MergeMode = true;
+			io.Fonts->AddFontDefault(&embeddedFallbackConfig);
+		}
+		else
+		{
+			editorFontBytes.clear();
+			URSA_LOG_WARN("Editor", "Unable to initialize the bundled Editor font; using ImGui default font");
+		}
+	}
+	if (!io.FontDefault)
+	{
+		io.FontDefault = io.Fonts->AddFontDefault();
+	}
+	if (!io.FontDefault)
+	{
+		return Result<void>::Failure("Cannot initialize an Editor font");
+	}
 	auto shaderPath = VirtualPath::Parse(String(engineScheme) + ":Shaders/Editor/ImGui.ursashaderasset");
 	if (!shaderPath)
 	{

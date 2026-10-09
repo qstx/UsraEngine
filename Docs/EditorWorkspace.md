@@ -34,4 +34,10 @@ Scene 面板提供 Transform Gizmo。Game 面板在 Play 模式显示运行画�
 
 Console 实时显示 Engine、Editor 和脚本日志的日期时间、等级、来源分类与消息。Trace、Debug、Info、Warning 和 Error 复选框只筛选显示内容；Clear 清空 Editor 的内存历史，不会删除日志文件。若日志记录携带资源路径或 GameObject ID，选择 Locate 会跳到对应资源或对象。
 
+## Editor 字体
+
+Editor 默认使用 Engine 自带的 `Noto Sans SC` 字体，不依赖项目 `Assets` 中的字体。`ursa:Fonts/Editor/NotoSansSC-VF.ttf` 通过 ImGui 动态字体图集按需加载拉丁和简体中文字符；ImGui 内置字体合并为缺字回退。若 Engine 字体无法读取，Editor 会记录警告并继续使用内置字体；仍未覆盖的字符会显示替代字形。
+
+字体来源、SIL Open Font License 1.1 和 SHA-256 见 [Editor 字体资源说明](../Assets/Fonts/Editor/README.md)。替换字体时，将兼容的新字体放在同一 Engine 资源路径，并保留对应许可与归属文件；松散资源和 `.pak` 均使用该 VFS 路径。
+
 项目可通过 `Ursa.Editor` 注册自定义 Inspector、菜单、工具窗口和 Editor 工具，见 [C# 编辑器扩展](ManagedEditorExtensions.md)。
