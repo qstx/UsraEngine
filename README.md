@@ -120,6 +120,8 @@ ctest --test-dir Build -C Release --output-on-failure
 
 `--parallel` without a job count lets CMake use the generator's default worker count. VS Code CMake Tools is also configured to choose the available worker count automatically.
 
+Visual Studio/MSVC 构建默认启用 `URSA_MSVC_PARALLEL_COMPILE=ON`，为 C/C++ 工程生成 `/MP`，让同一个工程的多个源文件并行编译。未指定 `/MP` 的数量时，MSVC 使用可用逻辑处理器；`cmake --build ... --parallel` 则负责工程之间的并行调度。两者共同生效，直接在 Visual Studio 中打开生成的解决方案构建也能使用 `/MP`。需要关闭源文件并行时，重新配置 `-DURSA_MSVC_PARALLEL_COMPILE=OFF`。此选项仅作用于 Visual Studio 生成器和 MSVC，其他生成器继续使用自身的任务调度。链接、资源准备、相互依赖的阶段以及只有一个源文件的目标不保证占满所有核心。
+
 For a new clone, run the submodule update commands above before configuring CMake. A full recursive checkout may attempt EABase's unrelated test-only SSH submodules. CMake reads dependency sources from `third_party/`, including EABase through a local FetchContent source override; configuration does not download dependencies.
 
 ## Editor scene and Prefab authoring

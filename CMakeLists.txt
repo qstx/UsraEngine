@@ -10,6 +10,14 @@ if(MSVC)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
 endif()
 
+option(URSA_MSVC_PARALLEL_COMPILE "Compile multiple source files concurrently with Visual Studio/MSVC" ON)
+if(URSA_MSVC_PARALLEL_COMPILE AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
+   AND CMAKE_GENERATOR MATCHES "^Visual Studio")
+  # MSBuild /m schedules projects; /MP parallelizes source files within each project.
+  # Without a numeric limit MSVC uses the available logical processors.
+  add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/MP>)
+endif()
+
 set(URSA_PROJECT_DIR "" CACHE PATH "Optional C# project path used by Engine integration tests and package commands")
 if(NOT URSA_PROJECT_DIR STREQUAL "")
   get_filename_component(URSA_PROJECT_DIR "${URSA_PROJECT_DIR}" ABSOLUTE)
