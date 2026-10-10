@@ -1,4 +1,5 @@
 #include <Core/Types.hpp>
+#include <Core/Profiler.hpp>
 #include <Application/SceneFrameRunner.hpp>
 
 namespace Ursa
@@ -10,6 +11,7 @@ Result<void> SceneFrameRunner::ConfigureFixedStep(Float32 seconds, UInt32 maxSte
 
 Result<void> SceneFrameRunner::Tick(Scene& scene, Float32 elapsed, Window* window, FrameInput input)
 {
+	URSA_PROFILE_SCOPE("SceneFrameRunner.Tick");
 	const FrameSchedule schedule = scheduler.Advance(elapsed);
 	for (Size index = 0; index < input.keys.size(); ++index)
 	{
@@ -32,6 +34,7 @@ Result<void> SceneFrameRunner::Tick(Scene& scene, Float32 elapsed, Window* windo
 	scene.BeginFrame();
 	for (UInt32 step = 0; step < schedule.fixedSteps; ++step)
 	{
+		URSA_PROFILE_SCOPE("Scene.FixedUpdate");
 		FrameContext fixedContext = context;
 		fixedContext.deltaSeconds = scheduler.FixedSeconds();
 		fixedContext.elapsedSeconds = schedule.fixedElapsedSeconds -
@@ -43,12 +46,18 @@ Result<void> SceneFrameRunner::Tick(Scene& scene, Float32 elapsed, Window* windo
 			return fixed;
 		}
 	}
-	auto updated = scene.Update(context);
-	if (!updated)
 	{
-		return updated;
+		URSA_PROFILE_SCOPE("Scene.Update");
+		auto updated = scene.Update(context);
+		if (!updated)
+		{
+			return updated;
+		}
 	}
-	return scene.LateUpdate(context);
+	{
+		URSA_PROFILE_SCOPE("Scene.LateUpdate");
+		return scene.LateUpdate(context);
+	}
 }
 
 void SceneFrameRunner::Reset()

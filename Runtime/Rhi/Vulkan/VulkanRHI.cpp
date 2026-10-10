@@ -13,6 +13,9 @@
 #include <mutex>
 #include <stdexcept>
 #include <vk_mem_alloc.h>
+#if defined(URSA_ENABLE_TRACY)
+#include <tracy/TracyVulkan.hpp>
+#endif
 
 namespace Ursa::Rhi
 {
@@ -406,12 +409,16 @@ struct Context
 	VkDevice device = VK_NULL_HANDLE;
 	VkQueue queue = VK_NULL_HANDLE;
 	Ursa::UInt32 family = UINT32_MAX;
+	bool supportsTimestamps = false;
 	VmaAllocator allocator = VK_NULL_HANDLE;
 	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 	VkPhysicalDeviceProperties properties{};
 	std::atomic<Ursa::UInt32> validationErrors{0};
 	std::shared_ptr<Window> window;
 	std::mutex queueMutex;
+#if defined(URSA_ENABLE_TRACY)
+	tracy::VkCtx* tracyGpu = nullptr;
+#endif
 
 	~Context()
 	{
@@ -419,6 +426,13 @@ struct Context
 		{
 			vkDeviceWaitIdle(device);
 		}
+#if defined(URSA_ENABLE_TRACY)
+		if (tracyGpu)
+		{
+			TracyVkDestroy(tracyGpu);
+			tracyGpu = nullptr;
+		}
+#endif
 		if (descriptorPool)
 		{
 			vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -576,6 +590,8 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 				ctx->physical = physical;
 				ctx->family = i;
 				ctx->properties = props;
+				ctx->supportsTimestamps =
+				    families[i].timestampValidBits > 0 && props.limits.timestampComputeAndGraphics;
 			}
 		}
 	}
@@ -616,6 +632,29 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 	poolInfo.poolSizeCount = static_cast<Ursa::UInt32>(poolSizes.size());
 	poolInfo.pPoolSizes = poolSizes.data();
 	Check(vkCreateDescriptorPool(ctx->device, &poolInfo, nullptr, &ctx->descriptorPool), "Creating descriptor pool");
+#if defined(URSA_ENABLE_TRACY)
+	if (ctx->supportsTimestamps)
+	{
+		VkCommandPoolCreateInfo profilingPoolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+		profilingPoolInfo.flags =
+		    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		profilingPoolInfo.queueFamilyIndex = ctx->family;
+		VkCommandPool profilingPool = VK_NULL_HANDLE;
+		Check(vkCreateCommandPool(ctx->device, &profilingPoolInfo, nullptr, &profilingPool),
+		      "Creating Tracy Vulkan command pool");
+		VkCommandBufferAllocateInfo profilingBufferInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+		profilingBufferInfo.commandPool = profilingPool;
+		profilingBufferInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		profilingBufferInfo.commandBufferCount = 1;
+		VkCommandBuffer profilingBuffer = VK_NULL_HANDLE;
+		Check(vkAllocateCommandBuffers(ctx->device, &profilingBufferInfo, &profilingBuffer),
+		      "Allocating Tracy Vulkan command buffer");
+		ctx->tracyGpu = TracyVkContext(ctx->instance, ctx->physical, ctx->device, ctx->queue, profilingBuffer,
+		                               vkGetInstanceProcAddr, vkGetDeviceProcAddr);
+		TracyVkContextName(ctx->tracyGpu, "Ursa Vulkan GPU", sizeof("Ursa Vulkan GPU") - 1);
+		vkDestroyCommandPool(ctx->device, profilingPool, nullptr);
+	}
+#endif
 	return ctx;
 }
 
@@ -957,6 +996,12 @@ struct CommandImpl final : CommandList
 		    [&]
 		    {
 			    Recording(true);
+#if defined(URSA_ENABLE_TRACY)
+			    if (ctx->tracyGpu)
+			    {
+				    TracyVkCollect(ctx->tracyGpu, command);
+			    }
+#endif
 			    Check(vkEndCommandBuffer(command), "Ending command list");
 			    state = 2;
 		    });
@@ -1273,7 +1318,19 @@ struct CommandImpl final : CommandList
 			    Require(state == 1 && rendering && boundPipeline && !boundPipeline->compute,
 			            "Draw requires a graphics pipeline and render pass");
 			    Require(vertices && instances, "Draw count must be positive");
+#if defined(URSA_ENABLE_TRACY)
+			    if (ctx->tracyGpu)
+			    {
+				    TracyVkZone(ctx->tracyGpu, command, "Vulkan.Draw");
+				    vkCmdDraw(command, vertices, instances, 0, 0);
+			    }
+			    else
+			    {
+				    vkCmdDraw(command, vertices, instances, 0, 0);
+			    }
+#else
 			    vkCmdDraw(command, vertices, instances, 0, 0);
+#endif
 		    });
 	}
 
@@ -1290,7 +1347,19 @@ struct CommandImpl final : CommandList
 			    Require(static_cast<Ursa::UInt64>(firstIndex) + indices <=
 			                boundIndexBuffer->desc.size / sizeof(Ursa::UInt32),
 			            "Indexed draw exceeds index buffer");
+#if defined(URSA_ENABLE_TRACY)
+			    if (ctx->tracyGpu)
+			    {
+				    TracyVkZone(ctx->tracyGpu, command, "Vulkan.DrawIndexed");
+				    vkCmdDrawIndexed(command, indices, instances, firstIndex, vertexOffset, firstInstance);
+			    }
+			    else
+			    {
+				    vkCmdDrawIndexed(command, indices, instances, firstIndex, vertexOffset, firstInstance);
+			    }
+#else
 			    vkCmdDrawIndexed(command, indices, instances, firstIndex, vertexOffset, firstInstance);
+#endif
 		    });
 	}
 
@@ -1302,7 +1371,19 @@ struct CommandImpl final : CommandList
 			    Recording(true);
 			    Require(boundPipeline && boundPipeline->compute, "Dispatch requires a compute pipeline");
 			    Require(x && y && z, "Dispatch dimensions must be positive");
+#if defined(URSA_ENABLE_TRACY)
+			    if (ctx->tracyGpu)
+			    {
+				    TracyVkZone(ctx->tracyGpu, command, "Vulkan.Dispatch");
+				    vkCmdDispatch(command, x, y, z);
+			    }
+			    else
+			    {
+				    vkCmdDispatch(command, x, y, z);
+			    }
+#else
 			    vkCmdDispatch(command, x, y, z);
+#endif
 		    });
 	}
 };

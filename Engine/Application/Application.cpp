@@ -1,4 +1,5 @@
 #include <Core/Types.hpp>
+#include <Core/Profiler.hpp>
 #include <Application/Application.hpp>
 #include <chrono>
 
@@ -76,6 +77,8 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 			sceneFrameRunner.ResetAccumulator();
 			continue;
 		}
+		URSA_PROFILE_FRAME("Engine");
+		URSA_PROFILE_SCOPE("Engine.Frame");
 		const auto now = std::chrono::steady_clock::now();
 		const Ursa::Float32 dt = std::chrono::duration<Ursa::Float32>(now - previous).count();
 		previous = now;
@@ -84,6 +87,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 			result = sceneFrameRunner.Tick(*scene, dt, window.get(), FrameInput::Capture(*window));
 			if (result)
 			{
+				URSA_PROFILE_SCOPE("Engine.RenderPreparation");
 				const Ursa::Float32 aspect = static_cast<Ursa::Float32>(window->FramebufferWidth()) /
 				                             static_cast<Ursa::Float32>(window->FramebufferHeight());
 				auto data = scene->CollectRenderData(aspect);
@@ -100,6 +104,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		}
 		else
 		{
+			URSA_PROFILE_SCOPE("Engine.GameFrame");
 			result = OnFrame(dt);
 		}
 		if (!result)

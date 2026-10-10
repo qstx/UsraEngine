@@ -1,4 +1,5 @@
 #include <Core/Log.hpp>
+#include <Core/Profiler.hpp>
 #include <Core/StringInterop.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Serialization/Archive.hpp>
@@ -331,6 +332,36 @@ Result<void> ScriptBehaviourComponent::Dispatch(BehaviourEvent event, const Fram
 	{
 		return {};
 	}
+	const char* callbackName = "Unknown";
+	switch (event)
+	{
+		case BehaviourEvent::Awake:
+			callbackName = "Awake";
+			break;
+		case BehaviourEvent::OnEnable:
+			callbackName = "OnEnable";
+			break;
+		case BehaviourEvent::Start:
+			callbackName = "Start";
+			break;
+		case BehaviourEvent::FixedUpdate:
+			callbackName = "FixedUpdate";
+			break;
+		case BehaviourEvent::Update:
+			callbackName = "Update";
+			break;
+		case BehaviourEvent::LateUpdate:
+			callbackName = "LateUpdate";
+			break;
+		case BehaviourEvent::OnDisable:
+			callbackName = "OnDisable";
+			break;
+		case BehaviourEvent::OnDestroy:
+			callbackName = "OnDestroy";
+			break;
+	}
+	const String zoneName = typeName + "::" + callbackName;
+	URSA_PROFILE_SCOPE_DYNAMIC(zoneName.data(), zoneName.size());
 	auto invoked = runtime->Dispatch(instanceToken, event, context, this);
 	if (invoked)
 	{

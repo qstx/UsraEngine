@@ -1,6 +1,7 @@
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
 #include <Renderer3D/Renderer3D.hpp>
+#include <Core/Profiler.hpp>
 #include <Core/StringInterop.hpp>
 #include <Shader/ShaderReflection.hpp>
 #include <Shader/ShaderAssetResource.hpp>
@@ -1656,6 +1657,7 @@ Result<std::unique_ptr<Renderer3D>> Renderer3D::Create(Rhi::DevicePtr selectedDe
 Result<void> Renderer3D::Render(const Rhi::SwapchainPtr& swapchain, const Camera& camera,
                                 const Vector<BoxInstance>& boxes)
 {
+	URSA_PROFILE_SCOPE("Renderer3D.Render");
 	try
 	{
 		if (!swapchain)
@@ -1685,6 +1687,7 @@ Result<void> Renderer3D::RenderModels(const Rhi::SwapchainPtr& swapchain, const 
                                       const Vector<ModelBoxInstance>& boxes, const SceneLighting& lighting,
                                       Vec3 cameraPosition)
 {
+	URSA_PROFILE_SCOPE("Renderer3D.RenderModels");
 	try
 	{
 		if (!swapchain)
@@ -1711,6 +1714,7 @@ Result<void> Renderer3D::RenderModels(const Rhi::SwapchainPtr& swapchain, const 
 Result<Rhi::FencePtr> Renderer3D::RenderOffscreen(const Rhi::TexturePtr& color, const Camera& camera,
                                                   const Vector<BoxInstance>& boxes)
 {
+	URSA_PROFILE_SCOPE("Renderer3D.RenderOffscreen");
 	try
 	{
 		impl->WaitPrevious();
@@ -1734,6 +1738,7 @@ Result<Rhi::FencePtr> Renderer3D::RenderOffscreenModels(const Rhi::TexturePtr& c
                                                         const Vector<ModelBoxInstance>& boxes,
                                                         const SceneLighting& lighting, Vec3 cameraPosition)
 {
+	URSA_PROFILE_SCOPE("Renderer3D.RenderOffscreenModels");
 	try
 	{
 		impl->WaitPrevious();
@@ -1752,6 +1757,7 @@ Result<void> Renderer3D::RecordOffscreenModels(const Rhi::CommandListPtr& comman
                                                const Mat4& viewProjection, const Vector<ModelBoxInstance>& boxes,
                                                const SceneLighting& lighting, Vec3 cameraPosition)
 {
+	URSA_PROFILE_SCOPE("Renderer3D.RecordOffscreenModels");
 	try
 	{
 		impl->WaitPrevious();

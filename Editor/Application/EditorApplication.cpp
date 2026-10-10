@@ -14,6 +14,7 @@
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
+#include <Core/Profiler.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/PakArchive.hpp>
@@ -2483,18 +2484,25 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			previous = std::chrono::steady_clock::now();
 			continue;
 		}
+		URSA_PROFILE_FRAME("Editor");
+		URSA_PROFILE_SCOPE("Editor.Frame");
 
 		const auto now = std::chrono::steady_clock::now();
 		const Ursa::Float32 deltaSeconds = std::chrono::duration<Ursa::Float32>(now - previous).count();
 		previous = now;
-		result = gui->BeginFrame(deltaSeconds, window->Width(), window->Height(), window->FramebufferWidth(),
-		                         window->FramebufferHeight());
+		{
+			URSA_PROFILE_SCOPE("Editor.BeginFrame");
+			result = gui->BeginFrame(deltaSeconds, window->Width(), window->Height(), window->FramebufferWidth(),
+			                         window->FramebufferHeight());
+		}
 		if (result)
 		{
+			URSA_PROFILE_SCOPE("Editor.OnFrame");
 			result = OnFrame(deltaSeconds);
 		}
 		if (result && play.Active())
 		{
+			URSA_PROFILE_SCOPE("Editor.PlayModeUpdate");
 			const FrameInput input =
 			    SelectPlayInput(FrameInput::Capture(*window), viewportFocused, ImGui::GetIO().WantTextInput);
 			auto ticked = play.Tick(deltaSeconds, window.get(), input);
@@ -2508,10 +2516,12 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		}
 		if (result)
 		{
+			URSA_PROFILE_SCOPE("Editor.BuildGui");
 			result = OnGui();
 		}
 		if (result)
 		{
+			URSA_PROFILE_SCOPE("Editor.EndFrame");
 			result = gui->EndFrame();
 		}
 		if (!result)
@@ -2519,77 +2529,80 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			break;
 		}
 
-		auto acquired = swapchain->Acquire();
-		if (!acquired)
 		{
-			result = Result<void>::Failure(acquired.error);
-			break;
-		}
-		if (!acquired.value.texture)
-		{
-			continue;
-		}
+			URSA_PROFILE_SCOPE("Editor.RenderPreparation");
+			auto acquired = swapchain->Acquire();
+			if (!acquired)
+			{
+				result = Result<void>::Failure(acquired.error);
+				break;
+			}
+			if (!acquired.value.texture)
+			{
+				continue;
+			}
 
-		auto command = device->CreateCommandList();
-		if (!command)
-		{
-			result = Result<void>::Failure(command.error);
-			break;
-		}
-		result = command.value->Begin();
-		if (result)
-		{
-			result = command.value->Barrier(acquired.value.texture, acquired.value.initialState,
-			                                Rhi::ResourceState::ColorAttachment);
-		}
-		Rhi::RenderTarget target;
-		target.color = acquired.value.texture;
-		if (result)
-		{
-			result = command.value->BeginRendering(target);
-		}
-		if (result)
-		{
-			result = gui->Record(command.value, swapchain->Format(), acquired.value.texture->desc.width,
-			                     acquired.value.texture->desc.height);
-		}
-		if (result)
-		{
-			result = command.value->EndRendering();
-		}
-		if (result)
-		{
-			result = command.value->Barrier(acquired.value.texture, Rhi::ResourceState::ColorAttachment,
-			                                Rhi::ResourceState::Present);
-		}
-		if (result)
-		{
-			result = command.value->End();
-		}
-		Rhi::FencePtr submittedFence;
-		if (result)
-		{
-			auto submitted = device->Submit(command.value, swapchain);
-			if (!submitted)
+			auto command = device->CreateCommandList();
+			if (!command)
 			{
-				result = Result<void>::Failure(submitted.error);
+				result = Result<void>::Failure(command.error);
+				break;
 			}
-			else
+			result = command.value->Begin();
+			if (result)
 			{
-				submittedFence = std::move(submitted.value);
+				result = command.value->Barrier(acquired.value.texture, acquired.value.initialState,
+				                                Rhi::ResourceState::ColorAttachment);
 			}
-		}
-		if (result)
-		{
-			result = swapchain->Present();
-		}
-		if (result)
-		{
-			result = submittedFence->Wait();
-		}
-		if (frameLimit && ++frames >= frameLimit)
-		{
-			break;
+			Rhi::RenderTarget target;
+			target.color = acquired.value.texture;
+			if (result)
+			{
+				result = command.value->BeginRendering(target);
+			}
+			if (result)
+			{
+				result = gui->Record(command.value, swapchain->Format(), acquired.value.texture->desc.width,
+				                     acquired.value.texture->desc.height);
+			}
+			if (result)
+			{
+				result = command.value->EndRendering();
+			}
+			if (result)
+			{
+				result = command.value->Barrier(acquired.value.texture, Rhi::ResourceState::ColorAttachment,
+				                                Rhi::ResourceState::Present);
+			}
+			if (result)
+			{
+				result = command.value->End();
+			}
+			Rhi::FencePtr submittedFence;
+			if (result)
+			{
+				auto submitted = device->Submit(command.value, swapchain);
+				if (!submitted)
+				{
+					result = Result<void>::Failure(submitted.error);
+				}
+				else
+				{
+					submittedFence = std::move(submitted.value);
+				}
+			}
+			if (result)
+			{
+				result = swapchain->Present();
+			}
+			if (result)
+			{
+				result = submittedFence->Wait();
+			}
+			if (frameLimit && ++frames >= frameLimit)
+			{
+				break;
+			}
 		}
 	}
 
