@@ -969,6 +969,7 @@ Result<void> Scene::LateUpdate(const FrameContext& context)
 
 Result<void> Scene::RunPhase(Phase phase, const FrameContext& context)
 {
+	Memory::TemporaryScope phaseMemory;
 	runtimeFrameContext = context;
 	hasRuntimeFrame = true;
 	auto prepared = PrepareRuntime();
@@ -981,8 +982,8 @@ Result<void> Scene::RunPhase(Phase phase, const FrameContext& context)
 	{
 		return lifecycle;
 	}
-	Vector<ComponentId> order;
-	for (const GameObject::Ptr& root : RootGameObjects())
+	TemporaryVector<ComponentId> order{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Scene)};
+	for (const GameObject::Ptr& root : rootObjects)
 	{
 		CollectComponents(HandleOf(root.get()), order);
 	}
@@ -1034,10 +1035,11 @@ Result<void> Scene::RunPhase(Phase phase, const FrameContext& context)
 
 Result<void> Scene::SynchronizeLifecycle(const FrameContext& context)
 {
+	Memory::TemporaryScope lifecycleMemory;
 	auto needsSynchronization = [this](bool includeStart = false)
 	{
-		Vector<ComponentId> currentOrder;
-		for (const GameObject::Ptr& root : RootGameObjects())
+		TemporaryVector<ComponentId> currentOrder{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Scene)};
+		for (const GameObject::Ptr& root : rootObjects)
 		{
 			CollectComponents(HandleOf(root.get()), currentOrder);
 		}
@@ -1073,8 +1075,8 @@ Result<void> Scene::SynchronizeLifecycle(const FrameContext& context)
 
 	for (Ursa::UInt32 pass = 0; pass < 1024; ++pass)
 	{
-		Vector<ComponentId> order;
-		for (const GameObject::Ptr& root : RootGameObjects())
+		TemporaryVector<ComponentId> order{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Scene)};
+		for (const GameObject::Ptr& root : rootObjects)
 		{
 			CollectComponents(HandleOf(root.get()), order);
 		}
@@ -1322,7 +1324,7 @@ Result<void> Scene::CommitChanges()
 	return result;
 }
 
-void Scene::CollectComponents(ObjectHandle node, Vector<ComponentId>& out) const
+void Scene::CollectComponents(ObjectHandle node, TemporaryVector<ComponentId>& out) const
 {
 	const GameObject* object = objects[node.index].object;
 	for (const auto& component : object->components)

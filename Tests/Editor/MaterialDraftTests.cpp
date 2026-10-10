@@ -129,7 +129,8 @@ int main()
 		auto gui = Take(Editor::ImGuiBridge::Create(device));
 		auto preview = Take(Editor::MaterialPreview::Create(device, *gui, 64));
 		done(preview->Render(secondLoaded->MaterialPtr()));
-		auto readback = Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Memory::Readback}));
+		auto readback =
+		    Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
 		auto command = Take(device->CreateCommandList());
 		done(command->Begin());
 		done(command->Barrier(preview->ColorTexture(), ResourceState::ShaderRead, ResourceState::TransferSource));

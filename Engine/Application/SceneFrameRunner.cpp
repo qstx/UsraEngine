@@ -1,5 +1,6 @@
 #include <Core/Types.hpp>
 #include <Core/Profiler.hpp>
+#include <Core/Memory/LinearAllocator.hpp>
 #include <Application/SceneFrameRunner.hpp>
 
 namespace Ursa
@@ -12,6 +13,7 @@ Result<void> SceneFrameRunner::ConfigureFixedStep(Float32 seconds, UInt32 maxSte
 Result<void> SceneFrameRunner::Tick(Scene& scene, Float32 elapsed, Window* window, FrameInput input)
 {
 	URSA_PROFILE_SCOPE("SceneFrameRunner.Tick");
+	Memory::TemporaryScope frameMemory;
 	const FrameSchedule schedule = scheduler.Advance(elapsed);
 	for (Size index = 0; index < input.keys.size(); ++index)
 	{

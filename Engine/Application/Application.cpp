@@ -1,5 +1,6 @@
 #include <Core/Types.hpp>
 #include <Core/Profiler.hpp>
+#include <Core/Memory/LinearAllocator.hpp>
 #include <Application/Application.hpp>
 #include <chrono>
 
@@ -78,6 +79,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 			continue;
 		}
 		URSA_PROFILE_FRAME("Engine");
+		Memory::TemporaryScope frameMemory;
 		URSA_PROFILE_SCOPE("Engine.Frame");
 		const auto now = std::chrono::steady_clock::now();
 		const Ursa::Float32 dt = std::chrono::duration<Ursa::Float32>(now - previous).count();

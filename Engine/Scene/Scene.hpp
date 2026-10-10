@@ -1,6 +1,7 @@
 #pragma once
 #include <Core/Types.hpp>
 #include <Core/Containers.hpp>
+#include <Core/Memory/MemoryContainers.hpp>
 #include <Core/Result.hpp>
 #include <Scene/Component.hpp>
 #include <Scene/GameObject.hpp>
@@ -273,7 +274,7 @@ private:
 
 	Result<void> InitializeAttachedComponent(ComponentId id);
 
-	void CollectComponents(ObjectHandle object, Vector<ComponentId>& out) const;
+	void CollectComponents(ObjectHandle object, TemporaryVector<ComponentId>& out) const;
 
 	void CollectRendering(ObjectHandle object, SceneRenderData& out) const;
 

@@ -1,4 +1,5 @@
 #include <Core/Types.hpp>
+#include <Core/Memory/MemoryFactories.hpp>
 #include <Material/Material.hpp>
 #include <Shader/ShaderBuiltins.hpp>
 #include <cctype>
@@ -722,7 +723,7 @@ MaterialTexturePtr MaterialInstance::ResolvedTexture(MaterialTextureSlot slot) c
 
 std::shared_ptr<MaterialInstance> MaterialInstance::Clone() const
 {
-	return std::make_shared<MaterialInstance>(*this);
+	return MakeShared<MaterialInstance>(Memory::MemoryTag::Assets, *this);
 }
 
 MaterialTexturePtr DefaultMaterialTexture(MaterialTextureSlot slot)

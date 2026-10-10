@@ -83,7 +83,7 @@ int main()
 		auto color = Take(device->CreateTexture(
 		    {size, size, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
 		auto readback =
-		    Take(device->CreateBuffer({size * size * 4, BufferUsage::TransferDestination, Memory::Readback}));
+		    Take(device->CreateBuffer({size * size * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
 		auto command = Take(device->CreateCommandList());
 		done(command->Begin());
 		done(preview->Record(scene, command, color, ResourceState::Undefined, ResourceState::TransferSource));

@@ -1,6 +1,7 @@
 #include <Assets/ScriptBuildService.hpp>
 
 #include <Core/StringInterop.hpp>
+#include <Core/Memory/ContainerAllocator.hpp>
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -108,6 +109,7 @@ Result<BuildProcessResult> RunProcess(const std::filesystem::path& executable,
                                       const std::vector<std::wstring>& arguments,
                                       const std::filesystem::path& workingDirectory)
 {
+	Memory::TemporaryScope processMemory;
 	SECURITY_ATTRIBUTES security{};
 	security.nLength = sizeof(security);
 	security.bInheritHandle = TRUE;
@@ -130,7 +132,9 @@ Result<BuildProcessResult> RunProcess(const std::filesystem::path& executable,
 	{
 		command += L" " + QuoteArgument(argument);
 	}
-	std::vector<wchar_t> writableCommand(command.begin(), command.end());
+	std::vector<wchar_t, Memory::StlAllocator<wchar_t>> writableCommand(
+	    command.begin(), command.end(),
+	    Memory::StlAllocator<wchar_t>(processMemory.GetAllocator(), Memory::MemoryTag::Editor));
 	writableCommand.push_back(L'\0');
 	const BOOL created = CreateProcessW(nullptr, writableCommand.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
 	                                    nullptr, workingDirectory.c_str(), &startup, &process);

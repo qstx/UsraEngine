@@ -1,4 +1,6 @@
 #include <Application/EditorApplication.hpp>
+#include <Core/Memory/Memory.hpp>
+#include <Core/Memory/LinearAllocator.hpp>
 #include <imgui_internal.h>
 #include <chrono>
 #include <filesystem>
@@ -9,6 +11,17 @@ namespace
 class WorkspaceEditor final : public Ursa::Editor::EditorApplication
 {
 protected:
+	Ursa::Result<void> OnFrame(Ursa::Float32) override
+	{
+		const auto tag = Ursa::Memory::RegisterTag("EditorFrameScratchTest");
+		if (Ursa::Memory::Snapshot().categories[static_cast<Ursa::Size>(tag)].liveAllocations != 0)
+		{
+			return Ursa::Result<void>::Failure("Previous Editor frame retained scratch allocation");
+		}
+		Ursa::Memory::ThreadTemporaryAllocator().Allocate(128, 64, tag);
+		return {};
+	}
+
 	Ursa::Result<void> OnGui() override
 	{
 		auto drawn = EditorApplication::OnGui();
@@ -71,8 +84,10 @@ int main()
 	WorkspaceEditor editor;
 	auto opened = editor.OpenProject(root);
 	auto ran = opened ? editor.Run(1280, 720, "Editor Workspace Test", false, 3) : opened;
+	const auto scratch = Ursa::Memory::Snapshot()
+	                         .categories[static_cast<Ursa::Size>(Ursa::Memory::RegisterTag("EditorFrameScratchTest"))];
 	std::filesystem::remove_all(root, error);
-	if (!ran || !editor.Checked())
+	if (!ran || !editor.Checked() || scratch.currentBytes != 0 || scratch.liveAllocations != 0)
 	{
 		std::cerr << (ran ? "Editor workspace was not checked" : ran.error.c_str()) << '\n';
 		return 1;

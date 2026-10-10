@@ -1,6 +1,7 @@
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
+#include <Core/Memory/Memory.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 #include <Scene/Scene.hpp>
 #include <iostream>
@@ -40,7 +41,11 @@ Ursa::Vector<Ursa::UInt8> ReadFrameWith(const Ursa::Rhi::DevicePtr& device, Draw
 	using namespace Ursa::Rhi;
 	auto color = Take(device->CreateTexture(
 	    {width, height, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
+	const auto before = Ursa::Memory::Snapshot().categories[static_cast<Ursa::Size>(Ursa::Memory::MemoryTag::Renderer)];
 	done(Take(draw(color))->Wait());
+	const auto after = Ursa::Memory::Snapshot().categories[static_cast<Ursa::Size>(Ursa::Memory::MemoryTag::Renderer)];
+	Expect(before.currentBytes == after.currentBytes && before.liveAllocations == after.liveAllocations,
+	       "Renderer scratch/control blocks escaped recording scope");
 	auto readback = Take(device->CreateBuffer(
 	    {static_cast<Ursa::Size>(width) * height * 4, BufferUsage::TransferDestination, Memory::Readback}));
 	auto command = Take(device->CreateCommandList());

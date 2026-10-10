@@ -2,6 +2,8 @@
 #include <Core/Types.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 #include <Core/Profiler.hpp>
+#include <Core/Memory/MemoryAlgorithms.hpp>
+#include <Core/Memory/MemoryFactories.hpp>
 #include <Core/StringInterop.hpp>
 #include <Shader/ShaderReflection.hpp>
 #include <Shader/ShaderAssetResource.hpp>
@@ -188,10 +190,10 @@ struct GpuModelMesh
 
 AlphaMode ShaderAlphaMode(const std::shared_ptr<MaterialInstance>& material);
 
-Vector<DrawItem> OrderItems(const Vector<ModelBoxInstance>& boxes, const std::shared_ptr<MaterialInstance>& fallback,
-                            Vec3 cameraPosition)
+TemporaryVector<DrawItem> OrderItems(const TemporaryVector<ModelBoxInstance>& boxes,
+                                     const std::shared_ptr<MaterialInstance>& fallback, Vec3 cameraPosition)
 {
-	Vector<DrawItem> items;
+	TemporaryVector<DrawItem> items{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Renderer)};
 	items.reserve(boxes.size());
 	for (Ursa::Size i = 0; i < boxes.size(); ++i)
 	{
@@ -201,20 +203,22 @@ Vector<DrawItem> OrderItems(const Vector<ModelBoxInstance>& boxes, const std::sh
 		auto material = box.material ? box.material : fallback;
 		items.push_back({&box, material, ShaderAlphaMode(material), Dot(delta, delta), i});
 	}
-	std::stable_sort(items.begin(), items.end(),
-	                 [](const DrawItem& a, const DrawItem& b)
-	                 {
-		                 if (a.mode != b.mode)
-		                 {
-			                 return static_cast<int>(a.mode) < static_cast<int>(b.mode);
-		                 }
-		                 if (a.mode == AlphaMode::Blend)
-		                 {
-			                 return a.distanceSquared == b.distanceSquared ? a.ordinal < b.ordinal
-			                                                               : a.distanceSquared > b.distanceSquared;
-		                 }
-		                 return std::less<const MaterialInstance*>{}(a.material.get(), b.material.get());
-	                 });
+	StableSort(
+	    items.begin(), items.end(),
+	    [](const DrawItem& a, const DrawItem& b)
+	    {
+		    if (a.mode != b.mode)
+		    {
+			    return static_cast<int>(a.mode) < static_cast<int>(b.mode);
+		    }
+		    if (a.mode == AlphaMode::Blend)
+		    {
+			    return a.distanceSquared == b.distanceSquared ? a.ordinal < b.ordinal
+			                                                  : a.distanceSquared > b.distanceSquared;
+		    }
+		    return std::less<const MaterialInstance*>{}(a.material.get(), b.material.get());
+	    },
+	    Memory::MemoryTag::Renderer);
 	return items;
 }
 
@@ -1360,7 +1364,8 @@ struct Renderer3D::Impl
 	{
 		if (!source)
 		{
-			auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
+			auto material = MakeShared<MaterialInstance>(Memory::ThreadTemporaryAllocator(),
+			                                             Memory::MemoryTag::Renderer, MaterialType::Unlit);
 			done(material->SetShaderAsset(builtinUnlit));
 			const Color linearColor{std::pow(std::max(color.red, 0.0f), 2.2f),
 			                        std::pow(std::max(color.green, 0.0f), 2.2f),
@@ -1451,6 +1456,7 @@ struct Renderer3D::Impl
 	            Rhi::ResourceState after, const Mat4& viewProjection, const Vector<ModelBoxInstance>& boxes,
 	            const SceneLighting& lighting, Vec3 cameraPosition)
 	{
+		Memory::TemporaryScope recordingMemory;
 		if (!command)
 		{
 			throw std::runtime_error("3D renderer requires a command list");
@@ -1460,7 +1466,8 @@ struct Renderer3D::Impl
 		{
 			throw std::runtime_error("Renderer light count exceeds directional or point capacity");
 		}
-		Vector<ModelBoxInstance> resolvedBoxes = boxes;
+		TemporaryVector<ModelBoxInstance> resolvedBoxes(
+		    boxes.begin(), boxes.end(), Memory::TemporaryContainerAllocator(Memory::MemoryTag::Renderer));
 		for (ModelBoxInstance& box : resolvedBoxes)
 		{
 			box.material = ResolveMaterial(box.material, box.color);
@@ -1509,7 +1516,7 @@ struct Renderer3D::Impl
 			Rhi::BindGroupPtr group;
 		};
 
-		Vector<RecordedPass> recordedPasses;
+		TemporaryVector<RecordedPass> recordedPasses{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Renderer)};
 		for (Ursa::Size itemIndex = 0; itemIndex < items.size(); ++itemIndex)
 		{
 			const auto& item = items[itemIndex];

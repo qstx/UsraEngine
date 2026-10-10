@@ -1,4 +1,5 @@
 #include <Core/Types.hpp>
+#include <Core/Memory/Memory.hpp>
 #include <EASTL/allocator.h>
 
 #include <algorithm>
@@ -44,12 +45,7 @@ allocator& allocator::operator=(const allocator& other)
 void* allocator::allocate(Ursa::Size size, int flags)
 {
 	(void)flags;
-	void* memory = _aligned_malloc(std::max<Ursa::Size>(size, 1), alignof(std::max_align_t));
-	if (!memory)
-	{
-		throw std::bad_alloc();
-	}
-	return memory;
+	return Ursa::Memory::Allocate(size, alignof(std::max_align_t), Ursa::Memory::MemoryTag::Containers);
 }
 
 void* allocator::allocate(Ursa::Size size, Ursa::Size alignment, Ursa::Size offset, int flags)
@@ -59,18 +55,12 @@ void* allocator::allocate(Ursa::Size size, Ursa::Size alignment, Ursa::Size offs
 	{
 		throw std::bad_alloc();
 	}
-	alignment = std::max(alignment, sizeof(void*));
-	void* memory = _aligned_offset_malloc(std::max(size, offset + 1), alignment, offset);
-	if (!memory)
-	{
-		throw std::bad_alloc();
-	}
-	return memory;
+	return Ursa::Memory::Allocate(size, alignment, Ursa::Memory::MemoryTag::Containers, offset);
 }
 
 void allocator::deallocate(void* memory, Ursa::Size)
 {
-	_aligned_free(memory);
+	Ursa::Memory::Free(memory);
 }
 
 const char* allocator::get_name() const

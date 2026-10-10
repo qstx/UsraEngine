@@ -450,6 +450,30 @@ if(URSA_BUILD_TESTS)
   target_link_libraries(UrsaEastlAllocatorTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaEastlAllocatorTests COMMAND UrsaEastlAllocatorTests)
 
+  add_executable(UrsaMemoryAllocatorTests Tests/Core/MemoryAllocatorTests.cpp)
+  target_link_libraries(UrsaMemoryAllocatorTests PRIVATE Ursa::Runtime)
+  add_test(NAME UrsaMemoryAllocatorTests COMMAND UrsaMemoryAllocatorTests)
+
+  add_executable(UrsaTemporaryAllocatorTests Tests/Core/TemporaryAllocatorTests.cpp)
+  target_link_libraries(UrsaTemporaryAllocatorTests PRIVATE Ursa::Runtime)
+  add_test(NAME UrsaTemporaryAllocatorTests COMMAND UrsaTemporaryAllocatorTests)
+
+  add_executable(UrsaMemoryFactoryTests Tests/Core/MemoryFactoryTests.cpp)
+  target_link_libraries(UrsaMemoryFactoryTests PRIVATE Ursa::Runtime)
+  add_test(NAME UrsaMemoryFactoryTests COMMAND UrsaMemoryFactoryTests)
+
+  add_executable(UrsaMemoryFrameTests Tests/Application/MemoryFrameTests.cpp)
+  target_link_libraries(UrsaMemoryFrameTests PRIVATE Ursa::Engine)
+  add_test(NAME UrsaMemoryFrameTests COMMAND UrsaMemoryFrameTests)
+
+  add_executable(UrsaMemoryBenchmarks Tests/Core/MemoryBenchmarks.cpp)
+  target_link_libraries(UrsaMemoryBenchmarks PRIVATE Ursa::Runtime)
+  set_target_properties(UrsaMemoryBenchmarks PROPERTIES FOLDER "Tests/Benchmarks")
+
+  add_executable(UrsaMemoryWorkloadBenchmarks Tests/Application/MemoryWorkloadBenchmarks.cpp)
+  target_link_libraries(UrsaMemoryWorkloadBenchmarks PRIVATE Ursa::Engine)
+  set_target_properties(UrsaMemoryWorkloadBenchmarks PROPERTIES FOLDER "Tests/Benchmarks")
+
   add_executable(UrsaLogTests Tests/Core/LogTests.cpp)
   target_link_libraries(UrsaLogTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaLogTests COMMAND UrsaLogTests)

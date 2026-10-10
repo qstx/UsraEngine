@@ -15,6 +15,7 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
 #include <Core/Profiler.hpp>
+#include <Core/Memory/LinearAllocator.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/PakArchive.hpp>
@@ -2485,6 +2486,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			continue;
 		}
 		URSA_PROFILE_FRAME("Editor");
+		Memory::TemporaryScope frameMemory;
 		URSA_PROFILE_SCOPE("Editor.Frame");
 
 		const auto now = std::chrono::steady_clock::now();

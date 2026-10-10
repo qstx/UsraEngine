@@ -459,3 +459,7 @@ cmake --build Build --parallel --config Debug
 See [persistent serialization](Docs/Serialization.md) for Serializable authoring, archive formats, component factories, schema versions and deferred references.
 
 See [scene lifecycle and frame scheduling](Docs/SceneLifecycle.md) for GameObject activity, component lifecycle events, fixed-step time and Engine/Editor frame order.
+
+## CPU 内存分配
+
+参见 [内存分配系统](Docs/Memory.md)，了解持久小块复用、线程临时作用域、类别统计、自定义 C++ 类型工厂及容器适配器。VMA 的 GPU 内存和 .NET 托管内存保留各自的分配机制。

@@ -1,5 +1,6 @@
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
+#include <Core/Memory/MemoryContainers.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -818,6 +819,7 @@ Result<void> ImGuiBridge::UpdateAtlas()
 Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format colorFormat,
                                  Ursa::UInt32 framebufferWidth, Ursa::UInt32 framebufferHeight)
 {
+	Memory::TemporaryScope recordingMemory;
 	if (!command || !framebufferWidth || !framebufferHeight)
 	{
 		return Result<void>::Failure("ImGui record requires a command list and nonzero framebuffer");
@@ -853,8 +855,8 @@ Result<void> ImGuiBridge::Record(const Rhi::CommandListPtr& command, Rhi::Format
 		}
 		pipeline = pipelines.emplace(formatKey, std::move(created.value)).first;
 	}
-	Ursa::Vector<GuiVertex> vertices;
-	Ursa::Vector<Ursa::UInt32> indices;
+	Ursa::TemporaryVector<GuiVertex> vertices{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Editor)};
+	Ursa::TemporaryVector<Ursa::UInt32> indices{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Editor)};
 	vertices.reserve(static_cast<Ursa::Size>(data->TotalVtxCount));
 	indices.reserve(static_cast<Ursa::Size>(data->TotalIdxCount));
 	for (int listIndex = 0; listIndex < data->CmdListsCount; ++listIndex)
