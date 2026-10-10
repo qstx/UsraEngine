@@ -10,7 +10,13 @@
 #define URSA_PROFILE_DYNAMIC_SCOPE_IMPL(name, length, line)                                                            \
 	ZoneNamedN(URSA_PROFILE_JOIN(ursaProfileZone_, line), "Ursa.DynamicScope", true);                                  \
 	URSA_PROFILE_JOIN(ursaProfileZone_, line).Name(name, length)
-#define URSA_PROFILE_FRAME(name) FrameMarkNamed(name)
+// The default frame set drives Tracy's initial FPS display and global frame count.
+#define URSA_PROFILE_FRAME(name)                                                                                       \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		FrameMark;                                                                                                     \
+		FrameMarkNamed(name);                                                                                          \
+	} while (false)
 #define URSA_PROFILE_SCOPE(name) ZoneScopedN(name)
 #define URSA_PROFILE_SCOPE_DYNAMIC(name, length) URSA_PROFILE_DYNAMIC_SCOPE_IMPL(name, length, __LINE__)
 #define URSA_PROFILE_MESSAGE(text) TracyMessage(text.data(), text.size())

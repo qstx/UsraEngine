@@ -2485,7 +2485,6 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			previous = std::chrono::steady_clock::now();
 			continue;
 		}
-		URSA_PROFILE_FRAME("Editor");
 		Memory::TemporaryScope frameMemory;
 		URSA_PROFILE_SCOPE("Editor.Frame");
 
@@ -2600,6 +2599,10 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			if (result)
 			{
 				result = submittedFence->Wait();
+			}
+			if (result)
+			{
+				URSA_PROFILE_FRAME("Editor");
 			}
 			if (frameLimit && ++frames >= frameLimit)
 			{

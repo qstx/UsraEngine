@@ -78,7 +78,6 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 			sceneFrameRunner.ResetAccumulator();
 			continue;
 		}
-		URSA_PROFILE_FRAME("Engine");
 		Memory::TemporaryScope frameMemory;
 		URSA_PROFILE_SCOPE("Engine.Frame");
 		const auto now = std::chrono::steady_clock::now();
@@ -113,6 +112,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		{
 			break;
 		}
+		URSA_PROFILE_FRAME("Engine");
 		if (frameLimit && ++frames >= frameLimit)
 		{
 			break;
