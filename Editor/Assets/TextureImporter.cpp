@@ -324,7 +324,8 @@ Result<void> TextureImporter::SetSettings(AssetDatabase& database, const Virtual
 }
 
 Result<TextureImportResult> TextureImporter::Import(AssetDatabase& database, const VirtualPath& source,
-                                                    const TextureImportSettings& settings, const String& target)
+                                                    const TextureImportSettings& settings, const String& target,
+                                                    bool force)
 {
 	if (!IsSupportedImage(source))
 	{
@@ -342,8 +343,9 @@ Result<TextureImportResult> TextureImporter::Import(AssetDatabase& database, con
 		return Result<TextureImportResult>::Failure(metadata.error);
 	}
 	const Json serializedSettings = settings.ToJson();
-	if (metadata.value.importer != textureImporterId || metadata.value.importerVersion != textureImporterVersion ||
-	    metadata.value.importSettings != serializedSettings)
+	if ((metadata.value.importer != textureImporterId || metadata.value.importerVersion != textureImporterVersion ||
+	     metadata.value.importSettings != serializedSettings) &&
+	    database.Filesystem().CheckWritable(source))
 	{
 		auto savedSettings =
 		    database.SetImporterSettings(source, textureImporterId, textureImporterVersion, serializedSettings);
@@ -364,7 +366,7 @@ Result<TextureImportResult> TextureImporter::Import(AssetDatabase& database, con
 		return Result<TextureImportResult>::Failure(cached.error);
 	}
 	const ResourceId guid = metadata.value.guid;
-	if (!cached.value.upToDate)
+	if (force || !cached.value.upToDate)
 	{
 		auto decoded = DecodeTexture(database.Filesystem(), source, settings);
 		if (!decoded)
@@ -413,6 +415,6 @@ Result<TextureImportResult> TextureImporter::Import(AssetDatabase& database, con
 		return Result<TextureImportResult>::Failure(loaded.error);
 	}
 	return Result<TextureImportResult>::Success(
-	    {guid, std::move(artifactPath.value), std::move(loaded.value.texture), cached.value.upToDate});
+	    {guid, std::move(artifactPath.value), std::move(loaded.value.texture), !force && cached.value.upToDate});
 }
 } // namespace Ursa::Editor

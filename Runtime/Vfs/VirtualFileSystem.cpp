@@ -393,4 +393,11 @@ Result<void> VirtualFileSystem::Rename(const VirtualPath& source, const VirtualP
 	}
 	return from.value->provider->Rename(source.relative, destination.relative);
 }
+
+Result<std::shared_ptr<VirtualFileLease>> VirtualFileSystem::AcquireExclusiveLease(const VirtualPath& path)
+{
+	auto provider = ResolveWriteProvider(path);
+	return provider ? provider.value->provider->AcquireExclusiveLease(path.relative)
+	                : Result<std::shared_ptr<VirtualFileLease>>::Failure(provider.error);
+}
 } // namespace Ursa

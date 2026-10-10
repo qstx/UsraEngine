@@ -12,6 +12,8 @@
 
 namespace Ursa
 {
+class ResourceReload;
+
 // Loads and caches resources by ID through the index's virtual file system.
 class ResourceSession final
 {
@@ -30,6 +32,14 @@ public:
 	                                                     MountAccess access = MountAccess::ReadWrite);
 
 	Result<std::unique_ptr<ResourceSession>> Refreshed() const;
+
+	Result<void> ReloadImportedResources(const VirtualFileSystem& files,
+	                                     const MaterialInstance* protectedMaterial = nullptr);
+
+	Result<std::shared_ptr<ResourceReload>> PrepareResourceReload(const VirtualFileSystem& files,
+	                                                              const MaterialInstance* protectedMaterial = nullptr);
+
+	void CommitResourceReload(std::shared_ptr<ResourceReload> reload);
 
 	Result<MaterialTexturePtr> LoadTexture(ResourceId id);
 

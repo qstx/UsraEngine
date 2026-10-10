@@ -55,6 +55,18 @@ Result<void> SceneViewPanel::Initialize()
 	return {};
 }
 
+Result<void> SceneViewPanel::ReloadResources()
+{
+	auto replacement = EditorScenePreview::Create(device);
+	if (!replacement)
+	{
+		return Result<void>::Failure(replacement.error);
+	}
+	replacement.value->GetCamera() = preview->GetCamera();
+	preview = std::move(replacement.value);
+	return {};
+}
+
 Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, EditorHierarchy& hierarchy,
                                   PlaySession& play, bool& showScene, bool& showGame, bool& viewportFocused,
                                   String& diagnostic)

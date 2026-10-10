@@ -346,8 +346,9 @@ Result<CompiledShaderStage> DxcShaderCompiler::Compile(const ShaderCompileReques
 	const String folderName =
 	    "UrsaShaderCompiler-" + ToUrsaString(std::to_string(timestamp) + "-" + std::to_string(uniqueIndex++));
 	std::error_code error;
-	const std::filesystem::path temporaryPath =
-	    std::filesystem::temp_directory_path(error) / std::filesystem::u8path(folderName.c_str());
+	const auto temporaryRoot =
+	    tools.stagingRoot.empty() ? std::filesystem::temp_directory_path(error) : tools.stagingRoot;
+	const std::filesystem::path temporaryPath = temporaryRoot / std::filesystem::u8path(folderName.c_str());
 	if (error || !std::filesystem::create_directories(temporaryPath, error) || error)
 	{
 		return Result<CompiledShaderStage>::Failure(Diagnostic(request, "Cannot create a temporary shader directory"));

@@ -1,4 +1,5 @@
 #include <Assets/ModelImportView.hpp>
+#include <Assets/ProjectAssetImporter.hpp>
 #include <Assets/SceneDraft.hpp>
 
 #include <Core/StringInterop.hpp>
@@ -108,15 +109,33 @@ Result<void> ModelImportView::RefreshImportedDocument(const VirtualFileSystem& f
 	return {};
 }
 
-Result<void> ModelImportView::Reimport(AssetDatabase& database)
+Result<void> ModelImportView::Reimport(AssetDatabase& database, bool cachedOnly)
 {
-	auto result = ModelImporter::Import(database, sourcePath, settings);
+	if (!cachedOnly)
+	{
+		auto savedSettings = ModelImporter::SetSettings(database, sourcePath, settings);
+		if (!savedSettings)
+		{
+			diagnostic = savedSettings.error;
+			return savedSettings;
+		}
+	}
+	auto result = cachedOnly ? ProjectAssetImporter::LoadCurrent(database, sourcePath)
+	                         : ProjectAssetImporter{}.Import(database, sourcePath, true);
 	if (!result)
 	{
 		diagnostic = result.error;
 		return Result<void>::Failure(diagnostic);
 	}
-	imported = std::move(result.value);
+	const auto root = std::find_if(result.value.artifacts.begin(), result.value.artifacts.end(),
+	                               [](const auto& artifact) { return artifact.localFileId == 0; });
+	if (root == result.value.artifacts.end())
+	{
+		return Result<void>::Failure("Model importer produced no root artifact");
+	}
+	imported = {result.value.guid,      root->path,
+	            result.value.artifacts, result.value.dependencies,
+	            result.value.cacheHit,  result.value.diagnostics};
 	auto refreshed = RefreshImportedDocument(database.Filesystem());
 	if (!refreshed)
 	{
@@ -139,7 +158,8 @@ Result<void> ModelImportView::Instantiate(SceneDraft& draft) const
 }
 
 Result<void> ModelImportView::Draw(AssetDatabase& database, bool canReimport,
-                                   const std::function<Result<void>()>& instantiate)
+                                   const std::function<Result<void>()>& instantiate,
+                                   const std::function<void(const VirtualPath&)>& requestImport)
 {
 	ImGui::Begin("Model Import");
 	ImGui::TextUnformatted(AssetDisplayPath(sourcePath).c_str());
@@ -184,7 +204,13 @@ Result<void> ModelImportView::Draw(AssetDatabase& database, bool canReimport,
 	ImGui::EndDisabled();
 	if (reimport)
 	{
-		auto result = Reimport(database);
+		auto result = requestImport ? ModelImporter::SetSettings(database, sourcePath, settings) : Reimport(database);
+		if (result && requestImport)
+		{
+			requestImport(sourcePath);
+			dirty = false;
+		}
+
 		if (!result)
 		{
 			diagnostic = result.error;

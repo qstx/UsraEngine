@@ -75,7 +75,9 @@ protected:
 		{
 			if (std::chrono::steady_clock::now() > deadline)
 			{
-				throw std::runtime_error("Editor workflow timed out: " + ToStdString(ScriptStatus()));
+				throw std::runtime_error("Editor workflow timed out at phase " + std::to_string(phase) +
+				                         ", running=" + std::to_string(RunningScene() != nullptr) +
+				                         ", assets=" + ToStdString(AssetStatus()) + ": " + ToStdString(ScriptStatus()));
 			}
 			if (ScriptWorkPending())
 			{

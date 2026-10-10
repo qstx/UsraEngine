@@ -55,6 +55,6 @@ public:
 	                                const ModelImportSettings& settings);
 
 	static Result<ModelImportResult> Import(AssetDatabase& database, const VirtualPath& source,
-	                                        const ModelImportSettings& settings);
+	                                        const ModelImportSettings& settings, bool force = false);
 };
 } // namespace Ursa::Editor

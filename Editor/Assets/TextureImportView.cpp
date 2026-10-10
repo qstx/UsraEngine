@@ -1,4 +1,6 @@
 #include <Assets/TextureImportView.hpp>
+#include <Assets/ProjectAssetImporter.hpp>
+#include <Serialization/TextureResource.hpp>
 
 #include <Core/StringInterop.hpp>
 #include <algorithm>
@@ -128,7 +130,8 @@ Result<void> TextureImportView::UploadPreview(Rhi::DevicePtr device, ImGuiBridge
 	return {};
 }
 
-Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr device, ImGuiBridge& gui)
+Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr device, ImGuiBridge& gui,
+                                         bool cachedOnly)
 {
 	auto sourceResult = TextureImporter::DecodeSourceImage(database.Filesystem(), sourcePath);
 	if (!sourceResult)
@@ -136,7 +139,31 @@ Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr
 		diagnostic = sourceResult.error;
 		return Result<void>::Failure(diagnostic);
 	}
-	auto importedResult = TextureImporter::Import(database, sourcePath, settings);
+	if (!cachedOnly)
+	{
+		auto savedSettings = TextureImporter::SetSettings(database, sourcePath, settings);
+		if (!savedSettings)
+		{
+			diagnostic = savedSettings.error;
+			return savedSettings;
+		}
+	}
+	auto importedAsset = cachedOnly ? ProjectAssetImporter::LoadCurrent(database, sourcePath)
+	                                : ProjectAssetImporter{}.Import(database, sourcePath, true);
+	if (!importedAsset)
+	{
+		diagnostic = importedAsset.error;
+		return Result<void>::Failure(diagnostic);
+	}
+	const auto& artifact = importedAsset.value.artifacts.front();
+	auto loaded = LoadTextureResource(database.Filesystem(), artifact.path);
+	if (!loaded)
+	{
+		diagnostic = loaded.error;
+		return Result<void>::Failure(diagnostic);
+	}
+	auto importedResult = Result<TextureImportResult>::Success(
+	    {importedAsset.value.guid, artifact.path, loaded.value.texture, importedAsset.value.cacheHit});
 	if (!importedResult)
 	{
 		diagnostic = importedResult.error;
@@ -185,7 +212,8 @@ Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr
 	return {};
 }
 
-Result<void> TextureImportView::Draw(AssetDatabase& database, Rhi::DevicePtr device, ImGuiBridge& gui, bool canReimport)
+Result<void> TextureImportView::Draw(AssetDatabase& database, Rhi::DevicePtr device, ImGuiBridge& gui, bool canReimport,
+                                     const std::function<void(const VirtualPath&)>& requestImport)
 {
 	ImGui::Begin("Texture Import");
 	ImGui::TextUnformatted(AssetDisplayPath(sourcePath).c_str());
@@ -240,7 +268,14 @@ Result<void> TextureImportView::Draw(AssetDatabase& database, Rhi::DevicePtr dev
 	ImGui::EndDisabled();
 	if (reimport)
 	{
-		auto result = Reimport(database, std::move(device), gui);
+		auto result = requestImport ? TextureImporter::SetSettings(database, sourcePath, settings)
+		                            : Reimport(database, std::move(device), gui);
+		if (result && requestImport)
+		{
+			requestImport(sourcePath);
+			dirty = false;
+		}
+
 		if (!result)
 		{
 			diagnostic = result.error;

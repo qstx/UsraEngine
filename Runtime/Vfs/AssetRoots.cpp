@@ -1,7 +1,7 @@
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
 #include <Vfs/AssetRoots.hpp>
-#include <Vfs/BuildResourceManifest.hpp>
+#include <Vfs/RuntimeContent.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/PakArchive.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
@@ -40,14 +40,6 @@ std::filesystem::path EngineAssetSource()
 #endif
 }
 
-std::filesystem::path EngineAssetMirror()
-{
-#ifdef URSA_ENGINE_RESOURCES_DIR
-	return std::filesystem::u8path(URSA_ENGINE_RESOURCES_DIR);
-#else
-	return {};
-#endif
-}
 } // namespace
 
 Result<std::filesystem::path> ResolveEngineAssetRoot(const EngineAssetRootCandidates& candidates)
@@ -70,14 +62,8 @@ Result<std::filesystem::path> ResolveEngineAssetRoot(const EngineAssetRootCandid
 		return Result<std::filesystem::path>::Success(besideExecutable);
 	}
 
-	if (IsReadableDirectory(candidates.buildMirror))
-	{
-		return Result<std::filesystem::path>::Success(candidates.buildMirror);
-	}
-
-	return Result<std::filesystem::path>::Failure("No engine asset root found. Tried an explicit override, " +
-	                                              PathToUrsaString(besideExecutable) + ", and " +
-	                                              PathToUrsaString(candidates.buildMirror));
+	return Result<std::filesystem::path>::Failure("No deployed engine asset root found; run UrsaAssetImport --project "
+	                                              "<project> and configure the project content view");
 }
 
 Result<Vector<std::filesystem::path>> ResolveEngineAssetRoots(const std::filesystem::path& explicitRoot)
@@ -104,52 +90,27 @@ Result<Vector<std::filesystem::path>> ResolveEngineAssetRoots(const std::filesys
 		return Result<Vector<std::filesystem::path>>::Success(std::move(packaged));
 	}
 
-	const auto source = EngineAssetSource();
-	const auto mirror = EngineAssetMirror();
-	if (!IsReadableDirectory(mirror))
-	{
-		return Result<Vector<std::filesystem::path>>::Failure(
-		    String("Missing engine resources for ") + URSA_BUILD_CONFIGURATION + " at " + PathToUrsaString(mirror) +
-		    "; build UrsaEngineResources for this configuration");
-	}
-	VirtualFileSystem generated;
-	auto mountedGenerated = generated.Mount(engineScheme, mirror, MountAccess::ReadOnly);
-	if (!mountedGenerated)
-	{
-		return Result<Vector<std::filesystem::path>>::Failure(mountedGenerated.error);
-	}
-	VirtualFileSystem inputs;
-	const VirtualFileSystem* sourceFiles = nullptr;
-	if (IsReadableDirectory(source))
-	{
-		auto mountedSource = inputs.Mount("source", source, MountAccess::ReadOnly);
-		if (!mountedSource)
-		{
-			return Result<Vector<std::filesystem::path>>::Failure(mountedSource.error);
-		}
-		sourceFiles = &inputs;
-	}
-	auto validated = ValidateBuildResources(generated, engineScheme, URSA_BUILD_CONFIGURATION, false, sourceFiles);
-	if (!validated)
-	{
-		return Result<Vector<std::filesystem::path>>::Failure(validated.error);
-	}
-	Vector<std::filesystem::path> roots;
-	if (IsReadableDirectory(source))
-	{
-		roots.push_back(source);
-	}
-	if (IsReadableDirectory(mirror))
-	{
-		roots.push_back(mirror);
-	}
-	if (roots.empty())
-	{
-		return Result<Vector<std::filesystem::path>>::Failure(
-		    "No engine asset root found. Tried " + PathToUrsaString(besideExecutable) + ", " +
-		    PathToUrsaString(source) + ", and " + PathToUrsaString(mirror));
-	}
-	return Result<Vector<std::filesystem::path>>::Success(std::move(roots));
+	auto source = ResolveEngineSourceRoot();
+	return source ? Result<Vector<std::filesystem::path>>::Success({source.value})
+	              : Result<Vector<std::filesystem::path>>::Failure(source.error);
+}
+
+Result<std::filesystem::path> ResolveEngineSourceRoot(const std::filesystem::path& explicitRoot)
+{
+	const auto source = explicitRoot.empty() ? EngineAssetSource() : explicitRoot;
+	return IsReadableDirectory(source) ? Result<std::filesystem::path>::Success(source)
+	                                   : Result<std::filesystem::path>::Failure(
+	                                         "Builtin source assets are unavailable: " + PathToUrsaString(source));
+}
+
+String EngineBuildConfiguration()
+{
+	return URSA_BUILD_CONFIGURATION;
+}
+
+std::filesystem::path EngineFrameworkDirectory()
+{
+	return std::filesystem::u8path(URSA_ENGINE_FRAMEWORK_DIR);
 }
 
 Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& explicitRoot)
@@ -160,6 +121,47 @@ Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& expl
 		if (configuredEngineFiles)
 		{
 			return Result<VirtualFileSystem>::Success(*configuredEngineFiles);
+		}
+#ifdef _WIN32
+		wchar_t selectedProject[32768]{};
+		const auto length = GetEnvironmentVariableW(L"URSA_CONTENT_PROJECT", selectedProject, 32768);
+		const std::filesystem::path project =
+		    length && length < 32768 ? std::filesystem::path(selectedProject) : std::filesystem::path{};
+#else
+		const auto* selectedProject = std::getenv("URSA_CONTENT_PROJECT");
+		const auto project = selectedProject ? std::filesystem::u8path(selectedProject) : std::filesystem::path{};
+#endif
+		if (!project.empty())
+		{
+			auto storage = std::make_shared<VirtualFileSystem>();
+			auto mounted = storage->Mount(editorLibraryScheme, project / "Library", MountAccess::ReadOnly);
+			if (!mounted)
+			{
+				return Result<VirtualFileSystem>::Failure(mounted.error);
+			}
+			auto ready = ReadRuntimeContent(*storage, EngineBuildConfiguration(), "Editor");
+			if (!ready)
+			{
+				return Result<VirtualFileSystem>::Failure(ready.error);
+			}
+			auto view = OpenRuntimeContentView(storage, ready.value);
+			if (!view)
+			{
+				return view;
+			}
+			VirtualFileSystem engine;
+			for (const auto& provider : view.value.Providers())
+			{
+				if (provider.scheme == engineScheme)
+				{
+					auto mountedView = engine.MountProvider(engineScheme, provider.provider, MountAccess::ReadOnly);
+					if (!mountedView)
+					{
+						return Result<VirtualFileSystem>::Failure(mountedView.error);
+					}
+				}
+			}
+			return Result<VirtualFileSystem>::Success(std::move(engine));
 		}
 		const auto package = CurrentExecutablePath().parent_path() / "Content.pak";
 		std::error_code error;
@@ -179,6 +181,11 @@ Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& expl
 		auto mounted = archive.value->Mount(files);
 		return mounted ? Result<VirtualFileSystem>::Success(std::move(files))
 		               : Result<VirtualFileSystem>::Failure(mounted.error);
+	}
+	if (explicitRoot.empty())
+	{
+		return Result<VirtualFileSystem>::Failure("Runtime content view is not configured; run UrsaAssetImport "
+		                                          "--project <project> and open its prepared content");
 	}
 	auto roots = ResolveEngineAssetRoots(explicitRoot);
 	if (!roots)

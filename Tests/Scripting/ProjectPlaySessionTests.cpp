@@ -79,7 +79,12 @@ int main()
 		profile.engineDirectories.push_back(std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path());
 		profile.projectAssetsDirectory = std::filesystem::u8path(URSA_PROJECT_DIR) / "Assets";
 		profile.projectLibraryDirectory = std::filesystem::u8path(URSA_PROJECT_DIR) / "Library";
-		auto filesystem = Take(OpenRuntimeFileSystem(profile));
+		auto sources = Take(OpenRuntimeFileSystem(profile));
+		auto filesystem = Take(OpenEngineFileSystem());
+		for (const auto& provider : sources.Providers())
+		{
+			Done(filesystem.MountProvider(provider.scheme, provider.provider, provider.access));
+		}
 		ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(filesystem));
 		auto resources = Take(ResourceSession::Open(filesystem));
 		ComponentRegistry registry;

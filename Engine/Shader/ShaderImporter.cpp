@@ -74,9 +74,10 @@ Result<Vector<ShaderAsset>> ShaderImporter::ImportAll(VirtualFileSystem& filesys
                                                       const String& compilerVersion, const String& sourceScheme,
                                                       const String& outputScheme, const VirtualPath& cacheRoot,
                                                       UInt32 maxVariantCount,
-                                                      const UsedShaderKeywordSets& usedKeywordSets)
+                                                      const UsedShaderKeywordSets& usedKeywordSets,
+                                                      const VirtualPath& requestedSource)
 {
-	auto library = ShaderSourceLibrary::Load(filesystem, sourceScheme);
+	auto library = ShaderSourceLibrary::Load(filesystem, sourceScheme, requestedSource);
 	if (!library)
 	{
 		return Result<Vector<ShaderAsset>>::Failure(library.error);
@@ -115,6 +116,10 @@ Result<Vector<ShaderAsset>> ShaderImporter::ImportAll(VirtualFileSystem& filesys
 	Vector<ShaderAsset> imported;
 	for (const ShaderSourceAsset* source : sources)
 	{
+		if (!requestedSource.relative.empty() && source->path != requestedSource)
+		{
+			continue;
+		}
 		auto dependencies = library.value.ResolveDependencies(filesystem, source->source.name);
 		if (!dependencies)
 		{

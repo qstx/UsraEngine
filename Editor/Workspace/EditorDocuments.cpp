@@ -1,4 +1,5 @@
 #include <Workspace/EditorDocuments.hpp>
+#include <Assets/MaterialDraft.hpp>
 #include <Core/Log.hpp>
 #include <Serialization/ResourceFile.hpp>
 #include <Serialization/TextureResource.hpp>
@@ -52,7 +53,7 @@ Result<std::unique_ptr<EditorDocument>> EditorDocument::Create(ResourceKind docu
 
 Result<std::unique_ptr<EditorDocuments>> EditorDocuments::Create(ProjectWorkspace& projectWorkspace)
 {
-	auto session = ResourceSession::Open(projectWorkspace.Index().Mounts(), projectWorkspace.AssetResolver());
+	auto session = ResourceSession::Open(projectWorkspace.ContentFiles(), projectWorkspace.AssetResolver());
 	if (!session)
 	{
 		return Result<std::unique_ptr<EditorDocuments>>::Failure(session.error);
@@ -221,7 +222,10 @@ Result<void> EditorDocuments::SaveCurrent()
 	}
 	Vector<ResourceMount> mounts;
 	mounts.push_back({current->Path().scheme, {}, MountAccess::ReadOnly, provider});
-	mounts.insert(mounts.end(), workspace.Index().Mounts().begin(), workspace.Index().Mounts().end());
+	for (const auto& mount : workspace.ContentFiles().Providers())
+	{
+		mounts.push_back({mount.scheme, {}, mount.access, mount.provider});
+	}
 	auto assetResolver = workspace.AssetResolver();
 	auto validated = ResourceSession::Open(mounts,
 	                                       [assetResolver, currentId = current->Id(),
@@ -280,7 +284,7 @@ Result<void> EditorDocuments::SaveCurrent()
 		return fail(written.error);
 	}
 	auto refreshed = workspace.Refresh();
-	auto session = refreshed ? ResourceSession::Open(workspace.Index().Mounts(), workspace.AssetResolver())
+	auto session = refreshed ? ResourceSession::Open(workspace.ContentFiles(), workspace.AssetResolver())
 	                         : Result<std::unique_ptr<ResourceSession>>::Failure(refreshed.error);
 	if (!session)
 	{
@@ -390,7 +394,7 @@ Result<void> EditorDocuments::RenameCurrent(const VirtualPath& path)
 		return renamed;
 	}
 	auto refreshed = workspace.Refresh();
-	auto session = refreshed ? ResourceSession::Open(workspace.Index().Mounts(), workspace.AssetResolver())
+	auto session = refreshed ? ResourceSession::Open(workspace.ContentFiles(), workspace.AssetResolver())
 	                         : Result<std::unique_ptr<ResourceSession>>::Failure(refreshed.error);
 	if (!session)
 	{
@@ -402,6 +406,54 @@ Result<void> EditorDocuments::RenameCurrent(const VirtualPath& path)
 	sessions.push_back(std::move(session.value));
 	current->path = path;
 	current->dirty = false;
+	return {};
+}
+
+Result<void> EditorDocuments::RefreshResources()
+{
+	const MaterialInstance* protectedMaterial = nullptr;
+	if (current && current->Dirty())
+	{
+		auto material = current->Payload<MaterialDraft>();
+		if (material)
+		{
+			protectedMaterial = material->MaterialPtr().get();
+		}
+	}
+	Vector<std::shared_ptr<ResourceReload>> reloads;
+	for (const auto& existing : sessions)
+	{
+		auto reloaded = existing->PrepareResourceReload(workspace.ContentFiles(), protectedMaterial);
+		if (!reloaded)
+		{
+			return Result<void>::Failure(reloaded.error);
+		}
+		reloads.push_back(std::move(reloaded.value));
+	}
+	std::unique_ptr<EditorDocument> refreshedMaterial;
+	if (current && !current->Dirty() && current->Kind() == ResourceKind::Material)
+	{
+		auto candidate = ResourceSession::Open(workspace.ContentFiles(), workspace.AssetResolver());
+		if (!candidate)
+		{
+			return Result<void>::Failure(candidate.error);
+		}
+		auto opened = OpenMaterialDocument(current->Path(), *candidate.value, workspace);
+		if (!opened)
+		{
+			return Result<void>::Failure(opened.error);
+		}
+		refreshedMaterial = std::move(opened.value);
+	}
+	for (Size index = 0; index < sessions.size(); ++index)
+	{
+		sessions[index]->CommitResourceReload(std::move(reloads[index]));
+	}
+	if (refreshedMaterial)
+	{
+		current = std::move(refreshedMaterial);
+	}
+
 	return {};
 }
 } // namespace Ursa::Editor

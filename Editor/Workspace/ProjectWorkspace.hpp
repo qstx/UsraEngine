@@ -24,6 +24,18 @@ public:
 
 	Result<void> Refresh();
 
+	Result<void> InitializeBuiltinAssets();
+
+	AssetDatabase* BuiltinDatabase()
+	{
+		return builtinDatabase.get();
+	}
+
+	const AssetDatabase* BuiltinDatabase() const
+	{
+		return builtinDatabase.get();
+	}
+
 	// Verify that a virtual path belongs to the writable project mount.
 	Result<void> CheckWritable(const VirtualPath& path) const;
 
@@ -48,6 +60,18 @@ public:
 	}
 
 	ResourceSession::AssetPathResolver AssetResolver() const;
+
+	Result<void> SetRuntimeContentView(const VirtualFileSystem& view);
+
+	const VirtualFileSystem& ContentFiles() const
+	{
+		return contentFiles ? *contentFiles : index.Filesystem();
+	}
+
+	VirtualFileSystem& ContentFiles()
+	{
+		return contentFiles ? *contentFiles : index.Filesystem();
+	}
 
 	const ResourceIndex& Index() const
 	{
@@ -75,5 +99,7 @@ private:
 	Vector<ResourceMount> engineMounts;
 	ResourceIndex index;
 	std::unique_ptr<AssetDatabase> assetDatabase;
+	std::unique_ptr<AssetDatabase> builtinDatabase;
+	std::unique_ptr<VirtualFileSystem> contentFiles;
 };
 } // namespace Ursa::Editor

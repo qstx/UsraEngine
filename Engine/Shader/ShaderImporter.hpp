@@ -15,6 +15,7 @@ public:
 	                                             const String& compilerVersion, const String& sourceScheme,
 	                                             const String& outputScheme, const VirtualPath& cacheRoot,
 	                                             UInt32 maxVariantCount = 256,
-	                                             const UsedShaderKeywordSets& usedKeywordSets = {});
+	                                             const UsedShaderKeywordSets& usedKeywordSets = {},
+	                                             const VirtualPath& requestedSource = {});
 };
 } // namespace Ursa::Shader

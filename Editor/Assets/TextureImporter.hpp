@@ -59,6 +59,6 @@ public:
 
 	static Result<TextureImportResult> Import(AssetDatabase& database, const VirtualPath& source,
 	                                          const TextureImportSettings& settings,
-	                                          const String& target = "texture-rgba8");
+	                                          const String& target = "texture-rgba8", bool force = false);
 };
 } // namespace Ursa::Editor

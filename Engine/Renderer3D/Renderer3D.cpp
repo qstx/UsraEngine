@@ -1374,7 +1374,23 @@ struct Renderer3D::Impl
 			                                MaterialPropertyValue::ColorValue(linearColor)));
 			return material;
 		}
-		if (source->Shader())
+		const auto sourceShader = source->Shader();
+		bool compiledBuiltin = false;
+		if (sourceShader)
+		{
+			for (const auto& subShader : sourceShader->subShaders)
+			{
+				for (const auto& pass : subShader.passes)
+				{
+					for (const auto& variant : pass.variants)
+					{
+						compiledBuiltin = compiledBuiltin || !variant.stages.empty();
+					}
+				}
+			}
+		}
+		if (sourceShader &&
+		    (compiledBuiltin || (source->ShaderId() != builtinUnlit->id && source->ShaderId() != builtinPbr->id)))
 		{
 			return source;
 		}

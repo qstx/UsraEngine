@@ -43,10 +43,13 @@ target_compile_definitions(UrsaEditorCore PRIVATE
   URSA_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
 
 add_executable(UrsaEditor Launcher/Main.cpp)
+add_executable(UrsaAssetImport "${PROJECT_SOURCE_DIR}/Tools/AssetImport/Main.cpp")
+target_link_libraries(UrsaAssetImport PRIVATE Ursa::Editor)
+ursa_attach_dotnet_host_runtime(UrsaAssetImport)
+set_target_properties(UrsaAssetImport PROPERTIES FOLDER "Tools")
 set_target_properties(UrsaEditor PROPERTIES FOLDER "Engine")
 target_link_libraries(UrsaEditor PRIVATE Ursa::Editor)
 ursa_attach_dotnet_host_runtime(UrsaEditor)
-add_dependencies(UrsaEditor UrsaEngineResources)
 if(NOT URSA_PROJECT_DIR STREQUAL "")
   set_target_properties(UrsaEditor PROPERTIES
     VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene"

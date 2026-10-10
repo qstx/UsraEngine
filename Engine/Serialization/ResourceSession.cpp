@@ -841,4 +841,66 @@ ResourceSession::IdentifyMaterialReference(const std::shared_ptr<MaterialInstanc
 	}
 	return Result<AssetReference>::Failure("Material object is not in this resource session");
 }
+
+class ResourceReload final
+{
+public:
+	std::unique_ptr<ResourceSession> candidate;
+	Vector<std::pair<std::shared_ptr<MaterialInstance>, std::shared_ptr<MaterialInstance>>> replacements;
+};
+
+Result<std::shared_ptr<ResourceReload>>
+ResourceSession::PrepareResourceReload(const VirtualFileSystem& files, const MaterialInstance* protectedMaterial)
+{
+	auto candidate = Open(files, assetPathResolver);
+	if (!candidate)
+	{
+		return Result<std::shared_ptr<ResourceReload>>::Failure(candidate.error);
+	}
+	auto reload = std::make_shared<ResourceReload>();
+	reload->candidate = std::move(candidate.value);
+	for (const auto& material : materials)
+	{
+		if (material.second.get() == protectedMaterial)
+		{
+			continue;
+		}
+		auto identity = IdentifyMaterialReference(material.second);
+		if (!identity)
+		{
+			return Result<std::shared_ptr<ResourceReload>>::Failure(identity.error);
+		}
+		auto loaded = reload->candidate->LoadMaterial(identity.value.guid, identity.value.localFileId);
+		if (!loaded)
+		{
+			return Result<std::shared_ptr<ResourceReload>>::Failure(loaded.error);
+		}
+		reload->replacements.push_back({material.second, loaded.value});
+	}
+	return Result<std::shared_ptr<ResourceReload>>::Success(std::move(reload));
+}
+
+void ResourceSession::CommitResourceReload(std::shared_ptr<ResourceReload> reload)
+{
+	for (const auto& replacement : reload->replacements)
+	{
+		*replacement.first = *replacement.second;
+	}
+	index = std::move(reload->candidate->index);
+	textures = std::move(reload->candidate->textures);
+	shaders = std::move(reload->candidate->shaders);
+}
+
+Result<void> ResourceSession::ReloadImportedResources(const VirtualFileSystem& files,
+                                                      const MaterialInstance* protectedMaterial)
+{
+	auto reload = PrepareResourceReload(files, protectedMaterial);
+	if (!reload)
+	{
+		return Result<void>::Failure(reload.error);
+	}
+	CommitResourceReload(std::move(reload.value));
+	return {};
+}
+
 } // namespace Ursa

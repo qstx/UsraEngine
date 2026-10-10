@@ -12,19 +12,25 @@ struct EngineAssetRootCandidates
 	std::filesystem::path explicitRoot;
 	// The running executable, used to derive "<executable directory>/Assets".
 	std::filesystem::path executablePath;
-	// The build-time mirror produced next to compiled shaders.
+	// Legacy discovery hint, ignored; generated resources belong to project Library.
 	std::filesystem::path buildMirror;
 };
 
 // Resolves the engine asset root in the order explicit override, "Assets" beside
-// the executable, then the build-time mirror. Fails with a diagnostic naming
+// the executable. buildMirror is ignored during migration. Fails with a diagnostic naming
 // every candidate when none is a readable directory.
 Result<std::filesystem::path> ResolveEngineAssetRoot(const EngineAssetRootCandidates& candidates);
 
 // The ordered engine asset roots. An explicit override wins; otherwise "Assets"
 // beside the executable (a packaged layout) wins; otherwise the engine source
-// assets followed by the generated mirror, which overlay to form one view.
+// sources for authoring tools. Runtime consumers must use a prepared content view.
 Result<Vector<std::filesystem::path>> ResolveEngineAssetRoots(const std::filesystem::path& explicitRoot = {});
+
+Result<std::filesystem::path> ResolveEngineSourceRoot(const std::filesystem::path& explicitRoot = {});
+
+String EngineBuildConfiguration();
+
+std::filesystem::path EngineFrameworkDirectory();
 
 // Mounts resolveEngineAssetRoots() read-only under the conventional engine
 // scheme, so callers can read "ursa:..." paths.

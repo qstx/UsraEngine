@@ -10,6 +10,7 @@
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/PakArchive.hpp>
+#include <Vfs/RuntimeContent.hpp>
 #include <iostream>
 #include <stdexcept>
 
@@ -235,10 +236,25 @@ int main(int argc, char** argv)
 					                   ? adjacentEngine
 					                   : std::filesystem::path(URSA_SCRIPT_PLAYER_ENGINE_ASSETS);
 				}
-				profile.engineDirectories = Take(ResolveEngineAssetRoots());
-				profile.engineDirectories.insert(profile.engineDirectories.begin(), engineAssets);
-				profile.projectAssetsDirectory = project / "Assets";
-				manifestPath = "lib:ScriptBuild/Manifests/Game.json";
+				VirtualFileSystem sources;
+				Done(sources.Mount(engineScheme, Take(ResolveEngineSourceRoot(engineAssets)), MountAccess::ReadOnly));
+				Done(sources.Mount(projectScheme, project / "Assets", MountAccess::ReadOnly));
+				auto libraryMount = sources.Mount(editorLibraryScheme, project / "Library", MountAccess::ReadOnly);
+				if (!libraryMount)
+				{
+					throw std::runtime_error(
+					    "Project Library is missing; run UrsaAssetImport --project <project> before launching Player");
+				}
+				Done(sources.Mount("framework", EngineFrameworkDirectory(), MountAccess::ReadOnly));
+				const auto ready =
+				    Take(ReadRuntimeContent(sources, EngineBuildConfiguration(), "Player", "WindowsVulkan", &sources));
+				const auto runtimeView =
+				    Take(OpenRuntimeContentView(std::make_shared<VirtualFileSystem>(sources), ready));
+				profile.mode = RuntimeMountMode::PackagedRuntime;
+				for (const auto& provider : runtimeView.Providers())
+				{
+					profile.packagedProviders.push_back({provider.scheme, provider.provider});
+				}
 			}
 		}
 		else
@@ -248,11 +264,6 @@ int main(int argc, char** argv)
 			                             {projectScheme, Take(archive->View(projectScheme))}};
 		}
 		auto files = std::make_shared<VirtualFileSystem>(Take(OpenRuntimeFileSystem(profile)));
-		if (package.empty() && !project.empty())
-		{
-			auto mountedLibrary = files->Mount("lib", project / "Library", MountAccess::ReadOnly);
-			Done(std::move(mountedLibrary));
-		}
 		ConfigureEngineFileSystem(files);
 		ScriptPlayer player(files, scenePath, manifestPath, stressWindow);
 		Done(player.Run(1024, 720, "Ursa Script Player", visible, frames));

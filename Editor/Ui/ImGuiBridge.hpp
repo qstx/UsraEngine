@@ -47,11 +47,16 @@ public:
 
 	Result<void> ClearSavedLayout();
 
+	// Call after finishing GPU submissions, before the next frame.
+	Result<void> ReloadShaders();
+
 private:
 	explicit ImGuiBridge(Rhi::DevicePtr selectedDevice, std::shared_ptr<Window> selectedWindow,
 	                     const String& layoutKey);
 
 	Result<void> Initialize();
+
+	Result<void> LoadShaders(const VirtualFileSystem& files);
 
 	Result<void> UpdateAtlas();
 
@@ -94,6 +99,7 @@ private:
 	Rhi::BufferPtr indexBuffer;
 	UnorderedMap<int, Rhi::PipelinePtr> pipelines;
 	UnorderedMap<ImTextureID, Rhi::BindGroupPtr> groups;
+	UnorderedMap<ImTextureID, Vector<Rhi::BindingResource>> textureResources;
 	UnorderedMap<ImTextureData*, ImTextureID> atlasIds;
 	ImTextureID nextTextureId = 1;
 };

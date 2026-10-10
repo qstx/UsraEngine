@@ -252,8 +252,7 @@ void TestEngineAssetRootResolution(const std::filesystem::path& root)
 
 	std::filesystem::remove(besideExecutable);
 	const auto fallback = Ursa::ResolveEngineAssetRoot(candidates);
-	Expect(static_cast<bool>(fallback) && fallback.value == mirror,
-	       "Build mirror was not used when no adjacent assets exist");
+	Expect(!fallback, "Removed build mirror fallback was still accepted");
 
 	candidates.explicitRoot = root / "custom-assets";
 	Expect(!Ursa::ResolveEngineAssetRoot(candidates), "A missing explicit root was accepted");

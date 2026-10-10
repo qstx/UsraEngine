@@ -8,6 +8,12 @@
 
 namespace Ursa
 {
+class VirtualFileLease
+{
+public:
+	virtual ~VirtualFileLease() = default;
+};
+
 // A storage provider implements file operations for a VFS mount without
 // exposing its backing store to resource consumers.
 class VirtualFileProvider
@@ -62,6 +68,11 @@ public:
 	virtual Result<void> Rename(const String&, const String&)
 	{
 		return Result<void>::Failure("Provider does not support rename");
+	}
+
+	virtual Result<std::shared_ptr<VirtualFileLease>> AcquireExclusiveLease(const String&)
+	{
+		return Result<std::shared_ptr<VirtualFileLease>>::Failure("Provider does not support exclusive leases");
 	}
 };
 } // namespace Ursa

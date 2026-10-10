@@ -39,6 +39,7 @@ struct ShaderCompilerTools
 	std::filesystem::path dxc;
 	std::filesystem::path spirvValidator;
 	std::filesystem::path spirvCross;
+	std::filesystem::path stagingRoot;
 };
 
 class DxcShaderCompiler final

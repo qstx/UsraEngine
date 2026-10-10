@@ -1,5 +1,8 @@
 #include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
+#include <Assets/AssetImportPipeline.hpp>
+#include <Vfs/MemoryFileProvider.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Ui/ImGuiInspectorUI.hpp>
 #include <Assets/TextureDraft.hpp>
@@ -130,6 +133,14 @@ bool HasManagedScriptComponent(Scene& scene)
 
 EditorApplication::~EditorApplication()
 {
+	if (assetImportJob.valid())
+	{
+		assetImportJob.wait();
+	}
+	if (assetScanJob.valid())
+	{
+		assetScanJob.wait();
+	}
 	FinishScriptJobs();
 	play.Stop();
 #if defined(URSA_ENABLE_DOTNET)
@@ -181,7 +192,7 @@ Result<void> EditorApplication::EnsureManagedHost()
 	files.entryAssembly = path("ursa:Ursa.ManagedHost.dll");
 	files.dependencies = {path("ursa:Ursa.ManagedHost.deps.json"), path("ursa:Ursa.Runtime.dll"),
 	                      path("ursa:Ursa.Editor.dll")};
-	auto started = host.value->Start(workspace->Index().Filesystem(), files,
+	auto started = host.value->Start(workspace->ContentFiles(), files,
 	                                 [](UInt32 level, const String& message)
 	                                 {
 		                                 if (level >= static_cast<UInt32>(LogLevel::Error))
@@ -405,7 +416,12 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 			textureImportView->Close(*gui);
 		}
 		textureImportView = std::move(view.value);
-		return textureImportView->Reimport(*workspace->Database(), device, *gui);
+		auto preview = textureImportView->Reimport(*workspace->Database(), device, *gui, true);
+		if (!preview)
+		{
+			RequestAssetImport(path);
+		}
+		return preview;
 	}
 	else if (IsModelSource(path) && workspace->Database())
 	{
@@ -420,7 +436,12 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 			return Result<void>::Failure(view.error);
 		}
 		modelImportView = std::move(view.value);
-		return modelImportView->Reimport(*workspace->Database());
+		auto preview = modelImportView->Reimport(*workspace->Database(), true);
+		if (!preview)
+		{
+			RequestAssetImport(path);
+		}
+		return preview;
 	}
 	else if (path.relative.size() >= 11 && path.relative.substr(path.relative.size() - 11) == ".ursashader")
 	{
@@ -540,6 +561,11 @@ Result<void> EditorApplication::OnStart()
 
 Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, const std::filesystem::path& package)
 {
+	if (assetImportJob.valid() || assetScanJob.valid())
+	{
+		return Result<void>::Failure("Wait for asset import/discovery before changing projects");
+	}
+
 	if (scriptCheckJob.valid() && scriptCheckJob.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
 	{
 		return Result<void>::Failure("Wait for script discovery to finish before changing projects");
@@ -564,15 +590,12 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	profile.projectLibraryDirectory = root / "Library";
 	if (package.empty())
 	{
-		auto roots = ResolveEngineAssetRoots();
-		if (!roots)
+		auto sourceRoot = ResolveEngineSourceRoot();
+		if (!sourceRoot)
 		{
-			return Result<void>::Failure(roots.error);
+			return Result<void>::Failure(sourceRoot.error);
 		}
-		profile.engineDirectories = std::move(roots.value);
-#if defined(URSA_ENABLE_DOTNET)
-		profile.engineDirectories.push_back(std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path());
-#endif
+		profile.engineDirectories = {sourceRoot.value};
 	}
 	else
 	{
@@ -602,6 +625,67 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 		return Result<void>::Failure(openedResult.error);
 	}
 	auto openedWorkspace = std::move(openedResult.value);
+	if (package.empty())
+	{
+		AssetImportOptions options;
+		options.bootstrapOnly = true;
+		options.buildScripts = false;
+		auto prepared = AssetImportPipeline::Prepare(*openedWorkspace, options);
+		if (!prepared)
+		{
+			return Result<void>::Failure(prepared.error);
+		}
+		auto assigned = openedWorkspace->SetRuntimeContentView(prepared.value.runtimeFiles);
+		if (!assigned)
+		{
+			return assigned;
+		}
+	}
+	else
+	{
+		// A read-only player package has no Editor shaders or font. Prepare only
+		// SDK bootstrap content in this project's Library, without modifying the pak.
+		VirtualFileSystem bootstrapFiles;
+		auto builtinRoot = ResolveEngineSourceRoot();
+		if (!builtinRoot)
+		{
+			return Result<void>::Failure(builtinRoot.error);
+		}
+		auto mounted = bootstrapFiles.Mount(engineScheme, builtinRoot.value, MountAccess::ReadOnly);
+		if (mounted)
+		{
+			mounted = bootstrapFiles.MountProvider(projectScheme, std::make_shared<MemoryFileProvider>(),
+			                                       MountAccess::ReadWrite);
+		}
+		if (mounted)
+		{
+			auto library = DirectoryFileProvider::Open(root / "Library", true);
+			mounted = library ? bootstrapFiles.MountProvider(editorLibraryScheme, library.value, MountAccess::ReadWrite)
+			                  : Result<void>::Failure(library.error);
+		}
+		if (!mounted)
+		{
+			return mounted;
+		}
+		auto bootstrap = ProjectWorkspace::FromFilesystem(root, bootstrapFiles);
+		if (!bootstrap)
+		{
+			return Result<void>::Failure(bootstrap.error);
+		}
+		AssetImportOptions options;
+		options.bootstrapOnly = true;
+		options.buildScripts = false;
+		auto prepared = AssetImportPipeline::Prepare(*bootstrap.value, options);
+		if (!prepared)
+		{
+			return Result<void>::Failure(prepared.error);
+		}
+		auto assigned = openedWorkspace->SetRuntimeContentView(prepared.value.runtimeFiles);
+		if (!assigned)
+		{
+			return assigned;
+		}
+	}
 	auto documentsResult = EditorDocuments::Create(*openedWorkspace);
 	if (!documentsResult)
 	{
@@ -645,7 +729,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	pendingRunDocument = {};
 	requestRun = false;
 	runAfterScriptBuild = false;
-	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(files.value));
+	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(openedWorkspace->ContentFiles()));
 	documents = std::move(documentsResult.value);
 	workspace = std::move(openedWorkspace);
 	showProjectPanel = true;
@@ -673,7 +757,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 #if defined(URSA_ENABLE_DOTNET)
 	if (managedHost)
 	{
-		managedHost->SetFilesystem(workspace->Index().Filesystem());
+		managedHost->SetFilesystem(workspace->ContentFiles());
 	}
 #endif
 	scriptCheckJob = {};
@@ -734,6 +818,11 @@ void EditorApplication::DrawMainMenuBar()
 {
 	if (ImGui::BeginMainMenuBar())
 	{
+		if (!assetImportStatus.empty())
+		{
+			ImGui::TextDisabled("%s", assetImportStatus.c_str());
+			ImGui::Separator();
+		}
 		ImGui::TextUnformatted("Ursa Editor");
 		ImGui::Separator();
 		EditorDocument* current = documents ? documents->Current() : nullptr;
@@ -744,6 +833,10 @@ void EditorApplication::DrawMainMenuBar()
 			{
 				auto saved = documents->SaveCurrent();
 				workspaceError = saved ? String{} : saved.error;
+				if (saved)
+				{
+					RequestAssetImport();
+				}
 			}
 			if (ImGui::MenuItem("Close Document"))
 			{
@@ -771,8 +864,14 @@ void EditorApplication::DrawMainMenuBar()
 		if (ImGui::BeginMenu("Assets"))
 		{
 			ImGui::BeginDisabled(!workspace || play.Active());
+			ImGui::MenuItem("Auto Refresh", nullptr, &autoRefreshAssets);
+			if (ImGui::MenuItem("Reimport All"))
+			{
+				RequestAssetImport({}, true);
+			}
 			if (ImGui::MenuItem("Refresh", "Ctrl+R"))
 			{
+				RequestAssetImport();
 				auto refreshed = workspace->Refresh();
 				workspaceError = refreshed ? String{} : refreshed.error;
 				if (refreshed)
@@ -1174,7 +1273,12 @@ Result<void> EditorApplication::OpenProjectBrowserAsset(const ProjectBrowserEntr
 			textureImportView->Close(*gui);
 		}
 		textureImportView = std::move(opened.value);
-		return textureImportView->Reimport(*workspace->Database(), device, *gui);
+		auto preview = textureImportView->Reimport(*workspace->Database(), device, *gui, true);
+		if (!preview)
+		{
+			RequestAssetImport(asset.path);
+		}
+		return preview;
 	}
 	if (IsModelSource(asset.path) && workspace->Database())
 	{
@@ -1186,7 +1290,12 @@ Result<void> EditorApplication::OpenProjectBrowserAsset(const ProjectBrowserEntr
 			return Result<void>::Failure(opened.error);
 		}
 		modelImportView = std::move(opened.value);
-		return modelImportView->Reimport(*workspace->Database());
+		auto preview = modelImportView->Reimport(*workspace->Database(), true);
+		if (!preview)
+		{
+			RequestAssetImport(asset.path);
+		}
+		return preview;
 	}
 	return Result<void>::Failure("No editor is registered for " + asset.path.ToString());
 }
@@ -1210,6 +1319,7 @@ Result<void> EditorApplication::RenameProjectAsset(const VirtualPath& source, co
 	{
 		return renamed;
 	}
+	RequestAssetImport();
 	auto refreshed = workspace->Refresh();
 	if (!refreshed)
 	{
@@ -1295,6 +1405,7 @@ Result<void> EditorApplication::CreateProjectFolder(const String& requestedName)
 	{
 		return created;
 	}
+	RequestAssetImport();
 	auto refreshed = workspace->Refresh();
 	if (!refreshed)
 	{
@@ -1809,6 +1920,7 @@ Result<void> EditorApplication::OnGui()
 		ProjectBrowserActions actions;
 		actions.refresh = [this]()
 		{
+			RequestAssetImport();
 			auto refreshed = workspace->Refresh();
 			if (refreshed)
 			{
@@ -1848,15 +1960,7 @@ Result<void> EditorApplication::OnGui()
 		ImGui::BeginDisabled(play.Active());
 		if (ImGui::Button("Reimport Shader"))
 		{
-			auto imported = shaderImportView->Reimport(*workspace);
-			if (!imported)
-			{
-				inspectorError = imported.error;
-			}
-			else
-			{
-				inspectorError.clear();
-			}
+			RequestAssetImport(shaderImportView->SourcePath(), true);
 		}
 		ImGui::EndDisabled();
 		if (shaderImportView->Imported())
@@ -1880,7 +1984,9 @@ Result<void> EditorApplication::OnGui()
 	}
 	if (textureImportView && workspace && workspace->Database())
 	{
-		auto drawn = textureImportView->Draw(*workspace->Database(), device, *gui, !play.Active());
+		auto drawn =
+		    textureImportView->Draw(*workspace->Database(), device, *gui, !play.Active() && !assetImportJob.valid(),
+		                            [this](const VirtualPath& path) { RequestAssetImport(path, true); });
 		if (!drawn)
 		{
 			inspectorError = drawn.error;
@@ -1907,7 +2013,9 @@ Result<void> EditorApplication::OnGui()
 				};
 			}
 		}
-		auto drawn = modelImportView->Draw(*workspace->Database(), !play.Active(), instantiate);
+		auto drawn =
+		    modelImportView->Draw(*workspace->Database(), !play.Active() && !assetImportJob.valid(), instantiate,
+		                          [this](const VirtualPath& path) { RequestAssetImport(path, true); });
 		if (!drawn)
 		{
 			inspectorError = drawn.error;
@@ -2407,6 +2515,127 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		return Result<void>::Failure(scenePanelResult.error);
 	}
 	sceneViewPanel = std::move(scenePanelResult.value);
+	if (workspace && workspace->BuiltinDatabase())
+	{
+		AssetImportOptions options;
+		const auto root = workspace->ProjectRoot();
+		auto progress = importProgress;
+		auto initialImport = std::async(
+		    std::launch::async,
+		    [root, options, progress]()
+		    {
+			    auto project = AssetImportPipeline::OpenProject(root);
+			    return project
+			               ? AssetImportPipeline::Prepare(*project.value, options,
+			                                              [progress](UInt64 done, UInt64 total, const VirtualPath& path)
+			                                              {
+				                                              std::lock_guard<std::mutex> lock(progress->mutex);
+				                                              progress->done = done;
+				                                              progress->total = total;
+				                                              progress->path = path.ToString();
+			                                              })
+			               : Result<AssetImportReport>::Failure(project.error);
+		    });
+		while (initialImport.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+		{
+			window->PollEvents();
+			if (window->ShouldClose())
+			{
+				initialImport.wait();
+				return {};
+			}
+			if (!window->FramebufferWidth() || !window->FramebufferHeight())
+			{
+				window->WaitEvents();
+				continue;
+			}
+			auto drawn = gui->BeginFrame(1.f / 60.f, window->Width(), window->Height(), window->FramebufferWidth(),
+			                             window->FramebufferHeight());
+			if (drawn)
+			{
+				ImGui::Begin("Importing project assets");
+				std::lock_guard<std::mutex> lock(progress->mutex);
+				ImGui::ProgressBar(
+				    progress->total ? static_cast<float>(progress->done) / static_cast<float>(progress->total) : 0.f);
+				ImGui::TextUnformatted(progress->path.c_str());
+				ImGui::TextDisabled("Preparing resources and script content in project Library...");
+				ImGui::End();
+				drawn = gui->EndFrame();
+			}
+			if (drawn)
+			{
+				drawn = PresentGuiFrame();
+			}
+			if (!drawn)
+			{
+				initialImport.wait();
+				return drawn;
+			}
+		}
+		auto prepared = initialImport.get();
+		if (prepared)
+		{
+			auto refreshed = workspace->Refresh();
+			if (refreshed)
+			{
+				refreshed = workspace->Database()->ReloadImports();
+			}
+			if (refreshed)
+			{
+				refreshed = workspace->BuiltinDatabase()->ReloadImports();
+			}
+			if (!refreshed)
+			{
+				return refreshed;
+			}
+		}
+		if (!prepared)
+		{
+			URSA_LOG_ERROR("Assets", prepared.error);
+			workspaceError = prepared.error;
+		}
+		else
+		{
+			auto assigned = workspace->SetRuntimeContentView(prepared.value.runtimeFiles);
+			if (!assigned)
+			{
+				return assigned;
+			}
+			ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(workspace->ContentFiles()));
+#if defined(URSA_ENABLE_DOTNET)
+			if (managedHost)
+			{
+				managedHost->SetFilesystem(workspace->ContentFiles());
+			}
+#endif
+			auto refreshed = documents->RefreshResources();
+			if (!refreshed)
+			{
+				return refreshed;
+			}
+		}
+	}
+
+	if (workspace && workspace->BuiltinDatabase())
+	{
+		auto signature = AssetImportPipeline::SourceFingerprint(*workspace);
+		if (signature)
+		{
+			observedAssetSources = signature.value;
+		}
+		auto focused = window->Subscribe(
+		    [this](const WindowEvent& event)
+		    {
+			    if (autoRefreshAssets && event.type == WindowEventType::Focused && event.focused)
+			    {
+				    nextAssetScan = {};
+			    }
+		    });
+		if (focused)
+		{
+			assetFocusSubscription = focused.value;
+		}
+	}
 
 	project = std::make_unique<EditorProject>();
 	auto result = RegisterBuiltinComponents(project->components);
@@ -2487,6 +2716,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		}
 		Memory::TemporaryScope frameMemory;
 		URSA_PROFILE_SCOPE("Editor.Frame");
+		FinishAssetJobs();
 
 		const auto now = std::chrono::steady_clock::now();
 		const Ursa::Float32 deltaSeconds = std::chrono::duration<Ursa::Float32>(now - previous).count();
@@ -2532,74 +2762,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 
 		{
 			URSA_PROFILE_SCOPE("Editor.RenderPreparation");
-			auto acquired = swapchain->Acquire();
-			if (!acquired)
-			{
-				result = Result<void>::Failure(acquired.error);
-				break;
-			}
-			if (!acquired.value.texture)
-			{
-				continue;
-			}
-
-			auto command = device->CreateCommandList();
-			if (!command)
-			{
-				result = Result<void>::Failure(command.error);
-				break;
-			}
-			result = command.value->Begin();
-			if (result)
-			{
-				result = command.value->Barrier(acquired.value.texture, acquired.value.initialState,
-				                                Rhi::ResourceState::ColorAttachment);
-			}
-			Rhi::RenderTarget target;
-			target.color = acquired.value.texture;
-			if (result)
-			{
-				result = command.value->BeginRendering(target);
-			}
-			if (result)
-			{
-				result = gui->Record(command.value, swapchain->Format(), acquired.value.texture->desc.width,
-				                     acquired.value.texture->desc.height);
-			}
-			if (result)
-			{
-				result = command.value->EndRendering();
-			}
-			if (result)
-			{
-				result = command.value->Barrier(acquired.value.texture, Rhi::ResourceState::ColorAttachment,
-				                                Rhi::ResourceState::Present);
-			}
-			if (result)
-			{
-				result = command.value->End();
-			}
-			Rhi::FencePtr submittedFence;
-			if (result)
-			{
-				auto submitted = device->Submit(command.value, swapchain);
-				if (!submitted)
-				{
-					result = Result<void>::Failure(submitted.error);
-				}
-				else
-				{
-					submittedFence = std::move(submitted.value);
-				}
-			}
-			if (result)
-			{
-				result = swapchain->Present();
-			}
-			if (result)
-			{
-				result = submittedFence->Wait();
-			}
+			result = PresentGuiFrame();
 			if (result)
 			{
 				URSA_PROFILE_FRAME("Editor");
@@ -2645,11 +2808,271 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	hierarchy.ClearSelection();
 	sceneViewPanel.reset();
 	materialPreview.reset();
+	if (assetImportJob.valid())
+	{
+		assetImportJob.wait();
+	}
+	if (assetScanJob.valid())
+	{
+		assetScanJob.wait();
+	}
+	if (assetFocusSubscription)
+	{
+		window->Unsubscribe(assetFocusSubscription);
+		assetFocusSubscription = 0;
+	}
 	gui.reset();
 	project.reset();
 	swapchain.reset();
 	device.reset();
 	window.reset();
 	return result ? idle : result;
+}
+
+Result<void> EditorApplication::PresentGuiFrame()
+{
+	Result<void> result;
+	auto acquired = swapchain->Acquire();
+	if (!acquired)
+	{
+		result = Result<void>::Failure(acquired.error);
+		return result;
+	}
+	if (!acquired.value.texture)
+	{
+		return {};
+	}
+
+	auto command = device->CreateCommandList();
+	if (!command)
+	{
+		result = Result<void>::Failure(command.error);
+		return result;
+	}
+	result = command.value->Begin();
+	if (result)
+	{
+		result = command.value->Barrier(acquired.value.texture, acquired.value.initialState,
+		                                Rhi::ResourceState::ColorAttachment);
+	}
+	Rhi::RenderTarget target;
+	target.color = acquired.value.texture;
+	if (result)
+	{
+		result = command.value->BeginRendering(target);
+	}
+	if (result)
+	{
+		result = gui->Record(command.value, swapchain->Format(), acquired.value.texture->desc.width,
+		                     acquired.value.texture->desc.height);
+	}
+	if (result)
+	{
+		result = command.value->EndRendering();
+	}
+	if (result)
+	{
+		result = command.value->Barrier(acquired.value.texture, Rhi::ResourceState::ColorAttachment,
+		                                Rhi::ResourceState::Present);
+	}
+	if (result)
+	{
+		result = command.value->End();
+	}
+	Rhi::FencePtr submittedFence;
+	if (result)
+	{
+		auto submitted = device->Submit(command.value, swapchain);
+		if (!submitted)
+		{
+			result = Result<void>::Failure(submitted.error);
+		}
+		else
+		{
+			submittedFence = std::move(submitted.value);
+		}
+	}
+	if (result)
+	{
+		result = swapchain->Present();
+	}
+	if (result)
+	{
+		result = submittedFence->Wait();
+	}
+	return result;
+}
+
+void EditorApplication::RequestAssetImport(const VirtualPath& scope, bool force)
+{
+	requestedImportScope = assetImportRequested && requestedImportScope != scope ? VirtualPath{} : scope;
+	forceAssetImport = forceAssetImport || force;
+	assetImportRequested = true;
+	assetRequestDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+}
+
+void EditorApplication::FinishAssetJobs()
+{
+	if (!workspace || !workspace->BuiltinDatabase())
+	{
+		return;
+	}
+	if (!play.Active() && assetImportJob.valid() &&
+	    assetImportJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	{
+		auto result = assetImportJob.get();
+		if (!result)
+		{
+			assetImportStatus = result.error;
+			workspaceError = result.error;
+			URSA_LOG_ERROR("Assets", result.error);
+			if (result.error.find("during import") != String::npos ||
+			    result.error.find("refresh and retry") != String::npos)
+			{
+				RequestAssetImport();
+			}
+		}
+		else
+		{
+			auto ready = device->WaitIdle();
+			if (ready)
+			{
+				ready = workspace->Refresh();
+			}
+			if (ready)
+			{
+				ready = workspace->Database()->ReloadImports();
+			}
+			if (ready)
+			{
+				ready = workspace->BuiltinDatabase()->ReloadImports();
+			}
+			if (ready)
+			{
+				ready = workspace->SetRuntimeContentView(result.value.runtimeFiles);
+			}
+			if (ready)
+			{
+				ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(workspace->ContentFiles()));
+#if defined(URSA_ENABLE_DOTNET)
+				if (managedHost)
+				{
+					managedHost->SetFilesystem(workspace->ContentFiles());
+				}
+#endif
+				ready = documents->RefreshResources();
+				if (ready)
+				{
+					ready = gui->ReloadShaders();
+				}
+			}
+			if (ready && sceneViewPanel)
+			{
+				ready = sceneViewPanel->ReloadResources();
+			}
+			if (ready && materialPreview)
+			{
+				auto preview = MaterialPreview::Create(device, *gui);
+				if (preview)
+				{
+					materialPreview = std::move(preview.value);
+				}
+				else
+				{
+					ready = Result<void>::Failure(preview.error);
+				}
+			}
+#if defined(URSA_ENABLE_DOTNET)
+			if (managedHost)
+			{
+				managedHost->SetFilesystem(workspace->ContentFiles());
+			}
+#endif
+			assetImportStatus = ready ? String("Assets are up to date") : ready.error;
+			workspaceError = ready ? String{} : ready.error;
+			if (!ready)
+			{
+				URSA_LOG_ERROR("Assets", ready.error);
+			}
+			workspace->Refresh();
+			if (textureImportView)
+			{
+				textureImportView->Reimport(*workspace->Database(), device, *gui, true);
+			}
+			if (modelImportView)
+			{
+				modelImportView->Reimport(*workspace->Database(), true);
+			}
+			if (shaderImportView)
+			{
+				shaderImportView->Reimport(*workspace, false);
+			}
+			auto signature = AssetImportPipeline::SourceFingerprint(*workspace);
+			if (signature)
+			{
+				observedAssetSources = signature.value;
+			}
+			auto refreshed = projectBrowser.Refresh(*workspace);
+			if (!refreshed)
+			{
+				workspaceError = refreshed.error;
+			}
+		}
+	}
+	if (assetImportJob.valid())
+	{
+		std::lock_guard<std::mutex> lock(importProgress->mutex);
+		assetImportStatus = "Importing " + ToUrsaString(std::to_string(importProgress->done)) + "/" +
+		                    ToUrsaString(std::to_string(importProgress->total)) + " " + importProgress->path;
+	}
+	if (assetScanJob.valid() && assetScanJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	{
+		auto signature = assetScanJob.get();
+		if (signature && signature.value != observedAssetSources)
+		{
+			observedAssetSources = signature.value;
+			RequestAssetImport();
+		}
+		else if (!signature)
+		{
+			assetImportStatus = signature.error;
+		}
+	}
+	if (assetImportRequested && !assetImportJob.valid() && !ScriptWorkPending() && !play.Active() &&
+	    std::chrono::steady_clock::now() >= assetRequestDeadline)
+	{
+		AssetImportOptions options;
+		options.scope = requestedImportScope;
+		options.force = forceAssetImport;
+		forceAssetImport = false;
+		const auto root = workspace->ProjectRoot();
+		assetImportRequested = false;
+		assetImportStatus = "Importing assets...";
+		auto progress = importProgress;
+		assetImportJob = std::async(std::launch::async,
+		                            [root, options, progress]()
+		                            {
+			                            auto project = AssetImportPipeline::OpenProject(root);
+			                            return project
+			                                       ? AssetImportPipeline::Prepare(
+			                                             *project.value, options,
+			                                             [progress](UInt64 done, UInt64 total, const VirtualPath& path)
+			                                             {
+				                                             std::lock_guard<std::mutex> lock(progress->mutex);
+				                                             progress->done = done;
+				                                             progress->total = total;
+				                                             progress->path = path.ToString();
+			                                             })
+			                                       : Result<AssetImportReport>::Failure(project.error);
+		                            });
+	}
+	const auto now = std::chrono::steady_clock::now();
+	if (autoRefreshAssets && !assetImportJob.valid() && !assetScanJob.valid() && now >= nextAssetScan)
+	{
+		nextAssetScan = now + std::chrono::seconds(2);
+		VirtualFileSystem sources = workspace->Index().Filesystem();
+		assetScanJob =
+		    std::async(std::launch::async, [sources]() { return AssetImportPipeline::SourceFingerprint(sources); });
+	}
 }
 } // namespace Ursa::Editor

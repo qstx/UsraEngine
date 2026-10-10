@@ -124,8 +124,9 @@ Result<BuildResourceManifest> ReadBuildResourceManifest(const VirtualFileSystem&
 	auto text = files.ReadText(path.value);
 	if (!text)
 	{
-		return Result<BuildResourceManifest>::Failure("Missing engine build manifest: " + path.value.ToString() +
-		                                              "; rebuild UrsaEngineResources. " + text.error);
+		return Result<BuildResourceManifest>::Failure(
+		    "Missing engine build manifest: " + path.value.ToString() +
+		    "; run UrsaAssetImport --project <project> and use its prepared content view. " + text.error);
 	}
 	try
 	{
@@ -213,8 +214,9 @@ Result<BuildResourceManifest> ValidateBuildResources(const VirtualFileSystem& fi
 		auto bytes = files.Read(path);
 		if (!bytes || bytes.value.size() != record.size || BuildResourceFingerprint(bytes.value) != record.fingerprint)
 		{
-			return Result<BuildResourceManifest>::Failure("Missing or invalid engine resource " + path.ToString() +
-			                                              " for " + configuration + "; rebuild UrsaEngineResources");
+			return Result<BuildResourceManifest>::Failure(
+			    "Missing or invalid engine resource " + path.ToString() + " for " + configuration +
+			    "; run UrsaAssetImport --project <project> and use its prepared content view");
 		}
 	}
 	if (manifest.value.managed)
@@ -234,8 +236,9 @@ Result<BuildResourceManifest> ValidateBuildResources(const VirtualFileSystem& fi
 		auto inputs = SnapshotBuildResourceFiles(*sources, sourceScheme);
 		if (!inputs || !EqualBuildResourceFiles(inputs.value, manifest.value.inputs))
 		{
-			return Result<BuildResourceManifest>::Failure("Engine resources are stale for " + configuration +
-			                                              "; rebuild UrsaEngineResources");
+			return Result<BuildResourceManifest>::Failure(
+			    "Engine resources are stale for " + configuration +
+			    "; run UrsaAssetImport --project <project> and use its prepared content view");
 		}
 	}
 	return manifest;

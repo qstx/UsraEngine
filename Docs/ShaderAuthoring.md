@@ -1,6 +1,6 @@
 # Shader authoring
 
-引擎内置 Shader 产物位于 `Build/Resources/<配置>`，编译缓存位于 `Build/Intermediate/ShaderCompileCache`；项目 Shader 使用项目 Library。删除生成文件后的恢复流程见 [构建资源与项目缓存](BuildResources.md)。
+内置与项目 Shader 的产物及编译缓存均位于项目 Library，由 Editor 或显式导入工具生成。程序构建不编译 Shader；参见 [项目资源导入管线](AssetImportPipeline.md)。
 
 Ursa shader source uses the versioned `.ursashader` format and declares a stable resource `ID` alongside its name. The syntax follows common Unity ShaderLab structure, while the program blocks contain HLSL compiled by the Engine's offline importer. Unity `.shader` files and Shader Graph assets are not imported.
 

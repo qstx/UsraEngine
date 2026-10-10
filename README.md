@@ -148,8 +148,8 @@ The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). For the C# Demo pro
 
 ```powershell
 cmake -S Engine -B Engine/Build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
-cmake --build Engine/Build --parallel --config Debug --target UrsaEditor UrsaScriptPlayer UrsaScriptCompile UrsaPak
-Engine/Build/Debug/UrsaScriptCompile.exe Demo Debug
+cmake --build Engine/Build --parallel --config Debug --target UrsaEditor UrsaScriptPlayer UrsaAssetImport UrsaPak
+Engine/Build/Editor/Debug/UrsaAssetImport.exe --project Demo --configuration Debug
 ctest --test-dir Engine/Build -C Debug --output-on-failure -R 'Ursa(Project|Snake)'
 ```
 
@@ -179,13 +179,13 @@ Code uses the repository's `.clang-format` rules, including one blank line betwe
 
 ## Virtual file system
 
-引擎生成资源按配置存放于 `Build/Resources/<配置>`，编译缓存位于 `Build/Intermediate/ShaderCompileCache`。项目导入与脚本数据归属项目 Library。旧配置迁移、缺失文件恢复及打包说明见 [构建资源与项目缓存](Docs/BuildResources.md)。
+引擎内置与项目资源均在项目 Library 导入。普通程序构建不准备内容；Editor 打开项目自动准备，Player 前需显式导入。迁移、恢复及打包说明见 [项目资源导入管线](Docs/AssetImportPipeline.md)。
 
 `<Vfs/VirtualFileSystem.hpp>` addresses runtime content through `scheme:relative/path` virtual paths. The directory provider is used in Editor and loose development runs; a Pak provider serves packaged content. Reads, range reads, listing, atomic writes, and appends all pass through the VFS provider interface. `VirtualPath::Parse` rejects host drive letters, absolute paths, and any `..` segment. The directory provider checks canonical paths against its mount root, including Windows junctions.
 
 ```text
 ursa:Shaders/Renderer3D/Unlit.ursashader       -> Engine/Assets
-ursa:Shaders/Renderer3D/Unlit.ursashaderasset  -> Build/Resources/<configuration>
+ursa:Shaders/Renderer3D/Unlit.ursashaderasset  -> <project>/Library/Artifacts/<fingerprint>
 prj:Snake/Snake.ursascene              -> selected project's Assets directory
 user:Logs/UrsaEditor.log                 -> per-user application data directory
 ```

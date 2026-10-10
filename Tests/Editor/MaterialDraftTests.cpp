@@ -60,9 +60,9 @@ int main()
 		    2, 2, TextureColorSpace::Srgb, {255, 80, 20, 255, 255, 80, 20, 255, 255, 80, 20, 255, 255, 80, 20, 255}));
 		done(SaveTextureResource(root / "Assets" / "shared.ursatex", textureId, *texture));
 		Vector<ResourceMount> engineMounts;
-		for (const auto& engineRoot : Take(ResolveEngineAssetRoots()))
+		for (const auto& provider : Take(OpenEngineFileSystem()).Providers())
 		{
-			engineMounts.push_back({engineScheme, engineRoot, MountAccess::ReadOnly});
+			engineMounts.push_back({provider.scheme, {}, MountAccess::ReadOnly, provider.provider});
 		}
 		auto workspace = Take(Editor::ProjectWorkspace::Open(root, engineMounts));
 		auto documents = Take(Editor::EditorDocuments::Create(*workspace));

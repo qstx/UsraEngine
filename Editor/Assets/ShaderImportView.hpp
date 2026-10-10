@@ -12,7 +12,7 @@ class ShaderImportView final
 public:
 	static Result<std::unique_ptr<ShaderImportView>> Open(const VirtualFileSystem& filesystem, VirtualPath sourcePath);
 
-	Result<void> Reimport(ProjectWorkspace& workspace);
+	Result<void> Reimport(ProjectWorkspace& workspace, bool force = true);
 
 	const VirtualPath& SourcePath() const
 	{

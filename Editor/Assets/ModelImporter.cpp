@@ -910,7 +910,7 @@ Result<void> ModelImporter::SetSettings(AssetDatabase& database, const VirtualPa
 }
 
 Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const VirtualPath& source,
-                                                const ModelImportSettings& settings)
+                                                const ModelImportSettings& settings, bool force)
 {
 	if (!IsSupportedModel(source))
 	{
@@ -927,8 +927,9 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		return Result<ModelImportResult>::Failure(metadata.error);
 	}
 	const Json serializedSettings = settings.ToJson();
-	if (metadata.value.importer != modelImporterId || metadata.value.importerVersion != modelImporterVersion ||
-	    metadata.value.importSettings != serializedSettings)
+	if ((metadata.value.importer != modelImporterId || metadata.value.importerVersion != modelImporterVersion ||
+	     metadata.value.importSettings != serializedSettings) &&
+	    database.Filesystem().CheckWritable(source))
 	{
 		auto savedSettings =
 		    database.SetImporterSettings(source, modelImporterId, modelImporterVersion, serializedSettings);
@@ -950,7 +951,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 	}
 	auto cache = database.CheckImport(source, modelImporterId, modelImporterVersion, "model-v4", serializedSettings,
 	                                  dependencies.value);
-	if (cache && cache.value.upToDate)
+	if (!force && cache && cache.value.upToDate)
 	{
 		auto artifactPath = database.Resolve(guid, 0);
 		if (!artifactPath)

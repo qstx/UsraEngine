@@ -188,11 +188,11 @@ std::filesystem::path BuildPackage(const std::filesystem::path& root, const std:
 	const auto outputDirectory = root / packageName;
 	const auto packagePath = outputDirectory / "Content.pak";
 	std::filesystem::create_directories(outputDirectory);
+	(void)libraryRoot;
 	const std::string command = std::string("\"") + URSA_PAK_EXECUTABLE + "\" --engine \"" +
-	                            URSA_DEMO_ENGINE_ASSET_PATH + "\" --engine-generated \"" +
-	                            URSA_DEMO_ENGINE_GENERATED_ASSET_PATH + "\" --project \"" + assetsRoot.string() +
-	                            "\" --library \"" + libraryRoot.string() + "\" --configuration " +
-	                            URSA_TEST_CONFIGURATION + " --output \"" + packagePath.string() + "\"";
+	                            URSA_DEMO_ENGINE_ASSET_PATH + "\" --project-root \"" +
+	                            assetsRoot.parent_path().string() + "\" --configuration " + URSA_TEST_CONFIGURATION +
+	                            " --output \"" + packagePath.string() + "\"";
 	Expect(RunProcess(command) == 0, "UrsaPak could not package imported runtime assets");
 	return packagePath;
 }
@@ -206,8 +206,8 @@ nlohmann::json ReadArtifact(const VirtualFileSystem& filesystem, const VirtualPa
 
 void TestProvidedFbx(const std::filesystem::path& root)
 {
-	const auto assetsRoot = root / "FbxAssets";
-	const auto libraryRoot = root / "FbxLibrary";
+	const auto assetsRoot = root / "Fbx" / "Assets";
+	const auto libraryRoot = root / "Fbx" / "Library";
 	std::filesystem::create_directories(assetsRoot / "Models");
 	std::filesystem::create_directories(libraryRoot);
 	std::filesystem::copy_file(std::filesystem::u8path(URSA_DEMO_MODEL_PATH), assetsRoot / "Models" / "Cube.fbx");
@@ -308,8 +308,8 @@ void TestProvidedFbx(const std::filesystem::path& root)
 
 void TestObjMaterialDependencies(const std::filesystem::path& root)
 {
-	const auto assetsRoot = root / "ObjAssets";
-	const auto libraryRoot = root / "ObjLibrary";
+	const auto assetsRoot = root / "Obj" / "Assets";
+	const auto libraryRoot = root / "Obj" / "Library";
 	const auto textureSource = std::filesystem::u8path(URSA_DEMO_TEXTURE_PATH);
 	std::filesystem::create_directories(assetsRoot / "Models" / "Textures");
 	std::filesystem::create_directories(libraryRoot);
@@ -545,8 +545,8 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 
 void TestEmbeddedTexture(const std::filesystem::path& root)
 {
-	const auto assetsRoot = root / "EmbeddedAssets";
-	const auto libraryRoot = root / "EmbeddedLibrary";
+	const auto assetsRoot = root / "Embedded" / "Assets";
+	const auto libraryRoot = root / "Embedded" / "Library";
 	std::filesystem::create_directories(assetsRoot);
 	std::filesystem::create_directories(libraryRoot);
 	std::filesystem::copy_file(std::filesystem::u8path(URSA_ASSIMP_EMBEDDED_FBX_PATH), assetsRoot / "Embedded.fbx");
@@ -593,8 +593,8 @@ void TestSkeletalAnimationImport(const std::filesystem::path& root)
 	Expect(!ModelImporter::NormalizeSkinInfluences(1, malformedWeights, 4),
 	       "Malformed non-finite skin weight data was accepted");
 
-	const auto assetsRoot = root / "AnimatedAssets";
-	const auto libraryRoot = root / "AnimatedLibrary";
+	const auto assetsRoot = root / "Animated" / "Assets";
+	const auto libraryRoot = root / "Animated" / "Library";
 	std::filesystem::create_directories(assetsRoot);
 	std::filesystem::create_directories(libraryRoot);
 	std::filesystem::copy_file(std::filesystem::u8path(URSA_ASSIMP_ANIMATED_FBX_PATH), assetsRoot / "Animated.fbx");

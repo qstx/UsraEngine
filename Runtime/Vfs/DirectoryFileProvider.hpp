@@ -36,6 +36,8 @@ public:
 
 	Result<void> Append(const String& relativePath, const Vector<Ursa::UInt8>& bytes, bool createDirectories) override;
 
+	Result<std::shared_ptr<VirtualFileLease>> AcquireExclusiveLease(const String& relativePath) override;
+
 	Result<void> CreateDirectory(const String& relativePath) override;
 
 	Result<void> RemoveDirectory(const String& relativePath, bool removeEmptyChildren) override;

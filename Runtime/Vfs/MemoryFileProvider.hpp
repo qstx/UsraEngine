@@ -9,7 +9,42 @@ namespace Ursa
 // Private staging store for validation before an atomic persistent commit.
 class MemoryFileProvider final : public VirtualFileProvider
 {
+private:
+	struct LeaseState
+	{
+		std::mutex mutex;
+		Set<String> paths;
+	};
+
+	class Lease final : public VirtualFileLease
+	{
+	public:
+		Lease(std::shared_ptr<LeaseState> state, String path) : state(std::move(state)), path(std::move(path))
+		{
+		}
+
+		~Lease() override
+		{
+			std::lock_guard<std::mutex> lock(state->mutex);
+			state->paths.erase(path);
+		}
+
+	private:
+		std::shared_ptr<LeaseState> state;
+		String path;
+	};
+
 public:
+	Result<std::shared_ptr<VirtualFileLease>> AcquireExclusiveLease(const String& path) override
+	{
+		std::lock_guard<std::mutex> lock(leaseState->mutex);
+		if (!leaseState->paths.insert(path).second)
+		{
+			return Result<std::shared_ptr<VirtualFileLease>>::Failure("Project import is busy: " + path);
+		}
+		return Result<std::shared_ptr<VirtualFileLease>>::Success(std::make_shared<Lease>(leaseState, path));
+	}
+
 	String Identity() const override
 	{
 		return "memory:" + String(std::to_string(reinterpret_cast<UIntPtr>(this)).c_str());
@@ -83,5 +118,6 @@ private:
 	using SizeType = Ursa::Size;
 	mutable std::mutex mutex;
 	Map<String, Vector<UInt8>> files;
+	std::shared_ptr<LeaseState> leaseState = std::make_shared<LeaseState>();
 };
 } // namespace Ursa

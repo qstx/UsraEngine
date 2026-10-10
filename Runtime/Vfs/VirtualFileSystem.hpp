@@ -78,6 +78,8 @@ public:
 
 	Result<void> CheckWritable(const VirtualPath& path) const;
 
+	Result<std::shared_ptr<VirtualFileLease>> AcquireExclusiveLease(const VirtualPath& path);
+
 	// Returns a validated filename only for native platform APIs that require a path.
 	// The path must already exist in the writable user: directory provider.
 	Result<std::filesystem::path> ResolveForNativeHostInterop(const VirtualPath& path) const;

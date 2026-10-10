@@ -54,6 +54,8 @@ struct ImportedArtifactLocation
 	Ursa::UInt64 localFileId = 0;
 	String kind;
 	VirtualPath path;
+	String contentFingerprint;
+	Ursa::UInt64 size = 0;
 };
 
 struct ImportedArtifactRecord
@@ -69,6 +71,8 @@ struct ImportCacheStatus
 	bool upToDate = false;
 	String fingerprint;
 	Vector<ImportedArtifactLocation> artifacts;
+	Vector<VirtualPath> dependencies;
+	nlohmann::json settings = nlohmann::json::object();
 };
 
 class AssetDatabase final
@@ -79,6 +83,8 @@ public:
 
 	Result<void> Refresh();
 
+	Result<void> ReloadImports();
+
 	Result<void> CreateFolder(const VirtualPath& path);
 
 	Result<AssetMetadata> Metadata(const VirtualPath& path) const;
@@ -87,6 +93,8 @@ public:
 	                                 const nlohmann::json& settings);
 
 	Result<VirtualPath> Resolve(ResourceId guid, Ursa::UInt64 localFileId = 0) const;
+
+	bool Contains(ResourceId guid) const;
 
 	Result<void> ApplyGuidMigration(const Vector<AssetGuidAssignment>& assignments);
 
@@ -97,6 +105,8 @@ public:
 	Result<Vector<VirtualPath>> ImportDependencies(const VirtualPath& source, const String& importer) const;
 
 	Result<Vector<ImportedArtifactRecord>> CurrentImportedArtifacts();
+
+	Result<ImportCacheStatus> CurrentImport(const VirtualPath& source);
 
 	Result<void> PublishImport(const VirtualPath& source, const String& importer, Ursa::UInt32 importerVersion,
 	                           const String& target, const nlohmann::json& settings,
@@ -128,6 +138,10 @@ public:
 	}
 
 private:
+	struct CachedImport;
+
+	const CachedImport* FindImport(const String& guid) const;
+
 	struct FileTransfer
 	{
 		VirtualPath source;
@@ -176,7 +190,8 @@ private:
 	String sourceScheme;
 	Map<String, AssetRecord> assetsByPath;
 	Map<String, String> pathsByGuid;
-	Map<String, CachedImport> importsByGuid;
+	Map<String, CachedImport> importsByKey;
+	Map<String, String> selectedImports;
 	bool cacheLoaded = false;
 	Ursa::UInt64 revision = 0;
 };

@@ -14,6 +14,7 @@
 
 #if defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
 #include <Assets/AssetDatabase.hpp>
+#include <Assets/AssetImportPipeline.hpp>
 #if defined(URSA_ENABLE_DOTNET)
 #include <Assets/ScriptBuildService.hpp>
 #endif
@@ -326,6 +327,8 @@ int main(int argc, char** argv)
 	Vector<std::filesystem::path> sourceEngineDirectories;
 	Vector<std::filesystem::path> generatedEngineDirectories;
 	std::filesystem::path projectDirectory;
+	std::filesystem::path projectRoot;
+	String contentTarget = "WindowsVulkan";
 	std::filesystem::path libraryDirectory;
 	std::filesystem::path output;
 	std::filesystem::path looseOutput;
@@ -338,6 +341,11 @@ int main(int argc, char** argv)
 			std::cerr << "Usage: UrsaPak --engine <assets> [--engine-generated <assets>] [--project <assets>] "
 			             "[--library <Library>] --output <Content.pak>\n";
 			return 2;
+		}
+		if (option == "--target")
+		{
+			contentTarget = argv[++index];
+			continue;
 		}
 		if (option == "--configuration")
 		{
@@ -352,6 +360,10 @@ int main(int argc, char** argv)
 		else if (option == "--output")
 		{
 			output = path;
+		}
+		else if (option == "--project-root")
+		{
+			projectRoot = path;
 		}
 		else if (option == "--project")
 		{
@@ -372,6 +384,47 @@ int main(int argc, char** argv)
 			return 2;
 		}
 	}
+#if defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
+	if (!projectRoot.empty())
+	{
+		if (output.empty())
+		{
+			std::cerr << "Package output is required\n";
+			return 2;
+		}
+		auto project = Editor::AssetImportPipeline::OpenProject(
+		    projectRoot, sourceEngineDirectories.empty() ? std::filesystem::path{} : sourceEngineDirectories.front());
+		if (!project)
+		{
+			std::cerr << project.error.c_str() << '\n';
+			return 1;
+		}
+		Editor::AssetImportOptions options;
+		options.profile = "Player";
+		options.configuration = scriptConfiguration;
+		options.target = contentTarget;
+		auto prepared = Editor::AssetImportPipeline::Prepare(*project.value, options);
+		if (!prepared)
+		{
+			std::cerr << prepared.error.c_str() << '\n';
+			return 1;
+		}
+		auto packagePath = std::filesystem::absolute(output);
+		VirtualFileSystem destination;
+		auto mounted = destination.Mount("out", packagePath.parent_path(), MountAccess::ReadWrite);
+		auto path = VirtualPath::Parse("out:" + PathToUrsaString(packagePath.filename()));
+		auto built = mounted && path ? PakBuilder::Build(prepared.value.runtimeFiles, {engineScheme, projectScheme},
+		                                                 destination, path.value)
+		                             : Result<void>::Failure(mounted ? path.error : mounted.error);
+		if (!built)
+		{
+			std::cerr << built.error.c_str() << '\n';
+			return 1;
+		}
+		std::cout << "Built current project content: " << packagePath.string() << '\n';
+		return 0;
+	}
+#endif
 	if (output.empty() || engineDirectories.empty())
 	{
 		std::cerr << "Package Engine sources and output are required\n";
@@ -444,7 +497,8 @@ int main(int argc, char** argv)
 		if (files && std::any_of(files.value.begin(), files.value.end(), [](const auto& entry)
 		                         { return PathFromUrsaString(entry.path.relative).extension() == ".ursashader"; }))
 		{
-			std::cerr << "Engine Shader sources require --engine-generated Resources/<configuration>\n";
+			std::cerr << "Source packaging requires the project import pipeline; use UrsaPak --project-root <project> "
+			             "--configuration <configuration> --output <Content.pak>\n";
 			return 1;
 		}
 	}

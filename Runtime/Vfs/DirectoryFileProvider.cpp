@@ -12,12 +12,47 @@
 #include <Windows.h>
 #undef CreateDirectory
 #undef RemoveDirectory
+#else
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace Ursa
 {
 namespace
 {
+class DirectoryLease final : public VirtualFileLease
+{
+public:
+#ifdef _WIN32
+	explicit DirectoryLease(HANDLE handle) : handle(handle)
+	{
+	}
+
+	~DirectoryLease() override
+	{
+		CloseHandle(handle);
+	}
+
+private:
+	HANDLE handle;
+#else
+	explicit DirectoryLease(int handle) : handle(handle)
+	{
+	}
+
+	~DirectoryLease() override
+	{
+		flock(handle, LOCK_UN);
+		close(handle);
+	}
+
+private:
+	int handle;
+#endif
+};
+
 std::atomic<Ursa::UInt64> temporaryId{0};
 
 bool SamePart(const std::filesystem::path& left, const std::filesystem::path& right)
@@ -511,5 +546,35 @@ Result<void> DirectoryFileProvider::Rename(const String& source, const String& d
 	}
 	return error ? Result<void>::Failure("Cannot rename " + source + " to " + destination + ": " + NativeError(error))
 	             : Result<void>{};
+}
+
+Result<std::shared_ptr<VirtualFileLease>> DirectoryFileProvider::AcquireExclusiveLease(const String& relativePath)
+{
+	auto path = ResolveForWrite(relativePath);
+	if (!path)
+	{
+		return Result<std::shared_ptr<VirtualFileLease>>::Failure(path.error);
+	}
+#ifdef _WIN32
+	const HANDLE handle = CreateFileW(path.value.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
+	                                  FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		return Result<std::shared_ptr<VirtualFileLease>>::Failure("Project import is busy or cannot be locked: " +
+		                                                          relativePath);
+	}
+#else
+	const int handle = open(path.value.c_str(), O_CREAT | O_RDWR, 0600);
+	if (handle < 0 || flock(handle, LOCK_EX | LOCK_NB) != 0)
+	{
+		if (handle >= 0)
+		{
+			close(handle);
+		}
+		return Result<std::shared_ptr<VirtualFileLease>>::Failure("Project import is busy or cannot be locked: " +
+		                                                          relativePath);
+	}
+#endif
+	return Result<std::shared_ptr<VirtualFileLease>>::Success(std::make_shared<DirectoryLease>(handle));
 }
 } // namespace Ursa

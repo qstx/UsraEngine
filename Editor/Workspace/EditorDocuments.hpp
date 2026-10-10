@@ -97,6 +97,8 @@ public:
 
 	Result<void> SaveCurrent();
 
+	Result<void> RefreshResources();
+
 	Result<void> RenameCurrent(const VirtualPath& path);
 
 	void SetSaveBlocked(bool blocked)

@@ -23,6 +23,8 @@ public:
 
 	void DrawEmpty(bool& showScene, bool& showGame);
 
+	Result<void> ReloadResources();
+
 private:
 	SceneViewPanel(Rhi::DevicePtr selectedDevice, ImGuiBridge& selectedGui)
 	    : device(std::move(selectedDevice)), gui(&selectedGui)

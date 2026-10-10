@@ -337,108 +337,10 @@ Result<void> ImGuiBridge::Initialize()
 	{
 		return Result<void>::Failure("Cannot initialize an Editor font");
 	}
-	auto shaderPath = VirtualPath::Parse(String(engineScheme) + ":Shaders/Editor/ImGui.ursashaderasset");
-	if (!shaderPath)
+	auto loadedShaders = LoadShaders(engineFiles.value);
+	if (!loadedShaders)
 	{
-		return Result<void>::Failure(shaderPath.error);
-	}
-	auto shader = Shader::LoadShaderAssetResource(engineFiles.value, shaderPath.value);
-	if (!shader)
-	{
-		return Result<void>::Failure(shader.error);
-	}
-	if (shader.value.subShaders.empty() || shader.value.subShaders.front().passes.empty() ||
-	    shader.value.subShaders.front().passes.front().variants.empty())
-	{
-		return Result<void>::Failure("Imported ImGui Shader has no compiled graphics Pass");
-	}
-	const auto& subShader = shader.value.subShaders.front();
-	const auto& pass = subShader.passes.front();
-	const auto& variant = pass.variants.front();
-	for (const Shader::RenderStateDeclaration& state : subShader.renderStates)
-	{
-		auto applied =
-		    ApplyImGuiRenderState(state, blendState, cullMode, blendEnabled, depthTestEnabled, depthWriteEnabled);
-		if (!applied)
-		{
-			return applied;
-		}
-	}
-	for (const Shader::RenderStateDeclaration& state : pass.renderStates)
-	{
-		auto applied =
-		    ApplyImGuiRenderState(state, blendState, cullMode, blendEnabled, depthTestEnabled, depthWriteEnabled);
-		if (!applied)
-		{
-			return applied;
-		}
-	}
-	auto reflection = Shader::BuildShaderBindingLayout(shader.value, variant);
-	if (!reflection)
-	{
-		return Result<void>::Failure(reflection.error);
-	}
-	for (const Rhi::LayoutBinding& binding : reflection.value.descriptors)
-	{
-		if (binding.type == Rhi::BindingType::SampledTexture)
-		{
-			textureBinding = binding.binding;
-		}
-		else if (binding.type == Rhi::BindingType::Sampler)
-		{
-			samplerBinding = binding.binding;
-		}
-		else
-		{
-			return Result<void>::Failure("ImGui Shader declares an unsupported descriptor type");
-		}
-	}
-	if (reflection.value.descriptors.size() != 2)
-	{
-		return Result<void>::Failure("ImGui Shader must declare one texture and one sampler");
-	}
-	auto layoutResult = Shader::CreateShaderBindGroupLayout(reflection.value, *device);
-	if (!layoutResult)
-	{
-		return Result<void>::Failure(layoutResult.error);
-	}
-	layout = std::move(layoutResult.value);
-	for (const Shader::ShaderStageAsset& stage : variant.stages)
-	{
-		if (stage.target != Shader::ShaderTarget::VulkanSpirv)
-		{
-			return Result<void>::Failure("ImGui Shader has no Vulkan SPIR-V stage");
-		}
-		Rhi::ShaderStage stageType;
-		if (stage.stage == Shader::ProgramStage::Vertex)
-		{
-			stageType = Rhi::ShaderStage::Vertex;
-		}
-		else if (stage.stage == Shader::ProgramStage::Fragment)
-		{
-			stageType = Rhi::ShaderStage::Fragment;
-		}
-		else
-		{
-			return Result<void>::Failure("ImGui Shader cannot contain a compute stage");
-		}
-		auto created = device->CreateShader({stageType, Rhi::ShaderFormat::Spirv, stage.spirv, stage.entryPoint});
-		if (!created)
-		{
-			return Result<void>::Failure(created.error);
-		}
-		if (stage.stage == Shader::ProgramStage::Vertex)
-		{
-			vertexShader = std::move(created.value);
-		}
-		else
-		{
-			fragmentShader = std::move(created.value);
-		}
-	}
-	if (!vertexShader || !fragmentShader)
-	{
-		return Result<void>::Failure("ImGui Shader requires vertex and fragment stages");
+		return loadedShaders;
 	}
 	auto sampler = device->CreateSampler({true, false});
 	if (!sampler)
@@ -656,6 +558,157 @@ Result<void> ImGuiBridge::ClearSavedLayout()
 	return {};
 }
 
+Result<void> ImGuiBridge::LoadShaders(const VirtualFileSystem& files)
+{
+	auto shaderPath = VirtualPath::Parse(String(engineScheme) + ":Shaders/Editor/ImGui.ursashaderasset");
+	if (!shaderPath)
+	{
+		return Result<void>::Failure(shaderPath.error);
+	}
+	auto shader = Shader::LoadShaderAssetResource(files, shaderPath.value);
+	if (!shader)
+	{
+		return Result<void>::Failure(shader.error);
+	}
+	if (shader.value.subShaders.empty() || shader.value.subShaders.front().passes.empty() ||
+	    shader.value.subShaders.front().passes.front().variants.empty())
+	{
+		return Result<void>::Failure("Imported ImGui Shader has no compiled graphics Pass");
+	}
+	const auto& subShader = shader.value.subShaders.front();
+	const auto& pass = subShader.passes.front();
+	const auto& variant = pass.variants.front();
+	for (const Shader::RenderStateDeclaration& state : subShader.renderStates)
+	{
+		auto applied =
+		    ApplyImGuiRenderState(state, blendState, cullMode, blendEnabled, depthTestEnabled, depthWriteEnabled);
+		if (!applied)
+		{
+			return applied;
+		}
+	}
+	for (const Shader::RenderStateDeclaration& state : pass.renderStates)
+	{
+		auto applied =
+		    ApplyImGuiRenderState(state, blendState, cullMode, blendEnabled, depthTestEnabled, depthWriteEnabled);
+		if (!applied)
+		{
+			return applied;
+		}
+	}
+	auto reflection = Shader::BuildShaderBindingLayout(shader.value, variant);
+	if (!reflection)
+	{
+		return Result<void>::Failure(reflection.error);
+	}
+	for (const Rhi::LayoutBinding& binding : reflection.value.descriptors)
+	{
+		if (binding.type == Rhi::BindingType::SampledTexture)
+		{
+			textureBinding = binding.binding;
+		}
+		else if (binding.type == Rhi::BindingType::Sampler)
+		{
+			samplerBinding = binding.binding;
+		}
+		else
+		{
+			return Result<void>::Failure("ImGui Shader declares an unsupported descriptor type");
+		}
+	}
+	if (reflection.value.descriptors.size() != 2)
+	{
+		return Result<void>::Failure("ImGui Shader must declare one texture and one sampler");
+	}
+	auto layoutResult = Shader::CreateShaderBindGroupLayout(reflection.value, *device);
+	if (!layoutResult)
+	{
+		return Result<void>::Failure(layoutResult.error);
+	}
+	layout = std::move(layoutResult.value);
+	for (const Shader::ShaderStageAsset& stage : variant.stages)
+	{
+		if (stage.target != Shader::ShaderTarget::VulkanSpirv)
+		{
+			return Result<void>::Failure("ImGui Shader has no Vulkan SPIR-V stage");
+		}
+		Rhi::ShaderStage stageType;
+		if (stage.stage == Shader::ProgramStage::Vertex)
+		{
+			stageType = Rhi::ShaderStage::Vertex;
+		}
+		else if (stage.stage == Shader::ProgramStage::Fragment)
+		{
+			stageType = Rhi::ShaderStage::Fragment;
+		}
+		else
+		{
+			return Result<void>::Failure("ImGui Shader cannot contain a compute stage");
+		}
+		auto created = device->CreateShader({stageType, Rhi::ShaderFormat::Spirv, stage.spirv, stage.entryPoint});
+		if (!created)
+		{
+			return Result<void>::Failure(created.error);
+		}
+		if (stage.stage == Shader::ProgramStage::Vertex)
+		{
+			vertexShader = std::move(created.value);
+		}
+		else
+		{
+			fragmentShader = std::move(created.value);
+		}
+	}
+	if (!vertexShader || !fragmentShader)
+	{
+		return Result<void>::Failure("ImGui Shader requires vertex and fragment stages");
+	}
+	return {};
+}
+
+Result<void> ImGuiBridge::ReloadShaders()
+{
+	auto files = OpenEngineFileSystem();
+	if (!files)
+	{
+		return Result<void>::Failure(files.error);
+	}
+	ImGuiBridge replacement(device, {}, {});
+	auto loaded = replacement.LoadShaders(files.value);
+	if (!loaded)
+	{
+		return loaded;
+	}
+	UnorderedMap<ImTextureID, Rhi::BindGroupPtr> replacementGroups;
+	for (const auto& entry : textureResources)
+	{
+		auto resources = entry.second;
+		for (auto& resource : resources)
+		{
+			resource.binding = resource.texture ? replacement.textureBinding : replacement.samplerBinding;
+		}
+		auto group = device->CreateBindGroup({replacement.layout, std::move(resources)});
+		if (!group)
+		{
+			return Result<void>::Failure(group.error);
+		}
+		replacementGroups.emplace(entry.first, std::move(group.value));
+	}
+	layout = std::move(replacement.layout);
+	vertexShader = std::move(replacement.vertexShader);
+	fragmentShader = std::move(replacement.fragmentShader);
+	blendState = replacement.blendState;
+	cullMode = replacement.cullMode;
+	blendEnabled = replacement.blendEnabled;
+	depthTestEnabled = replacement.depthTestEnabled;
+	depthWriteEnabled = replacement.depthWriteEnabled;
+	textureBinding = replacement.textureBinding;
+	samplerBinding = replacement.samplerBinding;
+	groups = std::move(replacementGroups);
+	pipelines.clear();
+	return {};
+}
+
 Result<ImTextureID> ImGuiBridge::RegisterTexture(Rhi::TexturePtr texture, Rhi::SamplerPtr sampler)
 {
 	if (!texture || !sampler)
@@ -669,19 +722,21 @@ Result<ImTextureID> ImGuiBridge::RegisterTexture(Rhi::TexturePtr texture, Rhi::S
 	Vector<Rhi::BindingResource> resources;
 	resources.push_back({textureBinding, {}, std::move(texture), {}});
 	resources.push_back({samplerBinding, {}, {}, std::move(sampler)});
-	auto group = device->CreateBindGroup({layout, std::move(resources)});
+	auto group = device->CreateBindGroup({layout, resources});
 	if (!group)
 	{
 		return Result<ImTextureID>::Failure(group.error);
 	}
 	const ImTextureID id = nextTextureId++;
 	groups.emplace(id, std::move(group.value));
+	textureResources.emplace(id, std::move(resources));
 	return Result<ImTextureID>::Success(id);
 }
 
 void ImGuiBridge::UnregisterTexture(ImTextureID id)
 {
 	groups.erase(id);
+	textureResources.erase(id);
 }
 
 Result<void> ImGuiBridge::UploadAtlas(ImTextureData* data)

@@ -12,10 +12,11 @@ class ModelImportView final
 public:
 	static Result<std::unique_ptr<ModelImportView>> Open(VirtualPath source, ModelImportSettings settings);
 
-	Result<void> Reimport(AssetDatabase& database);
+	Result<void> Reimport(AssetDatabase& database, bool cachedOnly = false);
 
 	Result<void> Draw(AssetDatabase& database, bool canReimport = true,
-	                  const std::function<Result<void>()>& instantiate = {});
+	                  const std::function<Result<void>()>& instantiate = {},
+	                  const std::function<void(const VirtualPath&)>& requestImport = {});
 
 	Result<void> Instantiate(SceneDraft& draft) const;
 

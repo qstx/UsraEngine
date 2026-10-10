@@ -20,7 +20,8 @@ struct ShaderDependencyReport
 class ShaderSourceLibrary final
 {
 public:
-	static Result<ShaderSourceLibrary> Load(const VirtualFileSystem& filesystem, const String& scheme);
+	static Result<ShaderSourceLibrary> Load(const VirtualFileSystem& filesystem, const String& scheme,
+	                                        const VirtualPath& requestedSource = {});
 
 	const ShaderSourceAsset* Find(const String& shaderName) const;
 

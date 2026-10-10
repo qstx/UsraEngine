@@ -172,6 +172,8 @@ int main()
 		           view->Dependencies()[0] == "prj:Shaders/Includes/Shared.hlsli",
 		       "Shader import status did not report the resolved include dependency");
 		const VirtualPath independentPath = Take(VirtualPath::Parse("prj:Shaders/Independent.ursashader"));
+		auto independentView = Take(ShaderImportView::Open(workspace->Index().Filesystem(), independentPath));
+		Done(independentView->Reimport(*workspace));
 		const AssetMetadata initialMetadata = Take(workspace->Database()->Metadata(sourcePath));
 		const auto initialDependencies = Take(workspace->Database()->ImportDependencies(sourcePath, "ursa.Shader"));
 		Expect(initialMetadata.importer == "ursa.Shader" && initialDependencies.size() == 1 &&

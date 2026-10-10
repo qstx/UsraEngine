@@ -19,6 +19,7 @@
 #include <Assets/TextureImportView.hpp>
 #include <Assets/ModelImportView.hpp>
 #include <Assets/ScriptBuildService.hpp>
+#include <Assets/AssetImportPipeline.hpp>
 #include <Scripting/ManagedEditorBridge.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Scene/SceneViewPanel.hpp>
@@ -27,6 +28,7 @@
 #include <Application/PlaySession.hpp>
 #include <functional>
 #include <future>
+#include <mutex>
 #include <chrono>
 
 namespace Ursa::Scripting
@@ -91,7 +93,7 @@ protected:
 
 	bool ScriptWorkPending() const
 	{
-		return scriptBuildJob.valid() || scriptCheckJob.valid();
+		return scriptBuildJob.valid() || scriptCheckJob.valid() || (assetImportJob.valid() && !play.Active());
 	}
 
 	const String& ScriptStatus() const
@@ -143,7 +145,50 @@ protected:
 		return documents.get();
 	}
 
+	void RefreshAssets(const VirtualPath& scope = {}, bool force = false)
+	{
+		RequestAssetImport(scope, force);
+	}
+
+	bool AssetWorkPending() const
+	{
+		return assetImportRequested || assetImportJob.valid();
+	}
+
+	const String& AssetStatus() const
+	{
+		return assetImportStatus;
+	}
+
 private:
+	void FinishAssetJobs();
+
+	Result<void> PresentGuiFrame();
+
+	void RequestAssetImport(const VirtualPath& scope = {}, bool force = false);
+
+	std::future<Result<AssetImportReport>> assetImportJob;
+	std::future<Result<String>> assetScanJob;
+	String observedAssetSources;
+	String assetImportStatus;
+	VirtualPath requestedImportScope;
+	bool assetImportRequested = false;
+	bool forceAssetImport = false;
+	bool autoRefreshAssets = true;
+
+	struct ImportProgress
+	{
+		std::mutex mutex;
+		UInt64 done = 0;
+		UInt64 total = 0;
+		String path;
+	};
+
+	std::shared_ptr<ImportProgress> importProgress = std::make_shared<ImportProgress>();
+	std::chrono::steady_clock::time_point assetRequestDeadline{};
+	UInt64 assetFocusSubscription = 0;
+	std::chrono::steady_clock::time_point nextAssetScan{};
+
 	void DrawMainMenuBar();
 
 	void DrawPlayToolbar(const EditorDocument* current);

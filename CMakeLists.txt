@@ -212,13 +212,16 @@ if(MSVC)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
 endif()
 
-find_package(Vulkan 1.2 REQUIRED COMPONENTS glslc)
+find_package(Vulkan 1.2 REQUIRED)
+find_program(URSA_GLSLC_EXECUTABLE NAMES glslc HINTS "$ENV{VULKAN_SDK}/Bin")
 find_program(URSA_DXC_EXECUTABLE NAMES dxc HINTS "$ENV{VULKAN_SDK}/Bin")
 find_program(URSA_SPIRV_VAL_EXECUTABLE NAMES spirv-val HINTS "$ENV{VULKAN_SDK}/Bin")
 find_program(URSA_SPIRV_CROSS_EXECUTABLE NAMES spirv-cross HINTS "$ENV{VULKAN_SDK}/Bin")
-if(NOT URSA_DXC_EXECUTABLE OR NOT URSA_SPIRV_VAL_EXECUTABLE OR NOT URSA_SPIRV_CROSS_EXECUTABLE)
-  message(FATAL_ERROR "Shader import requires dxc, spirv-val, and spirv-cross from the Vulkan SDK")
-endif()
+foreach(tool IN ITEMS URSA_DXC_EXECUTABLE URSA_SPIRV_VAL_EXECUTABLE URSA_SPIRV_CROSS_EXECUTABLE)
+  if(NOT ${tool})
+    set(${tool} "")
+  endif()
+endforeach()
 
 include(Tools/BuildResourcePaths.cmake)
 ursa_configure_resource_paths()
@@ -238,13 +241,6 @@ add_executable(UrsaPak Tools/Pak/Main.cpp)
 target_link_libraries(UrsaPak PRIVATE Ursa::Engine)
 target_compile_definitions(UrsaPak PRIVATE URSA_BUILD_CONFIGURATION="$<CONFIG>")
 set_target_properties(UrsaPak PROPERTIES FOLDER "Tools")
-if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-  add_custom_target(UrsaEnginePackage
-    COMMAND UrsaPak --engine "${PROJECT_SOURCE_DIR}/Assets"
-      --engine-generated "${URSA_ENGINE_RESOURCES_DIR}" --configuration "$<CONFIG>"
-      --output "${CMAKE_BINARY_DIR}/Package/$<CONFIG>/Content.pak"
-    DEPENDS UrsaPak UrsaEngineResources VERBATIM)
-endif()
 
 if(URSA_BUILD_EDITOR)
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp" OR
@@ -270,7 +266,6 @@ if(URSA_BUILD_EDITOR)
     target_link_libraries(UrsaScriptPlayer PRIVATE Ursa::DotNetHost)
     target_compile_definitions(UrsaScriptPlayer PRIVATE
       URSA_SCRIPT_PLAYER_ENGINE_ASSETS="${PROJECT_SOURCE_DIR}/Assets")
-    add_dependencies(UrsaScriptPlayer UrsaEngineResources)
     ursa_attach_dotnet_host_runtime(UrsaScriptPlayer)
     set_target_properties(UrsaScriptPlayer PROPERTIES FOLDER "Tools")
     if(NOT URSA_PROJECT_DIR STREQUAL "")
@@ -300,6 +295,7 @@ endif()
 option(URSA_BUILD_TESTS "Build the engine GPU tests" ${URSA_BUILD_TESTS_DEFAULT})
 
 if(URSA_BUILD_TESTS)
+  set(URSA_TEST_SAMPLE_PROJECT "${CMAKE_BINARY_DIR}/TestProjects/Sample/$<CONFIG>")
   enable_testing()
   add_executable(UrsaProfilerCompileTests Tests/Core/ProfilerCompileTests.cpp)
   target_link_libraries(UrsaProfilerCompileTests PRIVATE Ursa::Runtime)
@@ -310,19 +306,6 @@ if(URSA_BUILD_TESTS)
   add_executable(UrsaBuildResourceManifestTests Tests/Resources/BuildResourceManifestTests.cpp)
   target_link_libraries(UrsaBuildResourceManifestTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaBuildResourceManifestTests COMMAND UrsaBuildResourceManifestTests)
-  set(URSA_PREPARATION_TEST_MANAGED_ARGUMENTS)
-  if(URSA_ENABLE_DOTNET)
-    list(APPEND URSA_PREPARATION_TEST_MANAGED_ARGUMENTS "-DMANAGED_ROOT=${URSA_MANAGED_OUTPUT_DIR}")
-  endif()
-  add_test(NAME UrsaBuildResourcePreparationTests COMMAND "${CMAKE_COMMAND}"
-    "-DENGINE_ROOT=${PROJECT_SOURCE_DIR}" "-DENGINE_SOURCE=${PROJECT_SOURCE_DIR}/Assets"
-    "-DIMPORTER=$<TARGET_FILE:UrsaShaderImporter>" "-DPAK=$<TARGET_FILE:UrsaPak>"
-    "-DDXC=${URSA_DXC_EXECUTABLE}" "-DSPIRV_VAL=${URSA_SPIRV_VAL_EXECUTABLE}"
-    "-DSPIRV_CROSS=${URSA_SPIRV_CROSS_EXECUTABLE}"
-    "-DSCRATCH=${CMAKE_BINARY_DIR}/Temp/ResourcePreparation/$<CONFIG>"
-    "-DTEST_CONFIGURATION=$<CONFIG>"
-    ${URSA_PREPARATION_TEST_MANAGED_ARGUMENTS}
-    -P "${PROJECT_SOURCE_DIR}/Tests/Resources/BuildResourcePreparationTests.cmake")
   include_directories("${CMAKE_CURRENT_SOURCE_DIR}/Tests/Fixtures")
   add_executable(UrsaResourceVfsTests Tests/Serialization/ResourceVfsTests.cpp)
   target_link_libraries(UrsaResourceVfsTests PRIVATE Ursa::Engine)
@@ -382,6 +365,20 @@ if(URSA_BUILD_TESTS)
     add_test(NAME UrsaEditorDocumentsTests COMMAND UrsaEditorDocumentsTests)
 
     add_executable(UrsaAssetDatabaseTests Tests/Editor/AssetDatabaseTests.cpp)
+    add_executable(UrsaProjectAssetDatabaseTests Tests/Editor/ProjectAssetDatabaseTests.cpp)
+    add_executable(UrsaAssetRefreshWindowTests Tests/Editor/AssetRefreshWindowTests.cpp)
+    target_link_libraries(UrsaAssetRefreshWindowTests PRIVATE Ursa::Editor)
+    ursa_attach_dotnet_host_runtime(UrsaAssetRefreshWindowTests)
+    add_test(NAME UrsaAssetRefreshWindowTests COMMAND UrsaAssetRefreshWindowTests)
+    add_executable(UrsaAssetImportPipelineTests Tests/Editor/AssetImportPipelineTests.cpp)
+    target_link_libraries(UrsaAssetImportPipelineTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaAssetImportPipelineTests COMMAND UrsaAssetImportPipelineTests)
+    add_executable(UrsaProjectShaderImportTests Tests/Editor/ProjectShaderImportTests.cpp)
+    target_link_libraries(UrsaProjectShaderImportTests PRIVATE Ursa::Editor)
+    target_compile_definitions(UrsaProjectShaderImportTests PRIVATE URSA_TEST_ENGINE_SOURCE="${PROJECT_SOURCE_DIR}/Assets")
+    add_test(NAME UrsaProjectShaderImportTests COMMAND UrsaProjectShaderImportTests)
+    target_link_libraries(UrsaProjectAssetDatabaseTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaProjectAssetDatabaseTests COMMAND UrsaProjectAssetDatabaseTests)
     target_link_libraries(UrsaAssetDatabaseTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaAssetDatabaseTests COMMAND UrsaAssetDatabaseTests)
     set_tests_properties(UrsaAssetDatabaseTests PROPERTIES
@@ -501,6 +498,9 @@ if(URSA_BUILD_TESTS)
   add_test(NAME UrsaStringInteropTests COMMAND UrsaStringInteropTests)
 
   add_executable(UrsaVirtualFileSystemTests Tests/Vfs/VirtualFileSystemTests.cpp)
+  add_executable(UrsaRuntimeContentTests Tests/Vfs/RuntimeContentTests.cpp)
+  target_link_libraries(UrsaRuntimeContentTests PRIVATE Ursa::Runtime)
+  add_test(NAME UrsaRuntimeContentTests COMMAND UrsaRuntimeContentTests)
   target_link_libraries(UrsaVirtualFileSystemTests PRIVATE Ursa::Runtime)
   add_test(NAME UrsaVirtualFileSystemTests COMMAND UrsaVirtualFileSystemTests)
 
@@ -578,7 +578,7 @@ if(URSA_BUILD_TESTS)
     COMMAND ${CMAKE_COMMAND}
       "-DURSA_PAK_EXECUTABLE=$<TARGET_FILE:UrsaPak>"
       "-DURSA_ENGINE_ASSET_SOURCE=${PROJECT_SOURCE_DIR}/Assets"
-      "-DURSA_ENGINE_ASSET_MIRROR=${URSA_ENGINE_RESOURCES_DIR}"
+      "-DURSA_TEST_PROJECT=${CMAKE_BINARY_DIR}/TestProjects/Runtime/$<CONFIG>"
       "-DURSA_CONFIGURATION=$<CONFIG>"
       "-DURSA_SHADER_PAK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/Package/$<CONFIG>"
       "-DURSA_SHADER_PAK_PATH=${URSA_SHADER_TEST_PAK}"
@@ -588,7 +588,7 @@ if(URSA_BUILD_TESTS)
   add_executable(UrsaShaderPackageTests Tests/Shader/ShaderPackageTests.cpp)
   target_link_libraries(UrsaShaderPackageTests PRIVATE Ursa::Engine)
   target_compile_definitions(UrsaShaderPackageTests PRIVATE URSA_ENGINE_SHADER_PAK="${URSA_SHADER_TEST_PAK}")
-  add_dependencies(UrsaShaderPackageTests UrsaEngineResources UrsaPak)
+  add_dependencies(UrsaShaderPackageTests UrsaPak)
   add_test(NAME UrsaShaderPackageTests COMMAND UrsaShaderPackageTests)
   set_tests_properties(UrsaShaderPackageTests PROPERTIES FIXTURES_REQUIRED UrsaShaderContentPak)
 
@@ -665,23 +665,13 @@ if(URSA_BUILD_TESTS)
   add_test(NAME UrsaRendererWindowTests COMMAND UrsaRendererWindowTests)
 
   function(ursa_test_shader target source)
-    get_filename_component(name "${source}" NAME)
-    set(input "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
-    set(output "${CMAKE_CURRENT_BINARY_DIR}/Shaders/${name}.spv")
-    add_custom_command(OUTPUT "${output}"
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/Shaders"
-      COMMAND Vulkan::glslc "${input}" -o "${output}"
-      DEPENDS "${input}" VERBATIM)
-    target_sources(${target} PRIVATE "${input}" "${output}")
-    set_source_files_properties("${input}" PROPERTIES HEADER_FILE_ONLY TRUE)
-    set_source_files_properties("${output}" PROPERTIES GENERATED TRUE HEADER_FILE_ONLY TRUE)
-    source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES "${input}")
-    source_group("Generated Shaders" FILES "${output}")
+    target_sources(${target} PRIVATE "${source}")
+    set_source_files_properties("${source}" PROPERTIES HEADER_FILE_ONLY TRUE)
   endfunction()
 
   add_executable(UrsaRhiTests Tests/Rhi/RhiTests.cpp)
   target_link_libraries(UrsaRhiTests PRIVATE Ursa::Runtime)
-  target_compile_definitions(UrsaRhiTests PRIVATE URSA_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/Shaders")
+  target_compile_definitions(UrsaRhiTests PRIVATE URSA_SHADER_DIR="${CMAKE_BINARY_DIR}/TestProjects/Runtime/$<CONFIG>/Library/TestShaders")
   ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/Test.comp)
   ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestImage.comp)
   ursa_test_shader(UrsaRhiTests Tests/Rhi/Shaders/TestVertex.vert)
@@ -731,14 +721,6 @@ if(URSA_BUILD_TESTS)
     endif()
   endforeach()
 
-  foreach(URSA_RENDERER_TEST IN ITEMS
-      UrsaMaterialDraftTests UrsaRendererTests UrsaMaterialRendererTests UrsaMaterialSceneSmoke
-      UrsaEditorPreviewTests UrsaEditorShaderImportTests UrsaShaderExampleImportTests)
-    if(TARGET ${URSA_RENDERER_TEST})
-      add_dependencies(${URSA_RENDERER_TEST} UrsaEngineResources)
-    endif()
-  endforeach()
-
   if(URSA_ENABLE_DOTNET)
     add_executable(UrsaDotNetHostTests Tests/Scripting/DotNetHostTests.cpp)
     target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::DotNetHost)
@@ -757,10 +739,10 @@ if(URSA_BUILD_TESTS)
     if(NOT URSA_PROJECT_DIR STREQUAL "")
       add_test(NAME UrsaSnakeManagedLogicTests COMMAND "${URSA_DOTNET_EXECUTABLE}" run
         --project "${PROJECT_SOURCE_DIR}/Managed/Ursa.SnakeLogicTests/Ursa.SnakeLogicTests.csproj"
-        --configuration "$<CONFIG>" "-p:UrsaProjectDir=${URSA_PROJECT_DIR}"
+        --configuration "$<CONFIG>" "-p:UrsaProjectDir=${URSA_TEST_SAMPLE_PROJECT}"
         "-p:BaseOutputPath=${CMAKE_BINARY_DIR}/ManagedTests/Snake/bin/"
         "-p:BaseIntermediateOutputPath=${CMAKE_BINARY_DIR}/ManagedTests/Snake/obj/")
-      add_test(NAME UrsaProjectScriptCompile COMMAND UrsaScriptCompile "${URSA_PROJECT_DIR}" "$<CONFIG>")
+      add_test(NAME UrsaProjectScriptCompile COMMAND UrsaAssetImport --project "${URSA_TEST_SAMPLE_PROJECT}" --configuration "$<CONFIG>")
       set_tests_properties(UrsaProjectScriptCompile PROPERTIES FIXTURES_SETUP UrsaProjectScripts)
       foreach(URSA_PROJECT_SCENE IN ITEMS Snake/Snake.ursascene Snake/SnakeSmoke.ursascene)
         if(URSA_PROJECT_SCENE MATCHES "Smoke")
@@ -769,31 +751,31 @@ if(URSA_BUILD_TESTS)
           set(URSA_PROJECT_SMOKE_NAME UrsaProjectSnakePlayerSmoke)
         endif()
         add_test(NAME ${URSA_PROJECT_SMOKE_NAME} COMMAND UrsaScriptPlayer
-          --project "${URSA_PROJECT_DIR}" --scene "${URSA_PROJECT_SCENE}" --hidden --frames 20 --stress-window)
+          --project "${URSA_TEST_SAMPLE_PROJECT}" --scene "${URSA_PROJECT_SCENE}" --hidden --frames 20 --stress-window)
         set_tests_properties(${URSA_PROJECT_SMOKE_NAME} PROPERTIES FIXTURES_REQUIRED UrsaProjectScripts
           ENVIRONMENT "URSA_USER_DATA_ROOT=${CMAKE_BINARY_DIR}/temp/ProjectUser")
       endforeach()
       add_test(NAME UrsaProjectMaterialPlayerSmoke COMMAND UrsaScriptPlayer
-        --project "${URSA_PROJECT_DIR}" --scene "MaterialShowcase.ursascene" --hidden --frames 8)
+        --project "${URSA_TEST_SAMPLE_PROJECT}" --scene "MaterialShowcase.ursascene" --hidden --frames 8)
       set_tests_properties(UrsaProjectMaterialPlayerSmoke PROPERTIES FIXTURES_REQUIRED UrsaProjectScripts
         ENVIRONMENT "URSA_USER_DATA_ROOT=${CMAKE_BINARY_DIR}/temp/ProjectUser")
-      add_test(NAME UrsaProjectMaterialEditorSmoke COMMAND UrsaEditor --project "${URSA_PROJECT_DIR}"
+      add_test(NAME UrsaProjectMaterialEditorSmoke COMMAND UrsaEditor --project "${URSA_TEST_SAMPLE_PROJECT}"
         --scene "MaterialShowcase.ursascene" --hidden --frames 5)
       set_tests_properties(UrsaProjectMaterialEditorSmoke PROPERTIES FIXTURES_REQUIRED UrsaProjectScripts
         ENVIRONMENT "URSA_USER_DATA_ROOT=${CMAKE_BINARY_DIR}/temp/EditorProjectUser")
-      add_test(NAME UrsaProjectEditorOpenSmoke COMMAND UrsaEditor --project "${URSA_PROJECT_DIR}"
+      add_test(NAME UrsaProjectEditorOpenSmoke COMMAND UrsaEditor --project "${URSA_TEST_SAMPLE_PROJECT}"
         --scene "Snake/Snake.ursascene" --hidden --frames 5)
       set_tests_properties(UrsaProjectEditorOpenSmoke PROPERTIES FIXTURES_REQUIRED UrsaProjectScripts
         ENVIRONMENT "URSA_USER_DATA_ROOT=${CMAKE_BINARY_DIR}/temp/EditorProjectUser")
       add_executable(UrsaProjectScenePrefabRoundTripTests Tests/Scripting/ProjectScenePrefabRoundTripTests.cpp)
       target_link_libraries(UrsaProjectScenePrefabRoundTripTests PRIVATE Ursa::Engine)
       target_compile_definitions(UrsaProjectScenePrefabRoundTripTests PRIVATE
-        URSA_PROJECT_ASSETS_DIR="${URSA_PROJECT_DIR}/Assets")
+        URSA_PROJECT_ASSETS_DIR="${URSA_TEST_SAMPLE_PROJECT}/Assets")
       add_test(NAME UrsaProjectScenePrefabRoundTripTests COMMAND UrsaProjectScenePrefabRoundTripTests)
       if(TARGET Ursa::Editor)
         add_executable(UrsaProjectPlaySessionTests Tests/Scripting/ProjectPlaySessionTests.cpp)
         target_link_libraries(UrsaProjectPlaySessionTests PRIVATE Ursa::Editor Ursa::DotNetHost)
-        target_compile_definitions(UrsaProjectPlaySessionTests PRIVATE URSA_PROJECT_DIR="${URSA_PROJECT_DIR}")
+        target_compile_definitions(UrsaProjectPlaySessionTests PRIVATE URSA_PROJECT_DIR="${URSA_TEST_SAMPLE_PROJECT}")
         add_dependencies(UrsaProjectPlaySessionTests UrsaManagedHostAssemblies)
         ursa_attach_dotnet_host_runtime(UrsaProjectPlaySessionTests)
         add_test(NAME UrsaProjectPlaySessionTests COMMAND UrsaProjectPlaySessionTests)
@@ -802,7 +784,7 @@ if(URSA_BUILD_TESTS)
         add_executable(UrsaProjectEditorExtensionsTests Tests/Scripting/ProjectEditorExtensionsTests.cpp)
         target_link_libraries(UrsaProjectEditorExtensionsTests PRIVATE Ursa::DotNetHost)
         target_compile_definitions(UrsaProjectEditorExtensionsTests PRIVATE
-          URSA_PROJECT_DIR="${URSA_PROJECT_DIR}"
+          URSA_PROJECT_DIR="${URSA_TEST_SAMPLE_PROJECT}"
           URSA_DOTNET_RUNTIME_ASSEMBLY_PATH="${URSA_MANAGED_OUTPUT_DIR}/Ursa.Runtime.dll")
         add_dependencies(UrsaProjectEditorExtensionsTests UrsaManagedHostAssemblies)
         ursa_attach_dotnet_host_runtime(UrsaProjectEditorExtensionsTests)
@@ -810,20 +792,19 @@ if(URSA_BUILD_TESTS)
         set_tests_properties(UrsaProjectEditorExtensionsTests PROPERTIES FIXTURES_REQUIRED UrsaProjectScripts
           ENVIRONMENT "URSA_USER_DATA_ROOT=${CMAKE_BINARY_DIR}/temp/EditorExtensionUser")
       endif()
-      add_test(NAME UrsaProjectPackageScriptCompile COMMAND UrsaScriptCompile "${URSA_PROJECT_DIR}" "$<CONFIG>")
+      add_test(NAME UrsaProjectPackageScriptCompile COMMAND UrsaScriptCompile "${URSA_TEST_SAMPLE_PROJECT}" "$<CONFIG>")
       set_tests_properties(UrsaProjectPackageScriptCompile PROPERTIES FIXTURES_SETUP UrsaProjectPackageScripts)
       add_executable(UrsaProjectLibraryRecoveryTests Tests/Resources/ProjectLibraryRecoveryTests.cpp)
       target_link_libraries(UrsaProjectLibraryRecoveryTests PRIVATE Ursa::Editor)
       target_compile_definitions(UrsaProjectLibraryRecoveryTests PRIVATE
-        URSA_PROJECT_DIR="${URSA_PROJECT_DIR}"
+        URSA_PROJECT_DIR="${URSA_TEST_SAMPLE_PROJECT}"
         URSA_TEST_SCRATCH_ROOT="${CMAKE_BINARY_DIR}/Temp/ProjectLibraryRecovery/$<CONFIG>")
       ursa_attach_dotnet_host_runtime(UrsaProjectLibraryRecoveryTests)
       add_test(NAME UrsaProjectLibraryRecoveryTests COMMAND UrsaProjectLibraryRecoveryTests)
-      add_test(NAME UrsaProjectImportPrepare COMMAND UrsaProjectLibraryRecoveryTests --prepare "${URSA_PROJECT_DIR}")
+      add_test(NAME UrsaProjectImportPrepare COMMAND UrsaAssetImport --project "${URSA_TEST_SAMPLE_PROJECT}" --configuration "$<CONFIG>")
       set_tests_properties(UrsaProjectImportPrepare PROPERTIES FIXTURES_SETUP UrsaProjectImports)
       add_test(NAME UrsaProjectPackage COMMAND UrsaPak
-        --engine "${PROJECT_SOURCE_DIR}/Assets" --engine-generated "${URSA_ENGINE_RESOURCES_DIR}"
-        --project "${URSA_PROJECT_DIR}/Assets" --library "${URSA_PROJECT_DIR}/Library"
+        --project-root "${URSA_TEST_SAMPLE_PROJECT}"
         --configuration "$<CONFIG>" --output "${CMAKE_BINARY_DIR}/Package/$<CONFIG>/ProjectContent.pak")
       set_tests_properties(UrsaProjectPackage PROPERTIES FIXTURES_SETUP UrsaProjectPak
         FIXTURES_REQUIRED "UrsaProjectScripts;UrsaProjectPackageScripts;UrsaProjectImports")
@@ -836,44 +817,78 @@ if(URSA_BUILD_TESTS)
         add_executable(UrsaProjectTextureImportTests Tests/Assets/ProjectTextureImportTests.cpp)
         target_link_libraries(UrsaProjectTextureImportTests PRIVATE Ursa::Editor)
         target_compile_definitions(UrsaProjectTextureImportTests PRIVATE
-          URSA_DEMO_TEXTURE_PATH="${URSA_PROJECT_DIR}/Assets/Textures/UrsaEngine.png")
+          URSA_DEMO_TEXTURE_PATH="${URSA_TEST_SAMPLE_PROJECT}/Assets/Textures/UrsaEngine.png")
         add_test(NAME UrsaProjectTextureImportTests COMMAND UrsaProjectTextureImportTests)
         add_executable(UrsaProjectModelImportTests Tests/Assets/ProjectModelImportTests.cpp)
         target_link_libraries(UrsaProjectModelImportTests PRIVATE Ursa::Editor)
         target_compile_definitions(UrsaProjectModelImportTests PRIVATE
-          URSA_DEMO_MODEL_PATH="${URSA_PROJECT_DIR}/Assets/Models/Cube.fbx"
-          URSA_DEMO_TEXTURE_PATH="${URSA_PROJECT_DIR}/Assets/Textures/UrsaEngine.png"
+          URSA_DEMO_MODEL_PATH="${URSA_TEST_SAMPLE_PROJECT}/Assets/Models/Cube.fbx"
+          URSA_DEMO_TEXTURE_PATH="${URSA_TEST_SAMPLE_PROJECT}/Assets/Textures/UrsaEngine.png"
           URSA_ASSIMP_EMBEDDED_FBX_PATH="${PROJECT_SOURCE_DIR}/third_party/assimp/test/models/FBX/embedded_ascii/box_embedded_texture_fragmented.fbx"
           URSA_ASSIMP_ANIMATED_FBX_PATH="${PROJECT_SOURCE_DIR}/third_party/assimp/test/models/FBX/animation_with_skeleton.fbx"
           URSA_PAK_EXECUTABLE="$<TARGET_FILE:UrsaPak>"
           URSA_DEMO_ENGINE_ASSET_PATH="${PROJECT_SOURCE_DIR}/Assets"
-          URSA_DEMO_ENGINE_GENERATED_ASSET_PATH="${URSA_ENGINE_RESOURCES_DIR}"
           URSA_TEST_CONFIGURATION="$<CONFIG>")
-        add_dependencies(UrsaProjectModelImportTests UrsaPak UrsaEngineResources)
+        add_dependencies(UrsaProjectModelImportTests UrsaPak)
         add_test(NAME UrsaProjectModelImportTests COMMAND UrsaProjectModelImportTests)
       endif()
     endif()
   endif()
 endif()
 
-function(ursa_attach_resource_consumers directory)
-  get_property(resourceTargets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
-  foreach(resourceTarget IN LISTS resourceTargets)
-    get_target_property(resourceTargetType ${resourceTarget} TYPE)
-    get_target_property(resourceLinks ${resourceTarget} LINK_LIBRARIES)
-    if(resourceTargetType STREQUAL "EXECUTABLE" AND NOT resourceTarget STREQUAL "UrsaShaderImporter" AND
-       resourceLinks MATCHES "Ursa::(Engine|Editor|DotNetHost)")
-      add_dependencies(${resourceTarget} UrsaEngineResources)
+
+if(URSA_BUILD_TESTS AND TARGET UrsaAssetImport)
+  set(URSA_TEST_CONTENT_PROJECT "${CMAKE_BINARY_DIR}/TestProjects/Runtime/$<CONFIG>")
+  add_test(NAME UrsaTestContentPrepare COMMAND "${CMAKE_COMMAND}"
+    "-DPROJECT=${URSA_TEST_CONTENT_PROJECT}" "-DIMPORTER=$<TARGET_FILE:UrsaAssetImport>"
+    "-DCONFIGURATION=$<CONFIG>" "-DGLSLC=${URSA_GLSLC_EXECUTABLE}"
+    "-DSHADER_SOURCES=${PROJECT_SOURCE_DIR}/Tests/Rhi/Shaders"
+    -P "${PROJECT_SOURCE_DIR}/Tests/Resources/PrepareTestContent.cmake")
+  set_tests_properties(UrsaTestContentPrepare PROPERTIES FIXTURES_SETUP UrsaTestContent)
+  if(NOT URSA_PROJECT_DIR STREQUAL "")
+    add_test(NAME UrsaTestSamplePrepare COMMAND "${CMAKE_COMMAND}"
+      "-DSOURCE=${URSA_PROJECT_DIR}/Assets" "-DPROJECT=${URSA_TEST_SAMPLE_PROJECT}"
+      "-DIMPORTER=$<TARGET_FILE:UrsaAssetImport>" "-DCONFIGURATION=$<CONFIG>"
+      -P "${PROJECT_SOURCE_DIR}/Tests/Resources/PrepareSampleProject.cmake")
+    set_tests_properties(UrsaTestSamplePrepare PROPERTIES FIXTURES_SETUP UrsaTestSample)
+    if(TARGET UrsaScriptPlayer)
+      find_program(URSA_POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
+      add_test(NAME UrsaAssetImportCliTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
+        -File "${PROJECT_SOURCE_DIR}/Tests/Resources/AssetImportCliTests.ps1"
+        -Importer "$<TARGET_FILE:UrsaAssetImport>" -Player "$<TARGET_FILE:UrsaScriptPlayer>"
+        -PackageTool "$<TARGET_FILE:UrsaPak>" -Configuration "$<CONFIG>"
+        -Project "${CMAKE_BINARY_DIR}/TestProjects/Cli/$<CONFIG>" -Source "${URSA_TEST_SAMPLE_PROJECT}")
+    endif()
+
+  endif()
+  # Fixtures execute tools, so compiling a test also builds their programs;
+  # these dependencies never execute content preparation.
+  get_property(ursaFixtureConsumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(consumer IN LISTS ursaFixtureConsumers)
+    get_target_property(type ${consumer} TYPE)
+    if(type STREQUAL "EXECUTABLE" AND consumer MATCHES "(Tests|Smoke)$")
+      add_dependencies(${consumer} UrsaAssetImport UrsaPak)
     endif()
   endforeach()
-  get_property(resourceChildren DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
-  foreach(resourceChild IN LISTS resourceChildren)
-    if(NOT resourceChild MATCHES "/third_party(/|$)")
-      ursa_attach_resource_consumers("${resourceChild}")
+  get_property(ursaTests DIRECTORY PROPERTY TESTS)
+  foreach(test IN LISTS ursaTests)
+    if(NOT test STREQUAL "UrsaTestContentPrepare" AND NOT test STREQUAL "UrsaTestSamplePrepare")
+      if(TEST UrsaTestSamplePrepare)
+        set_property(TEST ${test} APPEND PROPERTY FIXTURES_REQUIRED UrsaTestSample)
+      endif()
+      set_property(TEST ${test} APPEND PROPERTY FIXTURES_REQUIRED UrsaTestContent)
+      set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT "URSA_CONTENT_PROJECT=${URSA_TEST_CONTENT_PROJECT}")
     endif()
   endforeach()
-endfunction()
-ursa_attach_resource_consumers("${CMAKE_CURRENT_SOURCE_DIR}")
+
+endif()
+
+if(TARGET UrsaAssetImport AND NOT URSA_PROJECT_DIR STREQUAL "")
+  add_custom_target(UrsaEnginePackage
+    COMMAND UrsaPak --project-root "${URSA_PROJECT_DIR}" --configuration "$<CONFIG>"
+      --output "${CMAKE_BINARY_DIR}/Package/$<CONFIG>/Content.pak"
+    DEPENDS UrsaPak VERBATIM)
+endif()
 
 if(TEST UrsaManagedEditorWorkflowTests)
   set_tests_properties(UrsaManagedEditorWorkflowTests PROPERTIES

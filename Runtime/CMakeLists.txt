@@ -24,7 +24,7 @@ target_link_libraries(UrsaRuntime PRIVATE nlohmann_json::nlohmann_json)
 target_compile_definitions(UrsaRuntime PRIVATE GLFW_INCLUDE_NONE)
 target_compile_definitions(UrsaRuntime PRIVATE
   URSA_ENGINE_ASSET_SOURCE_DIR="${PROJECT_SOURCE_DIR}/Assets"
-  URSA_ENGINE_RESOURCES_DIR="${URSA_ENGINE_RESOURCES_DIR}"
+  URSA_ENGINE_FRAMEWORK_DIR="${CMAKE_BINARY_DIR}/Managed/$<CONFIG>"
   URSA_BUILD_CONFIGURATION="$<CONFIG>")
 
 if(MSVC)

@@ -93,18 +93,15 @@ From the workspace root after configuring Engine with `-DURSA_PROJECT_DIR=Demo`:
 
 ```powershell
 cmake --build Engine/Build --parallel --config Debug --target UrsaPak UrsaScriptPlayer UrsaEditor
-Engine/Build/Debug/UrsaScriptCompile.exe Demo Debug
-Engine/Build/Debug/UrsaPak.exe --engine Engine/Assets --engine-generated Engine/Build/Resources/Debug `
-  --project Demo/Assets --library Demo/Library --configuration Debug `
+Engine/Build/Editor/Debug/UrsaAssetImport.exe --project Demo --configuration Debug
+Engine/Build/Debug/UrsaPak.exe --project-root Demo --configuration Debug `
   --output Engine/Build/Package/Debug/Content.pak
 Engine/Build/Debug/UrsaScriptPlayer.exe --project Demo --scene Snake/Snake.ursascene
 Engine/Build/Debug/UrsaScriptPlayer.exe --pak Engine/Build/Package/Debug/Content.pak --scene Snake/Snake.ursascene
 Engine/Build/Editor/Debug/UrsaEditor.exe --project Demo --scene Snake/Snake.ursascene
 ```
 
-When invoking `UrsaPak` directly for a project, pass `--library <Project/Library>`
-to include imported textures, models, materials, skeletons, and clips. Runtime
-resolves those references from the packaged catalog and does not mount `lib:`.
+项目内容构建使用 `UrsaPak --project-root <项目>`，共享管线会准备纹理、模型、材质、骨骼、动画与游戏脚本；运行时从包内目录解析身份，不挂载 `lib:`。
 
 `--scene` is relative to `prj:`. Runtime mounts resources once; renderer, UI and
 scene loading share the configured VFS. Explicit `--pak` failure never falls back

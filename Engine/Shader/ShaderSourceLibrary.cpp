@@ -238,7 +238,8 @@ Result<String> ShaderNameFromUsePass(const String& reference)
 }
 } // namespace
 
-Result<ShaderSourceLibrary> ShaderSourceLibrary::Load(const VirtualFileSystem& filesystem, const String& scheme)
+Result<ShaderSourceLibrary> ShaderSourceLibrary::Load(const VirtualFileSystem& filesystem, const String& scheme,
+                                                      const VirtualPath& requestedSource)
 {
 	auto entries = filesystem.List(scheme);
 	if (!entries)
@@ -261,6 +262,10 @@ Result<ShaderSourceLibrary> ShaderSourceLibrary::Load(const VirtualFileSystem& f
 		auto parsed = ParseShaderSource(entry.path.ToString(), text.value);
 		if (!parsed)
 		{
+			if (!requestedSource.relative.empty() && entry.path != requestedSource)
+			{
+				continue;
+			}
 			return Result<ShaderSourceLibrary>::Failure(parsed.error);
 		}
 		const String id = parsed.value.id.ToString();

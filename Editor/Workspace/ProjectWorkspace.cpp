@@ -64,14 +64,22 @@ Result<std::unique_ptr<ProjectWorkspace>> ProjectWorkspace::Open(const std::file
 	}
 	for (const ResourceMount& mount : builtinMounts)
 	{
+		if (mount.provider)
+		{
+			auto mounted = workspace->index.Mount(mount);
+			if (!mounted)
+			{
+				return Result<std::unique_ptr<ProjectWorkspace>>::Failure(mounted.error);
+			}
+			continue;
+		}
 		const auto canonicalEngine = std::filesystem::canonical(mount.root, error);
 		if (error || !std::filesystem::is_directory(canonicalEngine))
 		{
 			return Result<std::unique_ptr<ProjectWorkspace>>::Failure("Engine resource root is not a directory: " +
 			                                                          PathToUrsaString(mount.root));
 		}
-		// The generated engine mirror legitimately lives in the project's cache
-		// directory; only the writable assets folder must stay separate.
+		// Raw engine sources must stay separate from writable project sources.
 		if (ContainedIn(canonicalAssets, canonicalEngine) || ContainedIn(canonicalEngine, canonicalAssets))
 		{
 			return Result<std::unique_ptr<ProjectWorkspace>>::Failure(
@@ -115,14 +123,49 @@ Result<void> ProjectWorkspace::Refresh()
 	{
 		return refreshedAssets;
 	}
+	if (builtinDatabase)
+	{
+		auto refreshed = builtinDatabase->Refresh();
+		if (!refreshed)
+		{
+			return refreshed;
+		}
+		for (const auto& asset : builtinDatabase->Assets())
+		{
+			if (assetDatabase && assetDatabase->Contains(asset.metadata.guid))
+			{
+				return Result<void>::Failure("Duplicate builtin/project asset GUID " + asset.metadata.guid.ToString() +
+				                             " at " + asset.path.ToString());
+			}
+		}
+	}
 	return index.Rebuild();
+}
+
+Result<void> ProjectWorkspace::InitializeBuiltinAssets()
+{
+	if (!index.Filesystem().IsMounted(engineResourceScheme))
+	{
+		return {};
+	}
+	auto opened = AssetDatabase::Open(index.Filesystem(), engineResourceScheme);
+	if (!opened)
+	{
+		return Result<void>::Failure(opened.error);
+	}
+	builtinDatabase = std::move(opened.value);
+	return Refresh();
 }
 
 ResourceSession::AssetPathResolver ProjectWorkspace::AssetResolver() const
 {
 	return [this](ResourceId guid, Ursa::UInt64 localFileId)
 	{
-		if (assetDatabase)
+		if (builtinDatabase && builtinDatabase->Contains(guid))
+		{
+			return builtinDatabase->Resolve(guid, localFileId);
+		}
+		if (assetDatabase && assetDatabase->Contains(guid))
 		{
 			return assetDatabase->Resolve(guid, localFileId);
 		}
@@ -171,5 +214,42 @@ Result<void> ProjectWorkspace::CheckWritable(const VirtualPath& path) const
 	return path.scheme == projectResourceScheme
 	           ? index.Filesystem().CheckWritable(path)
 	           : Result<void>::Failure("Only project resources are writable: " + path.ToString());
+}
+
+Result<void> ProjectWorkspace::SetRuntimeContentView(const VirtualFileSystem& view)
+{
+	auto candidate = std::make_unique<VirtualFileSystem>();
+	for (const auto& provider : view.Providers())
+	{
+		if (provider.scheme == engineScheme)
+		{
+			auto mounted = candidate->MountProvider(provider.scheme, provider.provider, MountAccess::ReadOnly);
+			if (!mounted)
+			{
+				return mounted;
+			}
+		}
+	}
+	for (const auto& provider : index.Filesystem().Providers())
+	{
+		auto mounted = candidate->MountProvider(provider.scheme, provider.provider, provider.access);
+		if (!mounted)
+		{
+			return mounted;
+		}
+	}
+	for (const auto& provider : view.Providers())
+	{
+		if (provider.scheme == projectScheme)
+		{
+			auto mounted = candidate->MountProvider(provider.scheme, provider.provider, MountAccess::ReadOnly);
+			if (!mounted)
+			{
+				return mounted;
+			}
+		}
+	}
+	contentFiles = std::move(candidate);
+	return {};
 }
 } // namespace Ursa::Editor
