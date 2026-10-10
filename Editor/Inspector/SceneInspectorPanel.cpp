@@ -5,6 +5,7 @@
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/PrefabCapture.hpp>
 #include <Serialization/SerializedObject.hpp>
+#include <Scene/EditorHierarchy.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <imgui.h>
@@ -1211,5 +1212,44 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		document.MarkDirty();
 	}
 	return Result<bool>::Success(changed);
+}
+
+void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic)
+{
+	if (inspectorOpen && !*inspectorOpen)
+	{
+		return;
+	}
+	ImGui::Begin("Inspector", inspectorOpen);
+	auto selected = hierarchy.SelectedGameObject(scene);
+	if (!selected)
+	{
+		ImGui::TextDisabled("Select a runtime GameObject in Hierarchy.");
+	}
+	else
+	{
+		auto name = scene.GameObjectName(selected.value);
+		auto active = scene.ActiveSelf(selected.value);
+		auto transform = scene.GetLocalTransform(selected.value);
+		if (!name || !active || !transform)
+		{
+			diagnostic = !name ? name.error : !active ? active.error : transform.error;
+			ImGui::TextWrapped("%s", diagnostic.c_str());
+		}
+		else
+		{
+			ImGui::TextUnformatted(name.value.c_str());
+			ImGui::Separator();
+			ImGui::Text("Active: %s", active.value ? "Yes" : "No");
+			ImGui::Text("Position: %.3f, %.3f, %.3f", transform.value.position.x, transform.value.position.y,
+			            transform.value.position.z);
+			ImGui::Text("Rotation: %.3f, %.3f, %.3f, %.3f", transform.value.rotation.x, transform.value.rotation.y,
+			            transform.value.rotation.z, transform.value.rotation.w);
+			ImGui::Text("Scale: %.3f, %.3f, %.3f", transform.value.scale.x, transform.value.scale.y,
+			            transform.value.scale.z);
+			ImGui::TextDisabled("Runtime changes are discarded when Play stops.");
+		}
+	}
+	ImGui::End();
 }
 } // namespace Ursa::Editor

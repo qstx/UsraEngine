@@ -3,6 +3,7 @@
 #include <Core/Types.hpp>
 #include <Scene/Scene.hpp>
 #include <Math/Camera.hpp>
+#include <Scene/ViewportLayout.hpp>
 
 namespace Ursa::Editor
 {
@@ -13,12 +14,11 @@ enum class GizmoOperation
 	Scale
 };
 
-struct ViewportRect
+struct GizmoInteractionReport
 {
-	Ursa::Float32 x = 0;
-	Ursa::Float32 y = 0;
-	Ursa::Float32 width = 0;
-	Ursa::Float32 height = 0;
+	bool isOver = false;
+	bool isUsing = false;
+	bool matrixChanged = false;
 };
 
 // Converts a manipulated world matrix into the selected node's local TRS.
@@ -27,5 +27,5 @@ Result<void> ApplyGizmoWorldTransform(Scene& scene, GameObject::Ptr node, const 
 
 // Call during an ImGui frame after the viewport image has been placed.
 Result<bool> DrawGizmo(Scene& scene, GameObject::Ptr node, const Camera& camera, ViewportRect rect,
-                       GizmoOperation operation);
+                       GizmoOperation operation, GizmoInteractionReport* interaction = nullptr);
 } // namespace Ursa::Editor

@@ -19,10 +19,13 @@
 #include <Core/Log.hpp>
 #include <Core/Profiler.hpp>
 #include <Core/Memory/LinearAllocator.hpp>
+#include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/PakArchive.hpp>
 #include <imgui_internal.h>
+#include <cctype>
+#include <cstdio>
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <chrono>
@@ -65,6 +68,20 @@ Result<VirtualPath> ProjectAssetPath(const char* input)
 		return Result<VirtualPath>::Failure("Enter an asset path such as Snake/Level.ursascene");
 	}
 	return VirtualPath::Parse(String(projectResourceScheme) + ":" + name);
+}
+
+String ProjectSettingsKey(const std::filesystem::path& projectRoot)
+{
+	const std::string normalized = ToStdString(PathToUrsaString(projectRoot.lexically_normal()));
+	UInt64 hash = 14695981039346656037ull;
+	for (unsigned char value : normalized)
+	{
+		hash ^= static_cast<UInt64>(std::tolower(value));
+		hash *= 1099511628211ull;
+	}
+	char text[17]{};
+	std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(hash));
+	return ToUrsaString(text);
 }
 
 String AssetDisplayPath(const VirtualPath& path)
@@ -1528,6 +1545,28 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 		if (play.Active())
 		{
 			play.Stop();
+			if (documents && documents->Current())
+			{
+				auto draft = documents->Current()->Payload<SceneDraft>();
+				auto selected = draft && editSelectionBeforePlay
+				                    ? draft->GetScene().GameObjectById(editSelectionBeforePlay)
+				                    : Result<GameObject::Ptr>::Failure("No pre-play selection");
+				if (selected)
+				{
+					auto restored = hierarchy.Select(draft->GetScene(), selected.value);
+					if (!restored)
+					{
+						inspectorError = restored.error;
+					}
+				}
+				else
+				{
+					hierarchy.ClearSelection();
+				}
+			}
+			editSelectionBeforePlay = {};
+			selectionContext = selectionBeforePlay;
+			selectionBeforePlay = {};
 			documents->SetSaveBlocked(false);
 			viewportFocused = false;
 		}
@@ -1663,12 +1702,19 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 			auto draft = scriptsReady ? selectedDocument->Payload<SceneDraft>() : nullptr;
 			if (draft)
 			{
+				editSelectionBeforePlay = hierarchy.SelectedId();
+				selectionBeforePlay = selectionContext;
 				auto started =
 				    play.Start(*draft, selectedDocument->Id(), project->components, documents->Session(), playSetup);
 				inspectorError = started ? String{} : started.error;
 				if (started)
 				{
 					documents->SetSaveBlocked(true);
+				}
+				else
+				{
+					editSelectionBeforePlay = {};
+					selectionBeforePlay = {};
 				}
 			}
 		}
@@ -2074,9 +2120,7 @@ Result<void> EditorApplication::OnGui()
 		{
 			if (play.Active())
 			{
-				ImGui::BeginDisabled();
 				auto hierarchyResult = hierarchy.Draw(*play.GetScene(), &showHierarchyPanel);
-				ImGui::EndDisabled();
 				if (!hierarchyResult)
 				{
 					inspectorError = hierarchyResult.error;
@@ -2085,11 +2129,9 @@ Result<void> EditorApplication::OnGui()
 				{
 					selectionContext.SelectGameObject(documents->Current()->Id(), hierarchy.SelectedId());
 				}
-				if (showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset)
+				else if (selectionContext.kind == EditorSelectionKind::GameObject)
 				{
-					ImGui::Begin("Inspector", &showInspectorPanel);
-					ImGui::TextUnformatted("Play mode: scene changes are temporary");
-					ImGui::End();
+					selectionContext.Clear();
 				}
 			}
 			else
@@ -2115,11 +2157,17 @@ Result<void> EditorApplication::OnGui()
 					}
 				}
 			}
-			auto drawn = sceneViewPanel->Draw(*draft, *documents->Current(), hierarchy, play, showScenePanel,
-			                                  showGamePanel, viewportFocused, inspectorError);
+			VirtualFileSystem* settingsFiles = workspace ? &workspace->Index().Filesystem() : nullptr;
+			const String projectKey = workspace ? ProjectSettingsKey(workspace->ProjectRoot()) : String("default");
+			auto drawn = sceneViewPanel->Draw(*draft, *documents->Current(), hierarchy, play, settingsFiles, projectKey,
+			                                  showScenePanel, showGamePanel, viewportFocused, inspectorError);
 			if (!drawn)
 			{
 				inspectorError = drawn.error;
+			}
+			if (play.Active() && showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset)
+			{
+				DrawRuntimeSceneInspector(*play.GetScene(), hierarchy, &showInspectorPanel, inspectorError);
 			}
 		}
 	}
@@ -2731,6 +2779,11 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			URSA_PROFILE_SCOPE("Editor.OnFrame");
 			result = OnFrame(deltaSeconds);
 		}
+		if (result)
+		{
+			URSA_PROFILE_SCOPE("Editor.BuildGui");
+			result = OnGui();
+		}
 		if (result && play.Active())
 		{
 			URSA_PROFILE_SCOPE("Editor.PlayModeUpdate");
@@ -2741,14 +2794,39 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			{
 				inspectorError = ticked.error;
 				play.Stop();
+				if (documents && documents->Current())
+				{
+					auto draft = documents->Current()->Payload<SceneDraft>();
+					auto selected = draft && editSelectionBeforePlay
+					                    ? draft->GetScene().GameObjectById(editSelectionBeforePlay)
+					                    : Result<GameObject::Ptr>::Failure("No pre-play selection");
+					if (selected)
+					{
+						hierarchy.Select(draft->GetScene(), selected.value);
+					}
+					else
+					{
+						hierarchy.ClearSelection();
+					}
+				}
+				selectionContext = selectionBeforePlay;
+				selectionBeforePlay = {};
+				editSelectionBeforePlay = {};
 				documents->SetSaveBlocked(false);
 				viewportFocused = false;
 			}
 		}
-		if (result)
+		if (result && sceneViewPanel && documents && documents->Current())
 		{
-			URSA_PROFILE_SCOPE("Editor.BuildGui");
-			result = OnGui();
+			auto draft = documents->Current()->Payload<SceneDraft>();
+			if (draft)
+			{
+				auto rendered = sceneViewPanel->RenderPending(*draft, play);
+				if (!rendered)
+				{
+					inspectorError = rendered.error;
+				}
+			}
 		}
 		if (result)
 		{

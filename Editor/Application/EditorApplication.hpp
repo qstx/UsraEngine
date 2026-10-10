@@ -216,6 +216,8 @@ private:
 	std::unique_ptr<TextureImportView> textureImportView;
 	std::unique_ptr<ModelImportView> modelImportView;
 	EditorHierarchy hierarchy;
+	ResourceId editSelectionBeforePlay;
+	EditorSelectionContext selectionBeforePlay;
 	ResourceId displayedSceneId;
 	std::unique_ptr<SceneViewPanel> sceneViewPanel;
 	PlaySession play;

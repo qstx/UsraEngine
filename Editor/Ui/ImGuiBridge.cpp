@@ -2,6 +2,7 @@
 #include <Core/Types.hpp>
 #include <Core/Memory/MemoryContainers.hpp>
 #include <Ui/ImGuiBridge.hpp>
+#include <ImGuizmo.h>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
@@ -503,6 +504,7 @@ Result<void> ImGuiBridge::BeginFrame(Ursa::Float32 deltaSeconds, Ursa::UInt32 wi
 	                                    static_cast<Ursa::Float32>(framebufferHeight) / height);
 	io.DeltaTime = std::max(deltaSeconds, 0.00001f);
 	ImGui::NewFrame();
+	ImGuizmo::BeginFrame();
 	return {};
 }
 

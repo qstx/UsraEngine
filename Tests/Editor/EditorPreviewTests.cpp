@@ -96,6 +96,29 @@ int main()
 		const Ursa::Size center = (size / 2 * size + size / 2) * 4;
 		Expect(pixels[center] > pixels[center + 1] * 2, "Preview camera did not render the box");
 		Expect(starts == 0 && updates == 0, "Edit preview invoked a component lifecycle callback");
+
+		auto cameraNode = Take(scene.CreateGameObject("Game Camera"));
+		LocalTransform cameraTransform;
+		cameraTransform.position = {0, 0, 5};
+		done(scene.SetLocalTransform(cameraNode, cameraTransform));
+		const ComponentId cameraId = Take(scene.AddComponent<CameraComponent>(cameraNode));
+		done(scene.SetActiveCamera(cameraId));
+		auto gamePreview = Take(Editor::EditorScenePreview::Create(device));
+		auto gameColor = Take(device->CreateTexture(
+		    {128, 72, Format::RgbA8Unorm,
+		     TextureUsage::ColorAttachment | TextureUsage::Sampled | TextureUsage::TransferSource}));
+		auto sceneColor = Take(device->CreateTexture(
+		    {96, 96, Format::RgbA8Unorm,
+		     TextureUsage::ColorAttachment | TextureUsage::Sampled | TextureUsage::TransferSource}));
+		Expect(gameColor != sceneColor && gameColor->desc.width == 128 && sceneColor->desc.width == 96,
+		       "Scene and Game preview targets are not independent");
+		command = Take(device->CreateCommandList());
+		done(command->Begin());
+		done(preview->Record(scene, command, sceneColor, ResourceState::Undefined, ResourceState::ShaderRead));
+		done(gamePreview->RecordGame(scene, command, gameColor, ResourceState::Undefined, ResourceState::ShaderRead));
+		done(command->End());
+		done(Take(device->Submit(command))->Wait());
+		Expect(starts == 0 && updates == 0, "Game camera preview invoked a gameplay lifecycle callback");
 		done(device->WaitIdle());
 		std::cout << "Editor camera preview test passed\n";
 		return 0;

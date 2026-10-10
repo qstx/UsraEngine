@@ -2,12 +2,16 @@
 
 #include <Application/PlaySession.hpp>
 #include <Assets/SceneDraft.hpp>
+#include <Scene/GameViewSettings.hpp>
 #include <Scene/EditorGizmo.hpp>
+#include <Scene/ViewportLayout.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <memory>
 
 namespace Ursa::Editor
 {
+class EditorScenePreview;
+
 class SceneViewPanel final
 {
 public:
@@ -19,13 +23,26 @@ public:
 	SceneViewPanel& operator=(const SceneViewPanel&) = delete;
 
 	Result<void> Draw(SceneDraft& draft, EditorDocument& document, EditorHierarchy& hierarchy, PlaySession& play,
-	                  bool& showScene, bool& showGame, bool& viewportFocused, String& diagnostic);
+	                  VirtualFileSystem* userFiles, const String& projectKey, bool& showScene, bool& showGame,
+	                  bool& viewportFocused, String& diagnostic);
 
 	void DrawEmpty(bool& showScene, bool& showGame);
 
 	Result<void> ReloadResources();
 
+	Result<void> RenderPending(SceneDraft& draft, PlaySession& play);
+
 private:
+	struct ViewportTarget
+	{
+		std::unique_ptr<EditorScenePreview> preview;
+		Rhi::TexturePtr color;
+		ImTextureID imageId = ImTextureID_Invalid;
+		ViewportSize size;
+		bool rendered = false;
+		bool visible = false;
+	};
+
 	SceneViewPanel(Rhi::DevicePtr selectedDevice, ImGuiBridge& selectedGui)
 	    : device(std::move(selectedDevice)), gui(&selectedGui)
 	{
@@ -33,13 +50,45 @@ private:
 
 	Result<void> Initialize();
 
+	Result<void> EnsureTarget(ViewportTarget& target, ViewportSize size);
+
+	Result<void> RenderTarget(ViewportTarget& target, const Scene& scene, bool gameCamera);
+
+	void DrawGameToolbar(VirtualFileSystem* userFiles, const String& projectKey, String& diagnostic);
+
+	void LoadSettings(VirtualFileSystem& userFiles, const String& projectKey, String& diagnostic);
+
+	void SaveProjectSettings(VirtualFileSystem& userFiles, const String& projectKey, String& diagnostic);
+
+	void SaveCustomPresets(VirtualFileSystem& userFiles, String& diagnostic);
+
 	Rhi::DevicePtr device;
 	ImGuiBridge* gui = nullptr;
-	std::unique_ptr<EditorScenePreview> preview;
-	Rhi::TexturePtr color;
+	ViewportTarget sceneTarget;
+	ViewportTarget gameTarget;
 	Rhi::SamplerPtr sampler;
-	ImTextureID imageId = ImTextureID_Invalid;
-	bool rendered = false;
+	GameViewSizeMode gameSizeMode = GameViewSizeMode::FreeAspect;
+	UInt32 gamePresetWidth = 16;
+	UInt32 gamePresetHeight = 9;
+	Float32 gameScale = 1;
+	ViewportPoint gamePan;
+	bool gameFit = true;
+
+	Vector<GameViewPreset> customPresets;
+	String selectedCustomPreset;
+	String loadedProjectKey;
+	bool globalSettingsLoaded = false;
+	bool projectSettingsLoaded = false;
+	bool settingsChanged = false;
+	bool presetsChanged = false;
+	bool editCustomPreset = false;
+	String customPresetEditingId;
+	Array<char, 128> customPresetName{};
+	Int32 customPresetWidth = 1280;
+	Int32 customPresetHeight = 720;
+	Int32 customPresetMode = 0;
+	bool gizmoWasOver = false;
+	bool gizmoWasUsing = false;
 	GizmoOperation gizmoOperation = GizmoOperation::Translate;
 };
 } // namespace Ursa::Editor

@@ -1,5 +1,6 @@
 #include <Core/Types.hpp>
 #include <Application/PlaySession.hpp>
+#include <Scene/EditorGizmo.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Core/StringInterop.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
@@ -175,6 +176,19 @@ int main()
 		auto* playedScript = play.GetScene()->FindComponent<Scripting::ScriptBehaviourComponent>(
 		    play.GetScene()->RootGameObjects().front());
 		Expect(playedScript && playedScript->HasSerializedPayload(), "Run clone lost its managed script payload");
+		LocalTransform runtimeTransform =
+		    Take(play.GetScene()->GetLocalTransform(play.GetScene()->RootGameObjects().front()));
+		runtimeTransform.position.x = 3.f;
+		done(Editor::ApplyGizmoWorldTransform(*play.GetScene(), play.GetScene()->RootGameObjects().front(),
+		                                      runtimeTransform.Matrix()));
+		Expect(Take(play.GetScene()->GetLocalTransform(play.GetScene()->RootGameObjects().front())).position.x == 3.f &&
+		           Take(draft->GetScene().GetLocalTransform(rootNode)).position.x != 3.f,
+		       "Run gizmo transform changed the authoring scene");
+		play.Pause();
+		done(play.Tick(1.f / 30.f, nullptr, {}));
+		Expect(Take(play.GetScene()->GetLocalTransform(play.GetScene()->RootGameObjects().front())).position.x == 3.f,
+		       "Pause advanced the runtime scene after a gizmo transform");
+		play.Resume();
 		const nlohmann::json playedPayload = nlohmann::json::parse(ToStdString(playedScript->SerializedPayload()));
 		Expect(playedPayload.at("Fields").at("targetObject").at("$ursaReference").at("Id") ==
 		               ToStdString(Take(play.GetScene()->PersistentId(
@@ -198,7 +212,8 @@ int main()
 		play.Stop();
 		documents->SetSaveBlocked(false);
 		Expect(events.back() == "remove" && !play.Active() && documents->Current()->Dirty() &&
-		           !std::filesystem::exists(root / "Assets" / "play.ursascene"),
+		           !std::filesystem::exists(root / "Assets" / "play.ursascene") &&
+		           Take(draft->GetScene().GetLocalTransform(rootNode)).position.x != 3.f,
 		       "Stop did not restore the edit document state");
 		auto failingService = std::make_shared<TestService>();
 		failingService->value = -1;

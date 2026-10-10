@@ -10,4 +10,6 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
                                 const Vector<ScriptTypeDescriptor>* scriptTypes = nullptr,
                                 bool* hierarchyOpen = nullptr, bool* inspectorOpen = nullptr,
                                 bool drawInspector = true);
+
+void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic);
 } // namespace Ursa::Editor

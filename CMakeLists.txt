@@ -356,6 +356,18 @@ if(URSA_BUILD_TESTS)
     target_link_libraries(UrsaEditorGizmoTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaEditorGizmoTests COMMAND UrsaEditorGizmoTests)
 
+    add_executable(UrsaEditorGizmoInteractionTests Tests/Editor/EditorGizmoInteractionTests.cpp)
+    target_link_libraries(UrsaEditorGizmoInteractionTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaEditorGizmoInteractionTests COMMAND UrsaEditorGizmoInteractionTests)
+
+    add_executable(UrsaViewportLayoutTests Tests/Editor/ViewportLayoutTests.cpp)
+    target_link_libraries(UrsaViewportLayoutTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaViewportLayoutTests COMMAND UrsaViewportLayoutTests)
+
+    add_executable(UrsaGameViewSettingsTests Tests/Editor/GameViewSettingsTests.cpp)
+    target_link_libraries(UrsaGameViewSettingsTests PRIVATE Ursa::Editor)
+    add_test(NAME UrsaGameViewSettingsTests COMMAND UrsaGameViewSettingsTests)
+
     add_executable(UrsaProjectWorkspaceTests Tests/Editor/ProjectWorkspaceTests.cpp)
     target_link_libraries(UrsaProjectWorkspaceTests PRIVATE Ursa::Editor)
     add_test(NAME UrsaProjectWorkspaceTests COMMAND UrsaProjectWorkspaceTests)

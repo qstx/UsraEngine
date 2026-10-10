@@ -154,7 +154,7 @@ Result<void> ApplyGizmoWorldTransform(Scene& scene, GameObject::Ptr node, const 
 }
 
 Result<bool> DrawGizmo(Scene& scene, GameObject::Ptr node, const Camera& camera, ViewportRect rect,
-                       GizmoOperation operation)
+                       GizmoOperation operation, GizmoInteractionReport* interaction)
 {
 	if (!scene.Contains(node))
 	{
@@ -186,8 +186,15 @@ Result<bool> DrawGizmo(Scene& scene, GameObject::Ptr node, const Camera& camera,
 		{
 			selected = ImGuizmo::SCALE;
 		}
-		if (!ImGuizmo::Manipulate(view.values.data(), projection.values.data(), selected, ImGuizmo::WORLD,
-		                          world.value.values.data()))
+		const bool matrixChanged = ImGuizmo::Manipulate(view.values.data(), projection.values.data(), selected,
+		                                                ImGuizmo::WORLD, world.value.values.data());
+		if (interaction)
+		{
+			interaction->isOver = ImGuizmo::IsOver();
+			interaction->isUsing = ImGuizmo::IsUsing();
+			interaction->matrixChanged = matrixChanged;
+		}
+		if (!matrixChanged)
 		{
 			return Result<bool>::Success(false);
 		}
