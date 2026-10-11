@@ -113,4 +113,4 @@ Release 的实际 Demo Snake/MaterialShowcase Player 均正常退出，capture �
 
 `UrsaMemoryBenchmarks --repeat 5` 可重现未连接数据，`--repeat 5 --wait-for-profiler` 等待连接后执行采集中数据。原始日志和两种调用栈 capture 位于 `Engine/Build/ProfilingCaptures/Benchmark-*`。
 
-基础 `tracy-profiling` 的联合 CPU/GPU/C# capture 与中文采样流程现已补充实际证据；托管生命周期在完全关闭基础 profiling 时的独立对照验收仍保留为其单独待办，不由本次内存任务替代。
+基础 `tracy-profiling` 的联合 CPU/GPU/C# capture 与中文采样流程现已补充实际证据。2026-10-11 在 Windows x64 Debug 下，将 `URSA_ENABLE_TRACY`、`URSA_ENABLE_TRACY_MEMORY` 和 `URSA_ENABLE_TRACY_DIAGNOSTICS` 全部关闭，保留 .NET 与 Editor 支持，重新构建并通过 `UrsaManagedBehaviourRuntimeTests`、`UrsaDotNetHostSmoke`、`UrsaManagedProtocolTests` 和 `UrsaProjectPlaySessionTests` 及其准备步骤。实际 .NET 宿主验证了生命周期顺序、回调异常隔离和销毁行为，项目运行会话验证了 Run/Stop 与编辑状态恢复；对应 Runtime 和测试工程未引入 Tracy client 链接依赖。
