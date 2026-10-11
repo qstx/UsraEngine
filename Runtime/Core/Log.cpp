@@ -1,5 +1,6 @@
 #include <Core/Containers.hpp>
 #include <Core/Log.hpp>
+#include <Core/Profiler.hpp>
 #include <spdlog/logger.h>
 #include <Core/VfsLogSink.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
@@ -23,7 +24,7 @@ namespace
 std::mutex logMutex;
 std::shared_ptr<spdlog::logger> logger;
 std::atomic<LogLevel> minimumLevel{Log::DefaultLevel()};
-std::mutex listenerMutex;
+URSA_PROFILE_LOCK(std::mutex, listenerMutex, "Ursa.Log.Listeners");
 Map<Ursa::UInt64, Log::Listener> listeners;
 std::atomic<Ursa::UInt64> nextListener{1};
 thread_local bool notifyingListeners = false;
@@ -281,14 +282,14 @@ Ursa::UInt64 Log::Subscribe(Listener listener)
 		return 0;
 	}
 	const Ursa::UInt64 id = nextListener.fetch_add(1, std::memory_order_relaxed);
-	std::lock_guard<std::mutex> lock(listenerMutex);
+	std::lock_guard lock(listenerMutex);
 	listeners.emplace(id, std::move(listener));
 	return id;
 }
 
 void Log::Unsubscribe(Ursa::UInt64 id) noexcept
 {
-	std::lock_guard<std::mutex> lock(listenerMutex);
+	std::lock_guard lock(listenerMutex);
 	listeners.erase(id);
 }
 
@@ -304,7 +305,7 @@ void Log::Write(LogLevel level, const char* module, const String& message, const
 		{
 			Vector<Listener> snapshot;
 			{
-				std::lock_guard<std::mutex> lock(listenerMutex);
+				std::lock_guard lock(listenerMutex);
 				snapshot.reserve(listeners.size());
 				for (const auto& item : listeners)
 				{

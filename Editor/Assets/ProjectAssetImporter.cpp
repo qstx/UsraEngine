@@ -1,4 +1,5 @@
 #include <Assets/ProjectAssetImporter.hpp>
+#include <Core/Profiler.hpp>
 #include <Assets/ShaderAssetImporter.hpp>
 #include <Assets/TextureImporter.hpp>
 #include <Assets/ModelImporter.hpp>
@@ -148,134 +149,151 @@ Result<AssetImportResult> ProjectAssetImporter::LoadCurrent(AssetDatabase& datab
 Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, const VirtualPath& source,
                                                        bool force) const
 {
-	auto metadata = database.Metadata(source);
-	if (!metadata || metadata.value.folder)
+	URSA_PROFILE_DIAGNOSTIC_SCOPE("Asset.Import");
+	URSA_PROFILE_OPERATION("Asset.Import", source.ToString().c_str(), "begin");
+	const auto import = [&]() -> Result<AssetImportResult>
 	{
-		return Result<AssetImportResult>::Failure(metadata ? "Cannot import a folder" : metadata.error);
-	}
-	const auto extension = Extension(source);
-	const auto selected = importers.find(extension);
-	if (extension == ".ursashader")
-	{
-		return selected->second(database, source, force);
-	}
-	if (database.Filesystem().CheckWritable(source))
-	{
-		if (extension == ".png" || extension == ".jpg" || extension == ".jpeg")
+		auto metadata = database.Metadata(source);
+		if (!metadata || metadata.value.folder)
 		{
-			auto settings = TextureImporter::Settings(database, source);
-			if (!settings)
-			{
-				return Result<AssetImportResult>::Failure(settings.error);
-			}
-			if (metadata.value.importer != "ursa.Texture" || metadata.value.importerVersion != 1 ||
-			    metadata.value.importSettings != settings.value.ToJson())
-			{
-				auto saved = TextureImporter::SetSettings(database, source, settings.value);
-				if (!saved)
-				{
-					return Result<AssetImportResult>::Failure(saved.error);
-				}
-			}
+			return Result<AssetImportResult>::Failure(metadata ? "Cannot import a folder" : metadata.error);
 		}
-		else if (extension == ".fbx" || extension == ".obj")
+		const auto extension = Extension(source);
+		const auto selected = importers.find(extension);
+		if (extension == ".ursashader")
 		{
-			auto settings = ModelImporter::Settings(database, source);
-			if (!settings)
-			{
-				return Result<AssetImportResult>::Failure(settings.error);
-			}
-			if (metadata.value.importer != "ursa.Model" || metadata.value.importerVersion != 4 ||
-			    metadata.value.importSettings != settings.value.ToJson())
-			{
-				auto saved = ModelImporter::SetSettings(database, source, settings.value);
-				if (!saved)
-				{
-					return Result<AssetImportResult>::Failure(saved.error);
-				}
-			}
+			return selected->second(database, source, force);
 		}
-	}
-	VirtualFileSystem frozen;
-	Vector<RuntimeContentInput> inputs;
-	for (const auto& scheme : database.Filesystem().Schemes())
-	{
-		if (scheme != source.scheme)
+		if (database.Filesystem().CheckWritable(source))
 		{
-			for (const auto& provider : database.Filesystem().Providers())
+			if (extension == ".png" || extension == ".jpg" || extension == ".jpeg")
 			{
-				if (provider.scheme == scheme)
+				auto settings = TextureImporter::Settings(database, source);
+				if (!settings)
 				{
-					auto mounted = frozen.MountProvider(scheme, provider.provider, provider.access);
-					if (!mounted)
+					return Result<AssetImportResult>::Failure(settings.error);
+				}
+				if (metadata.value.importer != "ursa.Texture" || metadata.value.importerVersion != 1 ||
+				    metadata.value.importSettings != settings.value.ToJson())
+				{
+					auto saved = TextureImporter::SetSettings(database, source, settings.value);
+					if (!saved)
 					{
-						return Result<AssetImportResult>::Failure(mounted.error);
+						return Result<AssetImportResult>::Failure(saved.error);
 					}
 				}
 			}
-			continue;
-		}
-		auto memory = std::make_shared<MemoryFileProvider>();
-		auto entries = database.Filesystem().List(scheme);
-		if (!entries)
-		{
-			return Result<AssetImportResult>::Failure(entries.error);
-		}
-		for (const auto& entry : entries.value)
-		{
-			if (selected == importers.end() || extension == ".png" || extension == ".jpg" || extension == ".jpeg")
+			else if (extension == ".fbx" || extension == ".obj")
 			{
-				bool needed = entry.path == source || entry.path.ToString() == source.ToString() + ".meta";
-				for (auto slash = source.relative.find('/'); slash != String::npos;
-				     slash = source.relative.find('/', slash + 1))
+				auto settings = ModelImporter::Settings(database, source);
+				if (!settings)
 				{
-					needed = needed || entry.path.relative == source.relative.substr(0, slash) + ".meta";
+					return Result<AssetImportResult>::Failure(settings.error);
 				}
-				if (!needed)
+				if (metadata.value.importer != "ursa.Model" || metadata.value.importerVersion != 4 ||
+				    metadata.value.importSettings != settings.value.ToJson())
 				{
-					continue;
+					auto saved = ModelImporter::SetSettings(database, source, settings.value);
+					if (!saved)
+					{
+						return Result<AssetImportResult>::Failure(saved.error);
+					}
 				}
 			}
-			auto bytes = database.Filesystem().Read(entry.path);
-			if (!bytes)
+		}
+		VirtualFileSystem frozen;
+		Vector<RuntimeContentInput> inputs;
+		for (const auto& scheme : database.Filesystem().Schemes())
+		{
+			if (scheme != source.scheme)
 			{
-				return Result<AssetImportResult>::Failure(bytes.error);
+				for (const auto& provider : database.Filesystem().Providers())
+				{
+					if (provider.scheme == scheme)
+					{
+						auto mounted = frozen.MountProvider(scheme, provider.provider, provider.access);
+						if (!mounted)
+						{
+							return Result<AssetImportResult>::Failure(mounted.error);
+						}
+					}
+				}
+				continue;
 			}
-			inputs.push_back(
-			    {entry.path, BuildResourceFingerprint(bytes.value), static_cast<UInt64>(bytes.value.size())});
-			memory->WriteAtomic(entry.path.relative, bytes.value, true);
+			auto memory = std::make_shared<MemoryFileProvider>();
+			auto entries = database.Filesystem().List(scheme);
+			if (!entries)
+			{
+				return Result<AssetImportResult>::Failure(entries.error);
+			}
+			for (const auto& entry : entries.value)
+			{
+				if (selected == importers.end() || extension == ".png" || extension == ".jpg" || extension == ".jpeg")
+				{
+					bool needed = entry.path == source || entry.path.ToString() == source.ToString() + ".meta";
+					for (auto slash = source.relative.find('/'); slash != String::npos;
+					     slash = source.relative.find('/', slash + 1))
+					{
+						needed = needed || entry.path.relative == source.relative.substr(0, slash) + ".meta";
+					}
+					if (!needed)
+					{
+						continue;
+					}
+				}
+				auto bytes = database.Filesystem().Read(entry.path);
+				if (!bytes)
+				{
+					return Result<AssetImportResult>::Failure(bytes.error);
+				}
+				inputs.push_back(
+				    {entry.path, BuildResourceFingerprint(bytes.value), static_cast<UInt64>(bytes.value.size())});
+				memory->WriteAtomic(entry.path.relative, bytes.value, true);
+			}
+			auto mounted = frozen.MountProvider(scheme, memory, MountAccess::ReadOnly);
+			if (!mounted)
+			{
+				return Result<AssetImportResult>::Failure(mounted.error);
+			}
 		}
-		auto mounted = frozen.MountProvider(scheme, memory, MountAccess::ReadOnly);
-		if (!mounted)
+		auto isolated = AssetDatabase::Open(frozen, database.SourceScheme());
+		if (!isolated)
 		{
-			return Result<AssetImportResult>::Failure(mounted.error);
+			return Result<AssetImportResult>::Failure(isolated.error);
 		}
-	}
-	auto isolated = AssetDatabase::Open(frozen, database.SourceScheme());
-	if (!isolated)
-	{
-		return Result<AssetImportResult>::Failure(isolated.error);
-	}
-	auto refreshed = isolated.value->Refresh();
-	if (!refreshed)
-	{
-		return Result<AssetImportResult>::Failure(refreshed.error);
-	}
-	auto result = selected == importers.end() ? DefaultImport(*isolated.value, source, force)
-	                                          : selected->second(*isolated.value, source, force);
-	if (!result)
-	{
-		return result;
-	}
-	for (const auto& input : inputs)
-	{
-		auto current = CaptureRuntimeContentInput(database.Filesystem(), input.path);
-		if (!current || current.value.fingerprint != input.fingerprint)
+		auto refreshed = isolated.value->Refresh();
+		if (!refreshed)
 		{
-			return Result<AssetImportResult>::Failure("Asset inputs changed during import: " + input.path.ToString());
+			return Result<AssetImportResult>::Failure(refreshed.error);
 		}
+		auto result = selected == importers.end() ? DefaultImport(*isolated.value, source, force)
+		                                          : selected->second(*isolated.value, source, force);
+		if (!result)
+		{
+			return result;
+		}
+		for (const auto& input : inputs)
+		{
+			auto current = CaptureRuntimeContentInput(database.Filesystem(), input.path);
+			if (!current || current.value.fingerprint != input.fingerprint)
+			{
+				return Result<AssetImportResult>::Failure("Asset inputs changed during import: " +
+				                                          input.path.ToString());
+			}
+		}
+		refreshed = database.ReloadImports();
+		return refreshed ? result : Result<AssetImportResult>::Failure(refreshed.error);
+	};
+	auto result = import();
+	if (result)
+	{
+		URSA_PROFILE_OPERATION("Asset.Import", source.ToString().c_str(),
+		                       result.value.cacheHit ? "cache-hit" : "complete");
 	}
-	refreshed = database.ReloadImports();
-	return refreshed ? result : Result<AssetImportResult>::Failure(refreshed.error);
+	else
+	{
+		URSA_PROFILE_OPERATION("Asset.Import.failed", source.ToString().c_str(), result.error.c_str());
+	}
+	return result;
 }
 } // namespace Ursa::Editor

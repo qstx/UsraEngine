@@ -1,4 +1,5 @@
 #include <Core/Types.hpp>
+#include <Core/Profiler.hpp>
 #include <Rhi/RHI.hpp>
 #include <Core/StringInterop.hpp>
 #include <Rhi/Vulkan/ValidationLog.hpp>
@@ -6,11 +7,15 @@
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <stdexcept>
 #include <vk_mem_alloc.h>
 #if defined(URSA_ENABLE_TRACY)
@@ -400,6 +405,55 @@ Access Access(ResourceState state)
 	throw std::runtime_error("Unknown resource state");
 }
 
+#if defined(URSA_ENABLE_TRACY_MEMORY) || defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
+struct DeviceMemoryProfiling
+{
+	std::array<char, 80> pool{};
+	std::array<char, 80> reserved{};
+	std::array<char, 80> used{};
+	std::mutex sampling;
+	std::chrono::steady_clock::time_point nextSample{};
+};
+
+DeviceMemoryProfiling* RegisterDeviceMemoryProfiling()
+{
+	// Tracy can query names after the owning device has closed.
+	static std::atomic<UInt64> nextDevice{0};
+	void* storage = std::malloc(sizeof(DeviceMemoryProfiling));
+	Require(storage != nullptr, "Cannot allocate Vulkan profiling metadata");
+	auto* profile = new (storage) DeviceMemoryProfiling;
+	const auto identity = static_cast<unsigned long long>(nextDevice.fetch_add(1, std::memory_order_relaxed));
+	std::snprintf(profile->pool.data(), profile->pool.size(), "Ursa.Gpu.DeviceMemory.%llu", identity);
+	std::snprintf(profile->reserved.data(), profile->reserved.size(), "Ursa.Gpu.%llu.Reserved", identity);
+	std::snprintf(profile->used.data(), profile->used.size(), "Ursa.Gpu.%llu.Used", identity);
+	return profile;
+}
+#endif
+
+#if defined(URSA_ENABLE_TRACY_MEMORY)
+const void* DeviceMemoryIdentity(VkDeviceMemory memory) noexcept
+{
+#if VK_USE_64_BIT_PTR_DEFINES
+	return reinterpret_cast<const void*>(memory);
+#else
+	return reinterpret_cast<const void*>(static_cast<UIntPtr>(memory));
+#endif
+}
+
+void VKAPI_PTR DeviceMemoryAllocated(VmaAllocator, UInt32, VkDeviceMemory memory, VkDeviceSize size,
+                                     void* user) noexcept
+{
+	const auto* profile = static_cast<DeviceMemoryProfiling*>(user);
+	URSA_PROFILE_MEMORY_ALLOC(DeviceMemoryIdentity(memory), static_cast<Size>(size), profile->pool.data());
+}
+
+void VKAPI_PTR DeviceMemoryReleased(VmaAllocator, UInt32, VkDeviceMemory memory, VkDeviceSize, void* user) noexcept
+{
+	const auto* profile = static_cast<DeviceMemoryProfiling*>(user);
+	URSA_PROFILE_MEMORY_FREE(DeviceMemoryIdentity(memory), profile->pool.data());
+}
+#endif
+
 struct Context
 {
 	VkInstance instance = VK_NULL_HANDLE;
@@ -416,9 +470,45 @@ struct Context
 	std::atomic<Ursa::UInt32> validationErrors{0};
 	std::shared_ptr<Window> window;
 	std::mutex queueMutex;
+#if defined(URSA_ENABLE_TRACY_MEMORY) || defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
+	DeviceMemoryProfiling* memoryProfiling = nullptr;
+#endif
+#if defined(URSA_ENABLE_TRACY_MEMORY)
+	VmaDeviceMemoryCallbacks memoryCallbacks{};
+#endif
 #if defined(URSA_ENABLE_TRACY)
 	tracy::VkCtx* tracyGpu = nullptr;
 #endif
+
+	void SampleMemory() noexcept
+	{
+#if defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
+		if (!memoryProfiling || !allocator || !Profiling::IsConnected())
+		{
+			return;
+		}
+		std::unique_lock lock(memoryProfiling->sampling, std::try_to_lock);
+		const auto now = std::chrono::steady_clock::now();
+		if (!lock.owns_lock() || now < memoryProfiling->nextSample)
+		{
+			return;
+		}
+		memoryProfiling->nextSample = now + std::chrono::milliseconds(250);
+		VmaBudget budgets[VK_MAX_MEMORY_HEAPS]{};
+		vmaGetHeapBudgets(allocator, budgets);
+		UInt64 reserved = 0;
+		UInt64 used = 0;
+		VkPhysicalDeviceMemoryProperties memory{};
+		vkGetPhysicalDeviceMemoryProperties(physical, &memory);
+		for (UInt32 index = 0; index < memory.memoryHeapCount; ++index)
+		{
+			reserved += budgets[index].statistics.blockBytes;
+			used += budgets[index].statistics.allocationBytes;
+		}
+		URSA_PROFILE_PLOT(memoryProfiling->reserved.data(), static_cast<Float64>(reserved), Profiling::PlotUnit::Bytes);
+		URSA_PROFILE_PLOT(memoryProfiling->used.data(), static_cast<Float64>(used), Profiling::PlotUnit::Bytes);
+#endif
+	}
 
 	~Context()
 	{
@@ -619,6 +709,15 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 	allocatorInfo.instance = ctx->instance;
 	allocatorInfo.physicalDevice = ctx->physical;
 	allocatorInfo.device = ctx->device;
+#if defined(URSA_ENABLE_TRACY_MEMORY) || defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
+	ctx->memoryProfiling = RegisterDeviceMemoryProfiling();
+#endif
+#if defined(URSA_ENABLE_TRACY_MEMORY)
+	ctx->memoryCallbacks.pfnAllocate = DeviceMemoryAllocated;
+	ctx->memoryCallbacks.pfnFree = DeviceMemoryReleased;
+	ctx->memoryCallbacks.pUserData = ctx->memoryProfiling;
+	allocatorInfo.pDeviceMemoryCallbacks = &ctx->memoryCallbacks;
+#endif
 	Check(vmaCreateAllocator(&allocatorInfo, &ctx->allocator), "Creating Vulkan memory allocator");
 	Array<VkDescriptorPoolSize, 6> poolSizes{{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024},
 	                                          {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1024},
@@ -2159,6 +2258,9 @@ struct DeviceImpl final : Device
 			    }
 			    fence->submitted = true;
 			    command->state = 3;
+#if defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
+			    ctx->SampleMemory();
+#endif
 			    if (sc)
 			    {
 				    sc->submitted = true;

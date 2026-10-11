@@ -9,3 +9,5 @@ Scene 与 Game 分别持有颜色目标、预览渲染器和 ImGui 纹理注册�
 Game 尺寸区分可用面板区域与目标像素。Free Aspect 跟随区域，固定比例在区域内适配，固定分辨率保持用户给定像素。Scale、Fit、裁剪和 pan 只改变 ImGui 显示矩形，不改变目标像素或相机视场角。用户自定义预设和当前项目显示参数写入 `user:Settings/GameViewPresets.json` 与 `user:Settings/GameViewProjects/<project-key>.json`。
 
 ImGuizmo 必须在 `ImGui::NewFrame` 后执行 `ImGuizmo::BeginFrame`。Gizmo 绘制、命中和输入都应使用 Scene 当前实际显示矩形。
+
+依赖跟踪：Engine 当前固定 ImGuizmo 子模块提交 `b796ac3b861afc6e91ca74e4611effd9c9527367`。截至 2026-10-11，官方 master 的 `SetRect` 已使用 `mY + mHeight` 计算纵向命中边界；当前固定提交仍使用 `mY + mXMax`。本项目作者已在 Demo 中手动验收，反馈现有行为没有实际影响，因此当前不带本地修正，等待官方发布新版后再升级并复核。[官方 master 源码](https://github.com/CedricGuillemet/ImGuizmo/blob/master/src/ImGuizmo.cpp#L955-L964)

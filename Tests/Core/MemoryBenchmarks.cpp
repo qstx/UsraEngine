@@ -1,6 +1,7 @@
 #include <Core/Memory/Memory.hpp>
 #include <Core/Memory/LinearAllocator.hpp>
 #include <Core/Memory/MemoryAlgorithms.hpp>
+#include <Core/Profiler.hpp>
 #include <array>
 #include <chrono>
 #include <cstdlib>
@@ -10,6 +11,8 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include <thread>
+#include <cstring>
 
 namespace
 {
@@ -160,7 +163,7 @@ template <class Allocate, class Release> double Run(Allocate allocate, Release r
 }
 } // namespace
 
-int main()
+int Benchmark()
 {
 	HeapAllocator heap;
 	const MemoryTag tag = RegisterTag("MemoryBenchmark");
@@ -204,5 +207,51 @@ int main()
 	}
 	BenchmarkSorting();
 	BenchmarkCommandBuffer();
+	return 0;
+}
+
+int main(int argc, char** argv)
+{
+	bool waitForProfiler = false;
+	Ursa::UInt32 repeats = 1;
+	for (int index = 1; index < argc; ++index)
+	{
+		if (std::strcmp(argv[index], "--wait-for-profiler") == 0)
+		{
+			waitForProfiler = true;
+		}
+		else if (std::strcmp(argv[index], "--repeat") == 0 && index + 1 < argc)
+		{
+			repeats = static_cast<Ursa::UInt32>(std::strtoul(argv[++index], nullptr, 10));
+			if (!repeats || repeats > 20)
+			{
+				return 2;
+			}
+		}
+		else
+		{
+			return 2;
+		}
+	}
+	if (waitForProfiler)
+	{
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+		while (!Ursa::Profiling::IsConnected())
+		{
+			if (std::chrono::steady_clock::now() >= deadline)
+			{
+				return 3;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+	}
+	for (Ursa::UInt32 iteration = 0; iteration < repeats; ++iteration)
+	{
+		const int result = Benchmark();
+		if (result)
+		{
+			return result;
+		}
+	}
 	return 0;
 }

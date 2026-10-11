@@ -1,5 +1,6 @@
 #include <Application/Application.hpp>
 #include <Core/Log.hpp>
+#include <Core/Profiler.hpp>
 #include <Core/StringInterop.hpp>
 #include <Scripting/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
@@ -159,6 +160,7 @@ private:
 
 int main(int argc, char** argv)
 {
+	URSA_PROFILE_APP("UrsaScriptPlayer");
 	LogSession logging;
 	try
 	{

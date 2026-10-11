@@ -1,5 +1,6 @@
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
+#include <Core/Profiler.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/RuntimeContent.hpp>
 #include <Core/StringInterop.hpp>
@@ -18,7 +19,7 @@ namespace Ursa
 {
 namespace
 {
-std::mutex engineFilesMutex;
+URSA_PROFILE_LOCK(std::mutex, engineFilesMutex, "Ursa.Vfs.EngineFiles");
 std::shared_ptr<const VirtualFileSystem> configuredEngineFiles;
 
 bool IsReadableDirectory(const std::filesystem::path& path)
@@ -117,7 +118,7 @@ Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& expl
 {
 	if (explicitRoot.empty())
 	{
-		std::lock_guard<std::mutex> lock(engineFilesMutex);
+		std::lock_guard lock(engineFilesMutex);
 		if (configuredEngineFiles)
 		{
 			return Result<VirtualFileSystem>::Success(*configuredEngineFiles);
@@ -206,7 +207,7 @@ Result<VirtualFileSystem> OpenEngineFileSystem(const std::filesystem::path& expl
 
 void ConfigureEngineFileSystem(std::shared_ptr<const VirtualFileSystem> filesystem)
 {
-	std::lock_guard<std::mutex> lock(engineFilesMutex);
+	std::lock_guard lock(engineFilesMutex);
 	configuredEngineFiles = std::move(filesystem);
 }
 

@@ -1,4 +1,5 @@
 #include <Core/Types.hpp>
+#include <Core/Profiler.hpp>
 #include <Application/PlaySession.hpp>
 #include <Serialization/SceneResource.hpp>
 
@@ -12,47 +13,55 @@ FrameInput SelectPlayInput(FrameInput polled, bool viewportFocused, bool editorT
 Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, const ComponentRegistry& registry,
                                 ResourceSession& resources, const PlayContextSetup& setup)
 {
-	if (Active())
+	URSA_PROFILE_DIAGNOSTIC_SCOPE("Editor.Play.Start");
+	URSA_PROFILE_OPERATION("Editor.Play.Start", "", "begin");
+	const auto start = [&]() -> Result<void>
 	{
-		return Result<void>::Failure("Play mode is already active");
-	}
-	if (draft.Kind() != ResourceKind::Scene)
-	{
-		return Result<void>::Failure("Play mode requires a scene document");
-	}
-	const MaterialIdResolver resolveMaterial = [&draft](const std::shared_ptr<MaterialInstance>& material)
-	{ return draft.MaterialId(material); };
-	const String virtualPath = "play-clone.ursascene";
-	auto encoded = EncodeSceneDocument(virtualPath, documentId, draft.GetScene(), registry, resolveMaterial);
-	if (!encoded)
-	{
-		return Result<void>::Failure("Cannot clone edit scene: " + encoded.error);
-	}
-	ComponentLoadContext context(resources);
-	std::shared_ptr<void> preparedServices;
-	if (setup)
-	{
-		auto prepared = setup(context);
-		if (!prepared)
+		if (Active())
 		{
-			return Result<void>::Failure("Cannot create play services: " + prepared.error);
+			return Result<void>::Failure("Play mode is already active");
 		}
-		preparedServices = std::move(prepared.value);
-	}
-	auto decoded = DecodeSceneDocument(virtualPath, encoded.value, registry, context);
-	if (!decoded)
-	{
-		return Result<void>::Failure("Cannot clone edit scene: " + decoded.error);
-	}
-	auto sceneReady = context.NotifySceneReady(*decoded.value.scene);
-	if (!sceneReady)
-	{
-		return Result<void>::Failure("Cannot initialize the play scene: " + sceneReady.error);
-	}
-	services = std::move(preparedServices);
-	scene = std::move(decoded.value.scene);
-	frameRunner.Reset();
-	return {};
+		if (draft.Kind() != ResourceKind::Scene)
+		{
+			return Result<void>::Failure("Play mode requires a scene document");
+		}
+		const MaterialIdResolver resolveMaterial = [&draft](const std::shared_ptr<MaterialInstance>& material)
+		{ return draft.MaterialId(material); };
+		const String virtualPath = "play-clone.ursascene";
+		auto encoded = EncodeSceneDocument(virtualPath, documentId, draft.GetScene(), registry, resolveMaterial);
+		if (!encoded)
+		{
+			return Result<void>::Failure("Cannot clone edit scene: " + encoded.error);
+		}
+		ComponentLoadContext context(resources);
+		std::shared_ptr<void> preparedServices;
+		if (setup)
+		{
+			auto prepared = setup(context);
+			if (!prepared)
+			{
+				return Result<void>::Failure("Cannot create play services: " + prepared.error);
+			}
+			preparedServices = std::move(prepared.value);
+		}
+		auto decoded = DecodeSceneDocument(virtualPath, encoded.value, registry, context);
+		if (!decoded)
+		{
+			return Result<void>::Failure("Cannot clone edit scene: " + decoded.error);
+		}
+		auto sceneReady = context.NotifySceneReady(*decoded.value.scene);
+		if (!sceneReady)
+		{
+			return Result<void>::Failure("Cannot initialize the play scene: " + sceneReady.error);
+		}
+		services = std::move(preparedServices);
+		scene = std::move(decoded.value.scene);
+		frameRunner.Reset();
+		return {};
+	};
+	auto result = start();
+	URSA_PROFILE_OPERATION("Editor.Play.Start", "", result ? "complete" : result.error.c_str());
+	return result;
 }
 
 Result<void> PlaySession::Tick(Ursa::Float32 deltaSeconds, Window* window, FrameInput input)
@@ -71,6 +80,10 @@ Result<void> PlaySession::Tick(Ursa::Float32 deltaSeconds, Window* window, Frame
 
 void PlaySession::Stop()
 {
+	URSA_PROFILE_DIAGNOSTIC_SCOPE("Editor.Play.Stop");
+#if defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
+	const bool wasActive = Active();
+#endif
 	if (scene)
 	{
 		scene->Clear();
@@ -80,5 +93,11 @@ void PlaySession::Stop()
 	frameRunner.Reset();
 	paused = false;
 	stepRequested = false;
+#if defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
+	if (wasActive)
+	{
+		URSA_PROFILE_OPERATION("Editor.Play.Stop", "", "complete");
+	}
+#endif
 }
 } // namespace Ursa::Editor

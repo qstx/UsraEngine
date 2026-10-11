@@ -1,6 +1,7 @@
 #include <Core/Memory/Memory.hpp>
 #include <Core/Memory/MemoryInternal.hpp>
 #include <Core/Memory/MemoryLock.hpp>
+#include <Core/Profiler.hpp>
 #include <atomic>
 #include <cassert>
 #include <cstring>
@@ -55,6 +56,7 @@ struct State
 		for (Size index = 0; index < static_cast<Size>(MemoryTag::Count); ++index)
 		{
 			std::memcpy(categories[index].name.data(), names[index], std::strlen(names[index]) + 1);
+			URSA_PROFILE_CATEGORY(index, names[index]);
 		}
 	}
 };
@@ -146,6 +148,7 @@ void* Allocator::Allocate(Size size, Size alignment, MemoryTag tag, Size alignme
 	std::memcpy(static_cast<unsigned char*>(header->user) - sizeof(header), &header, sizeof(header));
 	RecordAllocation(*header, raw.overflow);
 	OnAllocated(header);
+	URSA_PROFILE_MEMORY_ALLOC(header->user, header->size, Profiling::Detail::CpuPool(static_cast<Size>(header->tag)));
 	return header->user;
 }
 
@@ -170,6 +173,7 @@ void Allocator::Deallocate(void* pointer) noexcept
 	auto* header = Header(pointer);
 	Allocator* owner = header->owner;
 	const Size rawSize = header->rawSize;
+	URSA_PROFILE_MEMORY_FREE(pointer, Profiling::Detail::CpuPool(static_cast<Size>(header->tag)));
 	owner->OnDeallocated(header);
 	RecordRelease(*header);
 	header->magic = 0;
@@ -236,6 +240,7 @@ MemoryTag RegisterTag(const char* name)
 		throw std::length_error("Memory category limit reached");
 	}
 	std::memcpy(state.categories[count].name.data(), name, std::strlen(name) + 1);
+	URSA_PROFILE_CATEGORY(count, name);
 	state.categoryCount.store(count + 1, std::memory_order_release);
 	return static_cast<MemoryTag>(count);
 }

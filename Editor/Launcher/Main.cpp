@@ -1,6 +1,7 @@
 #include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
 #include <Core/Log.hpp>
+#include <Core/Profiler.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/VirtualPath.hpp>
 #include <cstdlib>
@@ -9,6 +10,7 @@
 
 int main(int argc, char** argv)
 {
+	URSA_PROFILE_APP("UrsaEditor");
 	Ursa::LogSession logging;
 	URSA_LOG_INFO("Editor", "Starting UrsaEditor");
 	bool visible = true;
