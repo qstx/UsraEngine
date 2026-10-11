@@ -2,7 +2,7 @@
 
 #include <Scene/ComponentEditors.hpp>
 #include <Workspace/EditorDocuments.hpp>
-#include <Scripting/DotNetHost.hpp>
+#include <Scripting/DotNet/DotNetHost.hpp>
 
 namespace Ursa::Editor
 {

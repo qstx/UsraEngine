@@ -1,0 +1,25 @@
+ursa_add_test_executable(UrsaRendererTests RendererTests.cpp)
+target_link_libraries(UrsaRendererTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaRendererTests COMMAND UrsaRendererTests)
+
+ursa_add_test_executable(UrsaMaterialRendererTests MaterialRendererTests.cpp)
+target_link_libraries(UrsaMaterialRendererTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaMaterialRendererTests COMMAND UrsaMaterialRendererTests)
+
+ursa_add_test_executable(UrsaMaterialSceneSmoke MaterialSceneSmoke.cpp)
+target_link_libraries(UrsaMaterialSceneSmoke PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaMaterialSceneSmoke COMMAND UrsaMaterialSceneSmoke)
+
+ursa_add_test_executable(UrsaRendererWindowTests RendererWindowTests.cpp)
+target_link_libraries(UrsaRendererWindowTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaRendererWindowTests COMMAND UrsaRendererWindowTests)
+ursa_require_test_content(UrsaRendererTests UrsaRendererTests)
+ursa_require_test_content(UrsaMaterialRendererTests UrsaMaterialRendererTests)
+ursa_require_test_content(UrsaMaterialSceneSmoke UrsaMaterialSceneSmoke)
+ursa_require_test_content(UrsaRendererWindowTests UrsaRendererWindowTests)
+
+ursa_finalize_test_directory()

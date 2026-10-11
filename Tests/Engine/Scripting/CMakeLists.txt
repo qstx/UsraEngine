@@ -1,0 +1,20 @@
+ursa_add_test_executable(UrsaManagedHandleTests ManagedHandleTests.cpp)
+target_link_libraries(UrsaManagedHandleTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaManagedHandleTests COMMAND UrsaManagedHandleTests)
+
+ursa_add_test_executable(UrsaManagedSceneApiTests ManagedSceneApiTests.cpp)
+target_link_libraries(UrsaManagedSceneApiTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaManagedSceneApiTests COMMAND UrsaManagedSceneApiTests)
+
+ursa_add_test_executable(UrsaManagedAssetApiTests ManagedAssetApiTests.cpp)
+target_link_libraries(UrsaManagedAssetApiTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaManagedAssetApiTests COMMAND UrsaManagedAssetApiTests)
+
+ursa_add_test_executable(UrsaManagedBehaviourRuntimeTests ManagedBehaviourRuntimeTests.cpp)
+target_link_libraries(UrsaManagedBehaviourRuntimeTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaManagedBehaviourRuntimeTests COMMAND UrsaManagedBehaviourRuntimeTests)
+ursa_finalize_test_directory()

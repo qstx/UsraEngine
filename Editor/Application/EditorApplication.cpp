@@ -10,9 +10,9 @@
 #include <Assets/SceneDraft.hpp>
 #include <Inspector/SceneInspectorPanel.hpp>
 #if defined(URSA_ENABLE_DOTNET)
-#include <Scripting/DotNetHost.hpp>
+#include <Scripting/DotNet/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
-#include <Scripting/ManagedScriptRuntime.hpp>
+#include <Scripting/DotNet/ManagedScriptRuntime.hpp>
 #endif
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Core/StringInterop.hpp>

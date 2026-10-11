@@ -72,7 +72,7 @@ if ($ProjectDir) {
     if (-not $dotnet) {
         throw 'dotnet was not found; configure a C# project before checking its formatting.'
     }
-    foreach ($folder in @((Join-Path $repository 'Managed\Ursa.SnakeLogicTests'),
+    foreach ($folder in @((Join-Path $repository 'Tests\Managed\Ursa.SnakeLogicTests'),
                           (Join-Path $projectRoot 'Assets\Scripts'))) {
         $arguments = @('format', 'whitespace', $folder, '--folder')
         if ($Check) {

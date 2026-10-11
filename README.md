@@ -8,13 +8,13 @@ UrsaEngine is a C++17 graphics engine foundation with an API independent RHI and
 - Vulkan SDK 1.2 or newer with `glslc`, and a Vulkan 1.2 capable GPU and driver.
 - Git submodules containing pinned GLFW 3.5.1, VMA 3.4.0, nlohmann/json 3.12.0, EASTL 3.21.23 (`7fadbf0`), its matching EABase (`123363e`), spdlog 1.13.0 (`7c02e20`), Assimp 6.0.5 (`392a658f`), stb (`2c980bb5`), Dear ImGui `v1.92.9b-docking` (`b48d1af`), and ImGuizmo `1.10` (`b796ac3`) sources.
 
-Initialize the top-level dependencies after checkout with `git submodule update --init`. To verify the Editor dependencies recursively, run `git submodule update --init --recursive third_party/imgui third_party/imguizmo`. EABase also declares upstream test-only submodules over SSH; they are not needed for this Engine build. All submodule Git links are fixed to the revisions above.
+Initialize the top-level dependencies after checkout with `git submodule update --init`. To verify the Editor dependencies recursively, run `git submodule update --init --recursive ThirdParty/imgui ThirdParty/imguizmo`. EABase also declares upstream test-only submodules over SSH; they are not needed for this Engine build. All submodule Git links are fixed to the revisions above.
 
 `UrsaRuntime` owns the window, RHI interface, and Vulkan backend. `UrsaEngine` provides the application loop and links to `UrsaRuntime`. The optional `UrsaEditorCore` target (alias `Ursa::Editor`) owns the Editor UI and links to `Ursa::Engine`. CMake aliases `Ursa::Runtime`, `Ursa::Engine`, and `Ursa::Editor` are available to other targets when the Editor is enabled.
 
 ## Source layout
 
-`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Renderer3D`, and `Engine/Serialization` contain the engine modules. Editor modules live under `Editor/Application`, `Editor/Assets`, `Editor/Console`, `Editor/Inspector`, `Editor/Scene`, `Editor/Ui`, and `Editor/Workspace`. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Renderer3D/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. The Editor creates a generated, rebuildable `Library/` directory beside `Assets/`; keep it out of source control. Tests are grouped by module under `Tests/`.
+`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Renderer3D`, and `Engine/Serialization` contain the engine modules. Editor modules live under `Editor/Application`, `Editor/Assets`, `Editor/Console`, `Editor/Inspector`, `Editor/Scene`, `Editor/Ui`, and `Editor/Workspace`. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Renderer3D/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. The Editor creates a generated, rebuildable `Library/` directory beside `Assets/`; keep it out of source control. Tests are grouped by layer and module under `Tests/Runtime`, `Tests/Engine`, `Tests/Editor`, with integration, benchmarks, fixtures, and managed tests in their own directories. See [build structure](Docs/BuildStructure.md) for CMake ownership, Visual Studio filters, and migration details.
 
 CMake discovers `.cpp` and `.hpp` files within the listed module directories and checks for additions or removals during a build. New modules and test executables still need a CMake target or directory entry.
 
@@ -110,7 +110,7 @@ void inspectId(Ursa::ResourceId id) {
 
 ```powershell
 git submodule update --init
-git submodule update --init --recursive third_party/imgui third_party/imguizmo
+git submodule update --init --recursive ThirdParty/imgui ThirdParty/imguizmo
 cmake -S . -B Build -G "Visual Studio 17 2022" -A x64 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build Build --parallel --config Debug
 ctest --test-dir Build -C Debug --output-on-failure
@@ -122,7 +122,7 @@ ctest --test-dir Build -C Release --output-on-failure
 
 Visual Studio/MSVC 构建默认启用 `URSA_MSVC_PARALLEL_COMPILE=ON`，为 C/C++ 工程生成 `/MP`，让同一个工程的多个源文件并行编译。未指定 `/MP` 的数量时，MSVC 使用可用逻辑处理器；`cmake --build ... --parallel` 则负责工程之间的并行调度。两者共同生效，直接在 Visual Studio 中打开生成的解决方案构建也能使用 `/MP`。需要关闭源文件并行时，重新配置 `-DURSA_MSVC_PARALLEL_COMPILE=OFF`。此选项仅作用于 Visual Studio 生成器和 MSVC，其他生成器继续使用自身的任务调度。链接、资源准备、相互依赖的阶段以及只有一个源文件的目标不保证占满所有核心。
 
-For a new clone, run the submodule update commands above before configuring CMake. A full recursive checkout may attempt EABase's unrelated test-only SSH submodules. CMake reads dependency sources from `third_party/`, including EABase through a local FetchContent source override; configuration does not download dependencies.
+For a new clone, run the submodule update commands above before configuring CMake. A full recursive checkout may attempt EABase's unrelated test-only SSH submodules. CMake reads dependency sources from `ThirdParty/`, including EABase through a local FetchContent source override; configuration does not download dependencies.
 
 ## Editor scene and Prefab authoring
 

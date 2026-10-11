@@ -7,3 +7,5 @@
 
 /Managed/**/bin/
 /Managed/**/obj/
+/Tests/Managed/**/bin/
+/Tests/Managed/**/obj/

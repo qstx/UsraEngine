@@ -7,7 +7,7 @@ UrsaEngine 使用 Tracy 采集 CPU 帧阶段和 Vulkan GPU 区段。Tracy 是可
 先初始化 Tracy 子模块：
 
 ```powershell
-git submodule update --init third_party/tracy
+git submodule update --init ThirdParty/tracy
 ```
 
 然后在 CMake 配置时启用：

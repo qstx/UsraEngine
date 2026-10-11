@@ -1,0 +1,1014 @@
+{
+  "targets": [
+    "UrsaApplicationSceneTests",
+    "UrsaArchiveTests",
+    "UrsaAssetDatabaseTests",
+    "UrsaAssetImport",
+    "UrsaAssetImportPipelineTests",
+    "UrsaAssetMigrate",
+    "UrsaAssetMigrationTests",
+    "UrsaAssetPersistenceTests",
+    "UrsaAssetRefreshWindowTests",
+    "UrsaBuildResourceManifestTests",
+    "UrsaComponentEditorsTests",
+    "UrsaContainerHeaderSmoke",
+    "UrsaCustomComponentTests",
+    "UrsaDotNetHost",
+    "UrsaDotNetHostSupport",
+    "UrsaDotNetHostTests",
+    "UrsaEastlAllocatorTests",
+    "UrsaEditor",
+    "UrsaEditorCompositeWindowTests",
+    "UrsaEditorCore",
+    "UrsaEditorDocumentsTests",
+    "UrsaEditorGizmoInteractionTests",
+    "UrsaEditorGizmoTests",
+    "UrsaEditorHierarchyTests",
+    "UrsaEditorMaterialInspectorTests",
+    "UrsaEditorPreviewTests",
+    "UrsaEditorShaderImportTests",
+    "UrsaEditorWorkspaceWindowTests",
+    "UrsaEngine",
+    "UrsaEngineFormatCheck",
+    "UrsaEnginePackage",
+    "UrsaFrameSchedulerTests",
+    "UrsaGameObjectTests",
+    "UrsaGameViewSettingsTests",
+    "UrsaImGui",
+    "UrsaImGuiBridgeTests",
+    "UrsaLightingHeaderSmoke",
+    "UrsaLightingTests",
+    "UrsaLogHeaderSmoke",
+    "UrsaLogTests",
+    "UrsaManagedAssetApiTests",
+    "UrsaManagedBehaviourRuntimeTests",
+    "UrsaManagedEditorWorkflowTests",
+    "UrsaManagedHandleTests",
+    "UrsaManagedHostAssemblies",
+    "UrsaManagedSceneApiTests",
+    "UrsaManagedScriptCatalog",
+    "UrsaMaterialDraftTests",
+    "UrsaMaterialHeaderSmoke",
+    "UrsaMaterialInspectorHeaderSmoke",
+    "UrsaMaterialMigrationTests",
+    "UrsaMaterialRendererTests",
+    "UrsaMaterialSceneSmoke",
+    "UrsaMaterialTests",
+    "UrsaMathTests",
+    "UrsaMemoryAllocatorTests",
+    "UrsaMemoryBenchmarks",
+    "UrsaMemoryFactoryTests",
+    "UrsaMemoryFrameTests",
+    "UrsaMemoryWorkloadBenchmarks",
+    "UrsaPak",
+    "UrsaPakTests",
+    "UrsaPlaySessionTests",
+    "UrsaPrefabTests",
+    "UrsaProfilerCompileTests",
+    "UrsaProfilerEditorWindowTests",
+    "UrsaProfilerMemoryTests",
+    "UrsaProjectAssetDatabaseTests",
+    "UrsaProjectBrowserModelTests",
+    "UrsaProjectEditorExtensionsTests",
+    "UrsaProjectLibraryRecoveryTests",
+    "UrsaProjectModelImportTests",
+    "UrsaProjectPlaySessionTests",
+    "UrsaProjectScenePrefabRoundTripTests",
+    "UrsaProjectShaderImportTests",
+    "UrsaProjectTextureImportTests",
+    "UrsaProjectWorkspaceTests",
+    "UrsaRendererTests",
+    "UrsaRendererWindowTests",
+    "UrsaResourceVfsTests",
+    "UrsaRhiTests",
+    "UrsaRuntime",
+    "UrsaRuntimeContentTests",
+    "UrsaRuntimeHeaderSmoke",
+    "UrsaSceneDraftTests",
+    "UrsaSceneGraphTests",
+    "UrsaScenePersistenceTests",
+    "UrsaScriptBuildTests",
+    "UrsaScriptCompile",
+    "UrsaScriptPlayer",
+    "UrsaSerializableHeaderSmoke",
+    "UrsaSerializationBaseTests",
+    "UrsaSerializedObjectTests",
+    "UrsaShaderAssetTests",
+    "UrsaShaderCompileCacheTests",
+    "UrsaShaderCompilerTests",
+    "UrsaShaderExampleImportTests",
+    "UrsaShaderImporter",
+    "UrsaShaderMaterialTests",
+    "UrsaShaderPackageTests",
+    "UrsaShaderReflectionTests",
+    "UrsaShaderSourceLibraryTests",
+    "UrsaShaderSourceTests",
+    "UrsaShaderVariantTests",
+    "UrsaStbImage",
+    "UrsaStringInteropTests",
+    "UrsaTemporaryAllocatorTests",
+    "UrsaTextureDraftTests",
+    "UrsaTextureImporterTests",
+    "UrsaViewportLayoutTests",
+    "UrsaVirtualFileSystemTests",
+    "UrsaVulkanValidationLogTests",
+    "UrsaWindowInputTests"
+  ],
+  "tests": [
+    "UrsaApplicationSceneTests",
+    "UrsaArchiveTests",
+    "UrsaAssetDatabaseTests",
+    "UrsaAssetImportCliTests",
+    "UrsaAssetImportPipelineTests",
+    "UrsaAssetMigrationTests",
+    "UrsaAssetPersistenceTests",
+    "UrsaAssetRefreshWindowTests",
+    "UrsaBuildResourceManifestTests",
+    "UrsaBuildResourcePathsTests",
+    "UrsaComponentEditorsTests",
+    "UrsaContainerHeaderSmoke",
+    "UrsaCustomComponentTests",
+    "UrsaDotNetHostSmoke",
+    "UrsaEastlAllocatorTests",
+    "UrsaEditorCompositeWindowTests",
+    "UrsaEditorDocumentsTests",
+    "UrsaEditorGizmoInteractionTests",
+    "UrsaEditorGizmoTests",
+    "UrsaEditorHierarchyTests",
+    "UrsaEditorMaterialInspectorTests",
+    "UrsaEditorPreviewTests",
+    "UrsaEditorShaderImportTests",
+    "UrsaEditorWorkspaceWindowTests",
+    "UrsaFrameSchedulerTests",
+    "UrsaGameObjectTests",
+    "UrsaGameViewSettingsTests",
+    "UrsaImGuiBridgeTests",
+    "UrsaLightingHeaderSmoke",
+    "UrsaLightingTests",
+    "UrsaLogConsoleSmoke",
+    "UrsaLogHeaderSmoke",
+    "UrsaLogTests",
+    "UrsaManagedAssetApiTests",
+    "UrsaManagedBehaviourRuntimeTests",
+    "UrsaManagedEditorWorkflowTests",
+    "UrsaManagedHandleTests",
+    "UrsaManagedProtocolTests",
+    "UrsaManagedSceneApiTests",
+    "UrsaMaterialDraftTests",
+    "UrsaMaterialHeaderSmoke",
+    "UrsaMaterialInspectorHeaderSmoke",
+    "UrsaMaterialMigrationTests",
+    "UrsaMaterialRendererTests",
+    "UrsaMaterialSceneSmoke",
+    "UrsaMaterialTests",
+    "UrsaMathTests",
+    "UrsaMemoryAllocatorTests",
+    "UrsaMemoryFactoryTests",
+    "UrsaMemoryFrameTests",
+    "UrsaPakTests",
+    "UrsaPlaySessionTests",
+    "UrsaPrefabTests",
+    "UrsaProfilerCompileTests",
+    "UrsaProfilerEditorWindowTests",
+    "UrsaProfilerGpuMemoryTests",
+    "UrsaProfilerMemoryTests",
+    "UrsaProjectAssetDatabaseTests",
+    "UrsaProjectBrowserModelTests",
+    "UrsaProjectEditorExtensionsTests",
+    "UrsaProjectEditorOpenSmoke",
+    "UrsaProjectImportPrepare",
+    "UrsaProjectLibraryRecoveryTests",
+    "UrsaProjectMaterialEditorSmoke",
+    "UrsaProjectMaterialPlayerSmoke",
+    "UrsaProjectModelImportTests",
+    "UrsaProjectPackage",
+    "UrsaProjectPackageScriptCompile",
+    "UrsaProjectPlaySessionTests",
+    "UrsaProjectScenePrefabRoundTripTests",
+    "UrsaProjectScriptCompile",
+    "UrsaProjectShaderImportTests",
+    "UrsaProjectSnakeGameplaySmoke",
+    "UrsaProjectSnakePakSmoke",
+    "UrsaProjectSnakePlayerSmoke",
+    "UrsaProjectTextureImportTests",
+    "UrsaProjectWorkspaceTests",
+    "UrsaRendererTests",
+    "UrsaRendererWindowTests",
+    "UrsaResourceVfsTests",
+    "UrsaRhiTests",
+    "UrsaRuntimeContentTests",
+    "UrsaRuntimeHeaderSmoke",
+    "UrsaSceneDraftTests",
+    "UrsaSceneGraphTests",
+    "UrsaScenePersistenceTests",
+    "UrsaScriptBuildTests",
+    "UrsaSerializableHeaderSmoke",
+    "UrsaSerializationBaseTests",
+    "UrsaSerializedObjectTests",
+    "UrsaShaderAssetTests",
+    "UrsaShaderCompileCacheTests",
+    "UrsaShaderCompilerTests",
+    "UrsaShaderExampleImportTests",
+    "UrsaShaderMaterialTests",
+    "UrsaShaderPackageBuild",
+    "UrsaShaderPackageTests",
+    "UrsaShaderReflectionTests",
+    "UrsaShaderSourceLibraryTests",
+    "UrsaShaderSourceTests",
+    "UrsaShaderVariantTests",
+    "UrsaSnakeManagedLogicTests",
+    "UrsaStringInteropTests",
+    "UrsaTemporaryAllocatorTests",
+    "UrsaTestContentPrepare",
+    "UrsaTestSamplePrepare",
+    "UrsaTextureDraftTests",
+    "UrsaTextureImporterTests",
+    "UrsaViewportLayoutTests",
+    "UrsaVirtualFileSystemTests",
+    "UrsaVulkanValidationLogTests",
+    "UrsaVulkanValidationShutdownSmoke",
+    "UrsaWindowInputTests"
+  ],
+  "submodules": [
+    {
+      "path": "ThirdParty/assimp",
+      "commit": "392a658f9c271be965271f45e7521a1b80ea4392",
+      "url": "https://github.com/assimp/assimp.git"
+    },
+    {
+      "path": "ThirdParty/eabase",
+      "commit": "123363eb82e132c0181ac53e43226d8ee76dea12",
+      "url": "https://github.com/electronicarts/EABase.git"
+    },
+    {
+      "path": "ThirdParty/eastl",
+      "commit": "7fadbf0da01e6f6e0e7038b1b34343a069b8fc51",
+      "url": "https://github.com/electronicarts/EASTL.git"
+    },
+    {
+      "path": "ThirdParty/glfw",
+      "commit": "d9d6f0f1f967807ffade6598ea9a631ebaf37a56",
+      "url": "https://github.com/glfw/glfw.git"
+    },
+    {
+      "path": "ThirdParty/imgui",
+      "commit": "b48d1afbe8ee8b238e2961dc363a949dd7304e23",
+      "url": "https://github.com/ocornut/imgui.git"
+    },
+    {
+      "path": "ThirdParty/imguizmo",
+      "commit": "b796ac3b861afc6e91ca74e4611effd9c9527367",
+      "url": "https://github.com/CedricGuillemet/ImGuizmo.git"
+    },
+    {
+      "path": "ThirdParty/json",
+      "commit": "55f93686c01528224f448c19128836e7df245f72",
+      "url": "https://github.com/nlohmann/json.git"
+    },
+    {
+      "path": "ThirdParty/spdlog",
+      "commit": "7c02e204c92545f869e2f04edaab1f19fe8b19fd",
+      "url": "https://github.com/gabime/spdlog.git"
+    },
+    {
+      "path": "ThirdParty/stb",
+      "commit": "2c980bb59875b0d32144a71867fbdebb2f77cd20",
+      "url": "https://github.com/nothings/stb.git"
+    },
+    {
+      "path": "ThirdParty/tracy",
+      "commit": "30997d5ca6bb632cc10807a1da8a6d3de0aeeb3c",
+      "url": "https://github.com/wolfpld/tracy.git"
+    },
+    {
+      "path": "ThirdParty/vma",
+      "commit": "3aa921224c154a0d2c43912bc88e1c42ce1f7607",
+      "url": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git"
+    }
+  ],
+  "originalRootLines": 934,
+  "runtimeCppFiles": 59,
+  "engineCppFiles": 104,
+  "editorCppFiles": 77,
+  "testCppFiles": 98,
+  "aliases": {
+    "Ursa::StbImage": "UrsaStbImage",
+    "Ursa::Runtime": "UrsaRuntime",
+    "Ursa::Engine": "UrsaEngine",
+    "Ursa::Editor": "UrsaEditorCore",
+    "Ursa::DotNetHostSupport": "UrsaDotNetHostSupport",
+    "Ursa::DotNetHost": "UrsaDotNetHost"
+  },
+  "managedOutputs": [
+    "Managed/<Config>/Ursa.ManagedHost.dll",
+    "Managed/<Config>/Ursa.ManagedHost.deps.json",
+    "Managed/<Config>/Ursa.ManagedHost.runtimeconfig.json",
+    "Managed/<Config>/Ursa.Runtime.dll",
+    "Managed/<Config>/Ursa.Editor.dll"
+  ],
+  "testFixtures": {
+    "UrsaProfilerCompileTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProfilerMemoryTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProfilerGpuMemoryTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProfilerEditorWindowTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaBuildResourcePathsTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaBuildResourceManifestTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaResourceVfsTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaSerializableHeaderSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaManagedHandleTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaManagedSceneApiTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaManagedAssetApiTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaManagedBehaviourRuntimeTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaSerializedObjectTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaImGuiBridgeTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorCompositeWindowTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorWorkspaceWindowTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorPreviewTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorHierarchyTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorGizmoTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorGizmoInteractionTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaViewportLayoutTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaGameViewSettingsTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectWorkspaceTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorDocumentsTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaAssetRefreshWindowTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaAssetImportPipelineTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectShaderImportTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectAssetDatabaseTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaAssetDatabaseTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectBrowserModelTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaManagedEditorWorkflowTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaScriptBuildTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaAssetMigrationTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaTextureImporterTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorShaderImportTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEditorMaterialInspectorTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMaterialInspectorHeaderSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaComponentEditorsTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaTextureDraftTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMaterialDraftTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaSceneDraftTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaPlaySessionTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaEastlAllocatorTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMemoryAllocatorTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaTemporaryAllocatorTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMemoryFactoryTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMemoryFrameTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaLogTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaLogConsoleSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaLogHeaderSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaContainerHeaderSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaStringInteropTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaRuntimeContentTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaVirtualFileSystemTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaPakTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaRuntimeHeaderSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaWindowInputTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMathTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMaterialTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderMaterialTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMaterialMigrationTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderSourceTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderVariantTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderSourceLibraryTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderCompilerTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderCompileCacheTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderExampleImportTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderAssetTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderPackageBuild": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ],
+      "FIXTURES_SETUP": [
+        "UrsaShaderContentPak"
+      ]
+    },
+    "UrsaShaderPackageTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaShaderContentPak",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaShaderReflectionTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaSerializationBaseTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaArchiveTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaAssetPersistenceTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaScenePersistenceTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaCustomComponentTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaPrefabTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMaterialHeaderSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaSceneGraphTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaGameObjectTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaLightingTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaLightingHeaderSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaFrameSchedulerTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaApplicationSceneTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaRendererTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMaterialRendererTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaMaterialSceneSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaRendererWindowTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaRhiTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaVulkanValidationLogTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaVulkanValidationShutdownSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaDotNetHostSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaManagedProtocolTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaSnakeManagedLogicTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectScriptCompile": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ],
+      "FIXTURES_SETUP": [
+        "UrsaProjectScripts"
+      ]
+    },
+    "UrsaProjectSnakePlayerSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectScripts",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectSnakeGameplaySmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectScripts",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectMaterialPlayerSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectScripts",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectMaterialEditorSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectScripts",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectEditorOpenSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectScripts",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectScenePrefabRoundTripTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectPlaySessionTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectScripts",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectEditorExtensionsTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectScripts",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectPackageScriptCompile": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ],
+      "FIXTURES_SETUP": [
+        "UrsaProjectPackageScripts"
+      ]
+    },
+    "UrsaProjectLibraryRecoveryTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectImportPrepare": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ],
+      "FIXTURES_SETUP": [
+        "UrsaProjectImports"
+      ]
+    },
+    "UrsaProjectPackage": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectImports",
+        "UrsaProjectPackageScripts",
+        "UrsaProjectScripts",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ],
+      "FIXTURES_SETUP": [
+        "UrsaProjectPak"
+      ]
+    },
+    "UrsaProjectSnakePakSmoke": {
+      "FIXTURES_REQUIRED": [
+        "UrsaProjectPak",
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectTextureImportTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaProjectModelImportTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaTestContentPrepare": {
+      "FIXTURES_SETUP": [
+        "UrsaTestContent"
+      ]
+    },
+    "UrsaTestSamplePrepare": {
+      "FIXTURES_SETUP": [
+        "UrsaTestSample"
+      ]
+    },
+    "UrsaAssetImportCliTests": {
+      "FIXTURES_REQUIRED": [
+        "UrsaTestContent",
+        "UrsaTestSample"
+      ]
+    }
+  }
+}

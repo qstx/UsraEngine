@@ -1,0 +1,32 @@
+if(MSVC)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+endif()
+
+option(URSA_MSVC_PARALLEL_COMPILE "Compile multiple source files concurrently with Visual Studio/MSVC" ON)
+if(URSA_MSVC_PARALLEL_COMPILE AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
+   AND CMAKE_GENERATOR MATCHES "^Visual Studio")
+  # MSBuild /m schedules projects; /MP parallelizes source files within each project.
+  # Without a numeric limit MSVC uses the available logical processors.
+  add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/MP>)
+endif()
+
+function(ursa_configure_warning_policy directory)
+  get_property(directoryTargets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(target IN LISTS directoryTargets)
+    get_target_property(targetType ${target} TYPE)
+    if(target STREQUAL "UrsaImGui" OR NOT targetType MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
+      continue()
+    endif()
+    if(MSVC)
+      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/WX>)
+    else()
+      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
+    endif()
+  endforeach()
+  get_property(childDirectories DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+  foreach(childDirectory IN LISTS childDirectories)
+    if(NOT childDirectory MATCHES "/ThirdParty(/|$)")
+      ursa_configure_warning_policy("${childDirectory}")
+    endif()
+  endforeach()
+endfunction()

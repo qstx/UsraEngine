@@ -1,0 +1,6 @@
+ursa_add_test_executable(UrsaMemoryBenchmarks MemoryBenchmarks.cpp)
+target_link_libraries(UrsaMemoryBenchmarks PRIVATE Ursa::Runtime)
+
+ursa_add_test_executable(UrsaMemoryWorkloadBenchmarks MemoryWorkloadBenchmarks.cpp)
+target_link_libraries(UrsaMemoryWorkloadBenchmarks PRIVATE Ursa::Engine)
+ursa_finalize_test_directory()

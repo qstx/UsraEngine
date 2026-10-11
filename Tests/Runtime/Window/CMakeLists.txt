@@ -1,0 +1,5 @@
+ursa_add_test_executable(UrsaWindowInputTests WindowInputTests.cpp)
+target_link_libraries(UrsaWindowInputTests PRIVATE Ursa::Runtime)
+
+add_test(NAME UrsaWindowInputTests COMMAND UrsaWindowInputTests)
+ursa_finalize_test_directory()

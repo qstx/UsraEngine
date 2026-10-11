@@ -1,0 +1,41 @@
+ursa_add_test_executable(UrsaResourceVfsTests ResourceVfsTests.cpp)
+target_link_libraries(UrsaResourceVfsTests PRIVATE Ursa::Engine)
+target_compile_definitions(UrsaResourceVfsTests PRIVATE URSA_TEST_ENGINE_ASSET_ROOT="${URSA_SOURCE_ROOT}/Assets")
+
+add_test(NAME UrsaResourceVfsTests COMMAND UrsaResourceVfsTests)
+
+ursa_add_test_executable(UrsaSerializableHeaderSmoke SerializableHeaderSmoke.cpp)
+target_link_libraries(UrsaSerializableHeaderSmoke PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaSerializableHeaderSmoke COMMAND UrsaSerializableHeaderSmoke)
+
+ursa_add_test_executable(UrsaSerializationBaseTests SerializationBaseTests.cpp)
+target_link_libraries(UrsaSerializationBaseTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaSerializationBaseTests COMMAND UrsaSerializationBaseTests)
+
+ursa_add_test_executable(UrsaArchiveTests ArchiveTests.cpp)
+target_link_libraries(UrsaArchiveTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaArchiveTests COMMAND UrsaArchiveTests)
+
+ursa_add_test_executable(UrsaAssetPersistenceTests AssetPersistenceTests.cpp)
+target_link_libraries(UrsaAssetPersistenceTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaAssetPersistenceTests COMMAND UrsaAssetPersistenceTests)
+
+ursa_add_test_executable(UrsaScenePersistenceTests ScenePersistenceTests.cpp)
+target_link_libraries(UrsaScenePersistenceTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaScenePersistenceTests COMMAND UrsaScenePersistenceTests)
+
+ursa_add_test_executable(UrsaCustomComponentTests CustomComponentTests.cpp)
+target_link_libraries(UrsaCustomComponentTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaCustomComponentTests COMMAND UrsaCustomComponentTests)
+
+ursa_add_test_executable(UrsaPrefabTests PrefabTests.cpp)
+target_link_libraries(UrsaPrefabTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaPrefabTests COMMAND UrsaPrefabTests)
+ursa_finalize_test_directory()

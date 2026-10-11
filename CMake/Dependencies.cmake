@@ -1,0 +1,107 @@
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+if(NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/glfw/CMakeLists.txt" OR
+   NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/vma/CMakeLists.txt" OR
+   NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/json/CMakeLists.txt" OR
+   NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/spdlog/CMakeLists.txt" OR
+   NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/eastl/CMakeLists.txt" OR
+   NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/eabase/CMakeLists.txt")
+  message(FATAL_ERROR "Third-party submodules are missing. Run: git submodule update --init --recursive")
+endif()
+
+# Include targets declared by nested dependency projects, such as Assimp's zlib.
+function(ursa_classify_dependency_directory directory folder)
+  get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(target IN LISTS targets)
+    set_target_properties(${target} PROPERTIES FOLDER "${folder}")
+  endforeach()
+  get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+  foreach(child IN LISTS children)
+    ursa_classify_dependency_directory("${child}" "${folder}")
+  endforeach()
+endfunction()
+if(URSA_ENABLE_TRACY)
+  if(NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/tracy/CMakeLists.txt")
+    message(FATAL_ERROR "Tracy submodule is missing. Run: git submodule update --init ThirdParty/tracy")
+  endif()
+  set(TRACY_ENABLE ON CACHE BOOL "Enable profiling" FORCE)
+  set(TRACY_ON_DEMAND ON CACHE BOOL "On-demand profiling" FORCE)
+  add_subdirectory(ThirdParty/tracy)
+endif()
+add_subdirectory(ThirdParty/glfw)
+add_subdirectory(ThirdParty/vma)
+add_subdirectory(ThirdParty/json)
+set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_EXAMPLE_HO OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS_HO OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(ThirdParty/spdlog)
+if(MSVC)
+  target_compile_definitions(spdlog PRIVATE _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING)
+  target_compile_options(spdlog PRIVATE "$<$<CONFIG:Debug,RelWithDebInfo>:/Z7>")
+endif()
+set(FETCHCONTENT_SOURCE_DIR_EABASE "${URSA_SOURCE_ROOT}/ThirdParty/eabase")
+# EABase is header-only. Supply its interface target directly rather than
+# running its legacy CMake 3.1 project. EASTL reuses this local declaration.
+include(FetchContent)
+FetchContent_Declare(EABase
+  SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_EABASE}"
+  SOURCE_SUBDIR include)
+add_library(EABase INTERFACE)
+target_include_directories(EABase INTERFACE "${FETCHCONTENT_SOURCE_DIR_EABASE}/include/Common")
+add_subdirectory(ThirdParty/eastl)
+target_compile_definitions(EASTL PUBLIC EASTL_USER_DEFINED_ALLOCATOR=1)
+
+if(URSA_BUILD_EDITOR)
+  if(NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/assimp/CMakeLists.txt" OR
+     NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/stb/stb_image.h")
+    message(FATAL_ERROR "Asset importer submodules are missing. Run: git submodule update --init ThirdParty/assimp ThirdParty/stb")
+  endif()
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build Assimp as a static library" FORCE)
+  set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_INSTALL_PDB OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+  add_subdirectory(ThirdParty/assimp)
+  if(MSVC)
+    # Keep dependency debug symbols in object files; parallel compilation then
+    # does not require a shared compiler PDB server. Executable PDBs retain them.
+    target_compile_options(assimp PRIVATE "$<$<CONFIG:Debug,RelWithDebInfo>:/Z7>")
+    if(TARGET zlibstatic)
+      target_compile_options(zlibstatic PRIVATE "$<$<CONFIG:Debug,RelWithDebInfo>:/Z7>")
+    endif()
+  endif()
+  add_library(UrsaStbImage INTERFACE)
+  target_include_directories(UrsaStbImage INTERFACE "${URSA_SOURCE_ROOT}/ThirdParty/stb")
+  add_library(Ursa::StbImage ALIAS UrsaStbImage)
+  set_target_properties(assimp UrsaStbImage PROPERTIES FOLDER "ThirdParty")
+endif()
+
+# Keep vendored projects out of the way in the generated solution.
+foreach(URSA_DEPENDENCY IN ITEMS EASTL EABase TracyClient glfw spdlog spdlog_header_only update_mappings uninstall)
+  if(TARGET ${URSA_DEPENDENCY})
+    set_target_properties(${URSA_DEPENDENCY} PROPERTIES FOLDER "ThirdParty")
+  endif()
+endforeach()
+
+
+if(URSA_BUILD_EDITOR)
+  foreach(path IN ITEMS imgui/imgui.cpp imguizmo/src/ImGuizmo.cpp)
+    if(NOT EXISTS "${URSA_SOURCE_ROOT}/ThirdParty/${path}")
+      message(FATAL_ERROR "Editor submodules are missing; run git submodule update --init --recursive")
+    endif()
+  endforeach()
+endif()
+
+get_property(dependencyDirectories DIRECTORY "${URSA_SOURCE_ROOT}" PROPERTY SUBDIRECTORIES)
+foreach(directory IN LISTS dependencyDirectories)
+  if(directory MATCHES "/ThirdParty/([^/]+)")
+    ursa_classify_dependency_directory("${directory}" "ThirdParty/${CMAKE_MATCH_1}")
+  endif()
+endforeach()

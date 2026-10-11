@@ -1,0 +1,20 @@
+ursa_add_test_executable(UrsaMaterialTests MaterialTests.cpp)
+target_link_libraries(UrsaMaterialTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaMaterialTests COMMAND UrsaMaterialTests)
+
+ursa_add_test_executable(UrsaShaderMaterialTests ShaderMaterialTests.cpp)
+target_link_libraries(UrsaShaderMaterialTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaShaderMaterialTests COMMAND UrsaShaderMaterialTests)
+
+ursa_add_test_executable(UrsaMaterialMigrationTests MaterialMigrationTests.cpp)
+target_link_libraries(UrsaMaterialMigrationTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaMaterialMigrationTests COMMAND UrsaMaterialMigrationTests)
+
+ursa_add_test_executable(UrsaMaterialHeaderSmoke MaterialHeaderSmoke.cpp)
+target_link_libraries(UrsaMaterialHeaderSmoke PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaMaterialHeaderSmoke COMMAND UrsaMaterialHeaderSmoke)
+ursa_finalize_test_directory()

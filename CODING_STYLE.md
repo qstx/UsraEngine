@@ -7,7 +7,7 @@ Engine and Demo use their own matching `.clang-format` and `.editorconfig` files
 - Put opening braces on a new line for functions, types, namespaces, and control blocks. Keep braces around single-statement branches and loops.
 - Leave one blank line between method definitions. Keep lines within 120 columns when practical.
 - Attach `*` and `&` to the type (`Node*`, `const String&`). Keep include order intentional.
-- Format only first-party C++ sources. Do not format `third_party`, generated build output, shaders, or serialized assets.
+- Format only first-party C++ sources. Do not format `ThirdParty`, generated build output, shaders, or serialized assets.
 
 Use clang-format 19 with the repository's `Tools/Format.ps1`, or pass `-Check` to verify without edits. The script finds Visual Studio's clang-format when it is not in `PATH`, and accepts `-ClangFormatPath` for another installation. Run it separately in Engine and Demo. VS Code formats C++ on save using each repository's `.clang-format`.
 

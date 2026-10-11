@@ -1,0 +1,16 @@
+ursa_add_test_executable(UrsaMemoryFrameTests MemoryFrameTests.cpp)
+target_link_libraries(UrsaMemoryFrameTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaMemoryFrameTests COMMAND UrsaMemoryFrameTests)
+
+ursa_add_test_executable(UrsaFrameSchedulerTests FrameSchedulerTests.cpp)
+target_link_libraries(UrsaFrameSchedulerTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaFrameSchedulerTests COMMAND UrsaFrameSchedulerTests)
+
+ursa_add_test_executable(UrsaApplicationSceneTests ApplicationSceneTests.cpp)
+target_link_libraries(UrsaApplicationSceneTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaApplicationSceneTests COMMAND UrsaApplicationSceneTests)
+ursa_finalize_test_directory()
+ursa_require_test_content(UrsaApplicationSceneTests UrsaApplicationSceneTests)

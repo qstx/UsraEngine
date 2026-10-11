@@ -2,9 +2,9 @@
 #include <Core/Log.hpp>
 #include <Core/Profiler.hpp>
 #include <Core/StringInterop.hpp>
-#include <Scripting/DotNetHost.hpp>
+#include <Scripting/DotNet/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
-#include <Scripting/ManagedScriptRuntime.hpp>
+#include <Scripting/DotNet/ManagedScriptRuntime.hpp>
 #include <Serialization/SceneResource.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/PrefabResource.hpp>

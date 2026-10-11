@@ -1,33 +1,33 @@
 [submodule "third_party/glfw"]
-	path = third_party/glfw
+	path = ThirdParty/glfw
 	url = https://github.com/glfw/glfw.git
 [submodule "third_party/vma"]
-	path = third_party/vma
+	path = ThirdParty/vma
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
 [submodule "third_party/json"]
-	path = third_party/json
+	path = ThirdParty/json
 	url = https://github.com/nlohmann/json.git
 [submodule "third_party/eastl"]
-	path = third_party/eastl
+	path = ThirdParty/eastl
 	url = https://github.com/electronicarts/EASTL.git
 [submodule "third_party/eabase"]
-	path = third_party/eabase
+	path = ThirdParty/eabase
 	url = https://github.com/electronicarts/EABase.git
 [submodule "third_party/imgui"]
-	path = third_party/imgui
+	path = ThirdParty/imgui
 	url = https://github.com/ocornut/imgui.git
 [submodule "third_party/imguizmo"]
-	path = third_party/imguizmo
+	path = ThirdParty/imguizmo
 	url = https://github.com/CedricGuillemet/ImGuizmo.git
 [submodule "third_party/spdlog"]
-	path = third_party/spdlog
+	path = ThirdParty/spdlog
 	url = https://github.com/gabime/spdlog.git
 [submodule "third_party/assimp"]
-	path = third_party/assimp
+	path = ThirdParty/assimp
 	url = https://github.com/assimp/assimp.git
 [submodule "third_party/stb"]
-	path = third_party/stb
+	path = ThirdParty/stb
 	url = https://github.com/nothings/stb.git
 [submodule "third_party/tracy"]
-	path = third_party/tracy
+	path = ThirdParty/tracy
 	url = https://github.com/wolfpld/tracy.git

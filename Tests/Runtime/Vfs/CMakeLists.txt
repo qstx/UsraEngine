@@ -1,0 +1,20 @@
+ursa_add_test_executable(UrsaBuildResourceManifestTests BuildResourceManifestTests.cpp)
+target_link_libraries(UrsaBuildResourceManifestTests PRIVATE Ursa::Runtime)
+
+add_test(NAME UrsaBuildResourceManifestTests COMMAND UrsaBuildResourceManifestTests)
+
+ursa_add_test_executable(UrsaVirtualFileSystemTests VirtualFileSystemTests.cpp)
+
+ursa_add_test_executable(UrsaRuntimeContentTests RuntimeContentTests.cpp)
+target_link_libraries(UrsaRuntimeContentTests PRIVATE Ursa::Runtime)
+
+add_test(NAME UrsaRuntimeContentTests COMMAND UrsaRuntimeContentTests)
+target_link_libraries(UrsaVirtualFileSystemTests PRIVATE Ursa::Runtime)
+
+add_test(NAME UrsaVirtualFileSystemTests COMMAND UrsaVirtualFileSystemTests)
+
+ursa_add_test_executable(UrsaPakTests PakTests.cpp)
+target_link_libraries(UrsaPakTests PRIVATE Ursa::Runtime)
+
+add_test(NAME UrsaPakTests COMMAND UrsaPakTests)
+ursa_finalize_test_directory()

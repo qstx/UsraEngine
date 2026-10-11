@@ -1,0 +1,8 @@
+add_subdirectory(Application)
+add_subdirectory(Material)
+add_subdirectory(Math)
+add_subdirectory(Renderer3D)
+add_subdirectory(Scene)
+add_subdirectory(Scripting)
+add_subdirectory(Serialization)
+add_subdirectory(Shader)
