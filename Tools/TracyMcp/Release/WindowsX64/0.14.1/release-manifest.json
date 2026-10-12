@@ -1,0 +1,23 @@
+{
+  "package": "TracyMcp-WindowsX64-0.14.1",
+  "tracyVersion": "0.14.1",
+  "tracyRevision": "30997d5ca6bb632cc10807a1da8a6d3de0aeeb3c",
+  "configuration": "Release",
+  "architecture": "x64",
+  "buildPythonVersion": "3.11.5",
+  "runtimePythonVersion": "3.11.17",
+  "pythonRuntimePath": "Engine/Tools/Python/3.11.17",
+  "pythonDistribution": "astral-sh/python-build-standalone@20261009",
+  "pythonRuntimeArchive": "cpython-3.11.17+20261009-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  "pythonRuntimeUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.11.17%2B20261009-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  "pythonRuntimeSha256": "c3045115465bb4aa7d1ca6bfe6ce311ba157d726d768bbb3520fad2580831c3f",
+  "pythonAbi": "cp311-win_amd64",
+  "buildMode": "reused-existing-release-artifact",
+  "cmakeOptions": [
+    "TRACY_CLIENT_PYTHON=ON",
+    "TRACY_STATIC=OFF",
+    "BUILD_SHARED_LIBS=OFF",
+    "NO_LTO=ON",
+    "CMAKE_CXX_FLAGS=/utf-8 /D_CRT_SECURE_NO_WARNINGS /wd4018"
+  ]
+}

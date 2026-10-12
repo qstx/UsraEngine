@@ -20,6 +20,15 @@ $EngineRoot = Join-Path $WorkspaceRoot 'Engine'
 $TracyRoot = Join-Path $EngineRoot 'ThirdParty\tracy'
 $BuildRoot = Join-Path $EngineRoot 'Build\TracyMcp'
 $CMakeBuildDirectory = Join-Path $BuildRoot 'CMakeBuild'
+$BundledPythonVersion = '3.11.17'
+$PythonDistributionTag = '20261009'
+$PythonRuntimeArchiveName = "cpython-$BundledPythonVersion+$PythonDistributionTag-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+$PythonRuntimeArchive = Join-Path $BuildRoot $PythonRuntimeArchiveName
+$PythonRuntimeExtractionDirectory = Join-Path $BuildRoot "PythonRuntime-$BundledPythonVersion-$PythonDistributionTag"
+$PythonRuntimeSha256 = 'c3045115465bb4aa7d1ca6bfe6ce311ba157d726d768bbb3520fad2580831c3f'
+$PythonRuntimeUrl = "https://github.com/astral-sh/python-build-standalone/releases/download/$PythonDistributionTag/$($PythonRuntimeArchiveName.Replace('+', '%2B'))"
+$SharedPythonRoot = Join-Path $EngineRoot 'Tools\Python'
+$SharedPythonDirectory = Join-Path $SharedPythonRoot $BundledPythonVersion
 $VersionHeader = Join-Path $TracyRoot 'public\common\TracyVersion.hpp'
 
 if (-not (Test-Path -LiteralPath $VersionHeader -PathType Leaf))
@@ -33,13 +42,23 @@ if ([string]::IsNullOrWhiteSpace($PythonExecutable))
 	$PythonExecutable = $PythonCommand.Source
 }
 
-$PythonInfoJson = & $PythonExecutable -c 'import json, struct, sys; print(json.dumps({"major":sys.version_info.major,"minor":sys.version_info.minor,"patch":sys.version_info.micro,"bits":struct.calcsize("P")*8}))'
+$PythonInfoText = & $PythonExecutable -c "import sys,struct;print(sys.version_info.major,sys.version_info.minor,sys.version_info.micro,struct.calcsize(chr(80))*8)"
 if ($LASTEXITCODE -ne 0)
 {
 	throw "Could not query Python at $PythonExecutable"
 }
 
-$PythonInfo = $PythonInfoJson | ConvertFrom-Json
+$PythonInfoValues = $PythonInfoText.Trim() -split '\s+'
+if ($PythonInfoValues.Count -ne 4)
+{
+	throw "Could not parse Python version information from $PythonExecutable`: $PythonInfoText"
+}
+$PythonInfo = [PSCustomObject]@{
+	major = [int]$PythonInfoValues[0]
+	minor = [int]$PythonInfoValues[1]
+	patch = [int]$PythonInfoValues[2]
+	bits = [int]$PythonInfoValues[3]
+}
 if ($PythonInfo.major -ne 3 -or $PythonInfo.minor -ne 11 -or $PythonInfo.bits -ne 64)
 {
 	throw "Tracy MCP release requires 64-bit Python 3.11; found $($PythonInfo.major).$($PythonInfo.minor).$($PythonInfo.patch) ($($PythonInfo.bits)-bit)."
@@ -57,13 +76,38 @@ $VersionParts = foreach ($Part in @('Major', 'Minor', 'Patch'))
 }
 
 $TracyVersion = $VersionParts -join '.'
-$ReleaseName = "tracy-mcp-windows-x64-$TracyVersion"
-$ReleaseDirectory = Join-Path $WorkspaceRoot $ReleaseName
+$ReleaseName = "TracyMcp-WindowsX64-$TracyVersion"
+$ReleaseRoot = Join-Path $PSScriptRoot 'Release\WindowsX64'
+$ReleaseDirectory = Join-Path $ReleaseRoot $TracyVersion
 $StagingDirectory = Join-Path $BuildRoot ("Staging-" + [guid]::NewGuid().ToString('N'))
 $BackupDirectory = Join-Path $BuildRoot ("Previous-" + [guid]::NewGuid().ToString('N'))
 $PythonBindingDirectory = if ($PackageExistingBinding) { Join-Path $BuildRoot 'python\Release' } else { Join-Path $CMakeBuildDirectory 'python\Release' }
 
 New-Item -ItemType Directory -Path $BuildRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
+
+if (-not (Test-Path -LiteralPath $PythonRuntimeArchive -PathType Leaf))
+{
+	Write-Output "Downloading portable CPython $BundledPythonVersion x64 runtime..."
+	Invoke-WebRequest -Uri $PythonRuntimeUrl -OutFile $PythonRuntimeArchive
+}
+
+$DownloadedRuntimeHash = (Get-FileHash -LiteralPath $PythonRuntimeArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($DownloadedRuntimeHash -ne $PythonRuntimeSha256)
+{
+	throw "Portable Python archive checksum mismatch. Expected $PythonRuntimeSha256, found $DownloadedRuntimeHash."
+}
+
+$PythonRuntimeInstallDirectory = Join-Path $PythonRuntimeExtractionDirectory 'python'
+if (-not (Test-Path -LiteralPath (Join-Path $PythonRuntimeInstallDirectory 'python.exe') -PathType Leaf))
+{
+	New-Item -ItemType Directory -Path $PythonRuntimeExtractionDirectory -Force | Out-Null
+	& tar.exe -xzf $PythonRuntimeArchive -C $PythonRuntimeExtractionDirectory
+	if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $PythonRuntimeInstallDirectory 'python.exe') -PathType Leaf))
+	{
+		throw 'Could not extract the portable Python runtime.'
+	}
+}
 
 if (-not $PackageExistingBinding)
 {
@@ -172,6 +216,122 @@ foreach ($RuntimeLibrary in Get-ChildItem -LiteralPath $PythonBindingDirectory -
 	Copy-Item -LiteralPath $RuntimeLibrary.FullName -Destination $StagingDirectory
 }
 
+$PythonPackagesDirectory = Join-Path $StagingDirectory 'PythonPackages'
+New-Item -ItemType Directory -Path $PythonPackagesDirectory -Force | Out-Null
+
+Write-Output 'Installing Tracy MCP Python dependencies into the release package...'
+$PythonRuntimeExecutable = Join-Path $PythonRuntimeInstallDirectory 'python.exe'
+& $PythonRuntimeExecutable -m pip install --disable-pip-version-check --no-warn-script-location `
+	--target $PythonPackagesDirectory `
+	-r (Join-Path $StagingDirectory 'extra/mcp/requirements.txt')
+if ($LASTEXITCODE -ne 0)
+{
+	throw 'Could not install the Tracy MCP Python dependencies into the release package.'
+}
+
+$SiteCustomization = @"
+import site
+from pathlib import Path
+
+site.addsitedir(str(Path(__file__).resolve().parent / "PythonPackages"))
+"@
+[IO.File]::WriteAllText((Join-Path $StagingDirectory 'sitecustomize.py'), $SiteCustomization, [Text.UTF8Encoding]::new($false))
+
+$PreviousPythonPath = $env:PYTHONPATH
+$PreviousPythonBytecodeSetting = $env:PYTHONDONTWRITEBYTECODE
+$env:PYTHONPATH = $StagingDirectory
+$env:PYTHONDONTWRITEBYTECODE = '1'
+& $PythonRuntimeExecutable -c 'import mcp, TracyServerBindings'
+$RuntimeImportExitCode = $LASTEXITCODE
+$env:PYTHONPATH = $PreviousPythonPath
+$env:PYTHONDONTWRITEBYTECODE = $PreviousPythonBytecodeSetting
+if ($RuntimeImportExitCode -ne 0)
+{
+	throw 'The bundled Python runtime could not import MCP dependencies and TracyServerBindings.'
+}
+
+$LockedPythonDependencies = & $PythonRuntimeExecutable -m pip freeze --path $PythonPackagesDirectory
+if ($LASTEXITCODE -ne 0)
+{
+	throw 'Could not record the resolved MCP Python dependencies.'
+}
+[IO.File]::WriteAllText((Join-Path $StagingDirectory 'requirements.lock.txt'), (($LockedPythonDependencies -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+
+$OptionalMcpDirectories = @(
+	'PythonPackages\pythonwin',
+	'PythonPackages\win32com',
+	'PythonPackages\win32comext',
+	'PythonPackages\adodbapi',
+	'PythonPackages\isapi',
+	'PythonPackages\bin'
+)
+foreach ($RelativePattern in $OptionalMcpDirectories)
+{
+	$PatternPath = Join-Path $StagingDirectory $RelativePattern
+	foreach ($OptionalPath in Get-ChildItem -Path $PatternPath -Force -ErrorAction SilentlyContinue)
+	{
+		$OptionalFullPath = [IO.Path]::GetFullPath($OptionalPath.FullName)
+		if (-not $OptionalFullPath.StartsWith($StagingDirectory + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase))
+		{
+			throw "Refusing to trim an MCP dependency path outside the release staging directory: $OptionalFullPath"
+		}
+		Remove-Item -LiteralPath $OptionalFullPath -Recurse -Force
+	}
+}
+
+Get-ChildItem -LiteralPath $StagingDirectory -Directory -Recurse -Filter '__pycache__' | ForEach-Object {
+	Remove-Item -LiteralPath $_.FullName -Recurse -Force
+}
+
+$PreviousPythonPath = $env:PYTHONPATH
+$PreviousPythonBytecodeSetting = $env:PYTHONDONTWRITEBYTECODE
+$env:PYTHONPATH = $StagingDirectory
+$env:PYTHONDONTWRITEBYTECODE = '1'
+& $PythonRuntimeExecutable -c 'import mcp, TracyServerBindings'
+$TrimmedRuntimeImportExitCode = $LASTEXITCODE
+$env:PYTHONPATH = $PreviousPythonPath
+$env:PYTHONDONTWRITEBYTECODE = $PreviousPythonBytecodeSetting
+if ($TrimmedRuntimeImportExitCode -ne 0)
+{
+	throw 'The shared Python runtime could not import MCP dependencies and TracyServerBindings.'
+}
+
+if (Test-Path -LiteralPath $SharedPythonDirectory -PathType Container)
+{
+	$InstalledRuntimeManifestPath = Join-Path $SharedPythonDirectory 'runtime-manifest.json'
+	if (-not (Test-Path -LiteralPath (Join-Path $SharedPythonDirectory 'python.exe') -PathType Leaf) -or -not (Test-Path -LiteralPath $InstalledRuntimeManifestPath -PathType Leaf))
+	{
+		throw "Existing shared Python runtime is incomplete: $SharedPythonDirectory"
+	}
+	$InstalledRuntimeManifest = Get-Content -LiteralPath $InstalledRuntimeManifestPath -Raw | ConvertFrom-Json
+	if ($InstalledRuntimeManifest.archiveSha256 -ne $PythonRuntimeSha256)
+	{
+		throw "The shared Python runtime at $SharedPythonDirectory does not match the pinned distribution."
+	}
+}
+else
+{
+	$PythonRuntimeStageDirectory = Join-Path $BuildRoot ("PythonStage-" + [guid]::NewGuid().ToString('N'))
+	New-Item -ItemType Directory -Path $PythonRuntimeStageDirectory -Force | Out-Null
+	Copy-Item -Path (Join-Path $PythonRuntimeInstallDirectory '*') -Destination $PythonRuntimeStageDirectory -Recurse -Force
+	$PythonRuntimeManifest = [ordered]@{
+		version = $BundledPythonVersion
+		architecture = 'x64'
+		distribution = "astral-sh/python-build-standalone@$PythonDistributionTag"
+		archive = $PythonRuntimeArchiveName
+		archiveUrl = $PythonRuntimeUrl
+		archiveSha256 = $PythonRuntimeSha256
+	}
+	[IO.File]::WriteAllText((Join-Path $PythonRuntimeStageDirectory 'runtime-manifest.json'), (($PythonRuntimeManifest | ConvertTo-Json -Depth 4) + "`n"), [Text.UTF8Encoding]::new($false))
+	$InstalledPythonVersion = & (Join-Path $PythonRuntimeStageDirectory 'python.exe') -c 'import sys; print("{}.{}.{}".format(*sys.version_info[:3]))'
+	if ($LASTEXITCODE -ne 0 -or $InstalledPythonVersion.Trim() -ne $BundledPythonVersion)
+	{
+		throw "Portable Python runtime version mismatch. Expected $BundledPythonVersion, found $InstalledPythonVersion."
+	}
+	New-Item -ItemType Directory -Path $SharedPythonRoot -Force | Out-Null
+	Move-Item -LiteralPath $PythonRuntimeStageDirectory -Destination $SharedPythonDirectory
+}
+
 $ReadmeSource = Join-Path $PSScriptRoot 'README.md'
 if (-not (Test-Path -LiteralPath $ReadmeSource -PathType Leaf))
 {
@@ -184,7 +344,7 @@ $RuntimeIgnore = @(
 	'extra/mcp/tracy_mcp.pid',
 	'extra/mcp/tracy_mcp.port',
 	'extra/mcp/tracy_mcp.crash.log',
-	'extra/mcp/__pycache__/',
+	'__pycache__/',
 	'Captures/'
 ) -join "`n"
 [IO.File]::WriteAllText((Join-Path $StagingDirectory '.gitignore'), $RuntimeIgnore + "`n", [Text.UTF8Encoding]::new($false))
@@ -197,7 +357,13 @@ $Manifest = [ordered]@{
 	tracyRevision = $TracyRevision
 	configuration = 'Release'
 	architecture = 'x64'
-	pythonVersion = "$($PythonInfo.major).$($PythonInfo.minor).$($PythonInfo.patch)"
+	buildPythonVersion = "$($PythonInfo.major).$($PythonInfo.minor).$($PythonInfo.patch)"
+	runtimePythonVersion = $BundledPythonVersion
+	pythonRuntimePath = "Engine/Tools/Python/$BundledPythonVersion"
+	pythonDistribution = "astral-sh/python-build-standalone@$PythonDistributionTag"
+	pythonRuntimeArchive = $PythonRuntimeArchiveName
+	pythonRuntimeUrl = $PythonRuntimeUrl
+	pythonRuntimeSha256 = $PythonRuntimeSha256
 	pythonAbi = 'cp311-win_amd64'
 	buildMode = $BuildMode
 	cmakeOptions = @(
@@ -231,4 +397,4 @@ catch
 }
 
 Write-Output "Tracy MCP release created at $ReleaseDirectory"
-Write-Output 'Follow README.md in the release directory to create the Python environment and start the local MCP server.'
+Write-Output "Shared Python runtime is at $SharedPythonDirectory; follow README.md to start the local MCP server."

@@ -1,0 +1,8 @@
+{
+  "version": "3.11.17",
+  "architecture": "x64",
+  "distribution": "astral-sh/python-build-standalone@20261009",
+  "archive": "cpython-3.11.17+20261009-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  "archiveUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.11.17%2B20261009-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  "archiveSha256": "c3045115465bb4aa7d1ca6bfe6ce311ba157d726d768bbb3520fad2580831c3f"
+}

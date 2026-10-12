@@ -1,0 +1,5 @@
+extra/mcp/tracy_mcp.pid
+extra/mcp/tracy_mcp.port
+extra/mcp/tracy_mcp.crash.log
+__pycache__/
+Captures/
