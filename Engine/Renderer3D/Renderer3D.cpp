@@ -1000,9 +1000,11 @@ struct Renderer3D::Impl
 	{
 		if (lastFence)
 		{
+			URSA_PROFILE_SCOPE("Renderer3D.WaitPrevious.Fence");
 			done(lastFence->Wait());
 			lastFence.reset();
 		}
+		URSA_PROFILE_SCOPE("Renderer3D.WaitPrevious.CacheMaintenance");
 		for (auto it = modelMeshes.begin(); it != modelMeshes.end();)
 		{
 			auto owner = it->second.source.lock();
@@ -1493,6 +1495,7 @@ struct Renderer3D::Impl
 	            Rhi::ResourceState after, const Mat4& viewProjection, const Vector<ModelBoxInstance>& boxes,
 	            const SceneLighting& lighting, Vec3 cameraPosition)
 	{
+		URSA_PROFILE_SCOPE("Renderer3D.DrawRecord");
 		Memory::TemporaryScope recordingMemory;
 		if (!command)
 		{
@@ -1505,59 +1508,73 @@ struct Renderer3D::Impl
 		}
 		TemporaryVector<ModelBoxInstance> resolvedBoxes(
 		    boxes.begin(), boxes.end(), Memory::TemporaryContainerAllocator(Memory::MemoryTag::Renderer));
-		resolvedBoxes.erase(
-		    std::remove_if(resolvedBoxes.begin(), resolvedBoxes.end(),
-		                   [](const ModelBoxInstance& item)
-		                   {
-			                   if (!item.mesh || !item.mesh->IsValid())
-			                   {
-				                   return false;
-			                   }
-			                   const auto snapshot = item.meshSnapshot ? item.meshSnapshot : item.mesh->Snapshot();
-			                   return snapshot && (snapshot->data.positions.empty() || snapshot->data.indices.empty() ||
-			                                       snapshot->data.subMeshes.empty());
-		                   }),
-		    resolvedBoxes.end());
-		for (ModelBoxInstance& box : resolvedBoxes)
 		{
-			box.material = ResolveMaterial(box.material, box.color);
+			URSA_PROFILE_SCOPE("Renderer3D.Record.ResolveItems");
+			resolvedBoxes.erase(std::remove_if(resolvedBoxes.begin(), resolvedBoxes.end(),
+			                                   [](const ModelBoxInstance& item)
+			                                   {
+				                                   if (!item.mesh || !item.mesh->IsValid())
+				                                   {
+					                                   return false;
+				                                   }
+				                                   const auto snapshot =
+				                                       item.meshSnapshot ? item.meshSnapshot : item.mesh->Snapshot();
+				                                   return snapshot && (snapshot->data.positions.empty() ||
+				                                                       snapshot->data.indices.empty() ||
+				                                                       snapshot->data.subMeshes.empty());
+			                                   }),
+			                    resolvedBoxes.end());
+			for (ModelBoxInstance& box : resolvedBoxes)
+			{
+				box.material = ResolveMaterial(box.material, box.color);
+			}
 		}
-		const auto items = OrderItems(resolvedBoxes, fallback, cameraPosition);
+		const auto items = [&]()
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.Record.OrderItems");
+			return OrderItems(resolvedBoxes, fallback, cameraPosition);
+		}();
 		const GpuFrameHeader frame = BuildFrameHeader(viewProjection, lighting, cameraPosition);
 		bool needsStencil = false;
-		for (const auto& item : items)
 		{
-			const auto shader = item.material->Shader();
-			if (!item.material->IsShaderBacked() || !shader)
+			URSA_PROFILE_SCOPE("Renderer3D.Record.SelectStencilRequirements");
+			for (const auto& item : items)
 			{
-				continue;
-			}
-			bool compiled = false;
-			for (const ShaderSubShaderAsset& subShader : shader->subShaders)
-			{
-				for (const ShaderPassAsset& pass : subShader.passes)
+				const auto shader = item.material->Shader();
+				if (!item.material->IsShaderBacked() || !shader)
 				{
-					compiled = compiled || !pass.variants.empty();
+					continue;
 				}
-			}
-			if (!compiled)
-			{
-				continue;
-			}
-			auto plans = SelectForwardPasses(shader);
-			if (!plans)
-			{
-				throw std::runtime_error(ToStdString(plans.error));
-			}
-			for (const ShaderPassPlan& plan : plans.value)
-			{
-				for (const RenderStateDeclaration& state : plan.renderStates)
+				bool compiled = false;
+				for (const ShaderSubShaderAsset& subShader : shader->subShaders)
 				{
-					needsStencil = needsStencil || state.name.rfind("Stencil", 0) == 0;
+					for (const ShaderPassAsset& pass : subShader.passes)
+					{
+						compiled = compiled || !pass.variants.empty();
+					}
+				}
+				if (!compiled)
+				{
+					continue;
+				}
+				auto plans = SelectForwardPasses(shader);
+				if (!plans)
+				{
+					throw std::runtime_error(ToStdString(plans.error));
+				}
+				for (const ShaderPassPlan& plan : plans.value)
+				{
+					for (const RenderStateDeclaration& state : plan.renderStates)
+					{
+						needsStencil = needsStencil || state.name.rfind("Stencil", 0) == 0;
+					}
 				}
 			}
 		}
-		PrepareTarget(color, needsStencil);
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.Record.PrepareTarget");
+			PrepareTarget(color, needsStencil);
+		}
 
 		struct RecordedPass
 		{
@@ -1567,113 +1584,140 @@ struct Renderer3D::Impl
 		};
 
 		TemporaryVector<RecordedPass> recordedPasses{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Renderer)};
-		for (Ursa::Size itemIndex = 0; itemIndex < items.size(); ++itemIndex)
 		{
-			const auto& item = items[itemIndex];
-			if (item.box->mesh)
+			URSA_PROFILE_SCOPE("Renderer3D.Record.BuildPasses");
+			for (Ursa::Size itemIndex = 0; itemIndex < items.size(); ++itemIndex)
 			{
-				MeshFor(item.box->mesh, item.box->meshSnapshot);
-			}
-			const auto shader = item.material->Shader();
-			bool hasCompiledShader = false;
-			if (item.material->IsShaderBacked() && shader)
-			{
-				for (const ShaderSubShaderAsset& subShader : shader->subShaders)
+				const auto& item = items[itemIndex];
+				if (item.box->mesh)
 				{
-					for (const ShaderPassAsset& pass : subShader.passes)
+					MeshFor(item.box->mesh, item.box->meshSnapshot);
+				}
+				const auto shader = item.material->Shader();
+				bool hasCompiledShader = false;
+				if (item.material->IsShaderBacked() && shader)
+				{
+					for (const ShaderSubShaderAsset& subShader : shader->subShaders)
 					{
-						hasCompiledShader = hasCompiledShader || !pass.variants.empty();
+						for (const ShaderPassAsset& pass : subShader.passes)
+						{
+							hasCompiledShader = hasCompiledShader || !pass.variants.empty();
+						}
 					}
 				}
-			}
-			if (!hasCompiledShader)
-			{
-				throw std::runtime_error("Shader asset has no compiled graphics Pass: " + ToStdString(shader->name));
-			}
-			auto plans = SelectForwardPasses(shader);
-			if (!plans)
-			{
-				throw std::runtime_error(ToStdString(plans.error));
-			}
-			for (const ShaderPassPlan& plan : plans.value)
-			{
-				const ShaderVariantAsset* variant = SelectVariant(*plan.pass, item.material->Keywords());
-				if (!variant)
+				if (!hasCompiledShader)
 				{
-					throw std::runtime_error("No compiled keyword variant for Shader " + ToStdString(shader->name) +
-					                         " Pass " + ToStdString(plan.pass->name));
+					throw std::runtime_error("Shader asset has no compiled graphics Pass: " +
+					                         ToStdString(shader->name));
 				}
-				ShaderPipelineCache& cache = ShaderPipelineFor(
-				    shader, plan, *variant, color->desc.format,
-				    needsStencil ? Rhi::Format::D32FloatS8Uint : Rhi::Format::D32Float, *item.material);
-				auto group = ShaderGroupFor(shader, cache, item.material, viewProjection, *item.box, frame, command);
-				recordedPasses.push_back({itemIndex, cache.pipeline, std::move(group)});
+				auto plans = SelectForwardPasses(shader);
+				if (!plans)
+				{
+					throw std::runtime_error(ToStdString(plans.error));
+				}
+				for (const ShaderPassPlan& plan : plans.value)
+				{
+					const ShaderVariantAsset* variant = SelectVariant(*plan.pass, item.material->Keywords());
+					if (!variant)
+					{
+						throw std::runtime_error("No compiled keyword variant for Shader " + ToStdString(shader->name) +
+						                         " Pass " + ToStdString(plan.pass->name));
+					}
+					ShaderPipelineCache& cache = ShaderPipelineFor(
+					    shader, plan, *variant, color->desc.format,
+					    needsStencil ? Rhi::Format::D32FloatS8Uint : Rhi::Format::D32Float, *item.material);
+					Rhi::BindGroupPtr group;
+					{
+						URSA_PROFILE_SCOPE("Renderer3D.Record.BuildBindGroups");
+						group = ShaderGroupFor(shader, cache, item.material, viewProjection, *item.box, frame, command);
+					}
+					recordedPasses.push_back({itemIndex, cache.pipeline, std::move(group)});
+				}
 			}
 		}
-		done(command->Barrier(color, before, Rhi::ResourceState::ColorAttachment));
-		done(command->Barrier(depth, Rhi::ResourceState::Undefined, Rhi::ResourceState::DepthAttachment));
-		Rhi::RenderTarget target;
-		target.color = color;
-		target.depth = depth;
-		target.colorValue[0] = 0.035f;
-		target.colorValue[1] = 0.055f;
-		target.colorValue[2] = 0.09f;
-		done(command->BeginRendering(target));
-		const MeshSnapshot* boundMesh = nullptr;
-		if (items.empty() || !items.front().box->mesh)
 		{
-			done(command->BindVertexBuffer(vertexBuffer));
-			done(command->BindIndexBuffer(indexBuffer));
-		}
-		for (const RecordedPass& pass : recordedPasses)
-		{
-			const auto& draw = *items[pass.itemIndex].box;
-			const MeshPtr& mesh = draw.mesh;
-			const auto snapshot = mesh ? (draw.meshSnapshot ? draw.meshSnapshot : mesh->Snapshot()) : nullptr;
-			if (snapshot.get() != boundMesh)
+			URSA_PROFILE_SCOPE("Renderer3D.Record.EncodeCommands");
+			done(command->Barrier(color, before, Rhi::ResourceState::ColorAttachment));
+			done(command->Barrier(depth, Rhi::ResourceState::Undefined, Rhi::ResourceState::DepthAttachment));
+			Rhi::RenderTarget target;
+			target.color = color;
+			target.depth = depth;
+			target.colorValue[0] = 0.035f;
+			target.colorValue[1] = 0.055f;
+			target.colorValue[2] = 0.09f;
+			done(command->BeginRendering(target));
+			const MeshSnapshot* boundMesh = nullptr;
+			if (items.empty() || !items.front().box->mesh)
 			{
+				done(command->BindVertexBuffer(vertexBuffer));
+				done(command->BindIndexBuffer(indexBuffer));
+			}
+			for (const RecordedPass& pass : recordedPasses)
+			{
+				const auto& draw = *items[pass.itemIndex].box;
+				const MeshPtr& mesh = draw.mesh;
+				const auto snapshot = mesh ? (draw.meshSnapshot ? draw.meshSnapshot : mesh->Snapshot()) : nullptr;
+				if (snapshot.get() != boundMesh)
+				{
+					if (mesh)
+					{
+						GpuModelMesh& gpuMesh = MeshFor(mesh, snapshot);
+						done(command->BindVertexBuffer(gpuMesh.vertexBuffer));
+						done(command->BindIndexBuffer(gpuMesh.indexBuffer));
+					}
+					else
+					{
+						done(command->BindVertexBuffer(vertexBuffer));
+						done(command->BindIndexBuffer(indexBuffer));
+					}
+					boundMesh = snapshot.get();
+				}
+				done(command->BindPipeline(pass.pipeline));
+				if (pass.group)
+				{
+					done(command->BindGroup(pass.group));
+				}
+				SubMesh range{0, 36, 0};
 				if (mesh)
 				{
-					GpuModelMesh& gpuMesh = MeshFor(mesh, snapshot);
-					done(command->BindVertexBuffer(gpuMesh.vertexBuffer));
-					done(command->BindIndexBuffer(gpuMesh.indexBuffer));
+					if (!snapshot || draw.subMesh >= snapshot->data.subMeshes.size())
+					{
+						throw std::runtime_error("Renderer submesh index is invalid");
+					}
+					range = snapshot->data.subMeshes[draw.subMesh];
 				}
-				else
-				{
-					done(command->BindVertexBuffer(vertexBuffer));
-					done(command->BindIndexBuffer(indexBuffer));
-				}
-				boundMesh = snapshot.get();
+				done(command->DrawIndexed(range.indexCount, 1, UInt32(pass.itemIndex), range.firstIndex,
+				                          range.baseVertex));
 			}
-			done(command->BindPipeline(pass.pipeline));
-			if (pass.group)
-			{
-				done(command->BindGroup(pass.group));
-			}
-			SubMesh range{0, 36, 0};
-			if (mesh)
-			{
-				if (!snapshot || draw.subMesh >= snapshot->data.subMeshes.size())
-				{
-					throw std::runtime_error("Renderer submesh index is invalid");
-				}
-				range = snapshot->data.subMeshes[draw.subMesh];
-			}
-			done(command->DrawIndexed(range.indexCount, 1, UInt32(pass.itemIndex), range.firstIndex, range.baseVertex));
+			done(command->EndRendering());
+			done(command->Barrier(color, Rhi::ResourceState::ColorAttachment, after));
 		}
-		done(command->EndRendering());
-		done(command->Barrier(color, Rhi::ResourceState::ColorAttachment, after));
 	}
 
 	Rhi::FencePtr Draw(const Rhi::TexturePtr& color, Rhi::ResourceState before, Rhi::ResourceState after,
 	                   const Mat4& viewProjection, const Vector<ModelBoxInstance>& boxes, const SceneLighting& lighting,
 	                   Vec3 cameraPosition, const Rhi::SwapchainPtr& swapchain = {})
 	{
-		auto command = Take(device->CreateCommandList());
-		done(command->Begin());
+		URSA_PROFILE_SCOPE("Renderer3D.Draw");
+		auto command = [&]()
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.Draw.CreateCommandList");
+			return Take(device->CreateCommandList());
+		}();
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.Draw.BeginCommandList");
+			done(command->Begin());
+		}
 		record(command, color, before, after, viewProjection, boxes, lighting, cameraPosition);
-		done(command->End());
-		lastFence = Take(device->Submit(command, swapchain));
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.Draw.EndCommandList");
+			done(command->End());
+		}
+		lastFence = [&]()
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.QueueSubmit");
+			return Take(device->Submit(command, swapchain));
+		}();
 		return lastFence;
 	}
 
@@ -1731,8 +1775,15 @@ Result<void> Renderer3D::Render(const Rhi::SwapchainPtr& swapchain, const Camera
 		{
 			throw std::runtime_error("3D renderer requires a swapchain");
 		}
-		impl->WaitPrevious();
-		const auto acquired = Take(swapchain->Acquire());
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.WaitPrevious");
+			impl->WaitPrevious();
+		}
+		const auto acquired = [&]()
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.SwapchainAcquire");
+			return Take(swapchain->Acquire());
+		}();
 		if (!acquired.texture)
 		{
 			return {};
@@ -1741,7 +1792,10 @@ Result<void> Renderer3D::Render(const Rhi::SwapchainPtr& swapchain, const Camera
 		                             static_cast<Ursa::Float32>(acquired.texture->desc.height);
 		impl->Draw(acquired.texture, acquired.initialState, Rhi::ResourceState::Present, camera.ViewProjection(aspect),
 		           ModelsFromBoxes(boxes), {}, camera.position, swapchain);
-		done(swapchain->Present());
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.SwapchainPresent");
+			done(swapchain->Present());
+		}
 		return {};
 	}
 	catch (const std::exception& error)
@@ -1761,15 +1815,25 @@ Result<void> Renderer3D::RenderModels(const Rhi::SwapchainPtr& swapchain, const 
 		{
 			throw std::runtime_error("3D renderer requires a swapchain");
 		}
-		impl->WaitPrevious();
-		const auto acquired = Take(swapchain->Acquire());
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.WaitPrevious");
+			impl->WaitPrevious();
+		}
+		const auto acquired = [&]()
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.SwapchainAcquire");
+			return Take(swapchain->Acquire());
+		}();
 		if (!acquired.texture)
 		{
 			return {};
 		}
 		impl->Draw(acquired.texture, acquired.initialState, Rhi::ResourceState::Present, viewProjection, boxes,
 		           lighting, cameraPosition, swapchain);
-		done(swapchain->Present());
+		{
+			URSA_PROFILE_SCOPE("Renderer3D.SwapchainPresent");
+			done(swapchain->Present());
+		}
 		return {};
 	}
 	catch (const std::exception& error)
