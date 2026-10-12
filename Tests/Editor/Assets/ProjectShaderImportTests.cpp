@@ -70,6 +70,37 @@ int main()
 		{
 			throw std::runtime_error("Missing compiler tools were not diagnosed");
 		}
+
+		const auto projectShader = Take(VirtualPath::Parse("prj:Shaders/Identity.ursashader"));
+		const String shaderText = "Shader \"Tests/Identity\" { SubShader { Pass { HLSLPROGRAM\n"
+		                          "#pragma vertex VSMain\n#pragma fragment PSMain\n"
+		                          "float4 VSMain(float3 p: POSITION): SV_Position { return float4(p,1); }\n"
+		                          "float4 PSMain(): SV_Target0 { return float4(0,1,0,1); }\nENDHLSL } } }";
+		Done(files.WriteAtomic(projectShader, Vector<UInt8>(shaderText.data(), shaderText.data() + shaderText.size())));
+		Done(workspace->Refresh());
+		auto* database = workspace->Database();
+		const auto identity = Take(database->Metadata(projectShader)).guid;
+		const auto imported = Take(ShaderAssetImporter::Import(*database, projectShader));
+		if (imported.asset.id != identity)
+		{
+			throw std::runtime_error("A source without ID did not use its generated .meta GUID");
+		}
+		const auto moved = Take(VirtualPath::Parse("prj:Moved/Identity.ursashader"));
+		Done(database->Move(projectShader, moved));
+		if (Take(ShaderAssetImporter::Import(*database, moved)).asset.id != identity)
+		{
+			throw std::runtime_error("Moving Shader and metadata changed its identity");
+		}
+		const auto copied = Take(VirtualPath::Parse("prj:Shaders/Copy.ursashader"));
+		String copiedText = shaderText;
+		copiedText.replace(copiedText.find("Tests/Identity"), String("Tests/Identity").size(), "Tests/Copy");
+		Done(files.WriteAtomic(copied, Vector<UInt8>(copiedText.data(), copiedText.data() + copiedText.size())));
+		Done(database->Refresh());
+		const auto copyImport = Take(ShaderAssetImporter::Import(*database, copied));
+		if (copyImport.asset.id == identity || copyImport.asset.id != Take(database->Metadata(copied)).guid)
+		{
+			throw std::runtime_error("Copying source text reused the original Shader identity");
+		}
 		std::cout << "Project-owned shader import tests passed\n";
 		return 0;
 	}

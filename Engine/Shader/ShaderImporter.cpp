@@ -35,7 +35,8 @@ String DirectiveKey(const ShaderKeywordDirective& directive)
 }
 
 String SourceFingerprint(const VirtualFileSystem& filesystem, const ShaderSourceAsset& source,
-                         const ShaderDependencyReport& dependencies, const String& compilerVersion)
+                         const ShaderDependencyReport& dependencies, const String& compilerVersion,
+                         const ShaderSourceLibrary& library)
 {
 	const auto hashBytes = [](Ursa::UInt64& hash, const void* data, Ursa::Size size)
 	{
@@ -53,7 +54,17 @@ String SourceFingerprint(const VirtualFileSystem& filesystem, const ShaderSource
 		throw std::runtime_error(ToStdString(sourceBytes.error));
 	}
 	hashBytes(hash, sourceBytes.value.data(), sourceBytes.value.size());
+	hashBytes(hash, source.source.id.bytes.data(), source.source.id.bytes.size());
 	hashBytes(hash, compilerVersion.data(), compilerVersion.size());
+	for (const auto& reference : dependencies.shaderReferences)
+	{
+		const auto* dependency = library.Find(reference);
+		if (!dependency)
+		{
+			throw std::runtime_error("Shader dependency identity is missing");
+		}
+		hashBytes(hash, dependency->source.id.bytes.data(), dependency->source.id.bytes.size());
+	}
 	for (const VirtualPath& includePath : dependencies.includes)
 	{
 		const auto include = filesystem.Read(includePath);
@@ -216,7 +227,7 @@ Result<Vector<ShaderAsset>> ShaderImporter::ImportAll(VirtualFileSystem& filesys
 		String fingerprint;
 		try
 		{
-			fingerprint = SourceFingerprint(filesystem, *source, dependencies.value, compilerVersion);
+			fingerprint = SourceFingerprint(filesystem, *source, dependencies.value, compilerVersion, library.value);
 		}
 		catch (const std::exception& error)
 		{

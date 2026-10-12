@@ -207,6 +207,13 @@ Result<void> AddResources(const Json& reflection, const char* field, Rhi::Bindin
 		}
 		const String name = ToUrsaString(item["name"].get<std::string>());
 		const String key = BindingKey(set.value, binding.value);
+		for (const auto& resource : resources)
+		{
+			if (resource.second.name == name && resource.first != key)
+			{
+				return Result<void>::Failure("Shader stages assign different bindings to resource " + name);
+			}
+		}
 		auto found = resources.find(key);
 		if (found == resources.end())
 		{

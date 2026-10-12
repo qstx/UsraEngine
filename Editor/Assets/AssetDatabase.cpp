@@ -52,37 +52,7 @@ Result<std::optional<ResourceId>> EmbeddedGuid(const VirtualFileSystem& filesyst
 {
 	if (EndsWith(path.relative, ".ursashader"))
 	{
-		auto source = filesystem.ReadText(path);
-		if (!source)
-		{
-			return Result<std::optional<ResourceId>>::Failure(source.error);
-		}
-		Ursa::Size cursor = 0;
-		while (cursor < source.value.size())
-		{
-			const auto end = source.value.find('\n', cursor);
-			const String line = source.value.substr(cursor, end == String::npos ? String::npos : end - cursor);
-			const auto marker = line.find("ID");
-			if (marker != String::npos && (marker == 0 || line[marker - 1] == ' ' || line[marker - 1] == '\t') &&
-			    marker + 2 < line.size() && (line[marker + 2] == ' ' || line[marker + 2] == '\t'))
-			{
-				const auto firstQuote = line.find('"', marker + 2);
-				const auto secondQuote = firstQuote == String::npos ? String::npos : line.find('"', firstQuote + 1);
-				if (firstQuote == String::npos || secondQuote == String::npos)
-				{
-					return Result<std::optional<ResourceId>>::Failure("Malformed Shader ID at " + path.ToString());
-				}
-				auto guid = ResourceId::Parse(line.substr(firstQuote + 1, secondQuote - firstQuote - 1));
-				return guid ? Result<std::optional<ResourceId>>::Success(guid.value)
-				            : Result<std::optional<ResourceId>>::Failure(guid.error + " at " + path.ToString());
-			}
-			if (end == String::npos)
-			{
-				break;
-			}
-			cursor = end + 1;
-		}
-		return Result<std::optional<ResourceId>>::Failure("Shader source has no ID at " + path.ToString());
+		return Result<std::optional<ResourceId>>::Success(std::nullopt);
 	}
 	auto kind = ResourceKindForPath(path);
 	if (!kind)

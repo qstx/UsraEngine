@@ -8,6 +8,7 @@
 #include <Vfs/DirectoryFileProvider.hpp>
 #include <Vfs/PakBuilder.hpp>
 #include <Vfs/PakArchive.hpp>
+#include <ResourceFixtures.hpp>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -63,6 +64,10 @@ void WriteText(const std::filesystem::path& path, const String& text)
 	if (!file)
 	{
 		throw std::runtime_error("Could not write Shader importer fixture");
+	}
+	if (path.extension() == ".ursashader" && !std::filesystem::exists(std::filesystem::path(path).concat(".meta")))
+	{
+		Done(WriteAssetMetadata(path, ResourceId::Generate()));
 	}
 }
 
@@ -190,7 +195,7 @@ int main()
 		    independentMetadata.importSettings, independentDependencies));
 		Expect(initialCache.upToDate && independentCache.upToDate,
 		       "Shader artifacts were not published into the AssetDatabase import cache");
-		const ResourceId shaderId = Take(ResourceId::Parse("5403c8ea-669d-4b64-8c30-6d63d128de71"));
+		const ResourceId shaderId = initialMetadata.guid;
 		auto location = Take(workspace->Database()->Resolve(shaderId));
 		auto originalAsset = Take(Shader::LoadShaderAssetResource(workspace->Index().Filesystem(), location));
 		WriteText(projectRoot / "Assets" / "Shaders" / "Includes" / "Shared.hlsli",

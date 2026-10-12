@@ -420,7 +420,7 @@ public:
 				{
 					return Result<ShaderSourceDocument>::Failure(Error(tokens[index - 1], id.error));
 				}
-				document.id = id.value;
+				// Legacy source IDs are accepted only for migration; asset metadata owns identity.
 				idDeclared = true;
 			}
 			else if (ConsumeIdentifier("SubShader"))
@@ -473,14 +473,6 @@ public:
 		if (document.subShaders.empty())
 		{
 			return FailDocument(tokens.front(), "Shader must declare at least one SubShader");
-		}
-		if (!versionDeclared)
-		{
-			return FailDocument(tokens.front(), "Shader source format Version is required");
-		}
-		if (!idDeclared)
-		{
-			return FailDocument(tokens.front(), "Shader resource ID is required");
 		}
 		return Result<ShaderSourceDocument>::Success(std::move(document));
 	}

@@ -1,25 +1,24 @@
 Shader "Ursa/Examples/Unlit"
 {
-	ID "c6f1e600-b5c6-4c56-a5e1-5bba91570111"
-	Version 1
 	Properties
 	{
 		_Tint ("Tint", Color) = (1, 1, 1, 1)
 		[NoScaleOffset] _MainTex ("Base Map", 2D) = "white" {}
 	}
 	HLSLINCLUDE
+#include "../Includes/UrsaCore.hlsli"
 #include "Common.hlsli"
-cbuffer UrsaPerObject : register(b0)
+cbuffer UrsaPerObject
 {
 	float4x4 _UrsaViewProjection;
 	float4x4 _UrsaModel;
 }
-cbuffer MaterialData : register(b1)
+cbuffer MaterialData
 {
 	float4 _Tint;
 }
-Texture2D<float4> _MainTex : register(t0);
-SamplerState sampler_MainTex : register(s0);
+TEXTURE2D(_MainTex);
+SAMPLER(sampler_MainTex);
 ENDHLSL
 	SubShader
 	{

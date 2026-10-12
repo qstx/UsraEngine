@@ -1,10 +1,9 @@
 Shader "Ursa/Internal/ImGui"
 {
-	ID "10000000-0000-4000-8000-000000000003"
-	Version 1
 	HLSLINCLUDE
-Texture2D<float4> imageTexture : register(t0);
-SamplerState imageSampler : register(s0);
+#include "../Includes/UrsaCore.hlsli"
+TEXTURE2D(imageTexture);
+SAMPLER(imageSampler);
 ENDHLSL
 	SubShader
 	{
@@ -35,7 +34,7 @@ VertexOutput VSMain(float2 position : POSITION0, float2 uv : TEXCOORD0, float4 c
 }
 float4 PSMain(VertexOutput input) : SV_Target0
 {
-	return input.color * imageTexture.Sample(imageSampler, input.uv);
+	return input.color * SAMPLE_TEXTURE2D(imageTexture, imageSampler, input.uv);
 }
 ENDHLSL
 		}

@@ -132,6 +132,7 @@ struct ShaderSourceDocument
 {
 	String sourcePath;
 	String name;
+	// Resolved from the asset's .meta by ShaderSourceLibrary, never from source text.
 	ResourceId id;
 	UInt32 formatVersion = 1;
 	String fallback;

@@ -40,6 +40,8 @@ void WriteText(VirtualFileSystem& filesystem, const char* path, const char* text
 		bytes.push_back(static_cast<UInt8>(*character));
 	}
 	Expect(static_cast<bool>(filesystem.WriteAtomic(virtualPath.value, bytes)), "Cannot write test Shader source");
+	Expect(bool(WriteAssetMetadata(filesystem, virtualPath.value, ResourceId::Generate())),
+	       "Cannot write Shader metadata");
 }
 
 CompiledShaderStage MakeStage(ProgramStage stage, const char* entryPoint)

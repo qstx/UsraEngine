@@ -73,6 +73,10 @@ ENDHLSL
 		}
 		Expect(static_cast<bool>(parsed), "Valid shader source did not parse");
 		Expect(parsed.value.name == "Ursa/Test", "Shader name was not preserved");
+		Expect(!parsed.value.id && parsed.value.formatVersion == 1,
+		       "Source text supplied asset identity or lost the internal format version");
+		auto minimal = ParseShaderSource("prj:Minimal.ursashader", "Shader \"Minimal\" { SubShader { Pass {} } }");
+		Expect(bool(minimal), "Unity-style source without ID or Version did not parse");
 		Expect(parsed.value.properties.size() == 6, "Shader properties were not preserved");
 		Expect(parsed.value.properties[0].type == PropertyType::Color &&
 		           parsed.value.properties[0].defaultVector[0] == 1.0f,

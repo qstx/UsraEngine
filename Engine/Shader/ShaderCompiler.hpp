@@ -8,6 +8,8 @@
 
 namespace Ursa::Shader
 {
+inline constexpr const char* shaderBindingPolicyVersion = "UrsaBindingMapV3Auto";
+
 struct ShaderIncludeSource
 {
 	VirtualPath path;

@@ -1,7 +1,5 @@
 Shader "Ursa/PBR"
 {
-	ID "10000000-0000-4000-8000-000000000002"
-	Version 1
 	Properties
 	{
 		_BaseColor ("Base Color", Color) = (1, 1, 1, 1)
@@ -19,6 +17,7 @@ Shader "Ursa/PBR"
 		_EmissiveMap ("Emissive Map", 2D) = "white" {}
 	}
 	HLSLINCLUDE
+#include "../Includes/UrsaCore.hlsli"
 struct DirectionalLight
 {
 	float4 directionIntensity;
@@ -29,13 +28,13 @@ struct PointLight
 	float4 positionRange;
 	float4 colorIntensity;
 };
-cbuffer UrsaPerObject : register(b0)
+cbuffer UrsaPerObject
 {
 	float4x4 _UrsaViewProjection;
 	float4x4 _UrsaModel;
 	float4x4 _UrsaNormal;
 }
-cbuffer UrsaScene : register(b1)
+cbuffer UrsaScene
 {
 	float4 _UrsaCameraPosition;
 	float4 _UrsaAmbient;
@@ -43,7 +42,7 @@ cbuffer UrsaScene : register(b1)
 	DirectionalLight _UrsaDirectional[4];
 	PointLight _UrsaPoint[8];
 }
-cbuffer MaterialData : register(b2)
+cbuffer MaterialData
 {
 	float4 _BaseColor;
 	float _Metallic;
@@ -54,17 +53,17 @@ cbuffer MaterialData : register(b2)
 	int _AlphaMode;
 	float _AlphaCutoff;
 }
-Texture2D<float4> _BaseMap : register(t0);
-SamplerState sampler_BaseMap : register(s0);
-Texture2D<float4> _MetallicRoughnessMap : register(t1);
-SamplerState sampler_MetallicRoughnessMap : register(s1);
-Texture2D<float4> _NormalMap : register(t2);
-SamplerState sampler_NormalMap : register(s2);
-Texture2D<float4> _OcclusionMap : register(t3);
-SamplerState sampler_OcclusionMap : register(s3);
-Texture2D<float4> _EmissiveMap : register(t4);
-SamplerState sampler_EmissiveMap : register(s4);
-StructuredBuffer<float4x4> _UrsaBonePalette : register(t5);
+TEXTURE2D(_BaseMap);
+SAMPLER(sampler_BaseMap);
+TEXTURE2D(_MetallicRoughnessMap);
+SAMPLER(sampler_MetallicRoughnessMap);
+TEXTURE2D(_NormalMap);
+SAMPLER(sampler_NormalMap);
+TEXTURE2D(_OcclusionMap);
+SAMPLER(sampler_OcclusionMap);
+TEXTURE2D(_EmissiveMap);
+SAMPLER(sampler_EmissiveMap);
+StructuredBuffer<float4x4> _UrsaBonePalette;
 ENDHLSL
 	SubShader
 	{

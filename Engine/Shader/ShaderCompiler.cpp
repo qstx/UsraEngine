@@ -318,8 +318,9 @@ Result<String> DxcShaderCompiler::Version() const
 		                               : !crossVersion     ? crossVersion.error
 		                                                   : "Cannot query shader tool versions");
 	}
-	return Result<String>::Success("UrsaBindingMapV2\nDXC " + dxcVersion.value.output + "SPIRV-Tools " +
-	                               validatorVersion.value.output + "SPIRV-Cross " + crossVersion.value.output);
+	return Result<String>::Success(String(shaderBindingPolicyVersion) + "\nDXC " + dxcVersion.value.output +
+	                               "SPIRV-Tools " + validatorVersion.value.output + "SPIRV-Cross " +
+	                               crossVersion.value.output);
 }
 
 Result<CompiledShaderStage> DxcShaderCompiler::Compile(const ShaderCompileRequest& request) const
@@ -428,6 +429,7 @@ Result<CompiledShaderStage> DxcShaderCompiler::Compile(const ShaderCompileReques
 	}
 	const Vector<std::wstring> compileArguments = {L"-spirv",
 	                                               L"-fspv-target-env=vulkan1.2",
+	                                               L"-fvk-auto-shift-bindings",
 	                                               L"-fvk-t-shift",
 	                                               L"16",
 	                                               L"0",

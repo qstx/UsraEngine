@@ -137,6 +137,12 @@ int main()
 		invalidSet.stages[0].reflectionJson =
 		    R"json({"entryPoints":[{"name":"VSMain","mode":"vert"}],"ubos":[{"name":"MaterialData","set":1,"binding":1,"block_size":32,"members":[]}]})json";
 		Expect(!BuildShaderBindingLayout(shader, invalidSet), "Unsupported descriptor set was accepted");
+		auto divergentBinding = variant;
+		divergentBinding.stages[0].reflectionJson =
+		    R"json({"entryPoints":[{"name":"VSMain","mode":"vert"}],"separate_images":[{"name":"_MainTex","type":"texture2d","set":0,"binding":9}]})json";
+		auto inconsistent = BuildShaderBindingLayout(shader, divergentBinding);
+		Expect(!inconsistent && inconsistent.error.find("different bindings") != String::npos,
+		       "The same resource silently used different bindings in different stages");
 		std::cout << "Shader reflection tests passed\n";
 		return 0;
 	}

@@ -1,5 +1,6 @@
 #include <Shader/ShaderSourceLibrary.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
+#include <ResourceFixtures.hpp>
 
 #include <iostream>
 #include <stdexcept>
@@ -26,6 +27,15 @@ void WriteText(VirtualFileSystem& filesystem, const char* path, const char* text
 		bytes.push_back(static_cast<UInt8>(*character));
 	}
 	Expect(static_cast<bool>(filesystem.WriteAtomic(virtualPath.value, bytes)), "Cannot write test VFS resource");
+	if (std::filesystem::path(path).extension() == ".ursashader")
+	{
+		const auto metadata = VirtualPath::Parse(virtualPath.value.ToString() + ".meta").value;
+		if (!filesystem.Exists(metadata).value)
+		{
+			Expect(bool(WriteAssetMetadata(filesystem, virtualPath.value, ResourceId::Generate())),
+			       "Cannot write Shader metadata");
+		}
+	}
 }
 
 VirtualFileSystem CreateFilesystem()
@@ -92,6 +102,9 @@ int main()
 		WriteText(filesystem, "prj:Shaders/Includes/Common.hlsli", "float3 CommonFunction() { return 1; }\n");
 		auto library = Ursa::Shader::ShaderSourceLibrary::Load(filesystem, "prj");
 		Expect(static_cast<bool>(library), "Valid shader source library did not load");
+		const auto commonId = library.value.Find("Ursa/Common")->source.id;
+		Expect(commonId != ResourceId::Parse("c6f1e600-b5c6-4c56-a5e1-5bba91570121").value,
+		       "Legacy source ID overrode the .meta identity");
 		auto dependencies = library.value.ResolveDependencies(filesystem, "Ursa/Root");
 		if (!dependencies)
 		{
@@ -148,9 +161,19 @@ int main()
 		WriteText(filesystem, "prj:Shaders/DuplicateId.ursashader",
 		          "Shader \"Ursa/DuplicateId\" { ID \"c6f1e600-b5c6-4c56-a5e1-5bba91570121\" Version 1 "
 		          "SubShader { Pass {} } }");
+		Expect(bool(WriteAssetMetadata(filesystem, VirtualPath::Parse("prj:Shaders/DuplicateId.ursashader").value,
+		                               commonId)),
+		       "Cannot create duplicate metadata identity fixture");
 		auto duplicateIds = Ursa::Shader::ShaderSourceLibrary::Load(filesystem, "prj");
 		Expect(!duplicateIds && duplicateIds.error.find("Duplicate Shader resource ID") != String::npos,
 		       "Duplicate Shader resource IDs were not rejected");
+		Expect(bool(filesystem.Remove(VirtualPath::Parse("prj:Shaders/DuplicateId.ursashader").value)),
+		       "Cannot remove duplicate identity fixture");
+		const auto rootMetadata = VirtualPath::Parse("prj:Shaders/Root.ursashader.meta").value;
+		Expect(bool(filesystem.Remove(rootMetadata)), "Cannot remove metadata fixture");
+		auto missingMetadata = Shader::ShaderSourceLibrary::Load(filesystem, "prj");
+		Expect(!missingMetadata && missingMetadata.error.find(rootMetadata.ToString()) != String::npos,
+		       "Missing Shader metadata fell back to a source ID or lost its diagnostic path");
 
 		std::cout << "Shader source library tests passed\n";
 		return 0;

@@ -134,6 +134,7 @@ Result<ShaderAssetImportResult> Compile(VirtualFileSystem& files, const VirtualP
 			return Result<ShaderAssetImportResult>::Failure("Missing Shader dependency: " + reference);
 		}
 		result.dependencies.push_back(dependency->path);
+		result.dependencies.push_back(VirtualPath::Parse(dependency->path.ToString() + ".meta").value);
 	}
 	auto listed = files.List(source.scheme);
 	if (!listed)
@@ -228,6 +229,7 @@ Result<ShaderAssetImportResult> ShaderAssetImporter::Import(AssetDatabase& datab
 		if (dependency)
 		{
 			dependencies.push_back(dependency->path);
+			dependencies.push_back(VirtualPath::Parse(dependency->path.ToString() + ".meta").value);
 		}
 	}
 	auto files = database.Filesystem().List(source.scheme);
@@ -259,6 +261,7 @@ Result<ShaderAssetImportResult> ShaderAssetImporter::Import(AssetDatabase& datab
 	auto previous = database.CurrentImport(source);
 	const auto toolIdentity = ToolIdentity(tools);
 	if (!force && previous && previous.value.upToDate && previous.value.dependencies == dependencies &&
+	    previous.value.settings.value("bindingPolicy", std::string{}) == Shader::shaderBindingPolicyVersion &&
 	    !previous.value.artifacts.empty() &&
 	    (toolIdentity.empty() || previous.value.settings.value("tools", nlohmann::json::array()) == toolIdentity))
 	{
@@ -281,8 +284,10 @@ Result<ShaderAssetImportResult> ShaderAssetImporter::Import(AssetDatabase& datab
 	{
 		return Result<ShaderAssetImportResult>::Failure(source.ToString() + ": " + version.error);
 	}
-	const nlohmann::json settings{
-	    {"compilerVersion", ToStdString(version.value)}, {"target", "VulkanSpirv"}, {"tools", toolIdentity}};
+	const nlohmann::json settings{{"compilerVersion", ToStdString(version.value)},
+	                              {"target", "VulkanSpirv"},
+	                              {"tools", toolIdentity},
+	                              {"bindingPolicy", Shader::shaderBindingPolicyVersion}};
 	if (source.scheme == projectScheme)
 	{
 		auto metadata = database.Metadata(source);

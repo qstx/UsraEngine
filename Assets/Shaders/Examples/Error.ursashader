@@ -1,7 +1,5 @@
 Shader "Ursa/Error"
 {
-	ID "c6f1e600-b5c6-4c56-a5e1-5bba91570112"
-	Version 1
 	SubShader
 	{
 		Pass

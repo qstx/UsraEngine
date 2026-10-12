@@ -1,11 +1,37 @@
 #include <Shader/ShaderSourceLibrary.hpp>
 
 #include <algorithm>
+#include <Core/StringInterop.hpp>
+#include <nlohmann/json.hpp>
 
 namespace Ursa::Shader
 {
 namespace
 {
+Result<ResourceId> ReadShaderIdentity(const VirtualFileSystem& filesystem, const VirtualPath& source)
+{
+	auto path = VirtualPath::Parse(source.ToString() + ".meta");
+	if (!path)
+	{
+		return Result<ResourceId>::Failure(path.error);
+	}
+	auto text = filesystem.ReadText(path.value);
+	if (!text)
+	{
+		return Result<ResourceId>::Failure("Shader asset metadata is required at " + path.value.ToString() + ": " +
+		                                   text.error);
+	}
+	auto metadata = nlohmann::json::parse(text.value.begin(), text.value.end(), nullptr, false);
+	if (!metadata.is_object() || !metadata.contains("version") || !metadata["version"].is_number_integer() ||
+	    metadata["version"] != 1 || !metadata.contains("folder") || !metadata["folder"].is_boolean() ||
+	    metadata["folder"] != false || !metadata.contains("guid") || !metadata["guid"].is_string())
+	{
+		return Result<ResourceId>::Failure("Invalid Shader asset metadata at " + path.value.ToString());
+	}
+	auto id = ResourceId::Parse(ToUrsaString(metadata["guid"].get<std::string>()));
+	return id && id.value ? id : Result<ResourceId>::Failure("Invalid Shader GUID at " + path.value.ToString());
+}
+
 bool HasSuffix(const String& value, const char* suffix)
 {
 	Ursa::Size length = 0;
@@ -268,7 +294,13 @@ Result<ShaderSourceLibrary> ShaderSourceLibrary::Load(const VirtualFileSystem& f
 			}
 			return Result<ShaderSourceLibrary>::Failure(parsed.error);
 		}
-		const String id = parsed.value.id.ToString();
+		auto identity = ReadShaderIdentity(filesystem, entry.path);
+		if (!identity)
+		{
+			return Result<ShaderSourceLibrary>::Failure(identity.error);
+		}
+		parsed.value.id = identity.value;
+		const String id = identity.value.ToString();
 		const auto existingId = ids.find(id);
 		if (existingId != ids.end())
 		{

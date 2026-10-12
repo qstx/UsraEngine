@@ -448,7 +448,23 @@ int main()
 		auto library = ShaderSourceLibrary::Load(filesystem, "ursa");
 		Expect(static_cast<bool>(library), "Documented shader examples did not import");
 		auto dependencies = library.value.ResolveDependencies(filesystem, "Ursa/Examples/Unlit");
-		Expect(static_cast<bool>(dependencies) && dependencies.value.includes.size() == 1,
+		const auto hasInclude = [&](const char* expected)
+		{
+			if (dependencies)
+			{
+				for (const auto& path : dependencies.value.includes)
+				{
+					if (path.ToString() == expected)
+					{
+						return true;
+					}
+				}
+			}
+			return false;
+		};
+		Expect(static_cast<bool>(dependencies) && dependencies.value.includes.size() == 2 &&
+		           hasInclude("ursa:Shaders/Examples/Common.hlsli") &&
+		           hasInclude("ursa:Shaders/Includes/UrsaCore.hlsli"),
 		       "Documented shader include did not resolve");
 		const ShaderSourceAsset* asset = library.value.Find("Ursa/Examples/Unlit");
 		Expect(asset != nullptr, "Documented Unlit Shader was not indexed");
