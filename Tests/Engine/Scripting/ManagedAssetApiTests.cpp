@@ -94,7 +94,7 @@ int main()
 		Expect(static_cast<bool>(resources), "Could not open managed asset ResourceSession");
 		Scene scene;
 		ManagedSceneApi sceneApi(scene, resources.value.get());
-		NativeApiV4 api = sceneApi.Bind({});
+		NativeApiV5 api = sceneApi.Bind({});
 		ManagedHandle textureHandle{};
 		const String textureGuid = textureId.ToString();
 		Expect(api.loadTexture(api.sceneContext, reinterpret_cast<const UInt8*>(textureGuid.data()), textureGuid.size(),

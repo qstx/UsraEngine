@@ -193,9 +193,9 @@ Result<void> ValidateValue(const Json& value, const String& kind, const String& 
 		                        underlying == "System.UInt32" || underlying == "System.UInt64";
 		return ValidateValue(value, isUnsigned ? "UnsignedInteger" : "SignedInteger", {}, numericDescriptor);
 	}
-	if (type == "Vector3" || type == "Quaternion" || type == "Color")
+	if (type == "Vector2" || type == "Vector3" || type == "Vector4" || type == "Quaternion" || type == "Color")
 	{
-		const Size expected = type == "Vector3" ? 3 : 4;
+		const Size expected = type == "Vector2" ? 2 : type == "Vector3" ? 3 : 4;
 		if (!value.is_array() || value.size() != expected)
 		{
 			return Result<void>::Failure("Serialized vector/color field has an invalid component count");
@@ -216,6 +216,21 @@ Result<void> ValidateValue(const Json& value, const String& kind, const String& 
 	if (type == "GameObjectReference")
 	{
 		return ValidateReference(value, "GameObject");
+	}
+	if (type == "MeshReference" || type == "MaterialReference")
+	{
+		if (value.is_null())
+		{
+			return {};
+		}
+		const auto expectedReferenceKind = type == "MeshReference" ? "Mesh" : "Material";
+		if (!value.is_object() || !value.contains("$ursaReference") || !value["$ursaReference"].is_object() ||
+		    value["$ursaReference"].value("Kind", std::string{}) != expectedReferenceKind ||
+		    !value["$ursaReference"].contains("Resource"))
+		{
+			return Result<void>::Failure("Malformed Mesh/Material script reference");
+		}
+		return {};
 	}
 	if (type == "ComponentReference")
 	{
@@ -556,18 +571,10 @@ Result<void> SerializedObject::Apply()
 	else
 	{
 		auto& script = static_cast<Scripting::ScriptBehaviourComponent&>(target);
-		const String previous = script.SerializedPayload();
-		const String candidate = ToUrsaString(pendingPayload.dump());
-		script.SetSerializedPayload(candidate);
-		if (script.InstanceToken() != 0)
+		auto applied = script.ApplySerializedPayload(ToUrsaString(pendingPayload.dump()), resources);
+		if (!applied)
 		{
-			auto restored = script.RestoreSerializedPayload();
-			if (!restored)
-			{
-				script.SetSerializedPayload(previous);
-				script.RestoreSerializedPayload();
-				return Result<void>::Failure(restored.error);
-			}
+			return applied;
 		}
 	}
 	originalPayload = pendingPayload;

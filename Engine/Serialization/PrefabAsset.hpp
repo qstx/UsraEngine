@@ -31,6 +31,10 @@ public:
 
 	PrefabAsset(ResourceId assetId, GameObject::Ptr rootObject) : id(assetId), root(std::move(rootObject))
 	{
+		if (root)
+		{
+			root->SetAssetTemplate(id);
+		}
 	}
 
 	ResourceId Id() const

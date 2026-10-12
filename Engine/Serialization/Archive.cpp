@@ -471,11 +471,11 @@ Result<Vector<UInt8>> JsonArchive::Encode(const ArchiveWriter& writer)
 	}
 }
 
-Result<ArchiveReader> JsonArchive::Decode(const Vector<UInt8>& bytes)
+Result<ArchiveReader> JsonArchive::Decode(const Vector<UInt8>& bytes, UInt64 maxEncodedBytes)
 {
 	try
 	{
-		if (bytes.size() > 256ull * 1024 * 1024)
+		if (bytes.size() > maxEncodedBytes)
 		{
 			return Result<ArchiveReader>::Failure("Archive exceeds size limit");
 		}
@@ -507,12 +507,12 @@ Result<Vector<UInt8>> BinaryArchive::Encode(const ArchiveWriter& writer)
 	}
 }
 
-Result<ArchiveReader> BinaryArchive::Decode(const Vector<UInt8>& bytes)
+Result<ArchiveReader> BinaryArchive::Decode(const Vector<UInt8>& bytes, UInt64 maxEncodedBytes)
 {
 	try
 	{
 		const UInt8 magic[8]{'U', 'R', 'S', 'A', 'A', 'R', 'C', 1};
-		if (bytes.size() < 9 || bytes.size() > 256ull * 1024 * 1024 ||
+		if (bytes.size() < 9 || bytes.size() > maxEncodedBytes ||
 		    !std::equal(std::begin(magic), std::end(magic), bytes.begin()))
 		{
 			return Result<ArchiveReader>::Failure("Invalid binary archive header or version");

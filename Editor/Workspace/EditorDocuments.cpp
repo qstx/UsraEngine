@@ -27,6 +27,8 @@ const char* ExtensionFor(ResourceKind kind)
 			return ".ursaprefab";
 		case ResourceKind::Shader:
 			return ".ursashaderasset";
+		case ResourceKind::Mesh:
+			return ".ursamesh";
 	}
 	return "";
 }

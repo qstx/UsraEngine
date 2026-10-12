@@ -10,6 +10,22 @@
 
 namespace Ursa::Editor
 {
+Vector<ImportedArtifactRecord> AssetDatabase::ImportedArtifacts() const
+{
+	Vector<ImportedArtifactRecord> records;
+	for (const auto& entry : assetsByPath)
+	{
+		if (const auto* cached = FindImport(entry.second.metadata.guid.ToString()))
+		{
+			for (const auto& artifact : cached->artifacts)
+			{
+				records.push_back({entry.second.metadata.guid, artifact.localFileId, artifact.kind, artifact.path});
+			}
+		}
+	}
+	return records;
+}
+
 namespace
 {
 using Json = nlohmann::json;
@@ -1071,7 +1087,11 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 	for (const ImportedArtifact& artifact : artifacts)
 	{
 		const char* extension = ".bin";
-		if (artifact.kind == "Texture")
+		if (artifact.kind == "Mesh")
+		{
+			extension = ".ursamesh";
+		}
+		else if (artifact.kind == "Texture")
 		{
 			extension = ".ursatex";
 		}

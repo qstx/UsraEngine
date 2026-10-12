@@ -101,6 +101,11 @@ protected:
 		return scriptBuildStatus;
 	}
 
+	const String& InspectorStatus() const
+	{
+		return inspectorError;
+	}
+
 	void RequestPlayToggle()
 	{
 		requestRun = true;

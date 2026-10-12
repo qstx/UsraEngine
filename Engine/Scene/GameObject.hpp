@@ -47,6 +47,15 @@ public:
 		return alive;
 	}
 
+	bool IsAssetTemplate() const
+	{
+		return static_cast<bool>(assetTemplate);
+	}
+
+	void SetAssetTemplate(ResourceId value);
+
+	Result<void> ValidateComponent(const Component& component) const;
+
 	Scene* TryGetScene() const
 	{
 		return scene;
@@ -94,6 +103,10 @@ public:
 	{
 		for (const auto& component : components)
 		{
+			if (!ComponentAvailable(*component))
+			{
+				continue;
+			}
 			if (auto* typed = dynamic_cast<T*>(component.get()))
 			{
 				return typed;
@@ -107,6 +120,10 @@ public:
 		Vector<T*> found;
 		for (const auto& component : components)
 		{
+			if (!ComponentAvailable(*component))
+			{
+				continue;
+			}
 			if (auto* typed = dynamic_cast<T*>(component.get()))
 			{
 				found.push_back(typed);
@@ -120,6 +137,8 @@ public:
 	Vector<Component*> Components() const;
 
 private:
+	bool ComponentAvailable(const Component& component) const;
+
 	friend class Scene;
 	friend class PrefabAsset;
 
@@ -136,6 +155,7 @@ private:
 	Result<void> RequireDetached(const char* operation) const;
 
 	ResourceId id;
+	ResourceId assetTemplate;
 	String name;
 	GameObject* parent = nullptr;
 	Vector<Ptr> children;

@@ -4,7 +4,7 @@
 #include <Material/Material.hpp>
 #include <Math/Camera.hpp>
 #include <Math/Transform.hpp>
-#include <Renderer3D/ModelMesh.hpp>
+#include <Mesh/Mesh.hpp>
 #include <Rhi/RHI.hpp>
 #include <Scene/Lighting.hpp>
 #include <memory>
@@ -23,8 +23,10 @@ struct ModelBoxInstance
 	Mat4 model;
 	Color color;
 	std::shared_ptr<MaterialInstance> material;
-	ModelMeshPtr mesh;
+	MeshPtr mesh;
 	Vector<Mat4> jointPalette;
+	std::shared_ptr<const MeshSnapshot> meshSnapshot;
+	UInt32 subMesh = 0;
 };
 
 class Renderer3D final
@@ -33,6 +35,8 @@ public:
 	static Result<std::unique_ptr<Renderer3D>> Create(Rhi::DevicePtr selectedDevice);
 
 	~Renderer3D();
+
+	Size MeshCacheSize() const;
 
 	Renderer3D(const Renderer3D&) = delete;
 

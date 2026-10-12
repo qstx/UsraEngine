@@ -38,7 +38,7 @@ Result<AssetImportResult> DefaultImport(AssetDatabase& database, const VirtualPa
 		{
 			return Result<AssetImportResult>::Failure(header.error);
 		}
-		const char* names[]{"Texture", "Material", "Scene", "Prefab", "Shader"};
+		const char* names[]{"Texture", "Material", "Scene", "Prefab", "Shader", "Mesh"};
 		kind = names[static_cast<int>(resourceKind.value)];
 	}
 	const nlohmann::json settings = metadata.value.importSettings;
@@ -190,7 +190,7 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 				{
 					return Result<AssetImportResult>::Failure(settings.error);
 				}
-				if (metadata.value.importer != "ursa.Model" || metadata.value.importerVersion != 4 ||
+				if (metadata.value.importer != "ursa.Model" || metadata.value.importerVersion != 5 ||
 				    metadata.value.importSettings != settings.value.ToJson())
 				{
 					auto saved = ModelImporter::SetSettings(database, source, settings.value);

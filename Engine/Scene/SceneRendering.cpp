@@ -3,6 +3,7 @@
 #include <Scene/Scene.hpp>
 #include <Core/StringInterop.hpp>
 #include <cmath>
+#include <algorithm>
 #include <exception>
 #include <string>
 
@@ -123,59 +124,86 @@ void Scene::CollectRendering(ObjectHandle node, SceneRenderData& out) const
 			continue;
 		}
 		const auto* object = components[id.index].object;
-		if (const auto* box = dynamic_cast<const BoxRenderComponent*>(object))
+		if (const auto* renderer = dynamic_cast<const RendererComponent*>(object))
 		{
-			out.boxes.push_back({world, box->color, box->material});
-		}
-		if (const auto* meshRenderer = dynamic_cast<const MeshRendererComponent*>(object))
-		{
-			const ModelMeshPtr mesh = meshRenderer->Mesh();
-			if (mesh)
+			MeshPtr mesh;
+			Vector<Mat4> palette;
+			if (dynamic_cast<const MeshRendererComponent*>(renderer))
 			{
-				out.boxes.push_back({world, {}, mesh->material, mesh});
+				auto* filter = gameObject->FindComponent<MeshFilterComponent>();
+				if (filter && (!filter->Id() || ContainsComponent(filter->Id())))
+				{
+					mesh = filter->SharedMesh();
+				}
 			}
-		}
-		if (const auto* skinnedRenderer = dynamic_cast<const SkinnedMeshRendererComponent*>(object))
-		{
-			const ModelMeshPtr mesh = skinnedRenderer->Mesh();
+			else if (const auto* skin = dynamic_cast<const SkinnedMeshRendererComponent*>(renderer))
+			{
+				mesh = skin->SharedMesh();
+				if (mesh)
+				{
+					auto snapshot = mesh->Snapshot();
+					if (!snapshot)
+					{
+						throw std::runtime_error("Skinned renderer Mesh was destroyed");
+					}
+					const auto& binding = snapshot->data;
+					for (GameObject::Ptr current = skin->GetGameObject(); current; current = current->Parent())
+					{
+						const auto* animator = current->FindComponent<AnimatorComponent>();
+						if (animator && animator->ModelGuid() == binding.skeletonReference.guid &&
+						    animator->SkeletonLocalFileId() == binding.skeletonReference.localFileId)
+						{
+							palette = animator->JointPalette();
+							break;
+						}
+					}
+					if (palette.empty() && binding.skeleton)
+					{
+						Vector<Mat4> bindTransforms;
+						for (const auto& joint : binding.skeleton->joints)
+						{
+							const Mat4 global =
+							    joint.parentJointIndex < 0
+							        ? joint.bindLocalTransform.Matrix()
+							        : bindTransforms[Size(joint.parentJointIndex)] * joint.bindLocalTransform.Matrix();
+							bindTransforms.push_back(global);
+							palette.push_back(global * joint.inverseBindMatrix);
+						}
+					}
+					const Mat4 inverseMeshWorld = world.InverseAffine();
+					for (Mat4& joint : palette)
+					{
+						joint = inverseMeshWorld * joint;
+					}
+				}
+			}
 			if (mesh)
 			{
-				Vector<Mat4> palette;
-				auto owner = skinnedRenderer->GetGameObject();
-				for (GameObject::Ptr current = owner; current; current = current->Parent())
+				const auto snapshot = mesh->Snapshot();
+				if (!snapshot)
 				{
-					const AnimatorComponent* animator = current->FindComponent<AnimatorComponent>();
-					if (animator && animator->ModelGuid() == mesh->modelGuid &&
-					    animator->SkeletonLocalFileId() == mesh->skeletonLocalFileId)
+					throw std::runtime_error("Renderer Mesh was destroyed");
+				}
+				if (!snapshot->data.positions.empty() && !snapshot->data.indices.empty() &&
+				    !snapshot->data.subMeshes.empty())
+				{
+					const auto materials = renderer->SharedMaterials();
+					const Size draws = std::max(snapshot->data.subMeshes.size(), materials.size());
+					for (Size slot = 0; slot < draws; ++slot)
 					{
-						palette = animator->JointPalette();
-						break;
+						const Size subMesh = std::min(slot, snapshot->data.subMeshes.size() - 1);
+						if (!snapshot->data.subMeshes[subMesh].indexCount)
+						{
+							continue;
+						}
+						auto material = slot < materials.size() ? materials[slot] : nullptr;
+						if (material && !material->IsValid())
+						{
+							throw std::runtime_error("Renderer material was destroyed");
+						}
+						out.boxes.push_back({world, {}, std::move(material), mesh, palette, snapshot, UInt32(subMesh)});
 					}
 				}
-				if (palette.empty() && mesh->skeleton)
-				{
-					Vector<Mat4> bindTransforms;
-					bindTransforms.reserve(mesh->skeleton->joints.size());
-					for (Ursa::Size jointIndex = 0; jointIndex < mesh->skeleton->joints.size(); ++jointIndex)
-					{
-						const SkeletonJoint& joint = mesh->skeleton->joints[jointIndex];
-						const Mat4 global = joint.parentJointIndex < 0
-						                        ? joint.bindLocalTransform.Matrix()
-						                        : bindTransforms[static_cast<Ursa::Size>(joint.parentJointIndex)] *
-						                              joint.bindLocalTransform.Matrix();
-						bindTransforms.push_back(global);
-						palette.push_back(global * joint.inverseBindMatrix);
-					}
-				}
-				if (mesh->skeleton)
-				{
-					const Mat4 inverseMeshWorld = world.InverseAffine();
-					for (Mat4& jointMatrix : palette)
-					{
-						jointMatrix = inverseMeshWorld * jointMatrix;
-					}
-				}
-				out.boxes.push_back({world, {}, mesh->material, mesh, std::move(palette)});
 			}
 		}
 		if (const auto* light = dynamic_cast<const DirectionalLightComponent*>(object))

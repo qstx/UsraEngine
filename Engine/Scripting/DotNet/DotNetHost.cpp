@@ -320,9 +320,9 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 	closeSession = reinterpret_cast<SessionFunction>(closeSessionEntry);
 	onLog = std::move(logCallback);
 	this->filesystem = &filesystem;
-	NativeApiV4 api = BuildNativeApi(sceneApi);
+	NativeApiV5 api = BuildNativeApi(sceneApi);
 	const auto invoke = reinterpret_cast<component_entry_point_fn>(managedEntryPoint);
-	const int managedResult = invoke(&api, static_cast<int32_t>(sizeof(NativeApiV4)));
+	const int managedResult = invoke(&api, static_cast<int32_t>(sizeof(NativeApiV5)));
 	if (managedResult != 0)
 	{
 		initialized = true;
@@ -349,10 +349,10 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 #endif
 }
 
-NativeApiV4 DotNetHost::BuildNativeApi(ManagedSceneApi* sceneApi)
+NativeApiV5 DotNetHost::BuildNativeApi(ManagedSceneApi* sceneApi)
 {
-	NativeApiV4 api;
-	api.size = static_cast<UInt32>(sizeof(NativeApiV4));
+	NativeApiV5 api;
+	api.size = static_cast<UInt32>(sizeof(NativeApiV5));
 	api.context = this;
 	api.logUtf8 = &DotNetHost::LogFromManaged;
 	api.writeLog = &DotNetHost::WriteLogFromManaged;
@@ -371,9 +371,9 @@ Result<void> DotNetHost::BindSceneApi(ManagedSceneApi& sceneApi)
 	{
 		return Result<void>::Failure("Managed host is not initialized");
 	}
-	NativeApiV4 api = BuildNativeApi(&sceneApi);
+	NativeApiV5 api = BuildNativeApi(&sceneApi);
 	const auto invoke = reinterpret_cast<component_entry_point_fn>(managedEntryPoint);
-	const Int32 status = invoke(&api, static_cast<Int32>(sizeof(NativeApiV4)));
+	const Int32 status = invoke(&api, static_cast<Int32>(sizeof(NativeApiV5)));
 	return status == 0 ? Result<void>{}
 	                   : Result<void>::Failure("Managed host rejected the active Scene API with status " +
 	                                           ToUrsaString(std::to_string(status)));
@@ -582,7 +582,7 @@ Result<UInt64> DotNetHost::CreateScriptSession(bool editor, ManagedSceneApi* sce
 	{
 		return Result<UInt64>::Failure("Managed host is unavailable or faulted after an unload failure");
 	}
-	NativeApiV4 api = BuildNativeApi(sceneApi);
+	NativeApiV5 api = BuildNativeApi(sceneApi);
 	UInt64 sessionId = 0;
 	const Int32 status = createSession(editor ? 1 : 0, &api, static_cast<Int32>(sizeof(api)), &sessionId);
 	return status == 0 && sessionId != 0 ? Result<UInt64>::Success(sessionId)
@@ -598,7 +598,7 @@ Result<void> DotNetHost::SelectScriptSession(UInt64 sessionId)
 
 Result<void> DotNetHost::BindScriptSession(UInt64 sessionId, ManagedSceneApi& sceneApi)
 {
-	NativeApiV4 api = BuildNativeApi(&sceneApi);
+	NativeApiV5 api = BuildNativeApi(&sceneApi);
 	return initialized && bindSession && bindSession(sessionId, &api, static_cast<Int32>(sizeof(api))) == 0
 	           ? Result<void>{}
 	           : Result<void>::Failure("Cannot bind the Scene API to this managed script session");

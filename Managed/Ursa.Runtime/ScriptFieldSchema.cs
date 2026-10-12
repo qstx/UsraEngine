@@ -36,12 +36,16 @@ public enum ScriptSerializedFieldKind
 	FloatingPoint,
 	String,
 	Enumeration,
+	Vector2,
 	Vector3,
+	Vector4,
 	Quaternion,
 	Color,
 	GameObjectReference,
 	ComponentReference,
 	AssetReference,
+	MeshReference,
+	MaterialReference,
 	Array,
 	List
 }
@@ -108,6 +112,7 @@ public static class ScriptFieldSchema
 	{
 		public string Kind { get; set; } = string.Empty;
 		public string Id { get; set; } = string.Empty;
+		public JsonElement? Resource { get; set; }
 	}
 
 	// Do not retain serializer metadata for collectible project Types in the shared API.
@@ -310,6 +315,10 @@ public static class ScriptFieldSchema
 			return (ScriptSerializedFieldKind.FloatingPoint, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(string)) return (ScriptSerializedFieldKind.String, ScriptSerializedFieldKind.Unsupported);
 		if (type.IsEnum) return (ScriptSerializedFieldKind.Enumeration, ScriptSerializedFieldKind.Unsupported);
+		if (type == typeof(Vector2)) return (ScriptSerializedFieldKind.Vector2, ScriptSerializedFieldKind.Unsupported);
+		if (type == typeof(Vector4)) return (ScriptSerializedFieldKind.Vector4, ScriptSerializedFieldKind.Unsupported);
+		if (type == typeof(Mesh)) return (ScriptSerializedFieldKind.MeshReference, ScriptSerializedFieldKind.Unsupported);
+		if (typeof(Material).IsAssignableFrom(type)) return (ScriptSerializedFieldKind.MaterialReference, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(Vector3)) return (ScriptSerializedFieldKind.Vector3, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(Quaternion)) return (ScriptSerializedFieldKind.Quaternion, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(Color)) return (ScriptSerializedFieldKind.Color, ScriptSerializedFieldKind.Unsupported);
@@ -327,6 +336,8 @@ public static class ScriptFieldSchema
 		var options = new JsonSerializerOptions { IncludeFields = true, PropertyNameCaseInsensitive = false };
 		options.Converters.Add(new AssetReferenceConverter());
 		options.Converters.Add(new Vector3Converter());
+		options.Converters.Add(new Vector2Converter());
+		options.Converters.Add(new Vector4Converter());
 		options.Converters.Add(new QuaternionConverter());
 		options.Converters.Add(new ColorConverter());
 		return options;
@@ -352,6 +363,22 @@ public static class ScriptFieldSchema
 		writer.WriteStartArray();
 		foreach (float value in values) writer.WriteNumberValue(value);
 		writer.WriteEndArray();
+	}
+
+	private sealed class Vector2Converter : JsonConverter<Vector2>
+	{
+		public override Vector2 Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+		{ var v = ReadComponents(ref reader, 2); return new Vector2(v[0], v[1]); }
+
+		public override void Write(Utf8JsonWriter writer, Vector2 value, JsonSerializerOptions options) => WriteComponents(writer, value.X, value.Y);
+	}
+
+	private sealed class Vector4Converter : JsonConverter<Vector4>
+	{
+		public override Vector4 Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+		{ var v = ReadComponents(ref reader, 4); return new Vector4(v[0], v[1], v[2], v[3]); }
+
+		public override void Write(Utf8JsonWriter writer, Vector4 value, JsonSerializerOptions options) => WriteComponents(writer, value.X, value.Y, value.Z, value.W);
 	}
 
 	private sealed class Vector3Converter : JsonConverter<Vector3>
@@ -498,6 +525,14 @@ public static class ScriptFieldSchema
 
 	private static JsonElement SerializeReference(object value, ScriptSerializedFieldKind kind)
 	{
+		if (value is RenderResource resource)
+		{
+			var binding = EngineApi.ResourceRequest(new { operation = "resource.reference", handle = resource.Handle });
+			return JsonSerializer.SerializeToElement(new Dictionary<string, ReferencePayload>
+			{
+				["$ursaReference"] = new() { Kind = kind == ScriptSerializedFieldKind.MeshReference ? "Mesh" : "Material", Resource = binding }
+			}, jsonOptions);
+		}
 		string? persistentId = GetPersistentId(value, kind);
 		var reference = new Dictionary<string, ReferencePayload>(StringComparer.Ordinal)
 		{
@@ -523,7 +558,8 @@ public static class ScriptFieldSchema
 		{
 			throw new InvalidOperationException("Serialized script reference has an invalid structure.");
 		}
-		return new ReferencePayload { Kind = kind.GetString() ?? string.Empty, Id = id.GetString() ?? string.Empty };
+		return new ReferencePayload { Kind = kind.GetString() ?? string.Empty, Id = id.GetString() ?? string.Empty,
+			Resource = reference.TryGetProperty("Resource", out var binding) && binding.ValueKind != JsonValueKind.Null ? binding.Clone() : null };
 	}
 
 	private static void QueueReferenceRestore(Behaviour behaviour, ScriptFieldDescriptor descriptor,
@@ -534,7 +570,7 @@ public static class ScriptFieldSchema
 			pending = new List<Action>();
 			pendingReferences.Add(behaviour, pending);
 		}
-		pending.Add(() =>
+		Action restore = () =>
 		{
 			Type? elementType = descriptor.Kind == ScriptSerializedFieldKind.Array
 			                        ? descriptor.ValueType.GetElementType()
@@ -546,6 +582,13 @@ public static class ScriptFieldSchema
 				if (reference == null)
 				{
 					return null;
+				}
+				if (reference.Kind is "Mesh" or "Material")
+				{
+					if (reference.Resource == null) throw new InvalidOperationException("Resource reference is missing its binding.");
+					var handle = EngineApi.ResourceRequest<NativeHandle>(new { operation = "resource.restore", type = reference.Kind, data = reference.Resource });
+					if (reference.Kind == "Mesh") return Mesh.FromHandle(handle);
+					return elementType == typeof(MaterialAsset) ? MaterialAsset.FromBinding(reference.Resource.Value, handle) : Material.FromHandle(handle);
 				}
 				if (reference.Kind == "GameObject")
 				{
@@ -582,11 +625,18 @@ public static class ScriptFieldSchema
 			{
 				descriptor.Field.SetValue(behaviour, Resolve(references[0]));
 			}
-		});
+		};
+		if (descriptor.Kind is ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference ||
+		    descriptor.ElementKind is ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference)
+		{
+			restore();
+		}
+		else { pending.Add(restore); }
 	}
 
 	private static bool IsReferenceKind(ScriptSerializedFieldKind kind)
 	{
-		return kind is ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference;
+		return kind is ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference or
+		       ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference;
 	}
 }

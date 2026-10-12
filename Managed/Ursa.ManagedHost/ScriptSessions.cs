@@ -73,12 +73,12 @@ internal static unsafe class ScriptSessions
 	private sealed class Session
 	{
 		internal readonly ProjectContext context;
-		internal NativeApiV4 api;
+		internal NativeApiV5 api;
 		internal IEditorExtensionSession? extensions;
 		internal string preparedReload = string.Empty;
 		internal readonly Dictionary<string, ScriptIdentity> identities = new(StringComparer.Ordinal);
 
-		internal Session(ulong id, bool editor, NativeApiV4 api)
+		internal Session(ulong id, bool editor, NativeApiV5 api)
 		{
 			context = new ProjectContext(id, editor);
 			this.api = api;
@@ -103,7 +103,7 @@ internal static unsafe class ScriptSessions
 		if (ownerThread != Environment.CurrentManagedThreadId) throw new InvalidOperationException("Script sessions require the host main thread.");
 	}
 
-	internal static ulong Create(bool editor, NativeApiV4 api)
+	internal static ulong Create(bool editor, NativeApiV5 api)
 	{
 		RequireThread();
 		if (faulted) throw new InvalidOperationException("A project context did not unload. Restart before creating another script session.");
@@ -122,11 +122,11 @@ internal static unsafe class ScriptSessions
 		BehaviourRegistry.identityResolver = type => session.identities.TryGetValue(type.FullName ?? type.Name, out ScriptIdentity identity)
 			? identity : BehaviourRegistry.DeclaredIdentity(type);
 		BehaviourRegistry.assemblyResolver = () => session.context.assemblies.Values.Append(typeof(Behaviour).Assembly);
-		NativeApiV4 api = session.api;
+		NativeApiV5 api = session.api;
 		EngineApi.Initialize((nint)(&api));
 	}
 
-	internal static void Bind(ulong id, NativeApiV4 api)
+	internal static void Bind(ulong id, NativeApiV5 api)
 	{
 		RequireThread();
 		if (!sessions.TryGetValue(id, out Session? session)) throw new InvalidOperationException("Script session is closed or unknown.");
@@ -434,7 +434,7 @@ public static unsafe partial class Bootstrap
 	public static int CreateScriptSession(uint kind, nint api, int size, ulong* output)
 	{
 		if (kind > 1 || output == null || Validate(api, size) != 0) return 1;
-		try { *output = ScriptSessions.Create(kind == 1, *(Ursa.NativeApiV4*)api); return 0; }
+		try { *output = ScriptSessions.Create(kind == 1, *(Ursa.NativeApiV5*)api); return 0; }
 		catch (Exception error) { Console.Error.WriteLine($"脚本会话创建失败：{error}"); return 2; }
 	}
 
@@ -449,7 +449,7 @@ public static unsafe partial class Bootstrap
 	public static int BindScriptSession(ulong id, nint api, int size)
 	{
 		if (Validate(api, size) != 0) return 1;
-		try { ScriptSessions.Bind(id, *(Ursa.NativeApiV4*)api); return 0; }
+		try { ScriptSessions.Bind(id, *(Ursa.NativeApiV5*)api); return 0; }
 		catch (Exception error) { Console.Error.WriteLine($"脚本会话绑定失败：{error}"); return 2; }
 	}
 

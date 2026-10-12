@@ -191,6 +191,10 @@ MaterialInstance::MaterialInstance(MaterialType materialType) : type(materialTyp
 
 Result<void> MaterialInstance::SetShader(ResourceId id)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (!id)
 	{
 		return Result<void>::Failure("Shader-backed material requires a nonzero Shader resource ID");
@@ -211,6 +215,10 @@ Result<void> MaterialInstance::SetShader(ResourceId id)
 
 Result<void> MaterialInstance::SetShaderAsset(std::shared_ptr<const Shader::ShaderAsset> asset)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (!asset || !asset->id || (shaderId && asset->id != shaderId))
 	{
 		return Result<void>::Failure("Shader asset ID does not match the material Shader reference");
@@ -232,6 +240,10 @@ Result<void> MaterialInstance::SetShaderAsset(std::shared_ptr<const Shader::Shad
 
 Result<void> MaterialInstance::MigrateLegacyToShader(ResourceId id)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (!id)
 	{
 		return Result<void>::Failure("Cannot migrate a material to a zero Shader resource ID");
@@ -284,6 +296,10 @@ Result<void> MaterialInstance::MigrateLegacyToShader(ResourceId id)
 Result<void> MaterialInstance::SetPropertyValue(const String& identifier, const Shader::ShaderAsset& shader,
                                                 MaterialPropertyValue value)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (!shaderId || shader.id != shaderId)
 	{
 		return Result<void>::Failure("Material Shader ID does not match the provided Shader asset");
@@ -465,6 +481,10 @@ Result<MaterialPropertyValue> MaterialInstance::PropertyValue(const String& iden
 
 Result<void> MaterialInstance::RemovePropertyOverride(const String& identifier)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	const auto found = propertyOverrides.find(identifier);
 	if (found == propertyOverrides.end())
 	{
@@ -477,6 +497,10 @@ Result<void> MaterialInstance::RemovePropertyOverride(const String& identifier)
 
 Result<void> MaterialInstance::SetKeywordEnabled(const String& keyword, bool enabled)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (keyword.empty())
 	{
 		return Result<void>::Failure("Material keyword cannot be empty");
@@ -510,6 +534,10 @@ bool MaterialInstance::KeywordEnabled(const String& keyword) const
 
 Result<void> MaterialInstance::SetBaseColor(Color color)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (!ValidColor(color, false))
 	{
 		return Result<void>::Failure("Material baseColor must have finite components in [0, 1]");
@@ -525,6 +553,10 @@ Result<void> MaterialInstance::SetBaseColor(Color color)
 
 Result<void> MaterialInstance::SetMetallic(Ursa::Float32 value)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Metallic is only valid for a PBR material");
@@ -544,6 +576,10 @@ Result<void> MaterialInstance::SetMetallic(Ursa::Float32 value)
 
 Result<void> MaterialInstance::SetRoughness(Ursa::Float32 value)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Roughness is only valid for a PBR material");
@@ -563,6 +599,10 @@ Result<void> MaterialInstance::SetRoughness(Ursa::Float32 value)
 
 Result<void> MaterialInstance::SetNormalScale(Ursa::Float32 value)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Normal scale is only valid for a PBR material");
@@ -582,6 +622,10 @@ Result<void> MaterialInstance::SetNormalScale(Ursa::Float32 value)
 
 Result<void> MaterialInstance::SetOcclusionStrength(Ursa::Float32 value)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Occlusion is only valid for a PBR material");
@@ -601,6 +645,10 @@ Result<void> MaterialInstance::SetOcclusionStrength(Ursa::Float32 value)
 
 Result<void> MaterialInstance::SetEmissive(Color color)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (type != MaterialType::PbrMetallicRoughness)
 	{
 		return Result<void>::Failure("Emissive is only valid for a PBR material");
@@ -620,6 +668,10 @@ Result<void> MaterialInstance::SetEmissive(Color color)
 
 Result<void> MaterialInstance::SetAlphaMode(AlphaMode mode, Ursa::Float32 cutoff)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (mode != AlphaMode::Opaque && mode != AlphaMode::Mask && mode != AlphaMode::Blend)
 	{
 		return Result<void>::Failure("Material alpha mode is invalid");
@@ -641,6 +693,10 @@ Result<void> MaterialInstance::SetAlphaMode(AlphaMode mode, Ursa::Float32 cutoff
 
 Result<void> MaterialInstance::SetSampler(MaterialSampler sampler)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	parameters.sampler = sampler;
 	samplerOverridden = true;
 	++version;
@@ -649,6 +705,10 @@ Result<void> MaterialInstance::SetSampler(MaterialSampler sampler)
 
 Result<void> MaterialInstance::SetTexture(MaterialTextureSlot slot, MaterialTexturePtr texture)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (!ValidSlot(slot))
 	{
 		return Result<void>::Failure("Material texture slot is invalid");
@@ -698,6 +758,10 @@ ResourceId MaterialInstance::TextureResourceId(MaterialTextureSlot slot) const
 
 Result<void> MaterialInstance::SetTextureResourceId(MaterialTextureSlot slot, ResourceId id)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	if (!ValidSlot(slot) || (textures[SlotIndex(slot)] && !id))
 	{
 		return Result<void>::Failure("Invalid material texture slot or zero resource ID");
@@ -723,7 +787,14 @@ MaterialTexturePtr MaterialInstance::ResolvedTexture(MaterialTextureSlot slot) c
 
 std::shared_ptr<MaterialInstance> MaterialInstance::Clone() const
 {
-	return MakeShared<MaterialInstance>(Memory::MemoryTag::Assets, *this);
+	if (!alive)
+	{
+		return nullptr;
+	}
+	auto clone = MakeShared<MaterialInstance>(Memory::MemoryTag::Assets, *this);
+	clone->assetIdentity = {};
+	clone->localIdentity = ResourceId::Generate();
+	return clone;
 }
 
 MaterialTexturePtr DefaultMaterialTexture(MaterialTextureSlot slot)

@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <ResourceFixtures.hpp>
 #include <Assets/SceneDraft.hpp>
 #include <Serialization/MaterialResource.hpp>
@@ -67,7 +68,7 @@ int main()
 		LocalTransform pose;
 		pose.position = {1, 2, 3};
 		done(scene.SetLocalTransform(child, pose));
-		Take(scene.AddComponent<BoxRenderComponent>(child));
+		Take(Ursa::Test::AddRenderer(scene, child));
 		Take(scene.AddComponent<DirectionalLightComponent>(last));
 		done(draft->AssignMaterial(child, materialId, documents->Session()));
 		const auto childId = Take(scene.PersistentId(child));
@@ -85,8 +86,8 @@ int main()
 		       "Scene hierarchy or transform did not round-trip");
 		Expect(Take(loaded->GetScene().PersistentId(loaded->GetScene().RootGameObjects().back())) == lastId,
 		       "Scene root order or ID changed");
-		const auto* box = loaded->GetScene().FindComponent<BoxRenderComponent>(loadedChild);
-		Expect(box && box->material && box->material->Parameters().baseColor.red > 0.6f,
+		const auto* box = loaded->GetScene().FindComponent<MeshRendererComponent>(loadedChild);
+		Expect(box && box->SharedMaterial() && box->SharedMaterial()->Parameters().baseColor.red > 0.6f,
 		       "Scene material reference did not round-trip");
 
 		const auto prefabPath = root / "Assets" / "tile.ursaprefab";
@@ -108,7 +109,7 @@ int main()
 		       "Prefab viewport transform was not copied back to its detached GameObject");
 		const auto prefabChild = GameObject::Create("Prefab child");
 		done(prefabChild->SetParent(prefabRoot));
-		auto prefabBox = Take(prefabChild->AddComponent<BoxRenderComponent>());
+		auto prefabBox = Take(Ursa::Test::AddRenderer(prefabChild));
 		Expect(prefabBox->TryGetScene() == nullptr, "Prefab component unexpectedly attached to its preview Scene");
 		done(prefabDraft->AssignMaterial(prefabChild, materialId, documents->Session()));
 		const auto prefabChildId = prefabChild->Id();
@@ -121,7 +122,7 @@ int main()
 		const auto loadedPrefabRoot = prefabLoaded->GetPrefabAsset()->Root();
 		const auto loadedPrefabChild = loadedPrefabRoot->Children().front();
 		Expect(loadedPrefabChild->Id() == prefabChildId && Take(loadedPrefabChild->Name()) == "Prefab child" &&
-		           loadedPrefabChild->FindComponent<BoxRenderComponent>()->material,
+		           loadedPrefabChild->FindComponent<MeshRendererComponent>()->SharedMaterial(),
 		       "Prefab subtree or material reference did not round-trip");
 		auto linkedDocument = Take(Editor::OpenSceneDocument(Take(VirtualPath::Parse("prj:level.ursascene")),
 		                                                     ResourceKind::Scene, registry, documents->Session()));

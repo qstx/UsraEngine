@@ -11,10 +11,9 @@ sub-assets, dependencies, and importer diagnostics. Change settings and choose
 **Reimport** to update the cached artifacts. A failed import keeps the last
 successful cache available and reports the source path and error.
 
-To place a model, open a Scene or Prefab, select the model source in Project, and
-choose **Add to Scene** in Model Import. The Editor creates GameObjects in source
-hierarchy order and attaches a MeshRenderer to each node that references a mesh.
-Save the Scene or Prefab to persist those GUID/local-file-ID references.
+模型放入 Scene 或 Prefab 时，静态物体使用 MeshFilter + MeshRenderer，蒙皮物体使用 SkinnedMeshRenderer + Animator。一个源节点包含多个网格时，按源顺序创建渲染子对象，保留原节点变换和网格/材质子资产 local IDs。几何 artifact 使用通用 `.ursamesh`；默认材质分配保存在模型实例化记录中。导入器版本为 5，升级后显式重导入即可重建旧 Library。
+
+Mesh Clone/另存保留骨骼 GUID/local file ID；骨骼身份不取决于网格资产 GUID。资源会话显式重载会发布新几何版本并保留共享对象身份，独立副本不被源重导入覆盖。松散 Runtime 内容和 pak 使用同一目录映射加载 Mesh，普通 CMake 构建只编译代码，资源准备使用 Editor 导入或 `UrsaAssetImport`。
 
 Supported settings currently include scale factor, generated normals and
 tangents, UV flipping, material import, and texture import. Materials use the

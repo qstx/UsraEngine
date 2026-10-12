@@ -31,7 +31,7 @@ public:
 		behaviourRuntime = runtime;
 	}
 
-	NativeApiV4 Bind(NativeApiV4 api);
+	NativeApiV5 Bind(NativeApiV5 api);
 
 private:
 	static ManagedSceneApi* FromContext(void* context);
@@ -60,16 +60,6 @@ private:
 	static Int32 GetCameraProjection(void* context, ManagedHandle component, Float32* output, UInt64 count);
 
 	static Int32 SetCameraProjection(void* context, ManagedHandle component, const Float32* values, UInt64 count);
-
-	static Int32 GetBoxRenderColor(void* context, ManagedHandle component, Float32* output, UInt64 count);
-
-	static Int32 SetBoxRenderColor(void* context, ManagedHandle component, const Float32* values, UInt64 count);
-
-	static Int32 GetComponentAssetReference(void* context, ManagedHandle component, UInt8* output, UInt64 capacity,
-	                                        UInt64* required, UInt64* localFileId);
-
-	static Int32 SetComponentAssetReference(void* context, ManagedHandle component, const UInt8* guid, UInt64 length,
-	                                        UInt64 localFileId);
 
 	static Int32 SetWindowTitle(void* context, const UInt8* title, UInt64 length);
 
@@ -127,6 +117,22 @@ private:
 
 	Result<Component*> ResolveComponent(const ManagedHandle& handle) const;
 
+	static Int32 ResourceRequest(void* context, const UInt8* input, UInt64 length, UInt8* output, UInt64 capacity,
+	                             UInt64* required);
+
+	nlohmann::json DispatchResourceRequest(const nlohmann::json& request);
+
+	Result<ManagedHandle> RegisterMesh(const MeshPtr& mesh);
+
+	Result<ManagedHandle> RegisterMaterial(const std::shared_ptr<MaterialInstance>& material);
+
+	Result<MeshPtr> ResolveMesh(const ManagedHandle& handle) const;
+
+	Result<std::shared_ptr<MaterialInstance>> ResolveMaterial(const ManagedHandle& handle) const;
+
+	String resourceResponse;
+	UnorderedMap<UInt32, MeshPtr> ownedMeshes;
+	UnorderedMap<UInt32, std::shared_ptr<MaterialInstance>> ownedMaterials;
 	Scene& scene;
 	std::unique_ptr<ManagedHandleRegistry> handles;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> objects;

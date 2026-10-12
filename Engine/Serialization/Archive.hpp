@@ -104,7 +104,7 @@ class JsonArchive final
 public:
 	static Result<Vector<UInt8>> Encode(const ArchiveWriter& writer);
 
-	static Result<ArchiveReader> Decode(const Vector<UInt8>& bytes);
+	static Result<ArchiveReader> Decode(const Vector<UInt8>& bytes, UInt64 maxEncodedBytes = 256ull * 1024 * 1024);
 };
 
 class BinaryArchive final
@@ -112,6 +112,6 @@ class BinaryArchive final
 public:
 	static Result<Vector<UInt8>> Encode(const ArchiveWriter& writer);
 
-	static Result<ArchiveReader> Decode(const Vector<UInt8>& bytes);
+	static Result<ArchiveReader> Decode(const Vector<UInt8>& bytes, UInt64 maxEncodedBytes = 256ull * 1024 * 1024);
 };
 } // namespace Ursa

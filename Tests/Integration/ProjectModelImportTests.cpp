@@ -10,6 +10,7 @@
 #include <Serialization/SceneResource.hpp>
 #include <Rhi/RHI.hpp>
 #include <Scene/RenderingComponents.hpp>
+#include <Serialization/MeshResource.hpp>
 #include <Scene/Scene.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/PakArchive.hpp>
@@ -206,6 +207,11 @@ nlohmann::json ReadArtifact(const VirtualFileSystem& filesystem, const VirtualPa
 {
 	auto bytes = filesystem.Read(path);
 	Expect(static_cast<bool>(bytes), "Cannot read the imported model artifact");
+	if (PathFromUrsaString(path.relative).extension() == ".ursamesh")
+	{
+		Expect(bytes.value.size() >= 48, "Truncated Mesh artifact");
+		return nlohmann::json::from_cbor(bytes.value.begin() + 48, bytes.value.end()).at("data");
+	}
 	return nlohmann::json::from_cbor(bytes.value.begin(), bytes.value.end());
 }
 
@@ -386,7 +392,8 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	auto meshPath = database.value->Resolve(imported.value.guid, meshId);
 	Expect(static_cast<bool>(meshPath), "Imported OBJ mesh did not resolve as a sub-asset");
 	const auto mesh = ReadArtifact(filesystem, meshPath.value);
-	Expect(mesh["materialLocalFileId"] == materialId && mesh["vertexCount"] >= 3 && mesh["indexCount"] == 3,
+	Expect(model["meshMaterialBindings"][std::to_string(meshId)] == materialId && mesh["vertexCount"] >= 3 &&
+	           mesh["indices"].get_binary().size() == 12,
 	       "OBJ mesh did not preserve its material assignment and triangle geometry");
 	AssetDatabase* assetDatabase = database.value.get();
 	Vector<ResourceMount> runtimeMounts;
@@ -402,8 +409,8 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	auto session = Take(ResourceSession::Open(runtimeMounts, [assetDatabase](ResourceId guid, UInt64 localFileId)
 	                                          { return assetDatabase->Resolve(guid, localFileId); }));
 	auto runtimeMesh = Take(session->LoadMesh(imported.value.guid, meshId));
-	Expect(runtimeMesh->vertexStride == 60 && runtimeMesh->vertexBytes.size() == 3 * 60 &&
-	           runtimeMesh->indices.size() == 3 && runtimeMesh->material,
+	Expect(runtimeMesh->Snapshot()->data.positions.size() == 3 && runtimeMesh->Snapshot()->data.indices.size() == 3 &&
+	           runtimeMesh->AssetIdentity().localFileId == meshId,
 	       "ResourceSession did not load the imported mesh and its shader-backed material sub-asset");
 	auto missingMesh = session->LoadMesh(imported.value.guid, std::numeric_limits<UInt64>::max());
 	Expect(!missingMesh && !missingMesh.error.empty(), "Unresolved model mesh did not return a diagnostic error");
@@ -427,8 +434,10 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	meshTransform.position = {0.15f, 0.0f, 0.0f};
 	Done(scene.SetLocalTransform(meshObject, meshTransform));
 	const ComponentId meshComponent = Take(scene.AddComponent<MeshRendererComponent>(meshObject));
+	auto* meshFilter = Take(meshObject->AddComponent<MeshFilterComponent>());
+	Done(meshFilter->SetSharedMesh(runtimeMesh));
 	Done(static_cast<MeshRendererComponent*>(scene.GetComponent(meshComponent))
-	         ->SetMesh(imported.value.guid, meshId, runtimeMesh));
+	         ->SetSharedMaterial(Take(session->LoadMaterial(imported.value.guid, materialId))));
 	ComponentRegistry componentRegistry;
 	Done(RegisterBuiltinComponents(componentRegistry));
 	const VirtualPath scenePath = Path("prj:RuntimeMesh.ursascene");
@@ -439,7 +448,7 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	auto loadedScene = Take(LoadSceneResource(filesystem, scenePath, componentRegistry, loadContext));
 	const auto renderData = Take(loadedScene.scene->CollectRenderData(1.0f));
 	Expect(renderData.boxes.size() == 1 && renderData.boxes[0].mesh == runtimeMesh &&
-	           renderData.boxes[0].material == runtimeMesh->material &&
+	           renderData.boxes[0].material == Take(session->LoadMaterial(imported.value.guid, materialId)) &&
 	           std::abs(renderData.boxes[0].model.At(0, 3) - meshTransform.position.x) < 0.001f,
 	       "Reloaded MeshRenderer lost its sub-asset, material, or GameObject world transform");
 	Vector<ModelBoxInstance> gpuDraws = renderData.boxes;
@@ -490,8 +499,19 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 			break;
 		}
 	}
-	Expect(reopenedSceneModel && FindMeshRenderer(reopenedSceneModel)->MeshGuid() == imported.value.guid &&
-	           FindMeshRenderer(reopenedSceneModel)->MeshLocalFileId() == meshId,
+	Expect(reopenedSceneModel &&
+	           FindMeshRenderer(reopenedSceneModel)
+	                   ->GetGameObject()
+	                   ->FindComponent<MeshFilterComponent>()
+	                   ->SharedMesh()
+	                   ->AssetIdentity()
+	                   .guid == imported.value.guid &&
+	           FindMeshRenderer(reopenedSceneModel)
+	                   ->GetGameObject()
+	                   ->FindComponent<MeshFilterComponent>()
+	                   ->SharedMesh()
+	                   ->AssetIdentity()
+	                   .localFileId == meshId,
 	       "Scene save and reopen did not preserve model sub-asset references");
 	const VirtualPath placedPrefabPath = Path("prj:PlacedModel.ursaprefab");
 	auto prefabDraft = Take(SceneDraft::Create(ResourceKind::Prefab, registry, *session));
@@ -501,7 +521,12 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	auto reopenedPrefab =
 	    Take(SceneDraft::Load(filesystem, placedPrefabPath, ResourceKind::Prefab, registry, *session));
 	Expect(reopenedPrefab->GetPrefabAsset() && FindMeshRenderer(reopenedPrefab->GetPrefabAsset()->Root()) &&
-	           FindMeshRenderer(reopenedPrefab->GetPrefabAsset()->Root())->MeshLocalFileId() == meshId,
+	           FindMeshRenderer(reopenedPrefab->GetPrefabAsset()->Root())
+	                   ->GetGameObject()
+	                   ->FindComponent<MeshFilterComponent>()
+	                   ->SharedMesh()
+	                   ->AssetIdentity()
+	                   .localFileId == meshId,
 	       "Prefab save and reopen did not preserve model sub-asset references");
 	auto cached = ModelImporter::Import(*database.value, source, ModelImportSettings{});
 	Expect(cached && cached.value.cacheHit, "OBJ import did not reuse artifacts after registering its dependencies");
@@ -541,7 +566,8 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	       "Pak included Editor-only source/cache data or omitted its runtime GUID/local-file-ID catalog");
 	auto packagedSession = Take(ResourceSession::Open(packagedFilesystem));
 	auto packagedMesh = Take(packagedSession->LoadMesh(imported.value.guid, meshId));
-	Expect(packagedMesh->material && packagedMesh->indices.size() == 3,
+	Expect(packagedMesh->Snapshot()->data.indices.size() == 3 &&
+	           Take(packagedSession->LoadMaterial(imported.value.guid, materialId))->IsValid(),
 	       "Packaged runtime catalog did not resolve the model mesh and its material sub-assets");
 	auto packagedTexture = Take(packagedSession->LoadTexture(textureMetadata.value.guid));
 	Expect(packagedTexture->GetWidth() == 1448 && packagedTexture->GetHeight() == 1086,
@@ -629,15 +655,14 @@ void TestSkeletalAnimationImport(const std::filesystem::path& root)
 		const UInt64 meshId = meshIdValue.get<UInt64>();
 		const auto meshPath = Take(database.value->Resolve(imported.value.guid, meshId));
 		const auto mesh = ReadArtifact(filesystem, meshPath);
-		if (!mesh.contains("skinInfluences"))
+		if (mesh["skinInfluences"].get_binary().empty())
 		{
 			continue;
 		}
 		foundSkinnedMesh = true;
 		const auto& influenceBytes = mesh["skinInfluences"].get_binary();
 		const Ursa::UInt64 vertexCount = mesh["vertexCount"].get<Ursa::UInt64>();
-		Expect(mesh["skeletonLocalFileId"] == skeletonId && mesh["skinInfluenceStride"] == 24 &&
-		           influenceBytes.size() == vertexCount * 24,
+		Expect(mesh["skeleton"]["localFileId"] == skeletonId && influenceBytes.size() == vertexCount * 24,
 		       "Skinned mesh influence records do not match the bounded vertex layout");
 		bool foundWeight = false;
 		for (Ursa::Size offset = 0; offset < influenceBytes.size(); offset += 24)
@@ -727,8 +752,31 @@ void TestSkeletalAnimationImport(const std::filesystem::path& root)
 	Expect(FindSkinnedMeshRenderer(modelRoot) != nullptr && FindAnimator(modelRoot) != nullptr,
 	       "Animated model instantiation did not add skinned rendering and Animator components");
 	AnimatorComponent* authoredAnimator = FindAnimator(modelRoot);
-	Expect(FindSkinnedMeshRenderer(modelRoot)->Mesh()->skinInfluences.size() > 0,
+	Expect(FindSkinnedMeshRenderer(modelRoot)->SharedMesh()->Snapshot()->data.skinInfluences.size() > 0,
 	       "Instantiated skinned mesh has no vertex joint influences");
+	auto clonedSkin = Take(FindSkinnedMeshRenderer(modelRoot)->SharedMesh()->Clone());
+	const auto skinSource = clonedSkin->Snapshot()->data.skeletonReference;
+	const auto standaloneSkinId = ResourceId::Generate();
+	const auto standaloneSkinPath = Path("prj:Meshes/IndependentSkin.ursamesh");
+	Done(SaveMeshResource(filesystem, standaloneSkinPath, standaloneSkinId, *clonedSkin));
+	const auto sidecarText = nlohmann::json{{"guid", ToStdString(standaloneSkinId.ToString())},
+	                                        {"version", 1u},
+	                                        {"folder", false},
+	                                        {"importer", ""},
+	                                        {"importerVersion", 0u},
+	                                        {"settings", nlohmann::json::object()}}
+	                             .dump();
+	Done(filesystem.WriteAtomic(Take(VirtualPath::Parse(standaloneSkinPath.ToString() + ".meta")),
+	                            Vector<UInt8>(sidecarText.data(), sidecarText.data() + sidecarText.size())));
+	SerializationContext skinContext(session.get());
+	auto savedSkin = Take(LoadMeshResource(filesystem, standaloneSkinPath, skinContext));
+	Expect(savedSkin.mesh->AssetIdentity().guid == standaloneSkinId &&
+	           savedSkin.mesh->Snapshot()->data.skeletonReference.guid == skinSource.guid &&
+	           savedSkin.mesh->Snapshot()->data.skeletonReference.localFileId == skinSource.localFileId,
+	       "Standalone skinned Mesh lost its independent geometry identity or original skeleton binding");
+	Done(database.value->Refresh());
+	Done(session->Index().Rebuild());
+	Done(FindSkinnedMeshRenderer(modelRoot)->SetSharedMesh(savedSkin.mesh));
 	Rhi::DeviceDesc deviceDescription;
 #ifndef NDEBUG
 	deviceDescription.validation = true;
@@ -814,7 +862,7 @@ void TestSkeletalAnimationImport(const std::filesystem::path& root)
 	for (const auto& meshIdValue : model["meshLocalFileIds"])
 	{
 		auto mesh = packagedSession->LoadMesh(imported.value.guid, meshIdValue.get<UInt64>());
-		if (mesh && mesh.value->skeleton)
+		if (mesh && mesh.value->Snapshot()->data.skeleton)
 		{
 			loadedPackagedSkin = true;
 			break;

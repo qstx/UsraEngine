@@ -135,7 +135,7 @@ private:
 	static Int32 WriteFileFromManaged(void* context, const UInt8* path, UInt64 pathLength, const UInt8* bytes,
 	                                  UInt64 length);
 
-	NativeApiV4 BuildNativeApi(ManagedSceneApi* sceneApi);
+	NativeApiV5 BuildNativeApi(ManagedSceneApi* sceneApi);
 
 #if defined(_WIN32)
 	using CreateBehaviourFunction = Int32(__stdcall*)(const UInt8*, UInt64, const ManagedHandle*, UInt64*);
@@ -148,9 +148,9 @@ private:
 	using InvokeEditorFunction = Int32(__stdcall*)(UInt64, const UInt8*, UInt64, const ManagedEditorApi*, Int32);
 	using ReadSessionTextFunction = Int32(__stdcall*)(UInt64, UInt8*, UInt64, UInt64*);
 	using LoadContentFunction = Int32(__stdcall*)(UInt64, const UInt8*, UInt64);
-	using CreateSessionFunction = Int32(__stdcall*)(UInt32, const NativeApiV4*, Int32, UInt64*);
+	using CreateSessionFunction = Int32(__stdcall*)(UInt32, const NativeApiV5*, Int32, UInt64*);
 	using SessionFunction = Int32(__stdcall*)(UInt64);
-	using BindSessionFunction = Int32(__stdcall*)(UInt64, const NativeApiV4*, Int32);
+	using BindSessionFunction = Int32(__stdcall*)(UInt64, const NativeApiV5*, Int32);
 #else
 	using CreateBehaviourFunction = Int32 (*)(const UInt8*, UInt64, const ManagedHandle*, UInt64*);
 	using BindBehaviourFunction = Int32 (*)(UInt64, const ManagedHandle*);
@@ -162,9 +162,9 @@ private:
 	using InvokeEditorFunction = Int32 (*)(UInt64, const UInt8*, UInt64, const ManagedEditorApi*, Int32);
 	using ReadSessionTextFunction = Int32 (*)(UInt64, UInt8*, UInt64, UInt64*);
 	using LoadContentFunction = Int32 (*)(UInt64, const UInt8*, UInt64);
-	using CreateSessionFunction = Int32 (*)(UInt32, const NativeApiV4*, Int32, UInt64*);
+	using CreateSessionFunction = Int32 (*)(UInt32, const NativeApiV5*, Int32, UInt64*);
 	using SessionFunction = Int32 (*)(UInt64);
-	using BindSessionFunction = Int32 (*)(UInt64, const NativeApiV4*, Int32);
+	using BindSessionFunction = Int32 (*)(UInt64, const NativeApiV5*, Int32);
 #endif
 
 	LogCallback onLog;

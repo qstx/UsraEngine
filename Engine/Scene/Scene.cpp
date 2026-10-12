@@ -155,7 +155,7 @@ Result<void> Scene::PrepareRuntime()
 
 Result<void> Scene::AttachGameObject(const GameObject::Ptr& object, GameObject::Ptr parent)
 {
-	if (!object || !object->alive || object->parent)
+	if (!object || !object->alive || object->parent || object->IsAssetTemplate())
 	{
 		return Result<void>::Failure("Scene can only attach a valid detached GameObject root");
 	}
@@ -645,6 +645,11 @@ Result<Component*> Scene::AttachComponent(GameObject& owner, std::unique_ptr<Com
 	{
 		return Result<Component*>::Failure("Cannot attach a component to a GameObject outside this Scene");
 	}
+	auto checked = owner.ValidateComponent(*object);
+	if (!checked)
+	{
+		return Result<Component*>::Failure(checked.error);
+	}
 	Ursa::UInt32 index;
 	if (freeComponentIndices.empty())
 	{
@@ -776,6 +781,10 @@ Result<void> Scene::SetComponentEnabled(ComponentId id, bool enabled)
 	if (!ContainsComponent(id))
 	{
 		return Result<void>::Failure("Cannot enable or disable an invalid component");
+	}
+	if (!components[id.index].object->SupportsEnabled())
+	{
+		return Result<void>::Failure("Component does not support an enabled state");
 	}
 	components[id.index].enabled = enabled;
 	components[id.index].object->enabled = enabled;

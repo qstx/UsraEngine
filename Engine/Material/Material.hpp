@@ -4,6 +4,7 @@
 #include <Core/Result.hpp>
 #include <Material/Color.hpp>
 #include <Serialization/Serializable.hpp>
+#include <Serialization/AssetReference.hpp>
 #include <Shader/ShaderAsset.hpp>
 #include <cstdint>
 #include <memory>
@@ -123,6 +124,7 @@ struct MaterialPropertyValue
 	Ursa::Int32 intValue = 0;
 	Array<Ursa::Float32, 4> vectorValue{};
 	ResourceId textureId;
+	UInt64 textureLocalFileId = 0;
 	String textureDefault;
 	MaterialTexturePtr texture;
 
@@ -208,6 +210,10 @@ public:
 
 	ResourceId TextureResourceId(MaterialTextureSlot slot) const;
 
+	AssetReference TextureReference(MaterialTextureSlot slot) const;
+
+	Result<void> SetTextureReference(MaterialTextureSlot slot, AssetReference reference, MaterialTexturePtr texture);
+
 	Result<void> SetTextureResourceId(MaterialTextureSlot slot, ResourceId id);
 
 	MaterialTexturePtr ResolvedTexture(MaterialTextureSlot slot) const;
@@ -258,12 +264,38 @@ public:
 
 	std::shared_ptr<MaterialInstance> Clone() const;
 
+	bool IsValid() const;
+
+	Result<void> Destroy();
+
+	ResourceId LocalIdentity() const
+	{
+		return localIdentity;
+	}
+
+	Result<void> BindLocalIdentity(ResourceId id)
+	{
+		if (!id)
+		{
+			return Result<void>::Failure("Local resource identity cannot be zero");
+		}
+		localIdentity = id;
+		return {};
+	}
+
+	AssetReference AssetIdentity() const;
+
+	Result<void> BindAssetIdentity(AssetReference reference);
+
 private:
 	Result<void> DeserializeLegacy(const ArchiveReader& reader, SerializationContext& context);
 
 	void SynchronizeBuiltinProperties();
 
 	MaterialType type;
+	bool alive = true;
+	AssetReference assetIdentity;
+	ResourceId localIdentity = ResourceId::Generate();
 	ResourceId shaderId;
 	std::shared_ptr<const Shader::ShaderAsset> shaderAsset;
 	MaterialParameters parameters;

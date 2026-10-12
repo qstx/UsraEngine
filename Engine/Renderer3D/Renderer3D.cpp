@@ -46,14 +46,14 @@ struct Vertex
 	Ursa::Float32 position[3];
 	Ursa::Float32 normal[3];
 	Ursa::Float32 uv[2];
-	Ursa::Float32 tangent[3];
+	Ursa::Float32 tangent[4];
 	Ursa::Float32 color[4];
 	Ursa::UInt32 jointIndices[4]{};
 	Ursa::Float32 jointWeights[4]{1.0f, 0.0f, 0.0f, 0.0f};
 };
 
-static_assert(offsetof(Vertex, jointIndices) == 60, "Unexpected model vertex skin index offset");
-static_assert(sizeof(Vertex) == 92, "Unexpected model vertex stride");
+static_assert(offsetof(Vertex, jointIndices) == 64, "Unexpected model vertex skin index offset");
+static_assert(sizeof(Vertex) == 96, "Unexpected model vertex stride");
 
 struct CubeMesh
 {
@@ -77,7 +77,7 @@ CubeMesh MakeCube()
 			mesh.vertices[vertex++] = {{p.x, p.y, p.z},
 			                           {normal.x, normal.y, normal.z},
 			                           {uvs[corner][0], uvs[corner][1]},
-			                           {tangent.x, tangent.y, tangent.z},
+			                           {tangent.x, tangent.y, tangent.z, 1.0f},
 			                           {1.0f, 1.0f, 1.0f, 1.0f}};
 		}
 		for (Ursa::UInt32 corner : {0u, 2u, 1u, 0u, 3u, 2u})
@@ -182,7 +182,8 @@ struct DrawItem
 
 struct GpuModelMesh
 {
-	ModelMeshPtr source;
+	std::weak_ptr<Mesh> source;
+	std::shared_ptr<const MeshSnapshot> snapshot;
 	Rhi::BufferPtr vertexBuffer;
 	Rhi::BufferPtr indexBuffer;
 	Ursa::UInt32 indexCount = 0;
@@ -940,51 +941,59 @@ struct Renderer3D::Impl
 		done(fallback->SetShaderAsset(builtinUnlit));
 	}
 
-	GpuModelMesh& MeshFor(const ModelMeshPtr& mesh)
+	GpuModelMesh& MeshFor(const MeshPtr& mesh, const std::shared_ptr<const MeshSnapshot>& selected)
 	{
-		if (!mesh || !mesh->modelGuid || mesh->localFileId == 0 ||
-		    mesh->vertexStride != offsetof(Vertex, jointIndices) || mesh->vertexBytes.empty() ||
-		    mesh->indices.empty() || mesh->indices.size() > UINT32_MAX)
+		if (!mesh || !mesh->IsValid())
 		{
-			throw std::runtime_error("Renderer received an invalid imported model mesh");
+			throw std::runtime_error("Renderer received a destroyed Mesh");
 		}
-		const String key = mesh->modelGuid.ToString() + ":" + ToUrsaString(std::to_string(mesh->localFileId));
-		const auto cached = modelMeshes.find(key);
+		const auto snapshot = selected ? selected : mesh->Snapshot();
+		if (!snapshot || snapshot->data.positions.empty() || snapshot->data.indices.empty())
+		{
+			throw std::runtime_error("Renderer received an empty Mesh draw");
+		}
+		const String key =
+		    ToUrsaString(std::to_string(mesh->Identity())) + ":" + ToUrsaString(std::to_string(snapshot->version));
+		auto cached = modelMeshes.find(key);
 		if (cached != modelMeshes.end())
 		{
 			return cached->second;
 		}
-		GpuModelMesh gpuMesh;
-		gpuMesh.source = mesh;
-		const Ursa::Size vertexCount = mesh->vertexBytes.size() / mesh->vertexStride;
-		if (mesh->vertexBytes.size() % mesh->vertexStride != 0 ||
-		    (!mesh->skinInfluences.empty() && mesh->skinInfluences.size() != vertexCount))
+		done(Mesh::Validate(snapshot->data));
+		const auto& data = snapshot->data;
+		GpuModelMesh gpu;
+		gpu.source = mesh;
+		gpu.snapshot = snapshot;
+		Vector<Vertex> vertices(data.positions.size());
+		for (Size i = 0; i < vertices.size(); ++i)
 		{
-			throw std::runtime_error("Imported mesh vertex skin data does not match its vertex count");
-		}
-		Vector<Ursa::UInt8> packedVertices(vertexCount * sizeof(Vertex));
-		for (Ursa::Size vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
-		{
-			Vertex vertex{};
-			std::memcpy(&vertex, mesh->vertexBytes.data() + vertexIndex * mesh->vertexStride, mesh->vertexStride);
-			if (!mesh->skinInfluences.empty())
+			const Vec3 position = data.positions[i];
+			const Vec3 normal = data.normals.empty() ? Vec3{0, 1, 0} : data.normals[i];
+			const Vec2 uv = data.uv0.empty() ? Vec2{} : data.uv0[i];
+			const Vec4 tangent = data.tangents.empty() ? Vec4{1, 0, 0, 1} : data.tangents[i];
+			const Color color = data.colors.empty() ? Color{} : data.colors[i];
+			vertices[i] = {{position.x, position.y, position.z},
+			               {normal.x, normal.y, normal.z},
+			               {uv.x, uv.y},
+			               {tangent.x, tangent.y, tangent.z, tangent.w},
+			               {color.red, color.green, color.blue, color.alpha}};
+			if (!data.skinInfluences.empty())
 			{
-				for (Ursa::Size influence = 0; influence < 4; ++influence)
+				for (Size influence = 0; influence < 4; ++influence)
 				{
-					vertex.jointIndices[influence] = mesh->skinInfluences[vertexIndex].jointIndices[influence];
-					vertex.jointWeights[influence] = mesh->skinInfluences[vertexIndex].weights[influence];
+					vertices[i].jointIndices[influence] = data.skinInfluences[i].jointIndices[influence];
+					vertices[i].jointWeights[influence] = data.skinInfluences[i].weights[influence];
 				}
 			}
-			std::memcpy(packedVertices.data() + vertexIndex * sizeof(Vertex), &vertex, sizeof(Vertex));
 		}
-		gpuMesh.vertexBuffer =
-		    Take(device->CreateBuffer({packedVertices.size(), Rhi::BufferUsage::Vertex, Rhi::Memory::Upload}));
-		gpuMesh.indexBuffer = Take(device->CreateBuffer(
-		    {mesh->indices.size() * sizeof(Ursa::UInt32), Rhi::BufferUsage::Index, Rhi::Memory::Upload}));
-		done(gpuMesh.vertexBuffer->Write(0, packedVertices.data(), packedVertices.size()));
-		done(gpuMesh.indexBuffer->Write(0, mesh->indices.data(), mesh->indices.size() * sizeof(Ursa::UInt32)));
-		gpuMesh.indexCount = static_cast<Ursa::UInt32>(mesh->indices.size());
-		return modelMeshes.emplace(key, std::move(gpuMesh)).first->second;
+		gpu.vertexBuffer = Take(
+		    device->CreateBuffer({vertices.size() * sizeof(Vertex), Rhi::BufferUsage::Vertex, Rhi::Memory::Upload}));
+		gpu.indexBuffer = Take(
+		    device->CreateBuffer({data.indices.size() * sizeof(UInt32), Rhi::BufferUsage::Index, Rhi::Memory::Upload}));
+		done(gpu.vertexBuffer->Write(0, vertices.data(), vertices.size() * sizeof(Vertex)));
+		done(gpu.indexBuffer->Write(0, data.indices.data(), data.indices.size() * sizeof(UInt32)));
+		gpu.indexCount = UInt32(data.indices.size());
+		return modelMeshes.emplace(key, std::move(gpu)).first->second;
 	}
 
 	void WaitPrevious()
@@ -993,6 +1002,18 @@ struct Renderer3D::Impl
 		{
 			done(lastFence->Wait());
 			lastFence.reset();
+		}
+		for (auto it = modelMeshes.begin(); it != modelMeshes.end();)
+		{
+			auto owner = it->second.source.lock();
+			if (!owner || !owner->IsValid() || owner->Version() != it->second.snapshot->version)
+			{
+				it = modelMeshes.erase(it);
+			}
+			else
+			{
+				++it;
+			}
 		}
 		for (auto it = textureCache.begin(); it != textureCache.end();)
 		{
@@ -1484,6 +1505,19 @@ struct Renderer3D::Impl
 		}
 		TemporaryVector<ModelBoxInstance> resolvedBoxes(
 		    boxes.begin(), boxes.end(), Memory::TemporaryContainerAllocator(Memory::MemoryTag::Renderer));
+		resolvedBoxes.erase(
+		    std::remove_if(resolvedBoxes.begin(), resolvedBoxes.end(),
+		                   [](const ModelBoxInstance& item)
+		                   {
+			                   if (!item.mesh || !item.mesh->IsValid())
+			                   {
+				                   return false;
+			                   }
+			                   const auto snapshot = item.meshSnapshot ? item.meshSnapshot : item.mesh->Snapshot();
+			                   return snapshot && (snapshot->data.positions.empty() || snapshot->data.indices.empty() ||
+			                                       snapshot->data.subMeshes.empty());
+		                   }),
+		    resolvedBoxes.end());
 		for (ModelBoxInstance& box : resolvedBoxes)
 		{
 			box.material = ResolveMaterial(box.material, box.color);
@@ -1538,7 +1572,7 @@ struct Renderer3D::Impl
 			const auto& item = items[itemIndex];
 			if (item.box->mesh)
 			{
-				MeshFor(item.box->mesh);
+				MeshFor(item.box->mesh, item.box->meshSnapshot);
 			}
 			const auto shader = item.material->Shader();
 			bool hasCompiledShader = false;
@@ -1585,7 +1619,7 @@ struct Renderer3D::Impl
 		target.colorValue[1] = 0.055f;
 		target.colorValue[2] = 0.09f;
 		done(command->BeginRendering(target));
-		const ModelMesh* boundMesh = nullptr;
+		const MeshSnapshot* boundMesh = nullptr;
 		if (items.empty() || !items.front().box->mesh)
 		{
 			done(command->BindVertexBuffer(vertexBuffer));
@@ -1593,12 +1627,14 @@ struct Renderer3D::Impl
 		}
 		for (const RecordedPass& pass : recordedPasses)
 		{
-			const ModelMeshPtr& mesh = items[pass.itemIndex].box->mesh;
-			if (mesh.get() != boundMesh)
+			const auto& draw = *items[pass.itemIndex].box;
+			const MeshPtr& mesh = draw.mesh;
+			const auto snapshot = mesh ? (draw.meshSnapshot ? draw.meshSnapshot : mesh->Snapshot()) : nullptr;
+			if (snapshot.get() != boundMesh)
 			{
 				if (mesh)
 				{
-					GpuModelMesh& gpuMesh = MeshFor(mesh);
+					GpuModelMesh& gpuMesh = MeshFor(mesh, snapshot);
 					done(command->BindVertexBuffer(gpuMesh.vertexBuffer));
 					done(command->BindIndexBuffer(gpuMesh.indexBuffer));
 				}
@@ -1607,15 +1643,23 @@ struct Renderer3D::Impl
 					done(command->BindVertexBuffer(vertexBuffer));
 					done(command->BindIndexBuffer(indexBuffer));
 				}
-				boundMesh = mesh.get();
+				boundMesh = snapshot.get();
 			}
 			done(command->BindPipeline(pass.pipeline));
 			if (pass.group)
 			{
 				done(command->BindGroup(pass.group));
 			}
-			const Ursa::UInt32 indexCount = mesh ? MeshFor(mesh).indexCount : 36;
-			done(command->DrawIndexed(indexCount, 1, static_cast<Ursa::UInt32>(pass.itemIndex)));
+			SubMesh range{0, 36, 0};
+			if (mesh)
+			{
+				if (!snapshot || draw.subMesh >= snapshot->data.subMeshes.size())
+				{
+					throw std::runtime_error("Renderer submesh index is invalid");
+				}
+				range = snapshot->data.subMeshes[draw.subMesh];
+			}
+			done(command->DrawIndexed(range.indexCount, 1, UInt32(pass.itemIndex), range.firstIndex, range.baseVertex));
 		}
 		done(command->EndRendering());
 		done(command->Barrier(color, Rhi::ResourceState::ColorAttachment, after));
@@ -1791,5 +1835,10 @@ Result<void> Renderer3D::RecordOffscreenModels(const Rhi::CommandListPtr& comman
 	{
 		return Result<void>::Failure(error.what());
 	}
+}
+
+Size Renderer3D::MeshCacheSize() const
+{
+	return impl->modelMeshes.size();
 }
 } // namespace Ursa

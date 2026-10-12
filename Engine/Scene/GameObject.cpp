@@ -1,22 +1,32 @@
 #include <Scene/GameObject.hpp>
 #include <Scene/Scene.hpp>
 #include <algorithm>
+#include <cstring>
 
 namespace Ursa
 {
+bool GameObject::ComponentAvailable(const Component& component) const
+{
+	return !scene || scene->ContainsComponent(component.Id());
+}
+
 std::shared_ptr<GameObject> Component::GetGameObject() const
 {
 	return gameObject ? gameObject->shared_from_this() : std::shared_ptr<GameObject>{};
 }
 
-void Component::SetEnabled(bool value)
+Result<void> Component::SetEnabled(bool value)
 {
+	if (!SupportsEnabled())
+	{
+		return Result<void>::Failure("Component does not support an enabled state");
+	}
 	if (scene)
 	{
-		scene->SetComponentEnabled(id, value);
-		return;
+		return scene->SetComponentEnabled(id, value);
 	}
 	enabled = value;
+	return {};
 }
 
 GameObject::Ptr GameObject::Create(String objectName)
@@ -131,6 +141,7 @@ Result<void> GameObject::SetParentInternal(GameObject* newParent)
 		siblings.erase(std::remove(siblings.begin(), siblings.end(), self), siblings.end());
 	}
 	parent = newParent;
+	SetAssetTemplate(parent ? parent->assetTemplate : ResourceId{});
 	if (parent)
 	{
 		parent->children.push_back(std::move(self));
@@ -290,6 +301,11 @@ Result<Component*> GameObject::AddComponentOwned(std::unique_ptr<Component> comp
 	{
 		return Result<Component*>::Failure("Cannot add a component to an invalid GameObject");
 	}
+	auto checked = ValidateComponent(*component);
+	if (!checked)
+	{
+		return Result<Component*>::Failure(checked.error);
+	}
 	if (scene)
 	{
 		return scene->AttachComponent(*this, std::move(component));
@@ -298,6 +314,36 @@ Result<Component*> GameObject::AddComponentOwned(std::unique_ptr<Component> comp
 	Component* result = component.get();
 	components.push_back(std::move(component));
 	return Result<Component*>::Success(result);
+}
+
+void GameObject::SetAssetTemplate(ResourceId value)
+{
+	assetTemplate = value;
+	for (const auto& child : children)
+	{
+		child->SetAssetTemplate(value);
+	}
+}
+
+Result<void> GameObject::ValidateComponent(const Component& candidate) const
+{
+	const char* group = candidate.UniquenessGroup();
+	if (group)
+	{
+		for (const auto& component : components)
+		{
+			if (scene && !scene->ContainsComponent(component->Id()))
+			{
+				continue;
+			}
+			const char* existing = component->UniquenessGroup();
+			if (existing && std::strcmp(group, existing) == 0)
+			{
+				return Result<void>::Failure(String("GameObject already contains component group ") + group);
+			}
+		}
+	}
+	return {};
 }
 
 void GameObject::DestroyDetachedTree()

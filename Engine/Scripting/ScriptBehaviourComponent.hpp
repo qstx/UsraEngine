@@ -2,6 +2,7 @@
 
 #include <Scene/Component.hpp>
 #include <Scripting/ManagedBehaviourRuntime.hpp>
+#include <Serialization/DocumentResources.hpp>
 
 namespace Ursa
 {
@@ -53,6 +54,10 @@ public:
 
 	Result<void> RestoreSerializedPayload();
 
+	Result<void> ApplySerializedPayload(String payload, ResourceSession* resources = nullptr);
+
+	Result<void> CollectFieldResources(DocumentResources& resources) const;
+
 	Result<void> AttachManagedRuntime(ManagedBehaviourRuntime& managedRuntime, UInt64 token);
 
 	UInt64 InstanceToken() const
@@ -85,6 +90,12 @@ private:
 
 	Result<void> RemapReferences(ComponentLoadContext& context);
 
+	Result<void> BindRenderResources(nlohmann::json& payload, SerializationContext& context);
+
+	Result<void> SaveRenderResources(nlohmann::json& payload, ArchiveWriter& writer) const;
+
+	std::shared_ptr<DocumentResources> fieldResources;
+	ResourceSession* fieldResourceSession = nullptr;
 	ManagedBehaviourRuntime* runtime = nullptr;
 	String typeName;
 	String serializedPayload;

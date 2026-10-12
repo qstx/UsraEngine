@@ -40,7 +40,7 @@ Result<ManagedHandle> ManagedSceneApi::Register(const GameObject::Ptr& object)
 	return handle;
 }
 
-NativeApiV4 ManagedSceneApi::Bind(NativeApiV4 api)
+NativeApiV5 ManagedSceneApi::Bind(NativeApiV5 api)
 {
 	api.sceneContext = this;
 	api.createGameObject = &ManagedSceneApi::CreateGameObject;
@@ -75,11 +75,8 @@ NativeApiV4 ManagedSceneApi::Bind(NativeApiV4 api)
 	api.setWorldPosition = &ManagedSceneApi::SetWorldPosition;
 	api.getCameraProjection = &ManagedSceneApi::GetCameraProjection;
 	api.setCameraProjection = &ManagedSceneApi::SetCameraProjection;
-	api.getBoxRenderColor = &ManagedSceneApi::GetBoxRenderColor;
-	api.setBoxRenderColor = &ManagedSceneApi::SetBoxRenderColor;
-	api.getComponentAssetReference = &ManagedSceneApi::GetComponentAssetReference;
-	api.setComponentAssetReference = &ManagedSceneApi::SetComponentAssetReference;
 	api.setWindowTitle = &ManagedSceneApi::SetWindowTitle;
+	api.resourceRequest = &ManagedSceneApi::ResourceRequest;
 	return api;
 }
 
@@ -390,199 +387,6 @@ Int32 ManagedSceneApi::SetCameraProjection(void* context, ManagedHandle handle, 
 	return 0;
 }
 
-Int32 ManagedSceneApi::GetBoxRenderColor(void* context, ManagedHandle handle, Float32* output, UInt64 count)
-{
-	auto* api = FromContext(context);
-	if (!api || !output || count != 4)
-	{
-		return 1;
-	}
-	auto resolved = api->ResolveComponent(handle);
-	if (!resolved)
-	{
-		return 2;
-	}
-	auto* box = dynamic_cast<BoxRenderComponent*>(resolved.value);
-	if (!box)
-	{
-		return 3;
-	}
-	output[0] = box->color.red;
-	output[1] = box->color.green;
-	output[2] = box->color.blue;
-	output[3] = box->color.alpha;
-	return 0;
-}
-
-Int32 ManagedSceneApi::SetBoxRenderColor(void* context, ManagedHandle handle, const Float32* values, UInt64 count)
-{
-	auto* api = FromContext(context);
-	if (!api || !values || count != 4 || !std::isfinite(values[0]) || !std::isfinite(values[1]) ||
-	    !std::isfinite(values[2]) || !std::isfinite(values[3]))
-	{
-		return 1;
-	}
-	auto resolved = api->ResolveComponent(handle);
-	if (!resolved)
-	{
-		return 2;
-	}
-	auto* box = dynamic_cast<BoxRenderComponent*>(resolved.value);
-	if (!box)
-	{
-		return 3;
-	}
-	box->color = {values[0], values[1], values[2], values[3]};
-	return 0;
-}
-
-Int32 ManagedSceneApi::GetComponentAssetReference(void* context, ManagedHandle handle, UInt8* output, UInt64 capacity,
-                                                  UInt64* required, UInt64* localFileId)
-{
-	auto* api = FromContext(context);
-	if (!api || !required || !localFileId || (!output && capacity != 0))
-	{
-		return 1;
-	}
-	auto resolved = api->ResolveComponent(handle);
-	if (!resolved)
-	{
-		return 2;
-	}
-	AssetReference reference;
-	if (auto* box = dynamic_cast<BoxRenderComponent*>(resolved.value))
-	{
-		if (box->material)
-		{
-			if (!api->resources)
-			{
-				return 3;
-			}
-			auto identified = api->resources->IdentifyMaterialReference(box->material);
-			if (!identified || identified.value.localFileId != 0)
-			{
-				return 4;
-			}
-			reference = identified.value;
-		}
-	}
-	else if (auto* meshRenderer = dynamic_cast<MeshRendererComponent*>(resolved.value))
-	{
-		if (meshRenderer->MeshGuid())
-		{
-			reference = {meshRenderer->MeshGuid(), meshRenderer->MeshLocalFileId()};
-		}
-	}
-	else if (auto* skinnedMeshRenderer = dynamic_cast<SkinnedMeshRendererComponent*>(resolved.value))
-	{
-		if (skinnedMeshRenderer->MeshGuid())
-		{
-			reference = {skinnedMeshRenderer->MeshGuid(), skinnedMeshRenderer->MeshLocalFileId()};
-		}
-	}
-	else
-	{
-		return 3;
-	}
-	*localFileId = reference.localFileId;
-	if (!reference.guid)
-	{
-		*required = 0;
-		return 0;
-	}
-	const String guid = reference.guid.ToString();
-	*required = guid.size();
-	if (capacity < guid.size())
-	{
-		return 4;
-	}
-	std::memcpy(output, guid.data(), guid.size());
-	return 0;
-}
-
-Int32 ManagedSceneApi::SetComponentAssetReference(void* context, ManagedHandle handle, const UInt8* guidBytes,
-                                                  UInt64 guidLength, UInt64 localFileId)
-{
-	auto* api = FromContext(context);
-	if (!api || (!guidBytes && guidLength != 0) || guidLength > 36 || (guidLength == 0 && localFileId != 0) ||
-	    (guidLength != 0 && guidLength != 36))
-	{
-		return 1;
-	}
-	auto resolved = api->ResolveComponent(handle);
-	if (!resolved)
-	{
-		return 2;
-	}
-	ResourceId guid;
-	if (guidLength != 0)
-	{
-		auto parsed =
-		    ResourceId::Parse(String(reinterpret_cast<const char*>(guidBytes), static_cast<Size>(guidLength)));
-		if (!parsed)
-		{
-			return 1;
-		}
-		guid = parsed.value;
-	}
-	if (auto* box = dynamic_cast<BoxRenderComponent*>(resolved.value))
-	{
-		if (!guid)
-		{
-			box->material.reset();
-			return 0;
-		}
-		if (!api->resources || localFileId != 0)
-		{
-			return 3;
-		}
-		auto material = api->resources->LoadMaterial(guid, localFileId);
-		if (!material)
-		{
-			return 4;
-		}
-		box->material = std::move(material.value);
-		return 0;
-	}
-	if (auto* mesh = dynamic_cast<MeshRendererComponent*>(resolved.value))
-	{
-		if (!guid)
-		{
-			mesh->ClearMesh();
-			return 0;
-		}
-		if (!api->resources)
-		{
-			return 3;
-		}
-		auto modelMesh = api->resources->LoadMesh(guid, localFileId);
-		if (!modelMesh)
-		{
-			return 4;
-		}
-		return mesh->SetMesh(guid, localFileId, std::move(modelMesh.value)) ? 0 : 5;
-	}
-	if (auto* mesh = dynamic_cast<SkinnedMeshRendererComponent*>(resolved.value))
-	{
-		if (!guid)
-		{
-			mesh->ClearMesh();
-			return 0;
-		}
-		if (!api->resources)
-		{
-			return 3;
-		}
-		auto modelMesh = api->resources->LoadMesh(guid, localFileId);
-		if (!modelMesh)
-		{
-			return 4;
-		}
-		return mesh->SetMesh(guid, localFileId, std::move(modelMesh.value)) ? 0 : 5;
-	}
-	return 6;
-}
-
 Int32 ManagedSceneApi::SetWindowTitle(void* context, const UInt8* title, UInt64 length)
 {
 	auto* api = FromContext(context);
@@ -715,9 +519,9 @@ Int32 ManagedSceneApi::AddComponent(void* context, ManagedHandle object, const U
 	{
 		added = api->scene.AddComponent<CameraComponent>(owner.value);
 	}
-	else if (typeName == "ursa.BoxRender")
+	else if (typeName == "ursa.MeshFilter")
 	{
-		added = api->scene.AddComponent<BoxRenderComponent>(owner.value);
+		added = api->scene.AddComponent<MeshFilterComponent>(owner.value);
 	}
 	else if (typeName == "ursa.MeshRenderer")
 	{
@@ -991,7 +795,7 @@ Int32 ManagedSceneApi::LoadMaterial(void* context, const UInt8* guidBytes, UInt6
 	{
 		return 3;
 	}
-	auto handle = api->handles->Register(material.value.get(), ManagedHandleKind::Asset);
+	auto handle = api->RegisterMaterial(material.value);
 	if (!handle)
 	{
 		return 4;

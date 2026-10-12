@@ -77,8 +77,27 @@ public enum ProbeMode : byte
 [UrsaScriptType("test.managed-render-component-probe")]
 public sealed class ManagedRenderComponentProbe : Behaviour
 {
+	public bool verifyTextureBindings;
+	public Mesh? mesh;
+	public Material? material;
+	public Mesh?[]? meshes;
+	public System.Collections.Generic.List<Material?>? materials;
+	public Vector2 uv;
+	public Vector4 tangent;
+
 	public override void Awake()
 	{
+		if (mesh != null && material != null)
+		{
+			if (GameObject.GetComponent<MeshFilterComponent>()!.SharedMesh != mesh ||
+			    GameObject.GetComponent<MeshRendererComponent>()!.SharedMaterial != material ||
+			    meshes == null || meshes[0] != mesh || meshes[1] != null || meshes[2] != mesh ||
+			    materials == null || materials[0] != material || materials[1] != null || materials[2] != material ||
+			    uv.X != 0.25f || tangent.W != -1)
+				throw new InvalidOperationException("Persisted resource fields lost sharing or math values.");
+			GameObject.Name = "MeshFields:Restored";
+			return;
+		}
 		GameObject.Name = "RenderProbe:Awake";
 		CameraComponent camera = GameObject.AddComponent<CameraComponent>();
 		GameObject.Name = "RenderProbe:Camera";
@@ -86,9 +105,60 @@ public sealed class ManagedRenderComponentProbe : Behaviour
 		camera.NearPlane = 0.2f;
 		camera.FarPlane = 80.0f;
 
-		BoxRenderComponent box = GameObject.AddComponent<BoxRenderComponent>();
-		GameObject.Name = "RenderProbe:Box";
-		box.Color = new Color(0.25f, 0.5f, 0.75f, 1.0f);
+		var filter = GameObject.AddComponent<MeshFilterComponent>();
+		var renderer = GameObject.AddComponent<MeshRendererComponent>();
+		mesh = Mesh.Create();
+		mesh.SetData(new MeshData
+		{
+			Positions = new[] { new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0) },
+			Indices = new uint[] { 0, 1, 2 }
+		});
+		filter.SharedMesh = mesh;
+		var original = mesh;
+		mesh = filter.Mesh;
+		if (mesh == original || !ReferenceEquals(mesh, filter.Mesh) || filter.SharedMesh != mesh)
+			throw new InvalidOperationException("Mesh instance ownership failed.");
+		var data = mesh.Vertices;
+		data[0].X = 7;
+		if (mesh.Vertices[0].X != 0) throw new InvalidOperationException("Mesh getter exposed a live array.");
+		mesh.RecalculateNormals();
+		mesh.RecalculateBounds();
+		material = Material.Create();
+		renderer.SharedMaterials = new Material?[] { material, material, null };
+		var originalMaterial = material;
+		material = renderer.Material!;
+		if (material == originalMaterial || !ReferenceEquals(material, renderer.Material))
+			throw new InvalidOperationException("Material instance ownership failed.");
+		material.Color = new Color(0.25f, 0.5f, 0.75f);
+		material.SetColor("_BaseColor", material.Color);
+		if (material.GetColor("_BaseColor").B != 0.75f) throw new InvalidOperationException("Shader Color property failed.");
+		if (verifyTextureBindings)
+		{
+		var texture = TextureAsset.Load(new AssetReference("34567890-0000-4000-8000-000000000001"));
+		material.SetTexture(MaterialTextureSlot.BaseColor, texture);
+		material.SetTexture("_MainTex", texture);
+		if (material.GetTexture(MaterialTextureSlot.BaseColor)?.Reference.Guid != texture.Reference.Guid ||
+		    material.GetTexture("_MainTex")?.Reference.Guid != texture.Reference.Guid)
+			throw new InvalidOperationException("Material texture references were not preserved.");
+		var before = material.Color;
+		bool invalidPropertyRejected = false;
+		try { material.SetFloat("Unknown", 1); } catch (InvalidOperationException) { invalidPropertyRejected = true; }
+		if (!invalidPropertyRejected || material.Color.R != before.R) throw new InvalidOperationException("Invalid Shader property changed material data.");
+		}
+		var slots = renderer.Materials;
+		if (slots[0] != material || slots[1] == originalMaterial || slots[2] != null || renderer.Materials[1] != slots[1])
+			throw new InvalidOperationException("Material slot getter cloned repeatedly.");
+		meshes = new Mesh?[] { mesh, null, mesh };
+		materials = new System.Collections.Generic.List<Material?> { material, null, material };
+		uv = new Vector2(0.25f, 0.75f);
+		tangent = new Vector4(1, 0, 0, -1);
+		bool duplicateRejected = false;
+		try { GameObject.AddComponent<MeshRendererComponent>(); }
+		catch (InvalidOperationException) { duplicateRejected = true; }
+		if (!duplicateRejected) throw new InvalidOperationException("Duplicate Renderer was accepted.");
+		original.Destroy();
+		originalMaterial.Destroy();
+
 	}
 }
 

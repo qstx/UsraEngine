@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Renderer3D/Renderer3D.hpp>
@@ -43,10 +44,10 @@ int main()
 		done(scene.SetLocalTransform(cameraNode, cameraPose));
 		done(scene.SetActiveCamera(Take(scene.AddComponent<Ursa::CameraComponent>(cameraNode))));
 		auto boxNode = Take(scene.CreateGameObject());
-		Take(scene.AddComponent<Ursa::BoxRenderComponent>(boxNode));
+		Take(Ursa::Test::AddRenderer(scene, boxNode));
 		auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
 		done(material->SetBaseColor({1.0f, 0.0f, 0.0f, 1.0f}));
-		scene.FindComponent<Ursa::BoxRenderComponent>(boxNode)->material = material;
+		done(scene.FindComponent<Ursa::MeshRendererComponent>(boxNode)->SetSharedMaterial(material));
 		auto frame = Take(scene.CollectRenderData(1.0f));
 		auto color = Take(device->CreateTexture(
 		    {64, 64, Ursa::Rhi::Format::RgbA8Unorm,

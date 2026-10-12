@@ -226,36 +226,73 @@ Result<GameObject::Ptr> SceneDraft::InstantiateModel(ResourceId modelGuid, const
 					return Result<GameObject::Ptr>::Failure("Model node has an invalid mesh local file ID: " + name);
 				}
 				const Ursa::UInt64 meshLocalFileId = meshValue.get<Ursa::UInt64>();
-				auto mesh = resources.LoadMesh(modelGuid, meshLocalFileId);
-				if (!mesh)
+				auto geometry = resources.LoadMesh(modelGuid, meshLocalFileId);
+				if (!geometry)
 				{
-					return Result<GameObject::Ptr>::Failure(name + ": " + mesh.error);
+					return Result<GameObject::Ptr>::Failure(geometry.error);
 				}
-				if (mesh.value->skeleton)
+				GameObject::Ptr renderObject = object;
+				if (node["meshLocalFileIds"].size() > 1)
 				{
-					auto added = object->AddComponent<SkinnedMeshRendererComponent>();
+					renderObject = GameObject::Create("Mesh-" + ToUrsaString(std::to_string(meshLocalFileId)));
+					auto parented = renderObject->SetParent(object);
+					if (!parented)
+					{
+						return Result<GameObject::Ptr>::Failure(parented.error);
+					}
+				}
+				RendererComponent* renderer = nullptr;
+				if (geometry.value->Snapshot()->data.skeleton)
+				{
+					auto added = renderObject->AddComponent<SkinnedMeshRendererComponent>();
 					if (!added)
 					{
 						return Result<GameObject::Ptr>::Failure(added.error);
 					}
-					auto assigned = added.value->SetMesh(modelGuid, meshLocalFileId, std::move(mesh.value));
+					auto assigned = added.value->SetSharedMesh(geometry.value);
 					if (!assigned)
 					{
 						return Result<GameObject::Ptr>::Failure(assigned.error);
 					}
+					renderer = added.value;
 				}
 				else
 				{
-					auto added = object->AddComponent<MeshRendererComponent>();
-					if (!added)
+					auto filter = renderObject->AddComponent<MeshFilterComponent>();
+					if (!filter)
 					{
-						return Result<GameObject::Ptr>::Failure(added.error);
+						return Result<GameObject::Ptr>::Failure(filter.error);
 					}
-					auto assigned = added.value->SetMesh(modelGuid, meshLocalFileId, std::move(mesh.value));
+					auto assigned = filter.value->SetSharedMesh(geometry.value);
 					if (!assigned)
 					{
 						return Result<GameObject::Ptr>::Failure(assigned.error);
 					}
+					auto added = renderObject->AddComponent<MeshRendererComponent>();
+					if (!added)
+					{
+						return Result<GameObject::Ptr>::Failure(added.error);
+					}
+					renderer = added.value;
+				}
+				std::shared_ptr<MaterialInstance> material;
+				const std::string bindingKey = std::to_string(meshLocalFileId);
+				if (modelDocument.contains("meshMaterialBindings") &&
+				    modelDocument["meshMaterialBindings"].contains(bindingKey) &&
+				    !modelDocument["meshMaterialBindings"][bindingKey].is_null())
+				{
+					auto loaded = resources.LoadMaterial(
+					    modelGuid, modelDocument["meshMaterialBindings"][bindingKey].get<UInt64>());
+					if (!loaded)
+					{
+						return Result<GameObject::Ptr>::Failure(loaded.error);
+					}
+					material = std::move(loaded.value);
+				}
+				auto assigned = renderer->SetSharedMaterial(std::move(material));
+				if (!assigned)
+				{
+					return Result<GameObject::Ptr>::Failure(assigned.error);
 				}
 			}
 		}
@@ -483,14 +520,18 @@ Result<void> SceneDraft::AssignMaterial(GameObject::Ptr node, ResourceId materia
 {
 	if (kind == ResourceKind::Prefab)
 	{
-		auto* box = node ? node->FindComponent<BoxRenderComponent>() : nullptr;
+		auto* box = node ? node->FindComponent<RendererComponent>() : nullptr;
 		if (!box)
 		{
 			return Result<void>::Failure("Selected Prefab GameObject has no box renderer component");
 		}
 		if (!materialId)
 		{
-			box->material.reset();
+			auto assigned = box->SetSharedMaterial(nullptr);
+			if (!assigned)
+			{
+				return assigned;
+			}
 			return {};
 		}
 		auto material = resourceSession.LoadMaterial(materialId);
@@ -498,11 +539,15 @@ Result<void> SceneDraft::AssignMaterial(GameObject::Ptr node, ResourceId materia
 		{
 			return Result<void>::Failure(material.error);
 		}
-		box->material = material.value;
+		auto assigned = box->SetSharedMaterial(material.value);
+		if (!assigned)
+		{
+			return assigned;
+		}
 		assignedMaterials[material.value.get()] = materialId;
 		return {};
 	}
-	auto* box = GetScene().FindComponent<BoxRenderComponent>(node);
+	auto* box = GetScene().FindComponent<RendererComponent>(node);
 	if (!box)
 	{
 		return Result<void>::Failure("Selected node has no box renderer component");
@@ -524,14 +569,18 @@ Result<void> SceneDraft::AssignMaterial(GameObject::Ptr node, ResourceId materia
 
 Result<void> SceneDraft::AssignMaterial(ComponentId component, ResourceId materialId, ResourceSession& resourceSession)
 {
-	auto* box = dynamic_cast<BoxRenderComponent*>(GetScene().GetComponent(component));
+	auto* box = dynamic_cast<RendererComponent*>(GetScene().GetComponent(component));
 	if (!box)
 	{
 		return Result<void>::Failure("Selected component is not a box renderer");
 	}
 	if (!materialId)
 	{
-		box->material.reset();
+		auto assigned = box->SetSharedMaterial(nullptr);
+		if (!assigned)
+		{
+			return assigned;
+		}
 		return {};
 	}
 	auto material = resourceSession.LoadMaterial(materialId);
@@ -539,9 +588,49 @@ Result<void> SceneDraft::AssignMaterial(ComponentId component, ResourceId materi
 	{
 		return Result<void>::Failure(material.error);
 	}
-	box->material = material.value;
+	auto assigned = box->SetSharedMaterial(material.value);
+	if (!assigned)
+	{
+		return assigned;
+	}
 	assignedMaterials[material.value.get()] = materialId;
 	return {};
+}
+
+Result<void> SceneDraft::ApplyInstance(VirtualFileSystem& files, const VirtualPath& source, ResourceId instance)
+{
+	if (!linked)
+	{
+		return Result<void>::Failure("Scene has no linked Prefab instances");
+	}
+	ComponentLoadContext context(resources);
+	if (setup)
+	{
+		auto prepared = setup(context);
+		if (!prepared)
+		{
+			return prepared;
+		}
+	}
+	return ApplyPrefabInstance(files, source, *linked, instance, registry, context);
+}
+
+Result<void> SceneDraft::RevertInstance(VirtualFileSystem& files, const VirtualPath& source, ResourceId instance)
+{
+	if (!linked)
+	{
+		return Result<void>::Failure("Scene has no linked Prefab instances");
+	}
+	ComponentLoadContext context(resources);
+	if (setup)
+	{
+		auto prepared = setup(context);
+		if (!prepared)
+		{
+			return prepared;
+		}
+	}
+	return RevertPrefabInstance(files, source, *linked, instance, registry, context);
 }
 
 Result<void> SceneDraft::SetInstanceProperty(ResourceId instanceId, ResourceId sourceObjectId, const String& pointer,

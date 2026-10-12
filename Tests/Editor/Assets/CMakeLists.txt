@@ -1,5 +1,15 @@
 if(URSA_BUILD_EDITOR)
 
+  ursa_add_test_executable(UrsaMeshMigrationTests MeshMigrationTests.cpp)
+  target_link_libraries(UrsaMeshMigrationTests PRIVATE Ursa::Editor)
+  target_compile_definitions(UrsaMeshMigrationTests PRIVATE URSA_TEST_BUILTIN_SOURCE="${URSA_SOURCE_ROOT}/Assets")
+  add_test(NAME UrsaMeshMigrationTests COMMAND UrsaMeshMigrationTests)
+
+  ursa_add_test_executable(UrsaMeshAssetEditorTests MeshAssetEditorTests.cpp)
+  target_link_libraries(UrsaMeshAssetEditorTests PRIVATE Ursa::Editor)
+  target_compile_definitions(UrsaMeshAssetEditorTests PRIVATE URSA_TEST_BUILTIN_SOURCE="${URSA_SOURCE_ROOT}/Assets")
+  add_test(NAME UrsaMeshAssetEditorTests COMMAND UrsaMeshAssetEditorTests)
+
   ursa_add_test_executable(UrsaAssetDatabaseTests AssetDatabaseTests.cpp)
 
   ursa_add_test_executable(UrsaProjectAssetDatabaseTests ProjectAssetDatabaseTests.cpp)

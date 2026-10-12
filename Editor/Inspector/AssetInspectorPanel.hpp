@@ -13,5 +13,10 @@ public:
 
 	void Draw(const ProjectWorkspace& workspace, const ProjectBrowserModel& model,
 	          const EditorSelectionContext& selection, bool& open, const OpenAsset& openAsset);
+
+private:
+	String inspectedMeshKey;
+	MeshPtr inspectedMesh;
+	String meshDiagnostic;
 };
 } // namespace Ursa::Editor

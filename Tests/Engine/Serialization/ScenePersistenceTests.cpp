@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <ResourceFixtures.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
@@ -150,7 +151,7 @@ void TestScene(const std::filesystem::path& root)
 	cameraObject->nearPlane = 0.2f;
 	cameraObject->farPlane = 80.0f;
 	done(scene.SetActiveCamera(camera));
-	const auto box = Take(scene.AddComponent<Ursa::BoxRenderComponent>(child, Ursa::Color{0.9f, 0.1f, 0.2f, 1.0f}));
+	const auto box = Take(Ursa::Test::AddRenderer(scene, child, Ursa::Color{0.9f, 0.1f, 0.2f, 1.0f}));
 	done(scene.SetComponentEnabled(box, false));
 	const auto sun = Take(scene.AddComponent<Ursa::DirectionalLightComponent>(second));
 	auto* sunObject = static_cast<Ursa::DirectionalLightComponent*>(scene.GetComponent(sun));
@@ -192,8 +193,8 @@ void TestScene(const std::filesystem::path& root)
 	const auto materialPath = root / "box.ursamat";
 	done(Ursa::SaveMaterialResource(materialPath, materialId, *material, {}));
 	done(Ursa::WriteResourceMetadata(materialPath));
-	const auto visibleBox = Take(scene.AddComponent<Ursa::BoxRenderComponent>(first));
-	static_cast<Ursa::BoxRenderComponent*>(scene.GetComponent(visibleBox))->material = material;
+	const auto visibleBox = Take(Ursa::Test::AddRenderer(scene, first));
+	done(static_cast<Ursa::MeshRendererComponent*>(scene.GetComponent(visibleBox))->SetSharedMaterial(material));
 	const auto firstId = Take(scene.PersistentId(first));
 	const auto childId = Take(scene.PersistentId(child));
 	const auto secondId = Take(scene.PersistentId(second));
@@ -223,7 +224,8 @@ void TestScene(const std::filesystem::path& root)
 	       "Scene hierarchy, transform, or enabled state was lost");
 	Expect(Take(loaded.scene->ComponentPersistentId(loaded.scene->ActiveCamera())) == cameraId &&
 	           loaded.scene->AmbientLightColor().green == 0.4f && loaded.scene->AmbientLightIntensity() == 0.25f &&
-	           !Take(loaded.scene->IsComponentEnabled(Take(loaded.scene->ComponentsOf(restoredChild))[0])),
+	           !Take(loaded.scene->IsComponentEnabled(
+	               loaded.scene->FindComponent<Ursa::MeshRendererComponent>(restoredChild)->Id())),
 	       "Scene camera, ambient light, or component enabled state was lost");
 	Expect(Take(loaded.scene->ComponentsOf(Take(loaded.scene->GameObjectById(secondId)))).size() == 3 &&
 	           loaded.scene->GetComponent(Take(loaded.scene->ComponentByPersistentId(sunId))) != nullptr,

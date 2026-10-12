@@ -30,6 +30,8 @@ const char* FormatName(ResourceKind kind)
 {
 	switch (kind)
 	{
+		case ResourceKind::Mesh:
+			return "UrsaMesh";
 		case ResourceKind::Material:
 			return "UrsaMaterial";
 		case ResourceKind::Scene:
@@ -162,14 +164,19 @@ Result<ResourceHeader> ParseJsonHeader(const Vector<Ursa::UInt8>& bytes, const S
 
 Ursa::UInt64 SizeLimitFor(ResourceKind kind)
 {
-	return kind == ResourceKind::Texture  ? maxTextureResourceBytes
-	       : kind == ResourceKind::Shader ? maxShaderResourceBytes
-	                                      : maxJsonResourceBytes;
+	return kind == ResourceKind::Mesh      ? maxMeshResourceBytes
+	       : kind == ResourceKind::Texture ? maxTextureResourceBytes
+	       : kind == ResourceKind::Shader  ? maxShaderResourceBytes
+	                                       : maxJsonResourceBytes;
 }
 
 Result<ResourceKind> KindFromExtension(const String& extension, const String& where)
 {
 	const String loweredExtension = Lowered(extension);
+	if (loweredExtension == ".ursamesh")
+	{
+		return Result<ResourceKind>::Success(ResourceKind::Mesh);
+	}
 	if (loweredExtension == ".ursatex")
 	{
 		return Result<ResourceKind>::Success(ResourceKind::Texture);
@@ -220,6 +227,27 @@ Result<ResourceHeader> ReadResourceHeader(const VirtualFileSystem& filesystem, c
 	if (size.value > SizeLimitFor(kind.value))
 	{
 		return Result<ResourceHeader>::Failure("Resource exceeds size limit at " + where);
+	}
+	if (kind.value == ResourceKind::Mesh)
+	{
+		auto prefix = filesystem.ReadPrefix(path, 40);
+		if (!prefix)
+		{
+			return Result<ResourceHeader>::Failure(prefix.error);
+		}
+		const Array<UInt8, 8> magic{'U', 'R', 'S', 'A', 'M', 'S', 'H', 0};
+		if (!prefix.value.empty() && prefix.value[0] == 'U')
+		{
+			if (prefix.value.size() != 40 || !std::equal(magic.begin(), magic.end(), prefix.value.begin()) ||
+			    ReadUint64(prefix.value, 28) != size.value - 40 ||
+			    std::any_of(prefix.value.begin() + 36, prefix.value.end(), [](UInt8 value) { return value != 0; }))
+			{
+				return Result<ResourceHeader>::Failure("Invalid Mesh envelope at " + where);
+			}
+			ResourceHeader header{ResourceKind::Mesh, ReadUint32(prefix.value, 8), {}};
+			std::copy(prefix.value.begin() + 12, prefix.value.begin() + 28, header.id.bytes.begin());
+			return FinishHeader(header, where);
+		}
 	}
 	if (kind.value == ResourceKind::Texture)
 	{

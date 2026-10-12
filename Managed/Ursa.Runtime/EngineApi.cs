@@ -15,7 +15,7 @@ internal struct NativeHandle
 }
 
 [StructLayout(LayoutKind.Sequential)]
-internal unsafe struct NativeApiV4
+internal unsafe struct NativeApiV5
 {
 	public uint version;
 	public uint size;
@@ -57,17 +57,14 @@ internal unsafe struct NativeApiV4
 	public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> setWorldPosition;
 	public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> getCameraProjection;
 	public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> setCameraProjection;
-	public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> getBoxRenderColor;
-	public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> setBoxRenderColor;
-	public delegate* unmanaged[Cdecl]<nint, NativeHandle, byte*, ulong, ulong*, ulong*, int> getComponentAssetReference;
-	public delegate* unmanaged[Cdecl]<nint, NativeHandle, byte*, ulong, ulong, int> setComponentAssetReference;
 	public delegate* unmanaged[Cdecl]<nint, byte*, ulong, int> setWindowTitle;
+	public delegate* unmanaged[Cdecl]<nint, byte*, ulong, byte*, ulong, ulong*, int> resourceRequest;
 }
 
-internal static unsafe class EngineApi
+internal static unsafe partial class EngineApi
 {
 	[ThreadStatic]
-	private static NativeApiV4 api;
+	private static NativeApiV5 api;
 	[ThreadStatic]
 	private static bool initialized;
 
@@ -79,7 +76,7 @@ internal static unsafe class EngineApi
 
 	internal static void Initialize(nint nativeApi)
 	{
-		api = *(NativeApiV4*)nativeApi;
+		api = *(NativeApiV5*)nativeApi;
 		initialized = true;
 	}
 
@@ -216,65 +213,13 @@ internal static unsafe class EngineApi
 		Check(api.setCameraProjection(api.sceneContext, handle, values, 3), "set Camera projection");
 	}
 
-	internal static Color GetBoxRenderColor(NativeHandle handle)
-	{
-		RequireInitialized();
-		if (api.getBoxRenderColor == null)
-			throw new InvalidOperationException("Box Renderer access is unavailable.");
-		float* values = stackalloc float[4];
-		Check(api.getBoxRenderColor(api.sceneContext, handle, values, 4), "read Box Renderer color");
-		return new Color(values[0], values[1], values[2], values[3]);
-	}
 
-	internal static void SetBoxRenderColor(NativeHandle handle, Color color)
-	{
-		RequireInitialized();
-		if (api.setBoxRenderColor == null)
-			throw new InvalidOperationException("Box Renderer access is unavailable.");
-		float* values = stackalloc float[] { color.R, color.G, color.B, color.A };
-		Check(api.setBoxRenderColor(api.sceneContext, handle, values, 4), "set Box Renderer color");
-	}
 
-	internal static AssetReference? GetComponentAssetReference(NativeHandle handle)
-	{
-		RequireInitialized();
-		if (api.getComponentAssetReference == null)
-			throw new InvalidOperationException("Renderer asset references are unavailable.");
-		ulong required = 0;
-		ulong localFileId = 0;
-		int status = api.getComponentAssetReference(api.sceneContext, handle, null, 0, &required, &localFileId);
-		if (status != 0 && status != 4)
-			Check(status, "read Renderer asset reference");
-		if (required == 0)
-		{
-			return null;
-		}
-		if (required != 36)
-		{
-			throw new InvalidOperationException("Renderer asset reference has an invalid GUID length.");
-		}
-		byte[] bytes = new byte[(int)required];
-		fixed(byte* output = bytes)
-		{
-			Check(api.getComponentAssetReference(api.sceneContext, handle, output, required, &required, &localFileId),
-			      "read Renderer asset reference");
-		}
-		return new AssetReference(Encoding.UTF8.GetString(bytes), localFileId);
-	}
 
-	internal static void SetComponentAssetReference(NativeHandle handle, AssetReference? reference)
-	{
-		RequireInitialized();
-		if (api.setComponentAssetReference == null)
-			throw new InvalidOperationException("Renderer asset references are unavailable.");
-		byte[] bytes = reference.HasValue ? Encoding.UTF8.GetBytes(reference.Value.Guid) : Array.Empty<byte>();
-		fixed(byte* guid = bytes)
-		{
-			Check(api.setComponentAssetReference(api.sceneContext, handle, guid, (ulong)bytes.Length,
-			                                     reference?.LocalFileId ?? 0),
-			      "set Renderer asset reference");
-		}
-	}
+
+
+
+
 
 	internal static void SetWindowTitle(string title)
 	{

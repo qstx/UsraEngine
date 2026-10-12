@@ -49,45 +49,6 @@ public sealed unsafe class CameraComponent : Component
 	}
 }
 
-[NativeComponentType("ursa.BoxRender")]
-public sealed class BoxRenderComponent : Component
-{
-	public Color Color
-	{
-		get => EngineApi.GetBoxRenderColor(NativeHandle);
-		set => EngineApi.SetBoxRenderColor(NativeHandle, value);
-	}
-
-	public MaterialAsset? Material
-	{
-		get {
-			AssetReference? reference = EngineApi.GetComponentAssetReference(NativeHandle);
-			return reference.HasValue ? MaterialAsset.Load(reference.Value) : null;
-		}
-		set => EngineApi.SetComponentAssetReference(NativeHandle, value?.Reference);
-	}
-}
-
-[NativeComponentType("ursa.MeshRenderer")]
-public sealed class MeshRendererComponent : Component
-{
-	public AssetReference? Mesh
-	{
-		get => EngineApi.GetComponentAssetReference(NativeHandle);
-		set => EngineApi.SetComponentAssetReference(NativeHandle, value);
-	}
-}
-
-[NativeComponentType("ursa.SkinnedMeshRenderer")]
-public sealed class SkinnedMeshRendererComponent : Component
-{
-	public AssetReference? Mesh
-	{
-		get => EngineApi.GetComponentAssetReference(NativeHandle);
-		set => EngineApi.SetComponentAssetReference(NativeHandle, value);
-	}
-}
-
 [NativeComponentType("ursa.Animator")]
 public sealed class AnimatorComponent : Component
 {

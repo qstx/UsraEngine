@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
@@ -609,7 +610,7 @@ void TestGameObjectRenderCollection()
 	Ursa::LocalTransform boxTransform;
 	boxTransform.position = {1.0f, 2.0f, 0.0f};
 	done(boxObject->SetLocalTransform(boxTransform));
-	Take(boxObject->AddComponent<Ursa::BoxRenderComponent>());
+	Take(Ursa::Test::AddRenderer(boxObject));
 	done(scene.AttachGameObject(cameraObject));
 	done(scene.AttachGameObject(boxObject));
 	done(scene.SetActiveCamera(camera->Id()));

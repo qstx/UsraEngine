@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <Serialization/TextureResource.hpp>
 #include <Serialization/MaterialResource.hpp>
 #include <Serialization/SceneResource.hpp>
@@ -96,8 +97,8 @@ int main()
 		auto cameraComponent = Take(authored.AddComponent<CameraComponent>(camera));
 		Done(authored.SetActiveCamera(cameraComponent));
 		auto box = Take(authored.CreateGameObject("Box"));
-		Take(authored.AddComponent<BoxRenderComponent>(box));
-		authored.FindComponent<BoxRenderComponent>(box)->material = material;
+		Take(Ursa::Test::AddRenderer(authored, box));
+		Done(authored.FindComponent<MeshRendererComponent>(box)->SetSharedMaterial(material));
 		const MaterialIdResolver identify = [&](const std::shared_ptr<MaterialInstance>&)
 		{ return Result<ResourceId>::Success(materialId); };
 		Done(SaveSceneResource(source, Path("prj:Scene.ursascene"), sceneId, authored, registry, identify));
@@ -143,7 +144,7 @@ int main()
 			Expect(Take(restored.scene->CollectRenderData(1)).boxes.size() == 1,
 			       "Scene graph did not load through VFS");
 			auto prefab = Take(LoadPrefabAssetResource(*filesystem, Path("prj:Box.ursaprefab"), registry, context));
-			Expect(prefab.Id() == prefabId && prefab.Root()->FindComponent<BoxRenderComponent>(),
+			Expect(prefab.Id() == prefabId && prefab.Root()->FindComponent<MeshRendererComponent>(),
 			       "PrefabAsset did not load through VFS");
 			Scene instances;
 			Take(prefab.Instantiate(instances, registry, context, identify));

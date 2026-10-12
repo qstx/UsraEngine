@@ -1,3 +1,5 @@
+using System;
+
 namespace Ursa;
 
 public struct Vector3
@@ -44,6 +46,7 @@ public struct Color
 		B = b;
 		A = a;
 	}
+	public Color ToLinear() => new(MathF.Pow(MathF.Max(R, 0), 2.2f), MathF.Pow(MathF.Max(G, 0), 2.2f), MathF.Pow(MathF.Max(B, 0), 2.2f), A);
 }
 
 public unsafe sealed class Transform

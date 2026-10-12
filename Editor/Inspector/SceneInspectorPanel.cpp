@@ -1,4 +1,5 @@
 #include <Inspector/SceneInspectorPanel.hpp>
+#include <Inspector/MeshInspector.hpp>
 
 #include <Core/StringInterop.hpp>
 #include <Ui/ImGuiInspectorUI.hpp>
@@ -265,9 +266,9 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 			ImGui::EndCombo();
 		}
 	}
-	else if (kind == "Vector3" || kind == "Quaternion" || kind == "Color")
+	else if (kind == "Vector2" || kind == "Vector3" || kind == "Vector4" || kind == "Quaternion" || kind == "Color")
 	{
-		const Size count = kind == "Vector3" ? 3 : 4;
+		const Size count = kind == "Vector2" ? 2 : kind == "Vector3" ? 3 : 4;
 		Float32 components[4]{0.0f, 0.0f, 0.0f, 1.0f};
 		for (Size index = 0; value.is_array() && index < count && index < value.size(); ++index)
 		{
@@ -276,9 +277,10 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 				components[index] = value[index].get<Float32>();
 			}
 		}
-		const bool edited = kind == "Vector3" ? ImGui::DragFloat3("##Value", components, 0.05f)
-		                    : kind == "Color" ? ImGui::ColorEdit4("##Value", components)
-		                                      : ImGui::DragFloat4("##Value", components, 0.005f);
+		const bool edited = kind == "Vector2"   ? ImGui::DragFloat2("##Value", components, 0.05f)
+		                    : kind == "Vector3" ? ImGui::DragFloat3("##Value", components, 0.05f)
+		                    : kind == "Color"   ? ImGui::ColorEdit4("##Value", components)
+		                                        : ImGui::DragFloat4("##Value", components, 0.005f);
 		if (edited)
 		{
 			value = nlohmann::json::array();
@@ -292,6 +294,63 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 	else if (kind == "AssetReference")
 	{
 		return DrawSerializedAssetReference(value, workspace);
+	}
+	else if (kind == "MeshReference" || kind == "MaterialReference")
+	{
+		const auto expected = kind == "MeshReference" ? ResourceKind::Mesh : ResourceKind::Material;
+		String preview = "None / Local";
+		if (value.is_object() && value.contains("$ursaReference") && value["$ursaReference"].contains("Resource"))
+		{
+			const auto& binding = value["$ursaReference"]["Resource"];
+			if (binding.is_object() && binding.value("kind", std::string{}) == "asset")
+			{
+				preview = ToUrsaString(binding["asset"]["guid"].get<std::string>());
+			}
+		}
+		bool changed = false;
+		if (ImGui::BeginCombo("##Resource", preview.c_str()))
+		{
+			if (ImGui::Selectable("None"))
+			{
+				value = nullptr;
+				changed = true;
+			}
+			const auto choose = [&](AssetReference reference, const String& label)
+			{
+				if (ImGui::Selectable(label.c_str()))
+				{
+					value = {{"$ursaReference",
+					          {{"Kind", expected == ResourceKind::Mesh ? "Mesh" : "Material"},
+					           {"Id", ""},
+					           {"Resource", {{"kind", "asset"}, {"asset", AssetReferenceToJson(reference)}}}}}};
+					changed = true;
+				}
+			};
+			for (const auto& entry : workspace.Resources())
+			{
+				if (entry.location.kind == expected)
+				{
+					choose({entry.id, 0}, entry.location.path.ToString());
+				}
+			}
+			for (const auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
+			{
+				if (!database)
+				{
+					continue;
+				}
+				for (const auto& artifact : database->ImportedArtifacts())
+				{
+					if (artifact.localFileId && artifact.kind == (expected == ResourceKind::Mesh ? "Mesh" : "Material"))
+					{
+						choose({artifact.guid, artifact.localFileId},
+						       artifact.guid.ToString() + ":" + ToUrsaString(std::to_string(artifact.localFileId)));
+					}
+				}
+			}
+			ImGui::EndCombo();
+		}
+		return changed;
 	}
 	else if (kind == "GameObjectReference" || kind == "ComponentReference")
 	{
@@ -343,11 +402,15 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 			{
 				item = "";
 			}
+			else if (elementKind == "Vector2")
+			{
+				value.push_back(nlohmann::json::array({0.0f, 0.0f}));
+			}
 			else if (elementKind == "Vector3")
 			{
 				item = {0.0, 0.0, 0.0};
 			}
-			else if (elementKind == "Quaternion" || elementKind == "Color")
+			else if (elementKind == "Vector4" || elementKind == "Quaternion" || elementKind == "Color")
 			{
 				item = {0.0, 0.0, 0.0, 0.0};
 			}
@@ -481,7 +544,7 @@ bool DrawSerializedScriptFields(Scripting::ScriptBehaviourComponent& component, 
 } // namespace
 
 Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hierarchy, EditorDocuments& documents,
-                                const ProjectWorkspace& workspace, ComponentRegistry& registry,
+                                ProjectWorkspace& workspace, ComponentRegistry& registry,
                                 ComponentEditors& componentEditors, String& diagnostic,
                                 const Vector<ScriptTypeDescriptor>* scriptTypes, bool* hierarchyOpen,
                                 bool* inspectorOpen, bool drawInspector)
@@ -596,7 +659,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					                     : codec        ? codec.value->type.c_str()
 					                                    : "Component");
 					bool componentEnabled = component->IsEnabled();
-					if (ImGui::Checkbox("Enabled", &componentEnabled))
+					if (component->SupportsEnabled() && ImGui::Checkbox("Enabled", &componentEnabled))
 					{
 						component->SetEnabled(componentEnabled);
 						changed = true;
@@ -628,39 +691,16 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						changed |= DrawSerializedScriptFields(*scriptData, workspace, inspectorContext, diagnostic,
 						                                      scriptTypes);
 					}
-					else if (auto* box = dynamic_cast<BoxRenderComponent*>(component))
+					else if (HasMeshInspector(*component))
 					{
-						Ursa::Float32 color[4]{box->color.red, box->color.green, box->color.blue, box->color.alpha};
-						if (ImGui::ColorEdit4("Color", color))
+						auto edited = DrawMeshInspector(*component, workspace, documents.Session());
+						if (edited)
 						{
-							box->color = {color[0], color[1], color[2], color[3]};
-							changed = true;
+							changed |= edited.value;
 						}
-						if (ImGui::BeginCombo("Material", box->material ? "Assigned" : "None"))
+						else
 						{
-							if (ImGui::Selectable("None", !box->material))
-							{
-								box->material.reset();
-								changed = true;
-							}
-							for (const auto& entry : workspace.Resources())
-							{
-								if (entry.location.kind == ResourceKind::Material)
-								{
-									const auto label = entry.location.path.FileName();
-									if (ImGui::Selectable(label.c_str()))
-									{
-										auto material = documents.Session().LoadMaterial(entry.id);
-										diagnostic = material ? String{} : material.error;
-										if (material)
-										{
-											box->material = material.value;
-											changed = true;
-										}
-									}
-								}
-							}
-							ImGui::EndCombo();
+							diagnostic = edited.error;
 						}
 					}
 					else if (auto* camera = dynamic_cast<CameraComponent*>(component))
@@ -740,6 +780,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		return hierarchyChanged;
 	}
 	bool changed = hierarchyChanged.value;
+	ResourceId prefabOperation;
+	bool applyPrefab = false;
 	ResourceId prefabToPlace;
 	ResourceId placementParent;
 	auto selected = hierarchy.SelectedGameObject(scene);
@@ -831,6 +873,17 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 							if (mapping.second == selectedId.value.ToString())
 							{
 								ImGui::Text("Prefab instance: %s", instance.first.c_str());
+								if (ImGui::Button("Apply Prefab"))
+								{
+									prefabOperation = ResourceId::Parse(instance.first).value;
+									applyPrefab = true;
+								}
+								ImGui::SameLine();
+								if (ImGui::Button("Revert Prefab"))
+								{
+									prefabOperation = ResourceId::Parse(instance.first).value;
+									applyPrefab = false;
+								}
 								if (ImGui::Button("Pin label override"))
 								{
 									auto instanceId = ResourceId::Parse(instance.first);
@@ -1011,7 +1064,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					                     : scriptHeader ? scriptHeader->TypeName().c_str()
 					                                    : codec.value->type.c_str());
 					auto enabled = scene.IsComponentEnabled(componentId);
-					if (enabled)
+					if (enabled && object->SupportsEnabled())
 					{
 						bool value = enabled.value;
 						if (ImGui::Checkbox("Enabled", &value))
@@ -1057,51 +1110,16 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						changed |= DrawSerializedScriptFields(*scriptData, workspace, inspectorContext, diagnostic,
 						                                      scriptTypes);
 					}
-					else if (auto* box = dynamic_cast<BoxRenderComponent*>(object))
+					else if (HasMeshInspector(*object))
 					{
-						Ursa::Float32 color[4]{box->color.red, box->color.green, box->color.blue, box->color.alpha};
-						if (ImGui::ColorEdit4("Color", color))
+						auto edited = DrawMeshInspector(*object, workspace, documents.Session());
+						if (edited)
 						{
-							box->color = {color[0], color[1], color[2], color[3]};
-							changed = true;
+							changed |= edited.value;
 						}
-						const auto selectedMaterial = draft->MaterialId(box->material);
-						String materialName = "None";
-						if (selectedMaterial)
+						else
 						{
-							for (const auto& entry : workspace.Resources())
-							{
-								if (entry.id == selectedMaterial.value)
-								{
-									materialName = entry.location.path.FileName();
-								}
-							}
-						}
-						if (ImGui::BeginCombo("Material", materialName.c_str()))
-						{
-							if (ImGui::Selectable("None", !box->material))
-							{
-								auto set = draft->AssignMaterial(componentId, {}, documents.Session());
-								diagnostic = set ? String{} : set.error;
-								changed |= static_cast<bool>(set);
-							}
-							for (const auto& entry : workspace.Resources())
-							{
-								if (entry.location.kind == ResourceKind::Material)
-								{
-									ImGui::PushID(entry.id.ToString().c_str());
-									const auto name = entry.location.path.FileName();
-									if (ImGui::Selectable(name.c_str(),
-									                      selectedMaterial && selectedMaterial.value == entry.id))
-									{
-										auto set = draft->AssignMaterial(componentId, entry.id, documents.Session());
-										diagnostic = set ? String{} : set.error;
-										changed |= static_cast<bool>(set);
-									}
-									ImGui::PopID();
-								}
-							}
-							ImGui::EndCombo();
+							diagnostic = edited.error;
 						}
 					}
 					else if (auto* camera = dynamic_cast<CameraComponent*>(object))
@@ -1201,6 +1219,40 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		}
 		ImGui::End();
 	}
+	if (prefabOperation && draft->LinkedScene())
+	{
+		for (const auto& instance : draft->LinkedScene()->document["instances"])
+		{
+			if (instance["id"] != ToStdString(prefabOperation.ToString()))
+			{
+				continue;
+			}
+			auto reference = AssetReferenceFromJson(instance["prefab"], "Prefab");
+			if (!reference)
+			{
+				diagnostic = reference.error;
+				break;
+			}
+			for (const auto& asset : workspace.Assets())
+			{
+				if (asset.metadata.guid != reference.value.guid)
+				{
+					continue;
+				}
+				auto result = applyPrefab
+				                  ? draft->ApplyInstance(workspace.Index().Filesystem(), asset.path, prefabOperation)
+				                  : draft->RevertInstance(workspace.Index().Filesystem(), asset.path, prefabOperation);
+				diagnostic = result ? String{} : result.error;
+				if (result)
+				{
+					hierarchy.ClearSelection();
+					changed = true;
+				}
+				break;
+			}
+			break;
+		}
+	}
 	if (prefabToPlace)
 	{
 		auto placed = draft->PlacePrefab(prefabToPlace, placementParent, document.Path(), document.Id());
@@ -1214,7 +1266,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 	return Result<bool>::Success(changed);
 }
 
-void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic)
+void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic,
+                               ProjectWorkspace* workspace, ResourceSession* resources)
 {
 	if (inspectorOpen && !*inspectorOpen)
 	{
@@ -1247,6 +1300,32 @@ void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* i
 			            transform.value.rotation.z, transform.value.rotation.w);
 			ImGui::Text("Scale: %.3f, %.3f, %.3f", transform.value.scale.x, transform.value.scale.y,
 			            transform.value.scale.z);
+			for (Component* component : selected.value->Components())
+			{
+				ImGui::PushID(component->PersistentId().ToString().c_str());
+				ImGui::SeparatorText(component->SerializationType().c_str());
+				if (component->SupportsEnabled())
+				{
+					bool enabled = component->IsEnabled();
+					if (ImGui::Checkbox("Enabled", &enabled))
+					{
+						auto set = component->SetEnabled(enabled);
+						if (!set)
+						{
+							diagnostic = set.error;
+						}
+					}
+				}
+				if (workspace && resources && HasMeshInspector(*component))
+				{
+					auto edited = DrawMeshInspector(*component, *workspace, *resources);
+					if (!edited)
+					{
+						diagnostic = edited.error;
+					}
+				}
+				ImGui::PopID();
+			}
 			ImGui::TextDisabled("Runtime changes are discarded when Play stops.");
 		}
 	}

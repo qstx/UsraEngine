@@ -80,6 +80,10 @@ Result<void> WritePropertyValue(ArchiveWriter& writer, const MaterialPropertyVal
 			    writer, "vector",
 			    {value.vectorValue[0], value.vectorValue[1], value.vectorValue[2], value.vectorValue[3]});
 		case Shader::PropertyType::Texture2D:
+			if (!value.textureId && !value.textureDefault.empty())
+			{
+				return writer.Write("textureDefault", value.textureDefault);
+			}
 			if (!value.textureId)
 			{
 				if (!value.texture || !writer.Context())
@@ -89,7 +93,7 @@ Result<void> WritePropertyValue(ArchiveWriter& writer, const MaterialPropertyVal
 				auto id = writer.Context()->Identify(*value.texture);
 				return id ? WriteAssetReference(writer, "textureId", {id.value, 0}) : Result<void>::Failure(id.error);
 			}
-			return WriteAssetReference(writer, "textureId", {value.textureId, 0});
+			return WriteAssetReference(writer, "textureId", {value.textureId, value.textureLocalFileId});
 	}
 	return Result<void>::Failure("Unknown material Shader property value type");
 }
@@ -151,24 +155,35 @@ Result<MaterialPropertyValue> ReadPropertyValue(const ArchiveReader& reader, Ser
 		}
 		case Shader::PropertyType::Texture2D:
 		{
-			auto reference = ReadAssetReference(reader, "textureId");
-			if (!reference || reference.value.localFileId != 0)
+			if (reader.Contains("textureDefault"))
 			{
-				return Result<MaterialPropertyValue>::Failure(
-				    reference ? "Texture sub-asset references are not supported by this loader" : reference.error);
+				auto name = reader.Text("textureDefault");
+				if (!name || (name.value != "white" && name.value != "black" && name.value != "normal"))
+				{
+					return Result<MaterialPropertyValue>::Failure("Invalid Shader texture default");
+				}
+				value.textureDefault = name.value;
+				break;
+			}
+			auto reference = ReadAssetReference(reader, "textureId");
+			if (!reference)
+			{
+				return Result<MaterialPropertyValue>::Failure(reference.error);
 			}
 			auto loader = context.Service<TextureResourceLoader>();
 			if (!context.ResourceLoader() && (!loader || !*loader.value))
 			{
 				return Result<MaterialPropertyValue>::Failure("Missing texture resource loader");
 			}
-			auto texture = context.ResourceLoader() ? context.ResourceLoader()->LoadTexture(reference.value.guid)
+			auto texture = context.ResourceLoader() ? context.ResourceLoader()->LoadTexture(reference.value.guid,
+			                                                                                reference.value.localFileId)
 			                                        : (*loader.value)(reference.value.guid);
 			if (!texture)
 			{
 				return Result<MaterialPropertyValue>::Failure(texture.error);
 			}
 			value.textureId = reference.value.guid;
+			value.textureLocalFileId = reference.value.localFileId;
 			value.texture = std::move(texture.value);
 			break;
 		}
@@ -304,6 +319,10 @@ Result<void> MaterialTexture::Deserialize(const ArchiveReader& reader, Serializa
 
 Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	auto result = writer.Write("type", String(type == MaterialType::Unlit ? "Unlit" : "PbrMetallicRoughness"));
 	if (result)
 	{
@@ -448,6 +467,10 @@ Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 
 Result<void> MaterialInstance::Deserialize(const ArchiveReader& reader, SerializationContext& context)
 {
+	if (!alive)
+	{
+		return Result<void>::Failure("Material has been destroyed");
+	}
 	auto loadedType = reader.Text("type");
 	if (!loadedType)
 	{
@@ -508,6 +531,8 @@ Result<void> MaterialInstance::Deserialize(const ArchiveReader& reader, Serializ
 			return enabled;
 		}
 	}
+	candidate.assetIdentity = assetIdentity;
+	candidate.localIdentity = localIdentity;
 	*this = std::move(candidate);
 	++version;
 	return {};

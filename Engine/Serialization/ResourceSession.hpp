@@ -3,7 +3,7 @@
 #include <Core/Result.hpp>
 #include <Material/Material.hpp>
 #include <Animation/AnimationAssets.hpp>
-#include <Renderer3D/ModelMesh.hpp>
+#include <Mesh/Mesh.hpp>
 #include <Serialization/AssetReference.hpp>
 #include <Serialization/ResourceIndex.hpp>
 #include <Shader/ShaderAsset.hpp>
@@ -33,6 +33,8 @@ public:
 
 	Result<std::unique_ptr<ResourceSession>> Refreshed() const;
 
+	Result<std::unique_ptr<ResourceSession>> Isolated() const;
+
 	Result<void> ReloadImportedResources(const VirtualFileSystem& files,
 	                                     const MaterialInstance* protectedMaterial = nullptr);
 
@@ -49,7 +51,9 @@ public:
 
 	Result<std::shared_ptr<MaterialInstance>> LoadMaterial(ResourceId guid, Ursa::UInt64 localFileId);
 
-	Result<ModelMeshPtr> LoadMesh(ResourceId modelGuid, Ursa::UInt64 localFileId);
+	Result<MeshPtr> LoadMesh(ResourceId guid, UInt64 localFileId);
+
+	Result<void> RememberMeshAsset(const MeshPtr& mesh);
 
 	Result<std::shared_ptr<const ModelSkeleton>> LoadSkeleton(ResourceId modelGuid, Ursa::UInt64 localFileId);
 
@@ -88,7 +92,7 @@ private:
 	Map<String, MaterialTexturePtr> textures;
 	Map<String, std::shared_ptr<MaterialInstance>> materials;
 	Map<String, std::shared_ptr<const Shader::ShaderAsset>> shaders;
-	Map<String, ModelMeshPtr> meshes;
+	Map<String, MeshPtr> geometry;
 	Map<String, std::shared_ptr<const ModelSkeleton>> skeletons;
 	Map<String, std::shared_ptr<const AnimationClip>> animationClips;
 };

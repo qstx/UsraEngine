@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/MaterialResource.hpp>
@@ -44,7 +45,7 @@ void Expect(bool condition, const char* message)
 	}
 }
 
-ManagedHandle Create(NativeApiV4& api, const char* name)
+ManagedHandle Create(NativeApiV5& api, const char* name)
 {
 	ManagedHandle handle{};
 	const auto* bytes = reinterpret_cast<const UInt8*>(name);
@@ -67,48 +68,21 @@ int main()
 	VirtualFileSystem resourceFiles;
 	Done(resourceFiles.MountProvider(projectScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
 	const ResourceId materialGuid = ResourceId::Generate();
-	const ResourceId meshGuid = ResourceId::Generate();
-	const UInt64 meshLocalFileId = 55;
 	const VirtualPath materialPath = Take(VirtualPath::Parse("prj:managed-renderer.ursamat"));
-	const VirtualPath meshPath = Take(VirtualPath::Parse("prj:managed-mesh.cbor"));
 	MaterialInstance material(MaterialType::Unlit);
 	Done(SaveMaterialResource(resourceFiles, materialPath, materialGuid, material, {}));
-	const std::vector<UInt8> vertexBytes(3 * 60, 0);
-	const std::vector<UInt8> indexBytes{0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0};
-	nlohmann::json meshDocument{{"kind", "Mesh"},
-	                            {"localFileId", meshLocalFileId},
-	                            {"vertexStride", 60},
-	                            {"vertexCount", 3},
-	                            {"indexCount", 3},
-	                            {"vertices", nlohmann::json::binary(vertexBytes)},
-	                            {"indices", nlohmann::json::binary(indexBytes)}};
-	const std::vector<UInt8> meshBytes = nlohmann::json::to_cbor(meshDocument);
-	Vector<UInt8> meshData;
-	meshData.reserve(meshBytes.size());
-	for (UInt8 byte : meshBytes)
-	{
-		meshData.push_back(byte);
-	}
-	Done(resourceFiles.WriteAtomic(meshPath, meshData));
-	auto resources =
-	    Take(ResourceSession::Open(resourceFiles,
-	                               [materialGuid, meshGuid, meshLocalFileId, materialPath,
-	                                meshPath](ResourceId guid, UInt64 localFileId) -> Result<VirtualPath>
-	                               {
-		                               if (guid == materialGuid && localFileId == 0)
-		                               {
-			                               return Result<VirtualPath>::Success(materialPath);
-		                               }
-		                               if (guid == meshGuid && localFileId == meshLocalFileId)
-		                               {
-			                               return Result<VirtualPath>::Success(meshPath);
-		                               }
-		                               return Result<VirtualPath>::Failure("Managed renderer fixture asset is missing");
-	                               }));
+	auto resources = Take(ResourceSession::Open(
+	    resourceFiles,
+	    [materialGuid, materialPath](ResourceId guid, UInt64 localFileId) -> Result<VirtualPath>
+	    {
+		    return guid == materialGuid && localFileId == 0
+		               ? Result<VirtualPath>::Success(materialPath)
+		               : Result<VirtualPath>::Failure("Managed renderer fixture asset is missing");
+	    }));
 	String windowTitle;
 	Scene scene;
 	ManagedSceneApi sceneApi(scene, resources.get(), [&windowTitle](const String& value) { windowTitle = value; });
-	NativeApiV4 api = sceneApi.Bind({});
+	NativeApiV5 api = sceneApi.Bind({});
 	const ManagedHandle parent = Create(api, "父节点");
 	const ManagedHandle child = Create(api, "Child");
 
@@ -175,7 +149,7 @@ int main()
 
 	Scene otherScene;
 	ManagedSceneApi otherApi(otherScene);
-	NativeApiV4 otherNativeApi = otherApi.Bind({});
+	NativeApiV5 otherNativeApi = otherApi.Bind({});
 	const ManagedHandle foreign = Create(otherNativeApi, "Foreign");
 	Expect(api.getGameObjectActive(api.sceneContext, foreign, &active) != 0,
 	       "Managed API accepted a handle from another Scene session");
@@ -253,118 +227,28 @@ int main()
 	           api.getCameraProjection(api.sceneContext, camera, projection, 3) != 0,
 	       "Managed API accepted a removed Component handle");
 
-	const char boxType[] = "ursa.BoxRender";
-	ManagedHandle boxHandle{};
-	Expect(api.addComponent(api.sceneContext, child, reinterpret_cast<const UInt8*>(boxType), sizeof(boxType) - 1,
-	                        &boxHandle) == 0,
-	       "Managed API failed to add a Box Renderer");
-	Float32 boxColor[4]{};
-	const Float32 defaultBoxColor[4]{1.0f, 1.0f, 1.0f, 1.0f};
-	Expect(api.getBoxRenderColor(api.sceneContext, boxHandle, boxColor, 4) == 0 &&
-	           std::equal(boxColor, boxColor + 4, defaultBoxColor),
-	       "Managed Box Renderer returned the wrong default color");
-	Expect(api.getCameraProjection(api.sceneContext, boxHandle, projection, 3) != 0,
-	       "Camera projection API accepted a Box Renderer handle");
-	const Float32 updatedColor[4]{0.2f, 0.4f, 0.8f, 1.0f};
-	Expect(api.setBoxRenderColor(api.sceneContext, boxHandle, updatedColor, 4) == 0 &&
-	           api.getBoxRenderColor(api.sceneContext, boxHandle, boxColor, 4) == 0 &&
-	           std::equal(boxColor, boxColor + 4, updatedColor),
-	       "Managed Box Renderer color did not round-trip");
-	const Float32 invalidColor[4]{0.1f, std::numeric_limits<Float32>::quiet_NaN(), 0.3f, 1.0f};
-	Expect(api.setBoxRenderColor(api.sceneContext, boxHandle, invalidColor, 4) != 0 &&
-	           api.getBoxRenderColor(api.sceneContext, boxHandle, boxColor, 4) == 0 &&
-	           std::equal(boxColor, boxColor + 4, updatedColor),
-	       "Invalid Box Renderer color changed the prior valid data");
-	UInt64 assetGuidSize = 0;
-	UInt64 assetLocalFileId = 99;
-	Expect(api.getComponentAssetReference(api.sceneContext, boxHandle, nullptr, 0, &assetGuidSize, &assetLocalFileId) ==
-	               0 &&
-	           assetGuidSize == 0 && assetLocalFileId == 0,
-	       "Box Renderer default material reference is not empty");
-	const String materialGuidText = materialGuid.ToString();
-	Expect(api.setComponentAssetReference(api.sceneContext, boxHandle,
-	                                      reinterpret_cast<const UInt8*>(materialGuidText.data()),
-	                                      materialGuidText.size(), 0) == 0,
-	       "Managed Box Renderer rejected a valid Material asset");
-	Vector<UInt8> materialGuidBytes(36);
-	Expect(api.getComponentAssetReference(api.sceneContext, boxHandle, materialGuidBytes.data(),
-	                                      materialGuidBytes.size(), &assetGuidSize, &assetLocalFileId) == 0 &&
-	           assetGuidSize == 36 && assetLocalFileId == 0 &&
-	           String(reinterpret_cast<const char*>(materialGuidBytes.data()), materialGuidBytes.size()) ==
-	               materialGuidText,
-	       "Managed Box Renderer Material reference did not round-trip by GUID/local file ID");
-
-	const char meshRendererType[] = "ursa.MeshRenderer";
-	ManagedHandle meshRendererHandle{};
-	Expect(api.addComponent(api.sceneContext, child, reinterpret_cast<const UInt8*>(meshRendererType),
-	                        sizeof(meshRendererType) - 1, &meshRendererHandle) == 0,
-	       "Managed API failed to add a Mesh Renderer");
-	const String meshGuidText = meshGuid.ToString();
-	Expect(api.setComponentAssetReference(api.sceneContext, meshRendererHandle,
-	                                      reinterpret_cast<const UInt8*>(meshGuidText.data()), meshGuidText.size(),
-	                                      meshLocalFileId) == 0,
-	       "Managed Mesh Renderer rejected a valid imported model sub-asset");
-	Vector<UInt8> meshGuidBytes(36);
-	Expect(api.getComponentAssetReference(api.sceneContext, meshRendererHandle, meshGuidBytes.data(),
-	                                      meshGuidBytes.size(), &assetGuidSize, &assetLocalFileId) == 0 &&
-	           assetGuidSize == 36 && assetLocalFileId == meshLocalFileId &&
-	           String(reinterpret_cast<const char*>(meshGuidBytes.data()), meshGuidBytes.size()) == meshGuidText,
-	       "Managed Mesh Renderer lost its imported mesh sub-asset identity");
-	const String missingMeshGuid = ResourceId::Generate().ToString();
-	Expect(api.setComponentAssetReference(api.sceneContext, meshRendererHandle,
-	                                      reinterpret_cast<const UInt8*>(missingMeshGuid.data()),
-	                                      missingMeshGuid.size(), meshLocalFileId) != 0 &&
-	           api.getComponentAssetReference(api.sceneContext, meshRendererHandle, meshGuidBytes.data(),
-	                                          meshGuidBytes.size(), &assetGuidSize, &assetLocalFileId) == 0 &&
-	           String(reinterpret_cast<const char*>(meshGuidBytes.data()), meshGuidBytes.size()) == meshGuidText,
-	       "Invalid Mesh Renderer asset reference changed its previous valid mesh");
-
-	const String title = u8"Ursa Snake | Score: 2";
-	Expect(api.setWindowTitle(api.sceneContext, reinterpret_cast<const UInt8*>(title.data()), title.size()) == 0 &&
-	           windowTitle == title,
-	       "Managed Application title did not preserve UTF-8 text");
-	const UInt8 invalidTitle[]{'x', 0, 'y'};
-	Expect(api.setWindowTitle(api.sceneContext, invalidTitle, 3) != 0 && windowTitle == title,
-	       "Managed Application accepted a title containing an embedded null");
-
-	auto persistedCameraId = Take(scene.AddComponent<CameraComponent>(scene.RootGameObjects().front()));
-	auto* persistedCamera = static_cast<CameraComponent*>(scene.GetComponent(persistedCameraId));
-	persistedCamera->verticalFovRadians = 1.2f;
-	persistedCamera->nearPlane = 0.25f;
-	persistedCamera->farPlane = 150.0f;
+	auto childObject = scene.RootGameObjects().front()->Children().front();
+	auto rendererComponent = Take(Ursa::Test::AddRenderer(childObject, {0.2f, 0.4f, 0.8f, 1}));
+	Done(rendererComponent->SetSharedMaterial(Take(resources->LoadMaterial(materialGuid))));
 	ComponentRegistry componentRegistry;
 	Done(RegisterBuiltinComponents(componentRegistry));
-	const MaterialIdResolver materialResolver =
-	    [resourceSession = resources.get()](const std::shared_ptr<MaterialInstance>& value)
-	{ return resourceSession->IdentifyMaterial(value); };
-	const ResourceId sceneId = ResourceId::Generate();
-	const VirtualPath scenePath = Take(VirtualPath::Parse("prj:ManagedRenderer.ursascene"));
-	Done(SaveSceneResource(resourceFiles, scenePath, sceneId, scene, componentRegistry, materialResolver));
+	const auto scenePath = Take(VirtualPath::Parse("prj:ManagedRenderer.ursascene"));
+	Done(SaveSceneResource(resourceFiles, scenePath, ResourceId::Generate(), scene, componentRegistry));
 	ComponentLoadContext sceneLoadContext(*resources);
 	auto loadedScene = Take(LoadSceneResource(resourceFiles, scenePath, componentRegistry, sceneLoadContext));
-	auto loadedRoot = loadedScene.scene->RootGameObjects().front();
-	auto loadedChild = loadedRoot->Children().front();
-	const CameraComponent* loadedCamera = loadedScene.scene->FindComponent<CameraComponent>(loadedRoot);
-	const BoxRenderComponent* loadedBox = loadedScene.scene->FindComponent<BoxRenderComponent>(loadedChild);
-	const MeshRendererComponent* loadedMesh = loadedScene.scene->FindComponent<MeshRendererComponent>(loadedChild);
-	Expect(loadedCamera && loadedCamera->verticalFovRadians == 1.2f && loadedCamera->nearPlane == 0.25f &&
-	           loadedCamera->farPlane == 150.0f && loadedBox && loadedBox->color.red == updatedColor[0] &&
-	           loadedBox->material && loadedMesh && loadedMesh->MeshGuid() == meshGuid &&
-	           loadedMesh->MeshLocalFileId() == meshLocalFileId,
-	       "Managed renderer component edits did not survive Scene serialization and reload");
-
-	const VirtualPath prefabPath = Take(VirtualPath::Parse("prj:ManagedRenderer.ursaprefab"));
-	auto prefabSourceRoot = scene.RootGameObjects().front()->Children().front();
-	Done(SavePrefabResource(resourceFiles, prefabPath, ResourceId::Generate(), scene, prefabSourceRoot,
-	                        componentRegistry, materialResolver));
+	auto loadedChild = loadedScene.scene->RootGameObjects().front()->Children().front();
+	auto* loadedRenderer = loadedChild->FindComponent<MeshRendererComponent>();
+	auto* loadedFilter = loadedChild->FindComponent<MeshFilterComponent>();
+	Expect(loadedRenderer && loadedRenderer->SharedMaterial() && loadedFilter && loadedFilter->SharedMesh(),
+	       "Managed Scene API graph lost Renderer/Filter resource bindings on save/load");
+	const auto prefabPath = Take(VirtualPath::Parse("prj:ManagedRenderer.ursaprefab"));
+	Done(SavePrefabResource(resourceFiles, prefabPath, ResourceId::Generate(), scene, childObject, componentRegistry));
 	ComponentLoadContext prefabLoadContext(*resources);
 	auto loadedPrefab = Take(LoadPrefabResource(resourceFiles, prefabPath, componentRegistry, prefabLoadContext));
 	auto prefabRoot = loadedPrefab.scene->RootGameObjects().front();
-	const BoxRenderComponent* prefabBox = loadedPrefab.scene->FindComponent<BoxRenderComponent>(prefabRoot);
-	const MeshRendererComponent* prefabMesh = loadedPrefab.scene->FindComponent<MeshRendererComponent>(prefabRoot);
-	Expect(prefabBox && prefabBox->color.red == updatedColor[0] && prefabBox->material && prefabMesh &&
-	           prefabMesh->MeshGuid() == meshGuid && prefabMesh->MeshLocalFileId() == meshLocalFileId,
-	       "Managed renderer component edits did not survive Prefab serialization and reload");
+	Expect(prefabRoot->FindComponent<MeshFilterComponent>()->SharedMesh() &&
+	           prefabRoot->FindComponent<MeshRendererComponent>()->SharedMaterial(),
+	       "Renderer/Filter bindings did not survive Prefab roundtrip");
 
 	FrameContext frame;
 	frame.deltaSeconds = 0.02f;

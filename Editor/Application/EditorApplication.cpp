@@ -416,6 +416,13 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 	{
 		opened = OpenMaterialDocument(path, documents->Session(), *workspace);
 	}
+	else if (kind && kind.value == ResourceKind::Mesh)
+	{
+		projectBrowser.SelectAsset(path);
+		selectionContext.SelectAsset(path);
+		showInspectorPanel = true;
+		return {};
+	}
 	else if (IsTextureSource(path) && workspace->Database() && gui)
 	{
 		auto settings = TextureImporter::Settings(*workspace->Database(), path);
@@ -2167,7 +2174,8 @@ Result<void> EditorApplication::OnGui()
 			}
 			if (play.Active() && showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset)
 			{
-				DrawRuntimeSceneInspector(*play.GetScene(), hierarchy, &showInspectorPanel, inspectorError);
+				DrawRuntimeSceneInspector(*play.GetScene(), hierarchy, &showInspectorPanel, inspectorError,
+				                          workspace.get(), play.Resources());
 			}
 		}
 	}

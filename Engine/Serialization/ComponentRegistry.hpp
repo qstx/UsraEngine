@@ -20,6 +20,7 @@ struct ComponentSaveContext
 {
 	const Scene* scene = nullptr;
 	MaterialIdResolver materialId;
+	SerializationContext* serialization = nullptr;
 
 	Result<ResourceId> GetGameObjectId(const GameObject::Ptr& object) const
 	{
@@ -134,20 +135,22 @@ public:
 		codec.matches = [](const Component& value) { return dynamic_cast<const T*>(&value) != nullptr; };
 		codec.save = [](const Component& component, const ComponentSaveContext& context)
 		{
-			SerializationContext saveContext;
+			SerializationContext fallback;
+			auto& saveContext = context.serialization ? *context.serialization : fallback;
 			saveContext.SetResourceIdResolver(
 			    [&context](const Serializable& value) -> Result<ResourceId>
 			    {
 				    auto* material = dynamic_cast<const MaterialInstance*>(&value);
 				    if (!material || !context.materialId)
 				    {
-					    return Result<ResourceId>::Failure("No material ID resolver for BoxRenderComponent");
+					    return Result<ResourceId>::Failure("No material ID resolver");
 				    }
 				    return context.materialId(std::shared_ptr<MaterialInstance>(const_cast<MaterialInstance*>(material),
 				                                                                [](MaterialInstance*) {}));
 			    });
 			ArchiveWriter writer;
 			writer.SetContext(&saveContext);
+			SerializationScope scope(&saveContext);
 			auto saved = component.Serialize(writer);
 			return saved ? ArchiveToJson(writer) : Result<nlohmann::json>::Failure(saved.error);
 		};

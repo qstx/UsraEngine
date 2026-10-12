@@ -3,6 +3,7 @@
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/SceneResource.hpp>
 #include <Serialization/JsonResource.hpp>
+#include <Serialization/DocumentResources.hpp>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -173,7 +174,10 @@ Result<Json> EncodeSceneDocument(const String& path, ResourceId id, const Scene&
 		return Result<Json>::Failure("Invalid scene subtree root at " + path);
 	}
 	Json gameObjects = Json::array();
-	const ComponentSaveContext context{&scene, materialId};
+	DocumentResources localResources;
+	SerializationContext serialization;
+	DocumentResourceScope resourceScope(serialization, localResources);
+	const ComponentSaveContext context{&scene, materialId, &serialization};
 	std::function<Result<void>(const GameObject::Ptr&)> append = [&](const GameObject::Ptr& object) -> Result<void>
 	{
 		if (gameObjects.size() >= maxSceneGameObjects)
@@ -261,7 +265,14 @@ Result<Json> EncodeSceneDocument(const String& path, ResourceId id, const Scene&
 		activeCamera = cameraId.value.ToString();
 	}
 	const auto ambient = scene.AmbientLightColor();
-	const Json document{{"format", "UrsaScene"},
+	auto localData = localResources.Encode(serialization);
+	if (!localData)
+	{
+		return Result<Json>::Failure(localData.error);
+	}
+	const Json document{{"localResourceVersion", UInt32{1}},
+	                    {"localResources", std::move(localData.value)},
+	                    {"format", "UrsaScene"},
 	                    {"version", resourceFormatVersion},
 	                    {"sceneGraphVersion", sceneGraphFormatVersion},
 	                    {"id", id.ToString()},
@@ -283,6 +294,13 @@ Result<LoadedSceneResource> DecodeSceneDocument(const String& path, const Json& 
                                                 const ComponentRegistry& registry, ComponentLoadContext& context)
 {
 	ComponentMappingScope mappings(context);
+	DocumentResources localResources;
+	DocumentResourceScope resourceScope(context, localResources);
+	auto restoredResources = localResources.Decode(document, context);
+	if (!restoredResources)
+	{
+		return Result<LoadedSceneResource>::Failure(restoredResources.error + " at " + path);
+	}
 	const auto sceneGraphVersion = document.find("sceneGraphVersion");
 	if (sceneGraphVersion == document.end() || !sceneGraphVersion->is_number_unsigned() ||
 	    sceneGraphVersion->get<Ursa::UInt32>() != sceneGraphFormatVersion)
@@ -438,7 +456,11 @@ Result<LoadedSceneResource> DecodeSceneDocument(const String& path, const Json& 
 			{
 				return Result<LoadedSceneResource>::Failure(mappedObject.error + " at " + location);
 			}
-			auto changed = scene->SetComponentEnabled(created.value, enabled->get<bool>());
+			auto* component = scene->GetComponent(created.value);
+			auto changed = component->SupportsEnabled()
+			                   ? scene->SetComponentEnabled(created.value, enabled->get<bool>())
+			               : enabled->get<bool>() ? Result<void>{}
+			                                      : Result<void>::Failure("Data component cannot be disabled");
 			if (!changed)
 			{
 				return Result<LoadedSceneResource>::Failure(changed.error + " at " + location);

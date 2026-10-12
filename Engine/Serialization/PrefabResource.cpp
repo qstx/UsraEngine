@@ -6,6 +6,7 @@
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/PrefabMerge.hpp>
 #include <Serialization/PrefabCapture.hpp>
+#include <Serialization/PrefabLocalResources.hpp>
 
 namespace Ursa
 {
@@ -265,7 +266,8 @@ Json SceneEnvelope(ResourceId id, Json nodes)
 }
 
 Result<Json> ExpandInstances(const String& scenePath, const Json& source, ResourceSession& resources,
-                             const ComponentRegistry& registry, Map<String, Map<String, String>>& scopedIds)
+                             const ComponentRegistry& registry, Map<String, Map<String, String>>& scopedIds,
+                             const Json* replacementPrefab = nullptr, ResourceId replacementId = {})
 {
 	Json expanded = source;
 	auto graphVersion = source.find("sceneGraphVersion");
@@ -357,7 +359,9 @@ Result<Json> ExpandInstances(const String& scenePath, const Json& source, Resour
 			return Result<Json>::Failure("Referenced resource is not a Prefab at " + location);
 		}
 		const String prefabSource = resolved.value.ToString();
-		auto prefab = ReadJsonResource(resources.Index().Filesystem(), resolved.value, ResourceKind::Prefab);
+		auto prefab = replacementPrefab && prefabId.value == replacementId
+		                  ? Result<Json>::Success(*replacementPrefab)
+		                  : ReadJsonResource(resources.Index().Filesystem(), resolved.value, ResourceKind::Prefab);
 		if (!prefab)
 		{
 			return Result<Json>::Failure(prefab.error);
@@ -424,6 +428,12 @@ Result<Json> ExpandInstances(const String& scenePath, const Json& source, Resour
 					                             " at " + location);
 				}
 			}
+		}
+		auto expandedResources =
+		    ExpandPrefabLocalResources(prefab.value, overrides, instanceId.value, scoped, expanded);
+		if (!expandedResources)
+		{
+			return Result<Json>::Failure(expandedResources.error + " at " + location);
 		}
 		if (merged.value.front().contains("parentId") && !merged.value.front()["parentId"].is_null())
 		{
@@ -496,6 +506,10 @@ Result<Json> ExpandInstances(const String& scenePath, const Json& source, Resour
 					}
 					else if (value.is_object())
 					{
+						if (value.contains("guid") || value.value("kind", std::string{}) == "asset")
+						{
+							return;
+						}
 						for (auto& item : value.items())
 						{
 							remap(item.value());
@@ -558,7 +572,9 @@ Result<void> SavePrefabResource(VirtualFileSystem& filesystem, const VirtualPath
 	              {"version", resourceFormatVersion},
 	              {"prefabGraphVersion", prefabGraphFormatVersion},
 	              {"id", id.ToString()},
-	              {"gameObjects", std::move(nodes)}};
+	              {"gameObjects", std::move(nodes)},
+	              {"localResourceVersion", UInt32{1}},
+	              {"localResources", std::move(encoded.value["localResources"])}};
 	return WriteJsonResource(filesystem, path, document);
 }
 
@@ -601,8 +617,13 @@ Result<LoadedSceneResource> LoadPrefabResource(const VirtualFileSystem& filesyst
 	{
 		return Result<LoadedSceneResource>::Failure(id.error);
 	}
-	return DecodeSceneDocument(path.ToString(), SceneEnvelope(id.value, prefab.value["gameObjects"]), registry,
-	                           context);
+	auto document = SceneEnvelope(id.value, prefab.value["gameObjects"]);
+	if (prefab.value.contains("localResources"))
+	{
+		document["localResourceVersion"] = prefab.value.value("localResourceVersion", UInt32{0});
+		document["localResources"] = prefab.value["localResources"];
+	}
+	return DecodeSceneDocument(path.ToString(), document, registry, context);
 }
 
 Result<void> AddPrefabInstance(Json& sceneDocument, ResourceId prefabId, ResourceId instanceId, ResourceId parentId)
@@ -693,6 +714,164 @@ Result<void> SaveLinkedSceneResource(VirtualFileSystem& filesystem, const Virtua
 	catch (const Json::exception& error)
 	{
 		return Result<void>::Failure("Cannot save linked scene at " + path.ToString() + ": " + error.what());
+	}
+}
+
+namespace
+{
+Result<void> RewritePrefabInstance(VirtualFileSystem& files, const VirtualPath& sourcePath, LinkedSceneResource& linked,
+                                   ResourceId instanceId, const ComponentRegistry& registry,
+                                   ComponentLoadContext& context, bool apply)
+{
+	struct RestoreOnFailure
+	{
+		LinkedSceneResource& linked;
+		Json document;
+		Json snapshot;
+		Map<String, Map<String, String>> scopes;
+		bool committed = false;
+
+		~RestoreOnFailure()
+		{
+			if (!committed)
+			{
+				linked.document = std::move(document);
+				linked.snapshot = std::move(snapshot);
+				linked.scopedIds = std::move(scopes);
+			}
+		}
+	} restore{linked, linked.document, linked.snapshot, linked.scopedIds};
+
+	auto captured = CaptureLinkedSceneChanges("prefab-operation.ursascene", linked, registry,
+	                                          [&context](const std::shared_ptr<MaterialInstance>& material)
+	                                          { return context.Resources().IdentifyMaterial(material); });
+	if (!captured)
+	{
+		return captured;
+	}
+	Json sceneDocument = linked.document;
+	auto instance = FindInstance(sceneDocument, instanceId);
+	if (!instance)
+	{
+		return Result<void>::Failure(instance.error);
+	}
+	auto prefabId = ParseId((*instance.value)["prefab"], "Prefab instance");
+	if (!prefabId)
+	{
+		return Result<void>::Failure(prefabId.error);
+	}
+	auto prefab = ReadJsonResource(files, sourcePath, ResourceKind::Prefab);
+	if (!prefab || prefab.value.value("id", String{}) != prefabId.value.ToString())
+	{
+		return Result<void>::Failure(prefab ? "Prefab source ID does not match the instance" : prefab.error);
+	}
+	if (apply)
+	{
+		auto writable = files.CheckWritable(sourcePath);
+		if (!writable)
+		{
+			return writable;
+		}
+		const auto& overrides = (*instance.value)["overrides"];
+		auto nodes = MergePrefabNodes(prefab.value["gameObjects"], overrides, "Apply Prefab");
+		if (!nodes)
+		{
+			return Result<void>::Failure(nodes.error);
+		}
+		if (overrides.contains("properties"))
+		{
+			for (auto& node : nodes.value)
+			{
+				const auto id = node["id"].get<std::string>();
+				if (overrides["properties"].contains(id))
+				{
+					auto result = ApplyProperties(node, overrides["properties"][id], "Apply Prefab GameObject");
+					if (!result)
+					{
+						return result;
+					}
+				}
+				for (auto& component : node["components"])
+				{
+					const auto componentId = component["id"].get<std::string>();
+					if (overrides["properties"].contains(componentId))
+					{
+						auto result =
+						    ApplyProperties(component, overrides["properties"][componentId], "Apply Prefab Component");
+						if (!result)
+						{
+							return result;
+						}
+					}
+				}
+			}
+		}
+		auto rows = MergePrefabLocalResources(prefab.value, overrides);
+		if (!rows)
+		{
+			return Result<void>::Failure(rows.error);
+		}
+		prefab.value["gameObjects"] = std::move(nodes.value);
+		prefab.value["localResourceVersion"] = UInt32{1};
+		prefab.value["localResources"] = std::move(rows.value);
+		CaptureRegularLocalResources(prefab.value, prefab.value);
+	}
+	(*instance.value)["overrides"] = Json::object();
+	Map<String, Map<String, String>> scopedIds;
+	auto expanded = ExpandInstances("prefab-operation.ursascene", sceneDocument, context.Resources(), registry,
+	                                scopedIds, &prefab.value, prefabId.value);
+	if (!expanded)
+	{
+		return Result<void>::Failure(expanded.error);
+	}
+	auto decoded = DecodeSceneDocument("prefab-operation.ursascene", expanded.value, registry, context);
+	if (!decoded)
+	{
+		return Result<void>::Failure(decoded.error);
+	}
+	auto ready = context.NotifySceneReady(*decoded.value.scene);
+	if (!ready)
+	{
+		return ready;
+	}
+	if (apply)
+	{
+		auto written = WriteJsonResource(files, sourcePath, prefab.value);
+		if (!written)
+		{
+			return written;
+		}
+	}
+	linked = {decoded.value.id,          std::move(decoded.value.scene), std::move(sceneDocument),
+	          std::move(expanded.value), std::move(scopedIds),           &context.Resources()};
+	restore.committed = true;
+	return {};
+}
+} // namespace
+
+Result<void> ApplyPrefabInstance(VirtualFileSystem& files, const VirtualPath& source, LinkedSceneResource& linked,
+                                 ResourceId instance, const ComponentRegistry& registry, ComponentLoadContext& context)
+{
+	try
+	{
+		return RewritePrefabInstance(files, source, linked, instance, registry, context, true);
+	}
+	catch (const std::exception& error)
+	{
+		return Result<void>::Failure(String("Cannot apply Prefab instance: ") + error.what());
+	}
+}
+
+Result<void> RevertPrefabInstance(VirtualFileSystem& files, const VirtualPath& source, LinkedSceneResource& linked,
+                                  ResourceId instance, const ComponentRegistry& registry, ComponentLoadContext& context)
+{
+	try
+	{
+		return RewritePrefabInstance(files, source, linked, instance, registry, context, false);
+	}
+	catch (const std::exception& error)
+	{
+		return Result<void>::Failure(String("Cannot revert Prefab instance: ") + error.what());
 	}
 }
 

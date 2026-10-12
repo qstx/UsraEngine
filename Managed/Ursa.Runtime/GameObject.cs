@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 namespace Ursa;
 
+public enum PrimitiveType { Cube }
+
 public sealed class GameObject
 {
 	private readonly NativeHandle handle;
@@ -105,6 +107,11 @@ public sealed class GameObject
 			if (component is T matching) found.Add(matching);
 		}
 		return found.ToArray();
+	}
+
+	public static GameObject CreatePrimitive(PrimitiveType type = PrimitiveType.Cube)
+	{
+		return FromHandle(EngineApi.ResourceRequest<NativeHandle>(new { operation = "gameObject.primitive", type = type.ToString() }));
 	}
 
 	public static GameObject Create(string name = "GameObject")

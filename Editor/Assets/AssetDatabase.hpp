@@ -106,6 +106,8 @@ public:
 
 	Result<Vector<ImportedArtifactRecord>> CurrentImportedArtifacts();
 
+	Vector<ImportedArtifactRecord> ImportedArtifacts() const;
+
 	Result<ImportCacheStatus> CurrentImport(const VirtualPath& source);
 
 	Result<void> PublishImport(const VirtualPath& source, const String& importer, Ursa::UInt32 importerVersion,

@@ -38,9 +38,6 @@ using ManagedGetComponentPersistentIdFunction = Int32(__cdecl*)(void*, ManagedHa
 using ManagedSetWindowTitleFunction = Int32(__cdecl*)(void*, const UInt8*, UInt64);
 using ManagedGetComponentValuesFunction = Int32(__cdecl*)(void*, ManagedHandle, Float32*, UInt64);
 using ManagedSetComponentValuesFunction = Int32(__cdecl*)(void*, ManagedHandle, const Float32*, UInt64);
-using ManagedGetComponentAssetReferenceFunction = Int32(__cdecl*)(void*, ManagedHandle, UInt8*, UInt64, UInt64*,
-                                                                  UInt64*);
-using ManagedSetComponentAssetReferenceFunction = Int32(__cdecl*)(void*, ManagedHandle, const UInt8*, UInt64, UInt64);
 #else
 using ManagedLogFunction = void (*)(void*, UInt32, const UInt8*, UInt64);
 using ManagedCreateGameObjectFunction = Int32 (*)(void*, const UInt8*, UInt64, ManagedHandle*);
@@ -74,13 +71,13 @@ using ManagedGetComponentPersistentIdFunction = Int32 (*)(void*, ManagedHandle, 
 using ManagedSetWindowTitleFunction = Int32 (*)(void*, const UInt8*, UInt64);
 using ManagedGetComponentValuesFunction = Int32 (*)(void*, ManagedHandle, Float32*, UInt64);
 using ManagedSetComponentValuesFunction = Int32 (*)(void*, ManagedHandle, const Float32*, UInt64);
-using ManagedGetComponentAssetReferenceFunction = Int32 (*)(void*, ManagedHandle, UInt8*, UInt64, UInt64*, UInt64*);
-using ManagedSetComponentAssetReferenceFunction = Int32 (*)(void*, ManagedHandle, const UInt8*, UInt64, UInt64);
 #endif
 
-struct NativeApiV4
+using ManagedResourceRequestFunction = Int32 (*)(void*, const UInt8*, UInt64, UInt8*, UInt64, UInt64*);
+
+struct NativeApiV5
 {
-	UInt32 version = 4;
+	UInt32 version = 5;
 	UInt32 size = 0;
 	void* context = nullptr;
 	ManagedLogFunction logUtf8 = nullptr;
@@ -120,13 +117,10 @@ struct NativeApiV4
 	ManagedSetLocalTransformFunction setWorldPosition = nullptr;
 	ManagedGetComponentValuesFunction getCameraProjection = nullptr;
 	ManagedSetComponentValuesFunction setCameraProjection = nullptr;
-	ManagedGetComponentValuesFunction getBoxRenderColor = nullptr;
-	ManagedSetComponentValuesFunction setBoxRenderColor = nullptr;
-	ManagedGetComponentAssetReferenceFunction getComponentAssetReference = nullptr;
-	ManagedSetComponentAssetReferenceFunction setComponentAssetReference = nullptr;
 	ManagedSetWindowTitleFunction setWindowTitle = nullptr;
+	ManagedResourceRequestFunction resourceRequest = nullptr;
 };
 
-static_assert(sizeof(void*) != 8 || sizeof(NativeApiV4) == 352, "NativeApiV4 layout changed; increment its version");
-static_assert(offsetof(NativeApiV4, sceneContext) == 24, "NativeApiV4 scene context offset changed");
+static_assert(sizeof(void*) != 8 || sizeof(NativeApiV5) == 328, "NativeApiV5 layout changed; increment its version");
+static_assert(offsetof(NativeApiV5, sceneContext) == 24, "NativeApiV5 scene context offset changed");
 } // namespace Ursa::Scripting

@@ -134,6 +134,10 @@ void ValidateResourceClosure(const VirtualFileSystem& files, const RuntimeConten
 		{
 			Take(resources->LoadMaterial(header.id));
 		}
+		else if (kind.value == ResourceKind::Mesh)
+		{
+			Take(resources->LoadMesh(header.id, 0));
+		}
 		else if (kind.value == ResourceKind::Shader)
 		{
 			Take(resources->LoadShader(header.id));

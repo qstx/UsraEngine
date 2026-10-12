@@ -6,6 +6,9 @@
 #include <Serialization/AssetReference.hpp>
 #include <Serialization/JsonArchiveInterop.hpp>
 #include <Serialization/TextureResource.hpp>
+#include <Serialization/MeshResource.hpp>
+#include <Animation/AnimationAssets.hpp>
+#include <Core/Memory/MemoryFactories.hpp>
 #include <Shader/ShaderBuiltins.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <assimp/Importer.hpp>
@@ -29,7 +32,7 @@ namespace
 {
 using Json = nlohmann::json;
 
-constexpr Ursa::UInt32 modelImporterVersion = 4;
+constexpr Ursa::UInt32 modelImporterVersion = 5;
 const String modelImporterId = "ursa.Model";
 
 String Lowered(String value)
@@ -73,19 +76,6 @@ void AppendUint32(Vector<Ursa::UInt8>& output, Ursa::UInt32 value)
 	}
 }
 
-void AppendUint16(Vector<Ursa::UInt8>& output, Ursa::UInt16 value)
-{
-	output.push_back(static_cast<Ursa::UInt8>(value));
-	output.push_back(static_cast<Ursa::UInt8>(value >> 8));
-}
-
-void AppendFloat(Vector<Ursa::UInt8>& output, Ursa::Float32 value)
-{
-	Ursa::UInt32 bits = 0;
-	std::memcpy(&bits, &value, sizeof(bits));
-	AppendUint32(output, bits);
-}
-
 Vector<Ursa::UInt8> EncodeJson(const Json& value)
 {
 	const std::vector<Ursa::UInt8> encoded = Json::to_cbor(value);
@@ -96,17 +86,6 @@ Vector<Ursa::UInt8> EncodeJson(const Json& value)
 		result.push_back(byte);
 	}
 	return result;
-}
-
-Json BinaryJson(const Vector<Ursa::UInt8>& value)
-{
-	std::vector<Ursa::UInt8> bytes;
-	bytes.reserve(value.size());
-	for (Ursa::UInt8 byte : value)
-	{
-		bytes.push_back(byte);
-	}
-	return Json::binary(std::move(bytes));
 }
 
 Json Vector3Json(const aiVector3D& value)
@@ -356,17 +335,6 @@ private:
 	String lastError;
 };
 
-struct MeshVertex
-{
-	Ursa::Float32 position[3]{};
-	Ursa::Float32 normal[3]{};
-	Ursa::Float32 uv[2]{};
-	Ursa::Float32 tangent[3]{};
-	Ursa::Float32 color[4]{};
-};
-
-static_assert(sizeof(MeshVertex) == 60, "Model mesh vertex format must match the renderer vertex layout");
-
 Result<Vector<Ursa::UInt8>> EncodeScene(const Json& document)
 {
 	try
@@ -417,74 +385,42 @@ Result<Vector<String>> ReadModelDiagnostics(const VirtualFileSystem& filesystem,
 	}
 }
 
-Vector<Ursa::UInt8> EncodeVertices(const aiMesh& mesh)
+MeshData GeometryData(const aiMesh& mesh)
 {
-	Vector<Ursa::UInt8> bytes;
-	bytes.reserve(static_cast<Ursa::Size>(mesh.mNumVertices) * sizeof(MeshVertex));
-	for (Ursa::UInt32 index = 0; index < mesh.mNumVertices; ++index)
+	MeshData data;
+	for (UInt32 i = 0; i < mesh.mNumVertices; ++i)
 	{
-		MeshVertex vertex{};
-		const aiVector3D& position = mesh.mVertices[index];
-		vertex.position[0] = static_cast<Ursa::Float32>(position.x);
-		vertex.position[1] = static_cast<Ursa::Float32>(position.y);
-		vertex.position[2] = static_cast<Ursa::Float32>(position.z);
+		data.positions.push_back({mesh.mVertices[i].x, mesh.mVertices[i].y, mesh.mVertices[i].z});
 		if (mesh.HasNormals())
 		{
-			vertex.normal[0] = static_cast<Ursa::Float32>(mesh.mNormals[index].x);
-			vertex.normal[1] = static_cast<Ursa::Float32>(mesh.mNormals[index].y);
-			vertex.normal[2] = static_cast<Ursa::Float32>(mesh.mNormals[index].z);
+			data.normals.push_back({mesh.mNormals[i].x, mesh.mNormals[i].y, mesh.mNormals[i].z});
 		}
 		if (mesh.HasTextureCoords(0))
 		{
-			vertex.uv[0] = static_cast<Ursa::Float32>(mesh.mTextureCoords[0][index].x);
-			vertex.uv[1] = static_cast<Ursa::Float32>(mesh.mTextureCoords[0][index].y);
-		}
-		if (mesh.HasTangentsAndBitangents())
-		{
-			vertex.tangent[0] = static_cast<Ursa::Float32>(mesh.mTangents[index].x);
-			vertex.tangent[1] = static_cast<Ursa::Float32>(mesh.mTangents[index].y);
-			vertex.tangent[2] = static_cast<Ursa::Float32>(mesh.mTangents[index].z);
+			data.uv0.push_back({mesh.mTextureCoords[0][i].x, mesh.mTextureCoords[0][i].y});
 		}
 		if (mesh.HasVertexColors(0))
 		{
-			vertex.color[0] = static_cast<Ursa::Float32>(mesh.mColors[0][index].r);
-			vertex.color[1] = static_cast<Ursa::Float32>(mesh.mColors[0][index].g);
-			vertex.color[2] = static_cast<Ursa::Float32>(mesh.mColors[0][index].b);
-			vertex.color[3] = static_cast<Ursa::Float32>(mesh.mColors[0][index].a);
+			const auto& c = mesh.mColors[0][i];
+			data.colors.push_back({c.r, c.g, c.b, c.a});
 		}
-		else
+		if (mesh.HasTangentsAndBitangents())
 		{
-			vertex.color[0] = vertex.color[1] = vertex.color[2] = vertex.color[3] = 1.0f;
-		}
-		const auto* sourceBytes = reinterpret_cast<const Ursa::UInt8*>(&vertex);
-		for (Ursa::Size byte = 0; byte < sizeof(vertex); ++byte)
-		{
-			bytes.push_back(sourceBytes[byte]);
+			const auto& t = mesh.mTangents[i];
+			const auto cross = mesh.mNormals[i] ^ t;
+			const Float32 sign = (cross * mesh.mBitangents[i]) < 0 ? -1.0f : 1.0f;
+			data.tangents.push_back({t.x, t.y, t.z, sign});
 		}
 	}
-	return bytes;
-}
-
-Vector<Ursa::UInt8> EncodeIndices(const aiMesh& mesh)
-{
-	Vector<Ursa::UInt8> bytes;
-	for (Ursa::UInt32 face = 0; face < mesh.mNumFaces; ++face)
+	for (UInt32 i = 0; i < mesh.mNumFaces; ++i)
 	{
-		const aiFace& triangle = mesh.mFaces[face];
-		if (triangle.mNumIndices != 3)
+		const auto& face = mesh.mFaces[i];
+		for (UInt32 j = 0; j < face.mNumIndices; ++j)
 		{
-			continue;
-		}
-		for (Ursa::UInt32 index = 0; index < triangle.mNumIndices; ++index)
-		{
-			const Ursa::UInt32 value = triangle.mIndices[index];
-			for (Ursa::UInt32 byte = 0; byte < 4; ++byte)
-			{
-				bytes.push_back(static_cast<Ursa::UInt8>(value >> (byte * 8)));
-			}
+			data.indices.push_back(face.mIndices[j]);
 		}
 	}
-	return bytes;
+	return data;
 }
 
 String MaterialName(const aiMaterial& material, Ursa::UInt32 index)
@@ -949,7 +885,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 	{
 		return Result<ModelImportResult>::Failure(dependencies.error);
 	}
-	auto cache = database.CheckImport(source, modelImporterId, modelImporterVersion, "model-v4", serializedSettings,
+	auto cache = database.CheckImport(source, modelImporterId, modelImporterVersion, "model-v5", serializedSettings,
 	                                  dependencies.value);
 	if (!force && cache && cache.value.upToDate)
 	{
@@ -1208,6 +1144,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		}
 	}
 
+	Json meshMaterialBindings = Json::object();
 	Vector<Ursa::UInt64> meshIds(scene->mNumMeshes);
 	Map<Ursa::UInt32, Ursa::UInt64> meshIdMap;
 	for (Ursa::UInt32 index = 0; index < scene->mNumMeshes; ++index)
@@ -1228,7 +1165,8 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		{
 			materialLocalId = materialIds.at(mesh->mMaterialIndex);
 		}
-		Json skinInfluences = nullptr;
+		auto data = GeometryData(*mesh);
+		meshMaterialBindings[std::to_string(localFileId)] = materialLocalId;
 		if (mesh->mNumBones != 0)
 		{
 			if (bonesByName.empty())
@@ -1270,38 +1208,23 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 			{
 				return Result<ModelImportResult>::Failure(normalizedInfluences.error + " at " + source.ToString());
 			}
-			Vector<Ursa::UInt8> influenceBytes;
-			influenceBytes.reserve(static_cast<Ursa::Size>(mesh->mNumVertices) * 24);
-			for (const ModelSkinInfluence& influence : normalizedInfluences.value)
+			auto skeleton = MakeShared<ModelSkeleton>(Memory::MemoryTag::Assets);
+			skeleton->modelGuid = guid;
+			skeleton->localFileId = skeletonLocalFileId;
+			skeleton->joints.resize(jointIndicesByNode.size());
+			data.skeletonReference = {guid, skeletonLocalFileId};
+			data.skeleton = std::move(skeleton);
+			for (const auto& influence : normalizedInfluences.value)
 			{
-				for (Ursa::UInt16 jointIndex : influence.jointIndices)
-				{
-					AppendUint16(influenceBytes, jointIndex);
-				}
-				for (Ursa::Float32 weight : influence.weights)
-				{
-					AppendFloat(influenceBytes, weight);
-				}
+				data.skinInfluences.push_back({influence.jointIndices, influence.weights});
 			}
-			skinInfluences = BinaryJson(influenceBytes);
 		}
-		Json meshDocument = {{"localFileId", localFileId},
-		                     {"kind", "Mesh"},
-		                     {"name", ToStdString(name)},
-		                     {"vertexStride", sizeof(MeshVertex)},
-		                     {"vertexCount", mesh->mNumVertices},
-		                     {"indexCount", mesh->mNumFaces * 3},
-		                     {"materialLocalFileId", materialLocalId},
-		                     {"vertices", BinaryJson(EncodeVertices(*mesh))},
-		                     {"indices", BinaryJson(EncodeIndices(*mesh))}};
-		if (mesh->mNumBones != 0)
+		auto geometry = Mesh::Create(std::move(data));
+		if (!geometry)
 		{
-			meshDocument["skeletonLocalFileId"] = skeletonLocalFileId;
-			meshDocument["influenceCount"] = settings.maxBoneInfluences;
-			meshDocument["skinInfluenceStride"] = 24;
-			meshDocument["skinInfluences"] = std::move(skinInfluences);
+			return Result<ModelImportResult>::Failure(geometry.error + " at " + source.ToString());
 		}
-		auto encodedMesh = EncodeScene(meshDocument);
+		auto encodedMesh = EncodeMeshResource(guid, *geometry.value, localFileId);
 		if (!encodedMesh)
 		{
 			return Result<ModelImportResult>::Failure(encodedMesh.error);
@@ -1468,6 +1391,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 	                      {"animationClipLocalFileIds", Json::array()},
 	                      {"dependencies", Json::array()},
 	                      {"diagnostics", Json::array()}};
+	modelDocument["meshMaterialBindings"] = std::move(meshMaterialBindings);
 	for (Ursa::UInt64 id : meshIds)
 	{
 		modelDocument["meshLocalFileIds"].push_back(id);
@@ -1531,7 +1455,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 			    {materialRecord["localFileId"].get<Ursa::UInt64>(), "Material", std::move(encodedMaterial.value)});
 		}
 	}
-	auto published = database.PublishImport(source, modelImporterId, modelImporterVersion, "model-v4",
+	auto published = database.PublishImport(source, modelImporterId, modelImporterVersion, "model-v5",
 	                                        serializedSettings, importedDependencies, allArtifacts);
 	if (!published)
 	{
@@ -1542,7 +1466,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 	{
 		return Result<ModelImportResult>::Failure(artifactPath.error);
 	}
-	auto status = database.CheckImport(source, modelImporterId, modelImporterVersion, "model-v4", serializedSettings,
+	auto status = database.CheckImport(source, modelImporterId, modelImporterVersion, "model-v5", serializedSettings,
 	                                   importedDependencies);
 	if (!status)
 	{

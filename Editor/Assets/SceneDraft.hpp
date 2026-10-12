@@ -75,6 +75,10 @@ public:
 
 	Result<ResourceId> MaterialId(const std::shared_ptr<MaterialInstance>& material) const;
 
+	Result<void> ApplyInstance(VirtualFileSystem& files, const VirtualPath& source, ResourceId instance);
+
+	Result<void> RevertInstance(VirtualFileSystem& files, const VirtualPath& source, ResourceId instance);
+
 	Result<void> SetInstanceProperty(ResourceId instanceId, ResourceId sourceObjectId, const String& pointer,
 	                                 const nlohmann::json& value);
 

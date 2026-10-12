@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
@@ -232,19 +233,19 @@ void TestSharedAndLegacy(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& r
 class SwapMaterialOnUpdate final : public Ursa::Component
 {
 public:
-	SwapMaterialOnUpdate(Ursa::BoxRenderComponent* targetBox, std::shared_ptr<Ursa::MaterialInstance> nextMaterial)
+	SwapMaterialOnUpdate(Ursa::MeshRendererComponent* targetBox, std::shared_ptr<Ursa::MaterialInstance> nextMaterial)
 	    : box(targetBox), next(std::move(nextMaterial))
 	{
 	}
 
 	Ursa::Result<void> Update(const Ursa::FrameContext&) override
 	{
-		box->material = next;
+		done(box->SetSharedMaterial(next));
 		return {};
 	}
 
 private:
-	Ursa::BoxRenderComponent* box;
+	Ursa::MeshRendererComponent* box;
 	std::shared_ptr<Ursa::MaterialInstance> next;
 };
 
@@ -257,8 +258,8 @@ void TestSceneMaterialReplacement(const Ursa::Rhi::DevicePtr& device, Ursa::Rend
 	done(scene.SetLocalTransform(cameraNode, pose));
 	done(scene.SetActiveCamera(Take(scene.AddComponent<Ursa::CameraComponent>(cameraNode))));
 	const auto node = Take(scene.CreateGameObject());
-	Take(scene.AddComponent<Ursa::BoxRenderComponent>(node, Ursa::Color{1, 0, 0, 1}));
-	auto* boxComponent = scene.FindComponent<Ursa::BoxRenderComponent>(node);
+	Take(Ursa::Test::AddRenderer(scene, node, Ursa::Color{1, 0, 0, 1}));
+	auto* boxComponent = scene.FindComponent<Ursa::MeshRendererComponent>(node);
 	const auto legacyData = Take(scene.CollectRenderData(1.0f));
 	const auto legacy = pixel(ReadFrame(device, renderer, legacyData.boxes), 32, 32);
 	Expect(legacy[0] > 200, "Legacy scene box lost its color");
@@ -268,7 +269,7 @@ void TestSceneMaterialReplacement(const Ursa::Rhi::DevicePtr& device, Ursa::Rend
 	done(scene.Update({}));
 	const auto changedData = Take(scene.CollectRenderData(1.0f));
 	const auto changed = pixel(ReadFrame(device, renderer, changedData.boxes), 32, 32);
-	Expect(changed[2] > 200 && changed[0] < 20 && !legacyData.boxes[0].material,
+	Expect(changed[2] > 200 && changed[0] < 20 && legacyData.boxes[0].material != blue,
 	       "Material replacement during update missed the current render frame");
 }
 

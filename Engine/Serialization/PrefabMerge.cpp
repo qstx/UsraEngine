@@ -81,9 +81,9 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 	{
 		return Result<Json>::Failure("Invalid Prefab source or overrides at " + location);
 	}
-	static const Set<String> supported{"properties",        "deletedGameObjects", "addedGameObjects",
-	                                   "gameObjectParents", "gameObjectOrders",   "deletedComponents",
-	                                   "addedComponents",   "componentOwners",    "componentOrders"};
+	static const Set<String> supported{
+	    "properties",        "deletedGameObjects", "addedGameObjects", "gameObjectParents", "gameObjectOrders",
+	    "deletedComponents", "addedComponents",    "componentOwners",  "componentOrders",   "localResources"};
 	for (const auto& entry : overrides.items())
 	{
 		if (!supported.count(ToUrsaString(entry.key())))
@@ -92,7 +92,8 @@ Result<Json> MergePrefabNodes(const Json& source, const Json& overrides, const S
 			                             location);
 		}
 	}
-	for (const char* name : {"deletedGameObjects", "addedGameObjects", "deletedComponents", "addedComponents"})
+	for (const char* name :
+	     {"deletedGameObjects", "addedGameObjects", "deletedComponents", "addedComponents", "localResources"})
 	{
 		auto checked = RequireArray(overrides, name, location);
 		if (!checked)

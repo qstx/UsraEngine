@@ -26,8 +26,6 @@ internal static unsafe class Program
 		internal string persistentId = string.Empty;
 		internal bool enabled = true;
 		internal float[] values = Array.Empty<float>();
-		internal string assetGuid = string.Empty;
-		internal ulong assetLocalFileId;
 	}
 
 	private static readonly System.Collections.Generic.Dictionary<uint, FakeObject> fakeObjects = new();
@@ -164,68 +162,13 @@ internal static unsafe class Program
 		return 0;
 	}
 
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 
-	private static int GetBoxRenderColor(nint context, Bootstrap.NativeHandle handle, float* values, ulong count)
-	{
-		if (context != 123 || count != 4 || !fakeComponents.TryGetValue(handle.index, out FakeComponent? component) ||
-			component.typeId != "ursa.BoxRender")
-			return 1;
-		component.values.AsSpan().CopyTo(new Span<float>(values, 4));
-		return 0;
-	}
 
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 
-	private static int SetBoxRenderColor(nint context, Bootstrap.NativeHandle handle, float* values, ulong count)
-	{
-		if (context != 123 || count != 4 || !fakeComponents.TryGetValue(handle.index, out FakeComponent? component) ||
-			component.typeId != "ursa.BoxRender")
-			return 1;
-		for (int index = 0; index < 4; ++index)
-			if (!float.IsFinite(values[index]))
-				return 1;
-		new ReadOnlySpan<float>(values, 4).CopyTo(component.values);
-		return 0;
-	}
 
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 
-	private static int GetComponentAssetReference(nint context, Bootstrap.NativeHandle handle, byte* output,
-	                                              ulong capacity, ulong* required, ulong* localFileId)
-	{
-		if (context != 123 || required == null || localFileId == null ||
-			!fakeComponents.TryGetValue(handle.index, out FakeComponent? component))
-			return 1;
-		*localFileId = component.assetLocalFileId;
-		if (string.IsNullOrEmpty(component.assetGuid))
-		{
-			*required = 0;
-			return 0;
-		}
-		byte[] bytes = Encoding.UTF8.GetBytes(component.assetGuid);
-		*required = (ulong)bytes.Length;
-		if (capacity < (ulong)bytes.Length)
-			return 4;
-		bytes.AsSpan().CopyTo(new Span<byte>(output, bytes.Length));
-		return 0;
-	}
 
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 
-	private static int SetComponentAssetReference(nint context, Bootstrap.NativeHandle handle, byte* guid, ulong length,
-	                                              ulong localFileId)
-	{
-		if (context != 123 || !fakeComponents.TryGetValue(handle.index, out FakeComponent? component) ||
-			(length != 0 && (guid == null || length != 36)) || (length == 0 && localFileId != 0))
-			return 1;
-		string value = length == 0 ? string.Empty : Encoding.UTF8.GetString(new ReadOnlySpan<byte>(guid, (int)length));
-		if (length != 0 && !Guid.TryParse(value, out _))
-			return 1;
-		component.assetGuid = value;
-		component.assetLocalFileId = localFileId;
-		return 0;
-	}
 
 	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 
@@ -538,23 +481,49 @@ internal static unsafe class Program
 		return 0;
 	}
 
+	private static string resourceResponse = string.Empty;
+
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+	private static int ResourceRequest(nint context, byte* input, ulong length, byte* output, ulong capacity, ulong* required)
+	{
+		if (context != 123 || required == null) return 1;
+		if (input != null)
+		{
+			using var document = System.Text.Json.JsonDocument.Parse(Encoding.UTF8.GetString(new ReadOnlySpan<byte>(input, checked((int)length))));
+			var request = document.RootElement;
+			object response = request.GetProperty("operation").GetString() switch
+			{
+				"material.load" when request.GetProperty("guid").GetString() == fakeMaterialGuid => new { value = (object)new { sessionId = 1UL, index = 202U, generation = 1U, kind = 5U, reserved = 0U } },
+				"resource.valid" => new { value = (object)(request.GetProperty("handle").GetProperty("index").GetUInt32() == 202U) },
+				_ => (object)new { error = "Unsupported protocol fixture resource request" }
+			};
+			resourceResponse = System.Text.Json.JsonSerializer.Serialize(response);
+		}
+		var bytes = Encoding.UTF8.GetBytes(resourceResponse);
+		*required = (ulong)bytes.Length;
+		if (capacity < *required) return 4;
+		bytes.CopyTo(new Span<byte>(output, bytes.Length));
+		resourceResponse = string.Empty;
+		return 0;
+	}
+
 	private static int Validate(uint version, uint size, bool hasCallback, int argumentSize)
 	{
-		Bootstrap.NativeApiV4 api = new() { version = version, size = size, context = 0, sceneContext = 123,
+		Bootstrap.NativeApiV5 api = new() { version = version, size = size, context = 0, sceneContext = 123,
 			                                logUtf8 = hasCallback ? &Log : null };
 		return Bootstrap.Validate((nint)(&api), argumentSize);
 	}
 
 	private static int Main()
 	{
-		int tableSize = sizeof(Bootstrap.NativeApiV4);
-		Expect(tableSize == 352, "Native API struct size differs from the x64 C ABI contract");
+		int tableSize = sizeof(Bootstrap.NativeApiV5);
+		Expect(tableSize == 328, "Native API struct size differs from the x64 C ABI contract");
 		Expect(Bootstrap.Validate(0, tableSize) == 1, "Null native API pointer was accepted");
 		Expect(Validate(1, (uint)tableSize, true, tableSize - 1) == 1, "Truncated native API arguments were accepted");
 		Expect(Validate(3, (uint)tableSize, true, tableSize) == 2, "Unsupported native API version was accepted");
-		Expect(Validate(4, (uint)(tableSize - 1), true, tableSize) == 2, "Truncated native API table was accepted");
-		Expect(Validate(4, (uint)tableSize, false, tableSize) == 3, "Missing required callback was accepted");
-		Expect(Validate(4, (uint)tableSize, true, tableSize) == 0, "Valid native API table was rejected");
+		Expect(Validate(5, (uint)(tableSize - 1), true, tableSize) == 2, "Truncated native API table was accepted");
+		Expect(Validate(5, (uint)tableSize, false, tableSize) == 3, "Missing required callback was accepted");
+		Expect(Validate(5, (uint)tableSize, true, tableSize) == 0, "Valid native API table was rejected");
 		var serializedFields = ScriptFieldSchema.Describe(typeof(SchemaProbeBehaviour));
 		Expect(
 		    serializedFields.Count == 3 &&
@@ -659,8 +628,8 @@ internal static unsafe class Program
 		}
 		Expect(migrationVersionRejected, "Managed script fields accepted an incompatible type version");
 
-		Bootstrap.NativeApiV4 api = new() { version = 4,
-			                                size = (uint)sizeof(Bootstrap.NativeApiV4),
+		Bootstrap.NativeApiV5 api = new() { version = 5,
+			                                size = (uint)sizeof(Bootstrap.NativeApiV5),
 			                                sceneContext = 123,
 			                                logUtf8 = &Log,
 			                                createGameObject = &CreateGameObject,
@@ -695,11 +664,8 @@ internal static unsafe class Program
 			                                resolveComponentPersistentId = &ResolveComponentPersistentId,
 			                                getCameraProjection = &GetCameraProjection,
 			                                setCameraProjection = &SetCameraProjection,
-			                                getBoxRenderColor = &GetBoxRenderColor,
-			                                setBoxRenderColor = &SetBoxRenderColor,
-			                                getComponentAssetReference = &GetComponentAssetReference,
-			                                setComponentAssetReference = &SetComponentAssetReference,
-			                                setWindowTitle = &SetWindowTitle };
+			                                setWindowTitle = &SetWindowTitle,
+			                                resourceRequest = &ResourceRequest };
 		EngineApi.Initialize((nint)(&api));
 		GameObject parent = GameObject.Create("父对象");
 		GameObject child = GameObject.Create("子对象");
@@ -741,17 +707,6 @@ internal static unsafe class Program
 		       "Managed Camera accepted an invalid clipping range or changed the old value");
 		camera.Enabled = false;
 		Expect(!camera.IsActiveAndEnabled, "Managed Component enabled wrapper failed");
-		BoxRenderComponent box = child.AddComponent<BoxRenderComponent>();
-		box.Color = new Color(0.25f, 0.5f, 0.75f, 1.0f);
-		Expect(Math.Abs(box.Color.B - 0.75f) < 0.0001f && box.Color.R == 0.25f,
-		       "Managed Box Renderer color did not round-trip through the native API");
-		box.Material = MaterialAsset.Load(new AssetReference(fakeMaterialGuid));
-		Expect(box.Material?.Reference.Guid == fakeMaterialGuid,
-		       "Managed Box Renderer material reference did not round-trip");
-		MeshRendererComponent meshRenderer = child.AddComponent<MeshRendererComponent>();
-		meshRenderer.Mesh = new AssetReference(fakeTextureGuid, 55);
-		Expect(meshRenderer.Mesh?.Guid == fakeTextureGuid && meshRenderer.Mesh?.LocalFileId == 55,
-		       "Managed Mesh Renderer did not preserve its model sub-asset reference");
 		Application.SetWindowTitle("Ursa Snake | Score: 二");
 		Expect(fakeWindowTitle == "Ursa Snake | Score: 二", "Managed Application title did not preserve UTF-8");
 		sourcePayload.targetObject = child;

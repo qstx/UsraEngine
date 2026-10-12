@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
 #include <Scene/EditorScenePreview.hpp>
@@ -74,7 +75,7 @@ int main()
 		preview->GetCamera().target = {0, 0, 0};
 		Scene scene;
 		const auto node = Take(scene.CreateGameObject());
-		Take(scene.AddComponent<BoxRenderComponent>(node, Color{0.8f, 0.1f, 0.1f, 1.f}));
+		Take(Ursa::Test::AddRenderer(scene, node, Color{0.8f, 0.1f, 0.1f, 1.f}));
 		int starts = 0;
 		int updates = 0;
 		Take(scene.AddComponent<SpyComponent>(node, starts, updates));

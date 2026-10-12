@@ -1,5 +1,6 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
+#include <Core/Memory/MemoryFactories.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <charconv>
 #include <Serialization/JsonArchiveInterop.hpp>
@@ -39,23 +40,6 @@ Result<Json> ReadCborArtifact(const VirtualFileSystem& filesystem, const Virtual
 		return Result<Json>::Failure("Cannot decode imported sub-asset " + path.ToString() + ": " +
 		                             ToUrsaString(error.what()));
 	}
-}
-
-Result<Vector<Ursa::UInt8>> ReadBinary(const Json& document, const char* field, const VirtualPath& path)
-{
-	if (!document.contains(field) || !document[field].is_binary())
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure("Imported mesh has no binary " + ToUrsaString(field) + " data at " +
-		                                            path.ToString());
-	}
-	const auto& binary = document[field].get_binary();
-	Vector<Ursa::UInt8> result;
-	result.reserve(binary.size());
-	for (Ursa::UInt8 byte : binary)
-	{
-		result.push_back(byte);
-	}
-	return Result<Vector<Ursa::UInt8>>::Success(std::move(result));
 }
 
 Result<Vector<Ursa::Float32>> ReadFloatVector(const Json& value, Ursa::Size count, const String& location)
@@ -344,6 +328,11 @@ Result<std::shared_ptr<MaterialInstance>> ResourceSession::LoadMaterial(Resource
 		return Result<std::shared_ptr<MaterialInstance>>::Failure("Material ID changed after indexing: " +
 		                                                          location.value.path.ToString());
 	}
+	auto boundIdentity = loaded.value.material->BindAssetIdentity({id, 0});
+	if (!boundIdentity)
+	{
+		return Result<std::shared_ptr<MaterialInstance>>::Failure(boundIdentity.error);
+	}
 	materials.emplace(key, loaded.value.material);
 	URSA_LOG_DEBUG("Engine", "Loaded material " + key + " from " + location.value.path.ToString());
 	return Result<std::shared_ptr<MaterialInstance>>::Success(std::move(loaded.value.material));
@@ -405,153 +394,13 @@ Result<std::shared_ptr<MaterialInstance>> ResourceSession::LoadMaterial(Resource
 			return Result<std::shared_ptr<MaterialInstance>>::Failure(path.value.ToString() + ": " + attached.error);
 		}
 	}
+	auto boundIdentity = material->BindAssetIdentity({guid, localFileId});
+	if (!boundIdentity)
+	{
+		return Result<std::shared_ptr<MaterialInstance>>::Failure(boundIdentity.error);
+	}
 	materials.emplace(key, material);
 	return Result<std::shared_ptr<MaterialInstance>>::Success(std::move(material));
-}
-
-Result<ModelMeshPtr> ResourceSession::LoadMesh(ResourceId modelGuid, Ursa::UInt64 localFileId)
-{
-	if (!modelGuid || localFileId == 0)
-	{
-		return Result<ModelMeshPtr>::Failure("Model mesh requires a nonzero model GUID and local file ID");
-	}
-	const String key = ResourceCacheKey(modelGuid, localFileId);
-	const auto cached = meshes.find(key);
-	if (cached != meshes.end())
-	{
-		return Result<ModelMeshPtr>::Success(cached->second);
-	}
-	auto path = ResolveAssetPath(modelGuid, localFileId);
-	if (!path)
-	{
-		return Result<ModelMeshPtr>::Failure(path.error);
-	}
-	auto document = ReadCborArtifact(index.Filesystem(), path.value);
-	if (!document)
-	{
-		return Result<ModelMeshPtr>::Failure(document.error);
-	}
-	const Ursa::UInt64 storedId = document.value.value("localFileId", Ursa::UInt64{0});
-	const Ursa::UInt64 vertexStride = document.value.value("vertexStride", Ursa::UInt64{0});
-	const Ursa::UInt64 vertexCount = document.value.value("vertexCount", Ursa::UInt64{0});
-	const Ursa::UInt64 indexCount = document.value.value("indexCount", Ursa::UInt64{0});
-	if (document.value.value("kind", std::string{}) != "Mesh" || storedId != localFileId || vertexStride != 60 ||
-	    vertexCount == 0 || vertexCount > std::numeric_limits<Ursa::UInt32>::max() || indexCount == 0 ||
-	    indexCount > std::numeric_limits<Ursa::UInt32>::max())
-	{
-		return Result<ModelMeshPtr>::Failure("Imported model mesh has an invalid descriptor at " +
-		                                     path.value.ToString());
-	}
-	auto vertices = ReadBinary(document.value, "vertices", path.value);
-	auto indexBytes = ReadBinary(document.value, "indices", path.value);
-	if (!vertices || !indexBytes || vertices.value.size() != vertexStride * vertexCount ||
-	    indexBytes.value.size() != indexCount * sizeof(Ursa::UInt32))
-	{
-		return Result<ModelMeshPtr>::Failure(
-		    !vertices     ? vertices.error
-		    : !indexBytes ? indexBytes.error
-		                  : "Imported mesh byte counts do not match its descriptor at " + path.value.ToString());
-	}
-	auto mesh = std::make_shared<ModelMesh>();
-	mesh->modelGuid = modelGuid;
-	mesh->localFileId = localFileId;
-	mesh->vertexStride = static_cast<Ursa::UInt32>(vertexStride);
-	mesh->vertexBytes = std::move(vertices.value);
-	mesh->indices.reserve(static_cast<Ursa::Size>(indexCount));
-	for (Ursa::Size offset = 0; offset < indexBytes.value.size(); offset += sizeof(Ursa::UInt32))
-	{
-		Ursa::UInt32 vertexIndex = 0;
-		for (Ursa::UInt32 byte = 0; byte < sizeof(Ursa::UInt32); ++byte)
-		{
-			vertexIndex |= static_cast<Ursa::UInt32>(indexBytes.value[offset + byte]) << (byte * 8);
-		}
-		if (vertexIndex >= vertexCount)
-		{
-			return Result<ModelMeshPtr>::Failure("Imported mesh index is outside its vertex range at " +
-			                                     path.value.ToString());
-		}
-		mesh->indices.push_back(vertexIndex);
-	}
-	if (document.value.contains("materialLocalFileId") && document.value["materialLocalFileId"].is_number_unsigned())
-	{
-		const Ursa::UInt64 materialLocalFileId = document.value["materialLocalFileId"].get<Ursa::UInt64>();
-		if (materialLocalFileId != 0)
-		{
-			auto material = LoadMaterial(modelGuid, materialLocalFileId);
-			if (!material)
-			{
-				return Result<ModelMeshPtr>::Failure(path.value.ToString() + ": " + material.error);
-			}
-			mesh->material = std::move(material.value);
-		}
-	}
-	if (document.value.contains("skeletonLocalFileId"))
-	{
-		if (!document.value["skeletonLocalFileId"].is_number_unsigned())
-		{
-			return Result<ModelMeshPtr>::Failure("Imported skinned mesh has an invalid skeleton reference at " +
-			                                     path.value.ToString());
-		}
-		mesh->skeletonLocalFileId = document.value["skeletonLocalFileId"].get<Ursa::UInt64>();
-		auto skeleton = LoadSkeleton(modelGuid, mesh->skeletonLocalFileId);
-		if (!skeleton)
-		{
-			return Result<ModelMeshPtr>::Failure(path.value.ToString() + ": " + skeleton.error);
-		}
-		mesh->skeleton = std::move(skeleton.value);
-		if (!document.value.contains("influenceCount") || !document.value["influenceCount"].is_number_unsigned() ||
-		    document.value["influenceCount"].get<Ursa::UInt32>() == 0 ||
-		    document.value["influenceCount"].get<Ursa::UInt32>() > 4 ||
-		    document.value.value("skinInfluenceStride", Ursa::UInt64{0}) != 24)
-		{
-			return Result<ModelMeshPtr>::Failure("Imported skinned mesh has an invalid influence layout at " +
-			                                     path.value.ToString());
-		}
-		auto influenceBytes = ReadBinary(document.value, "skinInfluences", path.value);
-		if (!influenceBytes || influenceBytes.value.size() != vertexCount * 24)
-		{
-			return Result<ModelMeshPtr>::Failure(influenceBytes ? "Imported skin influence byte count is invalid at " +
-			                                                          path.value.ToString()
-			                                                    : influenceBytes.error);
-		}
-		mesh->skinInfluences.resize(static_cast<Ursa::Size>(vertexCount));
-		for (Ursa::Size vertex = 0; vertex < mesh->skinInfluences.size(); ++vertex)
-		{
-			const Ursa::Size offset = vertex * 24;
-			Ursa::Float32 totalWeight = 0.0f;
-			for (Ursa::Size influence = 0; influence < 4; ++influence)
-			{
-				Ursa::UInt16 jointIndex =
-				    static_cast<Ursa::UInt16>(influenceBytes.value[offset + influence * 2]) |
-				    static_cast<Ursa::UInt16>(influenceBytes.value[offset + influence * 2 + 1] << 8);
-				Ursa::UInt32 bits = 0;
-				for (Ursa::UInt32 byte = 0; byte < 4; ++byte)
-				{
-					bits |= static_cast<Ursa::UInt32>(influenceBytes.value[offset + 8 + influence * 4 + byte])
-					        << (byte * 8);
-				}
-				Ursa::Float32 weight = 0.0f;
-				std::memcpy(&weight, &bits, sizeof(weight));
-				if (!std::isfinite(weight) || weight < 0.0f ||
-				    (weight > 0.0f && jointIndex >= mesh->skeleton->joints.size()))
-				{
-					return Result<ModelMeshPtr>::Failure("Imported skin influence is invalid at " +
-					                                     path.value.ToString());
-				}
-				mesh->skinInfluences[vertex].jointIndices[influence] = jointIndex;
-				mesh->skinInfluences[vertex].weights[influence] = weight;
-				totalWeight += weight;
-			}
-			if (!std::isfinite(totalWeight) || (totalWeight != 0.0f && std::abs(totalWeight - 1.0f) > 0.001f))
-			{
-				return Result<ModelMeshPtr>::Failure("Imported skin weights are not normalized at " +
-				                                     path.value.ToString());
-			}
-		}
-	}
-	ModelMeshPtr immutableMesh = std::move(mesh);
-	meshes.emplace(key, immutableMesh);
-	return Result<ModelMeshPtr>::Success(std::move(immutableMesh));
 }
 
 Result<std::shared_ptr<const ModelSkeleton>> ResourceSession::LoadSkeleton(ResourceId modelGuid,
@@ -846,6 +695,7 @@ class ResourceReload final
 {
 public:
 	std::unique_ptr<ResourceSession> candidate;
+	Vector<std::pair<MeshPtr, std::shared_ptr<const MeshSnapshot>>> meshReplacements;
 	Vector<std::pair<std::shared_ptr<MaterialInstance>, std::shared_ptr<MaterialInstance>>> replacements;
 };
 
@@ -877,11 +727,33 @@ ResourceSession::PrepareResourceReload(const VirtualFileSystem& files, const Mat
 		}
 		reload->replacements.push_back({material.second, loaded.value});
 	}
+	for (const auto& entry : geometry)
+	{
+		const auto reference = entry.second->AssetIdentity();
+		auto loaded = reload->candidate->LoadMesh(reference.guid, reference.localFileId);
+		if (!loaded)
+		{
+			return Result<std::shared_ptr<ResourceReload>>::Failure(loaded.error);
+		}
+		if (entry.second->Version() == std::numeric_limits<UInt64>::max())
+		{
+			return Result<std::shared_ptr<ResourceReload>>::Failure("Mesh version is exhausted");
+		}
+		auto snapshot = MakeShared<MeshSnapshot>(Memory::MemoryTag::Assets);
+		snapshot->version = entry.second->Version() + 1;
+		snapshot->data = loaded.value->Snapshot()->data;
+		reload->meshReplacements.push_back({entry.second, std::move(snapshot)});
+	}
 	return Result<std::shared_ptr<ResourceReload>>::Success(std::move(reload));
 }
 
 void ResourceSession::CommitResourceReload(std::shared_ptr<ResourceReload> reload)
 {
+	for (const auto& replacement : reload->meshReplacements)
+	{
+		std::lock_guard<std::mutex> lock(replacement.first->mutex);
+		std::atomic_store(&replacement.first->snapshot, replacement.second);
+	}
 	for (const auto& replacement : reload->replacements)
 	{
 		*replacement.first = *replacement.second;

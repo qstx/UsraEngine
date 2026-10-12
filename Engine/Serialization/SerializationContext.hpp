@@ -30,6 +30,11 @@ public:
 		                               : Result<T*>::Success(static_cast<T*>(found->second));
 	}
 
+	template <class T> void RemoveService()
+	{
+		services.erase(std::type_index(typeid(T)));
+	}
+
 	ResourceSession* ResourceLoader() const
 	{
 		return resources;
@@ -88,11 +93,40 @@ public:
 		bindings.clear();
 	}
 
+	static SerializationContext* Active()
+	{
+		return active;
+	}
+
+	static SerializationContext* SetActive(SerializationContext* value)
+	{
+		auto* previous = active;
+		active = value;
+		return previous;
+	}
+
 private:
+	inline static thread_local SerializationContext* active = nullptr;
 	ResourceSession* resources;
 	Map<std::type_index, void*> services;
 	Map<String, Serializable*> objects;
 	Vector<std::function<Result<void>()>> bindings;
 	std::function<Result<ResourceId>(const Serializable&)> resourceIdResolver;
+};
+
+class SerializationScope final
+{
+public:
+	explicit SerializationScope(SerializationContext* context) : previous(SerializationContext::SetActive(context))
+	{
+	}
+
+	~SerializationScope()
+	{
+		SerializationContext::SetActive(previous);
+	}
+
+private:
+	SerializationContext* previous;
 };
 } // namespace Ursa

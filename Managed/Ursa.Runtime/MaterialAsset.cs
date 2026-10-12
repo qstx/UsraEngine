@@ -1,21 +1,29 @@
+using System.Text.Json;
+
 namespace Ursa;
 
-public sealed class MaterialAsset
+// Compatibility loading adapter; editing and binding use the common Material API.
+public sealed class MaterialAsset : Material
 {
-	private readonly NativeHandle handle;
-
-	private MaterialAsset(AssetReference reference, NativeHandle handle)
+	private MaterialAsset(AssetReference reference, NativeHandle handle) : base(handle)
 	{
 		Reference = reference;
-		this.handle = handle;
+	}
+
+	internal static MaterialAsset FromBinding(JsonElement binding, NativeHandle handle)
+	{
+		var reference = binding.GetProperty("kind").GetString() == "asset" ?
+			binding.GetProperty("asset").Deserialize<AssetReference>(EngineApi.ResourceJson) : default;
+		return new MaterialAsset(reference, handle);
 	}
 
 	public AssetReference Reference { get; }
 
-	public static MaterialAsset Load(AssetReference reference)
+	public new static MaterialAsset Load(AssetReference reference)
 	{
-		return new MaterialAsset(reference, EngineApi.LoadMaterial(reference.Guid, reference.LocalFileId));
+		return new MaterialAsset(reference, EngineApi.ResourceRequest<NativeHandle>(new
+		{
+			operation = "material.load", guid = reference.Guid, localFileId = reference.LocalFileId
+		}));
 	}
-
-	public bool IsValid => handle.sessionId != 0 && handle.kind == 3;
 }

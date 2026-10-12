@@ -47,6 +47,13 @@ Result<void> SaveLinkedSceneResource(VirtualFileSystem& filesystem, const Virtua
                                      LinkedSceneResource& linked, const ComponentRegistry& registry,
                                      const MaterialIdResolver& materialId = {});
 
+Result<void> ApplyPrefabInstance(VirtualFileSystem& files, const VirtualPath& source, LinkedSceneResource& linked,
+                                 ResourceId instance, const ComponentRegistry& registry, ComponentLoadContext& context);
+
+Result<void> RevertPrefabInstance(VirtualFileSystem& files, const VirtualPath& source, LinkedSceneResource& linked,
+                                  ResourceId instance, const ComponentRegistry& registry,
+                                  ComponentLoadContext& context);
+
 Result<void> ReloadLinkedSceneResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
                                        const ComponentRegistry& registry, ComponentLoadContext& context,
                                        LinkedSceneResource& active);

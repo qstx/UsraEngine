@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
@@ -161,7 +162,7 @@ void TestSceneCollection(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& r
 	childTransform.position = {1, 0, 0};
 	childTransform.scale = {0.7f, 0.7f, 0.7f};
 	done(scene.SetLocalTransform(child, childTransform));
-	Take(scene.AddComponent<Ursa::BoxRenderComponent>(child, Ursa::Color{0, 1, 0, 1}));
+	Take(Ursa::Test::AddRenderer(scene, child, Ursa::Color{0, 1, 0, 1}));
 	Expect(!scene.CollectRenderData(1.0f) && scene.CollectRenderData(1.0f).error.find("camera") != Ursa::String::npos,
 	       "Missing active camera did not return a diagnostic error");
 	done(scene.SetActiveCamera(camera));

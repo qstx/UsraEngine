@@ -23,7 +23,7 @@ public static unsafe partial class Bootstrap
 	}
 
 	[StructLayout(LayoutKind.Sequential)]
-	internal struct NativeApiV4
+	internal struct NativeApiV5
 	{
 		public uint version;
 		public uint size;
@@ -65,12 +65,8 @@ public static unsafe partial class Bootstrap
 		public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> setWorldPosition;
 		public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> getCameraProjection;
 		public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> setCameraProjection;
-		public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> getBoxRenderColor;
-		public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> setBoxRenderColor;
-		public delegate* unmanaged[Cdecl]<nint, NativeHandle, byte*, ulong, ulong*, ulong*, int>
-		    getComponentAssetReference;
-		public delegate* unmanaged[Cdecl]<nint, NativeHandle, byte*, ulong, ulong, int> setComponentAssetReference;
 		public delegate* unmanaged[Cdecl]<nint, byte*, ulong, int> setWindowTitle;
+		public delegate* unmanaged[Cdecl]<nint, byte*, ulong, byte*, ulong, ulong*, int> resourceRequest;
 	}
 
 	private static readonly byte[] initializedMessage = Encoding.UTF8.GetBytes("Ursa 托管运行时已初始化");
@@ -89,12 +85,12 @@ public static unsafe partial class Bootstrap
 
 	internal static int Validate(nint arguments, int argumentSize)
 	{
-		if (arguments == 0 || argumentSize < sizeof(NativeApiV4))
+		if (arguments == 0 || argumentSize < sizeof(NativeApiV5))
 		{
 			return 1;
 		}
-		NativeApiV4* api = (NativeApiV4*)arguments;
-		if (api->version != 4 || api->size < (uint)sizeof(NativeApiV4))
+		NativeApiV5* api = (NativeApiV5*)arguments;
+		if (api->version != 5 || api->size < (uint)sizeof(NativeApiV5))
 		{
 			return 2;
 		}
@@ -111,7 +107,7 @@ public static unsafe partial class Bootstrap
 			return validation;
 		}
 
-		NativeApiV4* api = (NativeApiV4*)arguments;
+		NativeApiV5* api = (NativeApiV5*)arguments;
 		Ursa.EngineApi.Initialize(arguments);
 		fixed(byte* message = initializedMessage)
 		{

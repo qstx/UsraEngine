@@ -129,7 +129,17 @@ public:
 		return {};
 	}
 
-	void SetEnabled(bool value);
+	Result<void> SetEnabled(bool value);
+
+	virtual bool SupportsEnabled() const
+	{
+		return true;
+	}
+
+	virtual const char* UniquenessGroup() const
+	{
+		return nullptr;
+	}
 
 	bool IsEnabled() const
 	{

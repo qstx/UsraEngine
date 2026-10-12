@@ -1,3 +1,4 @@
+#include <Serialization/AssetReference.hpp>
 #include <Assets/ModelImportView.hpp>
 #include <Assets/ProjectAssetImporter.hpp>
 #include <Assets/SceneDraft.hpp>
@@ -40,7 +41,7 @@ String LocalFileIdText(Ursa::UInt64 localFileId)
 	return ToUrsaString(std::to_string(localFileId));
 }
 
-void DrawModelNode(const Json& nodes, Ursa::UInt64 localFileId)
+void DrawModelNode(const Json& nodes, Ursa::UInt64 localFileId, ResourceId modelGuid)
 {
 	for (const Json& node : nodes)
 	{
@@ -63,13 +64,20 @@ void DrawModelNode(const Json& nodes, Ursa::UInt64 localFileId)
 				for (const Json& meshId : node["meshLocalFileIds"])
 				{
 					ImGui::BulletText("Mesh local ID: %s", LocalFileIdText(meshId.get<Ursa::UInt64>()).c_str());
+					if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
+					{
+						const AssetReference reference{modelGuid, meshId.get<UInt64>()};
+						ImGui::SetDragDropPayload("URSA_ASSET_REFERENCE", &reference, sizeof(reference));
+						ImGui::TextUnformatted("Mesh sub-asset");
+						ImGui::EndDragDropSource();
+					}
 				}
 			}
 			if (node.contains("children"))
 			{
 				for (const Json& child : node["children"])
 				{
-					DrawModelNode(nodes, child.get<Ursa::UInt64>());
+					DrawModelNode(nodes, child.get<Ursa::UInt64>(), modelGuid);
 				}
 			}
 			ImGui::TreePop();
@@ -235,7 +243,7 @@ Result<void> ModelImportView::Draw(AssetDatabase& database, bool canReimport,
 		ImGui::TextDisabled("GUID: %s", imported.guid.ToString().c_str());
 		if (ImGui::TreeNode("Hierarchy"))
 		{
-			DrawModelNode(document["nodes"], document.value("rootNodeLocalFileId", Ursa::UInt64{0}));
+			DrawModelNode(document["nodes"], document.value("rootNodeLocalFileId", Ursa::UInt64{0}), imported.guid);
 			ImGui::TreePop();
 		}
 		if (ImGui::TreeNode("Sub-assets"))

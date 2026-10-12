@@ -4,6 +4,7 @@
 #include <Serialization/JsonResource.hpp>
 #include <Serialization/PrefabResource.hpp>
 #include <Serialization/SceneResource.hpp>
+#include <Serialization/DocumentResources.hpp>
 #include <Core/StringInterop.hpp>
 #include <Scene/Scene.hpp>
 #include <algorithm>
@@ -76,7 +77,10 @@ EncodePrefabAssetDocument(const String& label, const PrefabAsset& asset, const C
 		return Result<Json>::Failure("PrefabAsset requires a valid ID and one detached root at " + label);
 	}
 	Json objects = Json::array();
-	const ComponentSaveContext context{nullptr, materialId};
+	DocumentResources localResources;
+	SerializationContext serialization;
+	DocumentResourceScope resourceScope(serialization, localResources);
+	const ComponentSaveContext context{nullptr, materialId, &serialization};
 	String error;
 	std::function<void(const GameObject::Ptr&, ResourceId)> visit =
 	    [&](const GameObject::Ptr& object, ResourceId parent)
@@ -140,7 +144,14 @@ EncodePrefabAssetDocument(const String& label, const PrefabAsset& asset, const C
 	{
 		return Result<Json>::Failure("Cannot save PrefabAsset at " + label + ": " + error);
 	}
-	return Result<Json>::Success({{"format", "UrsaPrefab"},
+	auto localData = localResources.Encode(serialization);
+	if (!localData)
+	{
+		return Result<Json>::Failure(localData.error);
+	}
+	return Result<Json>::Success({{"localResourceVersion", UInt32{1}},
+	                              {"localResources", std::move(localData.value)},
+	                              {"format", "UrsaPrefab"},
 	                              {"version", resourceFormatVersion},
 	                              {"prefabGraphVersion", prefabGraphFormatVersion},
 	                              {"id", ToStdString(asset.Id().ToString())},
@@ -160,6 +171,13 @@ Result<PrefabAsset> DecodePrefabAssetDocument(const String& label, const Json& j
                                               ComponentLoadContext& context)
 {
 	ComponentMappingScope mappings(context);
+	DocumentResources localResources;
+	DocumentResourceScope resourceScope(context, localResources);
+	auto restoredResources = localResources.Decode(json, context);
+	if (!restoredResources)
+	{
+		return Result<PrefabAsset>::Failure(restoredResources.error + " at " + label);
+	}
 
 	if (!json.contains("prefabGraphVersion") || !json["prefabGraphVersion"].is_number_unsigned() ||
 	    json["prefabGraphVersion"].get<Ursa::UInt32>() != prefabGraphFormatVersion)
@@ -305,7 +323,13 @@ Result<PrefabAsset> DecodePrefabAssetDocument(const String& label, const Json& j
 				                                    created.error);
 			}
 			created.value->SetPersistentId(componentId.value);
-			created.value->SetEnabled(item["enabled"].get<bool>());
+			auto changed = created.value->SupportsEnabled() ? created.value->SetEnabled(item["enabled"].get<bool>())
+			               : item["enabled"].get<bool>()    ? Result<void>{}
+			                                             : Result<void>::Failure("Data component cannot be disabled");
+			if (!changed)
+			{
+				return Result<PrefabAsset>::Failure(changed.error);
+			}
 			auto mapped = context.MapComponentObject(componentId.value, created.value);
 			if (!mapped)
 			{
@@ -365,7 +389,9 @@ CapturePrefabAsset(ResourceId id, const Scene& scene, GameObject::Ptr root, cons
 	                                  {"version", resourceFormatVersion},
 	                                  {"prefabGraphVersion", prefabGraphFormatVersion},
 	                                  {"id", ToStdString(id.ToString())},
-	                                  {"gameObjects", std::move(objects)}},
+	                                  {"gameObjects", std::move(objects)},
+	                                  {"localResourceVersion", UInt32{1}},
+	                                  {"localResources", std::move(encoded.value["localResources"])}},
 	                                 registry, context);
 }
 
@@ -378,6 +404,21 @@ Result<GameObject::Ptr> PrefabAsset::Instantiate(
 		return Result<GameObject::Ptr>::Failure("Cannot instantiate an empty PrefabAsset");
 	}
 	ComponentMappingScope mappings(context);
+	auto sourceDocument = EncodePrefabAssetDocument("instantiate.ursaprefab", *this, registry, materialId);
+	if (!sourceDocument)
+	{
+		return Result<GameObject::Ptr>::Failure(sourceDocument.error);
+	}
+	DocumentResources localResources;
+	DocumentResourceScope resourceScope(context, localResources);
+	auto restoredResources = localResources.Decode(sourceDocument.value, context, true);
+	if (!restoredResources)
+	{
+		return Result<GameObject::Ptr>::Failure(restoredResources.error);
+	}
+	DocumentResources saveResources;
+	SerializationContext serialization;
+	DocumentResourceScope saveScope(serialization, saveResources);
 	Map<String, GameObject::Ptr> objects;
 
 	struct PendingBind
@@ -428,7 +469,7 @@ Result<GameObject::Ptr> PrefabAsset::Instantiate(
 				return Result<GameObject::Ptr>::Failure(
 				    codec ? "Prefab component has no detached factory: " + codec.value->type : codec.error);
 			}
-			auto data = codec.value->save(*sourceComponent, ComponentSaveContext{nullptr, materialId});
+			auto data = codec.value->save(*sourceComponent, ComponentSaveContext{nullptr, materialId, &serialization});
 			if (!data)
 			{
 				return Result<GameObject::Ptr>::Failure(data.error);
@@ -440,7 +481,14 @@ Result<GameObject::Ptr> PrefabAsset::Instantiate(
 			}
 			const ResourceId newComponentId = ResourceId::Generate();
 			created.value->SetPersistentId(newComponentId);
-			created.value->SetEnabled(sourceComponent->IsEnabled());
+			if (created.value->SupportsEnabled())
+			{
+				auto changed = created.value->SetEnabled(sourceComponent->IsEnabled());
+				if (!changed)
+				{
+					return Result<GameObject::Ptr>::Failure(changed.error);
+				}
+			}
 			auto mappedComponent = context.MapComponentObject(sourceComponent->PersistentId(), created.value);
 			if (!mappedComponent)
 			{

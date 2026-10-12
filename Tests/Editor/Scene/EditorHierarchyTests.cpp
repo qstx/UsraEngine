@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <ResourceFixtures.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <imgui_internal.h>
@@ -54,7 +55,7 @@ int main()
 		done(scene.SetGameObjectName(first, "Root"));
 		done(scene.SetGameObjectName(child, "Child"));
 		done(scene.SetActive(child, false));
-		Take(scene.AddComponent<BoxRenderComponent>(first));
+		Take(Ursa::Test::AddRenderer(scene, first));
 		const auto firstId = Take(scene.PersistentId(first));
 		const auto childId = Take(scene.PersistentId(child));
 		const auto secondId = Take(scene.PersistentId(second));

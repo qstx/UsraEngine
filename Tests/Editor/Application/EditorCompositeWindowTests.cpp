@@ -1,3 +1,4 @@
+#include <MeshFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <Renderer3D/Renderer3D.hpp>
@@ -127,7 +128,7 @@ int main()
 		const auto cameraId = Take(draft->GetScene().AddComponent<CameraComponent>(cameraNode));
 		done(draft->GetScene().SetActiveCamera(cameraId));
 		auto boxNode = Take(draft->GetScene().CreateGameObject(gameRoot));
-		Take(draft->GetScene().AddComponent<BoxRenderComponent>(boxNode, Color{0.2f, 0.8f, 0.4f, 1.f}));
+		Take(Ursa::Test::AddRenderer(draft->GetScene(), boxNode, Color{0.2f, 0.8f, 0.4f, 1.f}));
 		Editor::PlaySession play;
 		done(play.Start(*draft, ResourceId::Generate(), registry, *resources));
 		done(play.Tick(1.f / 30.f, window.get(), {}));

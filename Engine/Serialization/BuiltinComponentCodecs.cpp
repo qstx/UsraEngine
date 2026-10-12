@@ -11,20 +11,20 @@ Result<void> RegisterBuiltinComponents(ComponentRegistry& registry)
 	                                                             { return owner->AddComponent<CameraComponent>(); });
 	if (result)
 	{
-		result = registry.RegisterSerializable<BoxRenderComponent>(
-		    "ursa.BoxRender", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
-		    { return owner->AddComponent<BoxRenderComponent>(); });
+		result = registry.RegisterSerializable<MeshFilterComponent>(
+		    "ursa.MeshFilter", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
+		    { return owner->AddComponent<MeshFilterComponent>(); });
 	}
 	if (result)
 	{
 		result = registry.RegisterSerializable<MeshRendererComponent>(
-		    "ursa.MeshRenderer", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
+		    "ursa.MeshRenderer", 2, [](const GameObject::Ptr& owner, ComponentLoadContext&)
 		    { return owner->AddComponent<MeshRendererComponent>(); });
 	}
 	if (result)
 	{
 		result = registry.RegisterSerializable<SkinnedMeshRendererComponent>(
-		    "ursa.SkinnedMeshRenderer", 1, [](const GameObject::Ptr& owner, ComponentLoadContext&)
+		    "ursa.SkinnedMeshRenderer", 2, [](const GameObject::Ptr& owner, ComponentLoadContext&)
 		    { return owner->AddComponent<SkinnedMeshRendererComponent>(); });
 	}
 	if (result)

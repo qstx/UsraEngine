@@ -163,7 +163,29 @@ Result<void> RegisterBuiltinComponentEditors(ComponentEditors& editors)
 	if (result)
 	{
 		result = editors.RegisterType(
-		    {"ursa.BoxRender", "Box Renderer", "Rendering", CreateBuiltinComponent<BoxRenderComponent>, {}});
+		    {"ursa.MeshFilter", "Mesh Filter", "Rendering", CreateBuiltinComponent<MeshFilterComponent>, {}, false, 1});
+	}
+	const ComponentAvailability rendererAvailable = [](const ComponentInspectorContext& context) -> Result<void>
+	{
+		for (const auto* component : context.object->Components())
+		{
+			if (dynamic_cast<const RendererComponent*>(component))
+			{
+				return Result<void>::Failure("This GameObject already has a Renderer");
+			}
+		}
+		return {};
+	};
+	if (result)
+	{
+		result = editors.RegisterType({"ursa.MeshRenderer", "Mesh Renderer", "Rendering",
+		                               CreateBuiltinComponent<MeshRendererComponent>, rendererAvailable, false, 2});
+	}
+	if (result)
+	{
+		result =
+		    editors.RegisterType({"ursa.SkinnedMeshRenderer", "Skinned Mesh Renderer", "Rendering",
+		                          CreateBuiltinComponent<SkinnedMeshRendererComponent>, rendererAvailable, false, 2});
 	}
 	if (result)
 	{

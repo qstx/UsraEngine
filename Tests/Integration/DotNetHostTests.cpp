@@ -5,10 +5,12 @@
 #include <Scripting/DotNet/ManagedScriptRuntime.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Scene/RenderingComponents.hpp>
+#include <Mesh/Primitive.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <Serialization/PrefabAsset.hpp>
 #include <Serialization/SceneResource.hpp>
 #include <Serialization/ResourceSession.hpp>
+#include <Serialization/TextureResource.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #if defined(URSA_DOTNET_TEST_EDITOR)
 #include <Scripting/ManagedEditorBridge.hpp>
@@ -62,6 +64,18 @@ void Done(Result<void> result)
 void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSystem& filesystem,
                                                 const VirtualPath& contentPath)
 {
+	if (!filesystem.IsMounted("texturefixture"))
+	{
+		Done(
+		    filesystem.MountProvider("texturefixture", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	}
+	const auto textureId = Take(ResourceId::Parse("34567890-0000-4000-8000-000000000001"));
+	const auto texturePath = Take(VirtualPath::Parse("texturefixture:ManagedMeshTexture.ursatex"));
+	auto texture = Take(MaterialTexture::Create(1, 1, TextureColorSpace::Srgb, {255, 255, 255, 255}));
+	Done(SaveTextureResource(filesystem, texturePath, textureId, *texture));
+	const auto metadata = nlohmann::json{{"guid", ToStdString(textureId.ToString())}}.dump();
+	Done(filesystem.WriteAtomic(Take(VirtualPath::Parse(texturePath.ToString() + ".meta")),
+	                            Vector<UInt8>(metadata.data(), metadata.data() + metadata.size())));
 	auto resources = Take(ResourceSession::Open(filesystem));
 	Scene scene;
 	auto sceneApi = std::make_unique<ManagedSceneApi>(scene, resources.get());
@@ -70,7 +84,12 @@ void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSys
 	Done(host.ValidateScriptSession(session));
 	auto runtime = std::make_unique<ManagedScriptRuntime>(scene, host, *sceneApi, session);
 	auto owner = Take(scene.CreateGameObject("Managed Render Components"));
-	Take(runtime->CreateAndAdd(owner, "Ursa.SessionFixtures.ManagedRenderComponentProbe, Ursa.SessionFixtures"));
+	const auto scriptId =
+	    Take(runtime->CreateAndAdd(owner, "Ursa.SessionFixtures.ManagedRenderComponentProbe, Ursa.SessionFixtures"));
+	auto* probe = static_cast<ScriptBehaviourComponent*>(scene.GetComponent(scriptId));
+	Done(host.DeserializeBehaviour(
+	    probe->InstanceToken(),
+	    R"({"FormatVersion":1,"ScriptType":"test.managed-render-component-probe","Version":1,"Fields":{"verifyTextureBindings":true}})"));
 	FrameContext frame;
 	frame.deltaSeconds = 1.0f / 60.0f;
 	frame.fixedDeltaSeconds = 1.0f / 50.0f;
@@ -78,11 +97,14 @@ void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSys
 	Done(scene.Update(frame));
 
 	auto* camera = scene.FindComponent<CameraComponent>(owner);
-	auto* box = scene.FindComponent<BoxRenderComponent>(owner);
-	Expect(camera && box, "C# Awake did not add built-in Camera and Box Renderer components");
+	auto* box = scene.FindComponent<MeshRendererComponent>(owner);
+	auto* filter = scene.FindComponent<MeshFilterComponent>(owner);
+	Expect(camera && box && filter && filter->SharedMesh(),
+	       "C# Awake did not add built-in Camera, Mesh Filter and Mesh Renderer components");
 	Expect(std::abs(camera->verticalFovRadians - 1.1f) < 0.0001f && camera->nearPlane == 0.2f &&
-	           camera->farPlane == 80.0f && box->color.red == 0.25f && box->color.green == 0.5f &&
-	           box->color.blue == 0.75f,
+	           camera->farPlane == 80.0f && box->SharedMaterial()->Parameters().baseColor.red == 0.25f &&
+	           box->SharedMaterial()->Parameters().baseColor.green == 0.5f &&
+	           box->SharedMaterial()->Parameters().baseColor.blue == 0.75f,
 	       "C# built-in component properties did not update native Scene data");
 
 	ComponentRegistry registry;
@@ -97,26 +119,29 @@ void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSys
 	    Take(DecodeSceneDocument("ManagedRenderComponents.ursascene", sceneDocument, registry, sceneLoadContext));
 	auto loadedRoot = loadedScene.scene->RootGameObjects().front();
 	const auto* loadedCamera = loadedScene.scene->FindComponent<CameraComponent>(loadedRoot);
-	const auto* loadedBox = loadedScene.scene->FindComponent<BoxRenderComponent>(loadedRoot);
+	const auto* loadedBox = loadedScene.scene->FindComponent<MeshRendererComponent>(loadedRoot);
 	Expect(loadedCamera && std::abs(loadedCamera->verticalFovRadians - 1.1f) < 0.0001f &&
 	           loadedCamera->nearPlane == 0.2f && loadedCamera->farPlane == 80.0f && loadedBox &&
-	           loadedBox->color.red == 0.25f && loadedBox->color.green == 0.5f && loadedBox->color.blue == 0.75f,
+	           loadedBox->SharedMaterial()->Parameters().baseColor.red == 0.25f &&
+	           loadedBox->SharedMaterial()->Parameters().baseColor.green == 0.5f &&
+	           loadedBox->SharedMaterial()->Parameters().baseColor.blue == 0.75f,
 	       "Managed built-in component properties did not survive Scene serialization");
 
 	ComponentLoadContext prefabCaptureContext(*resources);
 	const ResourceId prefabId = ResourceId::Generate();
 	auto prefabRoot = GameObject::Create("Managed Render Components");
 	auto* prefabCameraSource = owner->FindComponent<CameraComponent>();
-	auto* prefabBoxSource = owner->FindComponent<BoxRenderComponent>();
+	auto* prefabBoxSource = owner->FindComponent<MeshRendererComponent>();
 	Expect(prefabCameraSource && prefabBoxSource,
 	       "Managed rendering components were unavailable for Prefab serialization");
 	auto* detachedCamera = Take(prefabRoot->AddComponent<CameraComponent>());
 	detachedCamera->verticalFovRadians = prefabCameraSource->verticalFovRadians;
 	detachedCamera->nearPlane = prefabCameraSource->nearPlane;
 	detachedCamera->farPlane = prefabCameraSource->farPlane;
-	auto* detachedBox = Take(prefabRoot->AddComponent<BoxRenderComponent>());
-	detachedBox->color = prefabBoxSource->color;
-	detachedBox->material = prefabBoxSource->material;
+	auto* detachedBox = Take(prefabRoot->AddComponent<MeshRendererComponent>());
+	Done(detachedBox->SetMaterials(prefabBoxSource->SharedMaterials()));
+	auto* detachedFilter = Take(prefabRoot->AddComponent<MeshFilterComponent>());
+	Done(detachedFilter->SetMesh(filter->SharedMesh()));
 	PrefabAsset prefab(prefabId, std::move(prefabRoot));
 	auto prefabDocument =
 	    Take(EncodePrefabAssetDocument("ManagedRenderComponents.ursaprefab", prefab, registry, resolveMaterial));
@@ -124,13 +149,29 @@ void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSys
 	auto loadedPrefab =
 	    Take(DecodePrefabAssetDocument("ManagedRenderComponents", prefabDocument, registry, prefabLoadContext));
 	auto* prefabCamera = loadedPrefab.Root()->FindComponent<CameraComponent>();
-	auto* prefabBox = loadedPrefab.Root()->FindComponent<BoxRenderComponent>();
+	auto* prefabBox = loadedPrefab.Root()->FindComponent<MeshRendererComponent>();
 	Expect(prefabCamera && std::abs(prefabCamera->verticalFovRadians - 1.1f) < 0.0001f &&
 	           prefabCamera->nearPlane == 0.2f && prefabCamera->farPlane == 80.0f && prefabBox &&
-	           prefabBox->color.red == 0.25f && prefabBox->color.green == 0.5f && prefabBox->color.blue == 0.75f,
+	           prefabBox->SharedMaterial()->Parameters().baseColor.red == 0.25f &&
+	           prefabBox->SharedMaterial()->Parameters().baseColor.green == 0.5f &&
+	           prefabBox->SharedMaterial()->Parameters().baseColor.blue == 0.75f,
 	       "Managed built-in component properties did not survive Prefab serialization");
 
+	auto loadedApi = std::make_unique<ManagedSceneApi>(*loadedScene.scene, resources.get());
+	const UInt64 loadedSession = Take(host.CreateScriptSession(false, loadedApi.get()));
+	Done(host.LoadScriptContent(loadedSession, contentPath));
+	Done(host.ValidateScriptSession(loadedSession));
+	auto loadedRuntime = std::make_unique<ManagedScriptRuntime>(*loadedScene.scene, host, *loadedApi, loadedSession);
+	Done(loadedRuntime->AttachSerializedComponents());
+	loadedScene.scene->BeginFrame();
+	Done(loadedScene.scene->Update(frame));
+	Expect(loadedRoot->Name().value == "MeshFields:Restored",
+	       "Actual C# Mesh/Material fields were not restored before Awake");
 	loadedScene.scene->Clear();
+	loadedRuntime.reset();
+	loadedApi.reset();
+	Done(host.CloseScriptSession(loadedSession));
+	Done(host.SelectScriptSession(session));
 	scene.Clear();
 	runtime.reset();
 	sceneApi.reset();
@@ -637,15 +678,16 @@ int main(int argumentCount, char** arguments)
 			Take(runRuntime.CreateAndAdd(renderOwner,
 			                             "Ursa.SessionFixtures.ManagedRenderComponentProbe, Ursa.SessionFixtures"));
 			auto* managedCamera = runScene.FindComponent<CameraComponent>(renderOwner);
-			auto* managedBox = runScene.FindComponent<BoxRenderComponent>(renderOwner);
+			auto* managedBox = runScene.FindComponent<MeshRendererComponent>(renderOwner);
 			const std::string renderComponentFailure =
 			    "C# built-in component wrappers did not mutate native render components: " +
 			    ToStdString(Take(renderOwner->Name())) + " (" + std::to_string(renderOwner->Components().size()) +
 			    " native components)";
 			Expect(managedCamera && std::abs(managedCamera->verticalFovRadians - 1.1f) < 0.0001f &&
 			           managedCamera->nearPlane == 0.2f && managedCamera->farPlane == 80.0f && managedBox &&
-			           managedBox->color.red == 0.25f && managedBox->color.green == 0.5f &&
-			           managedBox->color.blue == 0.75f,
+			           managedBox->SharedMaterial()->Parameters().baseColor.red == 0.25f &&
+			           managedBox->SharedMaterial()->Parameters().baseColor.green == 0.5f &&
+			           managedBox->SharedMaterial()->Parameters().baseColor.blue == 0.75f,
 			       renderComponentFailure.c_str());
 			auto destroyer = Take(runScene.CreateGameObject("Destroyer"));
 			Take(runRuntime.CreateAndAdd(destroyer, "Ursa.SessionFixtures.DestroyerProbe, Ursa.SessionFixtures"));

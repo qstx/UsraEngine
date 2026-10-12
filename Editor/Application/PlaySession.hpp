@@ -59,12 +59,18 @@ public:
 		return scene.get();
 	}
 
+	ResourceSession* Resources()
+	{
+		return resourceSession.get();
+	}
+
 	~PlaySession()
 	{
 		Stop();
 	}
 
 private:
+	std::unique_ptr<ResourceSession> resourceSession;
 	std::shared_ptr<void> services;
 	std::unique_ptr<Scene> scene;
 	SceneFrameRunner frameRunner;

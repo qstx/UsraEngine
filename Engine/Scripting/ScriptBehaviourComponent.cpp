@@ -95,6 +95,11 @@ Result<void> ScriptBehaviourComponent::Serialize(ArchiveWriter& writer) const
 	try
 	{
 		nlohmann::json document = nlohmann::json::parse(ToStdString(payload));
+		auto boundResources = SaveRenderResources(document, writer);
+		if (!boundResources)
+		{
+			return boundResources;
+		}
 		auto object = writer.Object("scriptPayload");
 		if (!object)
 		{
@@ -127,6 +132,11 @@ Result<void> ScriptBehaviourComponent::Deserialize(const ArchiveReader& reader, 
 		if (!document)
 		{
 			return Result<void>::Failure(document.error);
+		}
+		auto resourcesBound = BindRenderResources(document.value, context);
+		if (!resourcesBound)
+		{
+			return resourcesBound;
 		}
 		serializedPayload = ToUrsaString(document.value.dump());
 		if (!serializedPayload.empty())
@@ -174,6 +184,11 @@ Result<void> ScriptBehaviourComponent::RemapReferences(ComponentLoadContext& con
 			if (value.contains("$ursaReference"))
 			{
 				auto& reference = value["$ursaReference"];
+				if (reference.is_object() && (reference.value("Kind", std::string{}) == "Mesh" ||
+				                              reference.value("Kind", std::string{}) == "Material"))
+				{
+					return {};
+				}
 				if (!reference.is_object() || !reference.contains("Kind") || !reference["Kind"].is_string() ||
 				    !reference.contains("Id") || !reference["Id"].is_string())
 				{
@@ -246,6 +261,12 @@ Result<void> ScriptBehaviourComponent::RestoreSerializedPayload()
 	{
 		return Result<void>::Failure("Cannot restore script fields before creating a managed instance");
 	}
+	SerializationContext context(fieldResourceSession);
+	if (fieldResources)
+	{
+		context.Provide<RenderResourceReferences>(*fieldResources);
+	}
+	SerializationScope scope(&context);
 	return runtime ? runtime->DeserializeFields(instanceToken, serializedPayload)
 	               : Result<void>::Failure("Managed Behaviour runtime is not attached");
 }

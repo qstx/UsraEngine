@@ -86,9 +86,9 @@ int main()
 		ComponentEditors registry;
 		Done(RegisterBuiltinComponentEditors(registry));
 		const auto types = registry.Types();
-		Expect(types.size() == 4 && registry.FindType("ursa.BoxRender") &&
-		           registry.FindType("ursa.BoxRender")->displayName == "Box Renderer" &&
-		           registry.FindType("ursa.BoxRender")->category == "Rendering",
+		Expect(types.size() == 6 && registry.FindType("ursa.MeshRenderer") &&
+		           registry.FindType("ursa.MeshRenderer")->displayName == "Mesh Renderer" &&
+		           registry.FindType("ursa.MeshRenderer")->category == "Rendering",
 		       "Built-in component metadata is incomplete");
 		auto files = std::make_shared<VirtualFileSystem>();
 		Done(files->MountProvider(projectScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
@@ -98,10 +98,10 @@ int main()
 		context.object = GameObject::Create("Catalog target");
 		context.roots = {context.object};
 		context.loadContext = &loadContext;
-		auto box = Take(registry.Create("ursa.BoxRender", context));
-		Expect(box->GetGameObject() == context.object && box->SerializationType() == "ursa.BoxRender",
+		auto box = Take(registry.Create("ursa.MeshRenderer", context));
+		Expect(box->GetGameObject() == context.object && box->SerializationType() == "ursa.MeshRenderer",
 		       "Component factory attached the wrong type or owner");
-		Expect(static_cast<bool>(registry.Create("ursa.BoxRender", context)), "Default component multiplicity changed");
+		Expect(!registry.Create("ursa.MeshRenderer", context), "Renderer multiplicity rule was not enforced");
 		bool enabled = false;
 		Float32 scalar = 0.0f;
 		TestInspectorUI ui;

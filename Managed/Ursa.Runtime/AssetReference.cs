@@ -1,9 +1,11 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace Ursa;
 
 public readonly struct AssetReference
 {
+	[JsonConstructor]
 	public AssetReference(string guid, ulong localFileId = 0)
 	{
 		if (!System.Guid.TryParse(guid, out Guid parsed))

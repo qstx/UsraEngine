@@ -2,6 +2,7 @@
 #include <Core/Types.hpp>
 #include <Serialization/JsonInterop.hpp>
 #include <Serialization/PrefabCapture.hpp>
+#include <Serialization/PrefabLocalResources.hpp>
 #include <algorithm>
 #include <functional>
 
@@ -135,6 +136,13 @@ void CaptureFields(const Json& before, const Json& after, const String& pointer,
 	    before.contains("localFileId") && before["localFileId"].is_number_unsigned() &&
 	    before["localFileId"].get<Ursa::UInt64>() == 0 && after.get<std::string>() == before["guid"].get<std::string>())
 	{
+		return;
+	}
+	if (before.is_object() && after.is_object() && before.contains("kind") && after.contains("kind"))
+	{
+		Json value = after;
+		RemapReferences(value, reverse);
+		properties[ToStdString(pointer)] = std::move(value);
 		return;
 	}
 	if (before.is_object() && after.is_object())
@@ -474,6 +482,46 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 }
 } // namespace
 
+Result<Json> CapturePrefabDocumentChanges(const Json& source, const Json& target)
+{
+	auto baseline = Index(source, "Prefab source");
+	auto current = Index(target, "Prefab candidate");
+	if (!baseline || !current)
+	{
+		return Result<Json>::Failure(baseline ? current.error : baseline.error);
+	}
+	Map<String, String> identities;
+	for (const auto* graph : {&source, &target})
+	{
+		for (const auto& node : (*graph)["gameObjects"])
+		{
+			const auto id = node["id"].get<String>();
+			identities[id] = id;
+			for (const auto& component : node["components"])
+			{
+				const auto componentId = component["id"].get<String>();
+				identities[componentId] = componentId;
+			}
+		}
+		for (const auto& row : graph->value("localResources", Json::array()))
+		{
+			const auto id = row["id"].get<String>();
+			identities[id] = id;
+		}
+	}
+	Json patch = Json::object();
+	const auto instance = source.at("id").get<String>();
+	auto resources = CapturePrefabLocalResources(target, source, instance, identities, patch);
+	if (!resources)
+	{
+		return Result<Json>::Failure(resources.error);
+	}
+	Set<String> nodes, oldNodes, components;
+	auto captured = CaptureInstance(instance, identities, baseline.value, current.value, patch, nodes, oldNodes,
+	                                components, "Prefab document conversion");
+	return captured ? Result<Json>::Success(std::move(patch)) : Result<Json>::Failure(captured.error);
+}
+
 Result<void> CaptureLinkedSceneChanges(const String& path, LinkedSceneResource& linked,
                                        const ComponentRegistry& registry, const MaterialIdResolver& materialId)
 {
@@ -501,6 +549,12 @@ Result<void> CaptureLinkedSceneChanges(const String& path, LinkedSceneResource& 
 		{
 			return Result<void>::Failure("Missing Prefab scope for instance " + id + " at " + path);
 		}
+		auto capturedResources =
+		    CapturePrefabLocalResources(encoded.value, linked.snapshot, id, mapping->second, instance["overrides"]);
+		if (!capturedResources)
+		{
+			return capturedResources;
+		}
 		auto result = CaptureInstance(id, mapping->second, baseline.value, current.value, instance["overrides"],
 		                              currentInstanceNodes, baselineInstanceNodes, currentInstanceComponents, path);
 		if (!result)
@@ -523,6 +577,7 @@ Result<void> CaptureLinkedSceneChanges(const String& path, LinkedSceneResource& 
 			candidate["gameObjects"].push_back(node);
 		}
 	}
+	CaptureRegularLocalResources(candidate, encoded.value);
 	candidate["ambient"] = encoded.value["ambient"];
 	candidate["activeCamera"] = encoded.value["activeCamera"];
 	linked.document = std::move(candidate);

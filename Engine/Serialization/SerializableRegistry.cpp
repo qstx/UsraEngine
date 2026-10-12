@@ -2,6 +2,7 @@
 #include <Scene/Scene.hpp>
 #include <Serialization/PrefabAsset.hpp>
 #include <Shader/ShaderAsset.hpp>
+#include <Mesh/Mesh.hpp>
 
 namespace Ursa
 {
@@ -20,6 +21,16 @@ Result<void> RegisterBuiltinSerializableTypes(SerializableRegistry& registry)
 		result = registry.Register(
 		    "ursa.PrefabAsset", 1, [](SerializationContext&)
 		    { return Result<std::shared_ptr<Serializable>>::Success(std::make_shared<PrefabAsset>()); });
+	}
+	if (result)
+	{
+		result = registry.Register("ursa.Mesh", 1,
+		                           [](SerializationContext&) -> Result<std::shared_ptr<Serializable>>
+		                           {
+			                           auto mesh = Mesh::Create();
+			                           return mesh ? Result<std::shared_ptr<Serializable>>::Success(mesh.value)
+			                                       : Result<std::shared_ptr<Serializable>>::Failure(mesh.error);
+		                           });
 	}
 	if (result)
 	{

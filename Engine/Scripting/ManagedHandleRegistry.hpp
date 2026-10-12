@@ -13,7 +13,9 @@ enum class ManagedHandleKind : UInt32
 {
 	GameObject = 1,
 	Component = 2,
-	Asset = 3
+	Asset = 3,
+	Mesh = 4,
+	Material = 5
 };
 
 struct ManagedHandle

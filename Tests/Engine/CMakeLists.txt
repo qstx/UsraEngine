@@ -1,6 +1,7 @@
 add_subdirectory(Application)
 add_subdirectory(Material)
 add_subdirectory(Math)
+add_subdirectory(Mesh)
 add_subdirectory(Renderer3D)
 add_subdirectory(Scene)
 add_subdirectory(Scripting)

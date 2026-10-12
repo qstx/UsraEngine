@@ -1,3 +1,4 @@
+#include <Serialization/AssetReference.hpp>
 #include <Assets/ProjectBrowserPanel.hpp>
 
 #include <Core/StringInterop.hpp>
@@ -250,6 +251,13 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				auto opened = actions.openAsset(asset);
 				diagnostic = opened ? String{} : opened.error;
 			}
+		}
+		if (!asset.folder && ImGui::BeginDragDropSource())
+		{
+			const AssetReference reference{asset.guid, 0};
+			ImGui::SetDragDropPayload("URSA_ASSET_REFERENCE", &reference, sizeof(reference));
+			ImGui::TextUnformatted(asset.name.c_str());
+			ImGui::EndDragDropSource();
 		}
 		if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 		{
