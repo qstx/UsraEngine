@@ -32,8 +32,8 @@ Result<Json*> FindInstance(Json& document, ResourceId id)
 
 bool AllowedPropertyPath(const String& pointer)
 {
-	return pointer == "/enabled" || pointer == "/name" || pointer.rfind("/localTransform/", 0) == 0 ||
-	       pointer.rfind("/data/", 0) == 0;
+	return pointer == "/enabled" || pointer == "/name" || pointer == "/layer" ||
+	       pointer.rfind("/localTransform/", 0) == 0 || pointer.rfind("/data/", 0) == 0;
 }
 
 Result<void> ApplyProperties(Json& object, const Json& properties, const String& location)

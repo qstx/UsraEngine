@@ -11,6 +11,8 @@ class SerializationContext;
 
 namespace Ursa::Shader
 {
+constexpr UInt32 shaderReflectionFormatVersion = 1;
+
 struct ShaderStageAsset
 {
 	ShaderTarget target = ShaderTarget::VulkanSpirv;
@@ -18,6 +20,8 @@ struct ShaderStageAsset
 	String entryPoint;
 	Vector<UInt8> spirv;
 	String reflectionJson;
+	UInt32 reflectionVersion = shaderReflectionFormatVersion;
+	String reflectionIdentity;
 };
 
 struct ShaderVariantAsset
@@ -25,6 +29,7 @@ struct ShaderVariantAsset
 	Vector<String> keywords;
 	Vector<ShaderStageAsset> stages;
 	bool required = true;
+	String layoutIdentity;
 };
 
 struct ShaderPassAsset
@@ -34,6 +39,9 @@ struct ShaderPassAsset
 	Vector<RenderStateDeclaration> renderStates;
 	Vector<String> reusedPasses;
 	Vector<ShaderVariantAsset> variants;
+	String identity;
+	bool computeKernel = false;
+	Array<UInt32, 3> threadGroupSize{1, 1, 1};
 };
 
 struct ShaderSubShaderAsset

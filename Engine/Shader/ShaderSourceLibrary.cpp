@@ -276,7 +276,8 @@ Result<ShaderSourceLibrary> ShaderSourceLibrary::Load(const VirtualFileSystem& f
 	Map<String, String> ids;
 	for (const VirtualFileEntry& entry : entries.value)
 	{
-		if (!HasSuffix(entry.path.FileName(), ".ursashader"))
+		const bool computeSource = HasSuffix(entry.path.FileName(), ".compute");
+		if (!computeSource && !HasSuffix(entry.path.FileName(), ".ursashader"))
 		{
 			continue;
 		}
@@ -285,7 +286,8 @@ Result<ShaderSourceLibrary> ShaderSourceLibrary::Load(const VirtualFileSystem& f
 		{
 			return Result<ShaderSourceLibrary>::Failure(text.error);
 		}
-		auto parsed = ParseShaderSource(entry.path.ToString(), text.value);
+		auto parsed = computeSource ? ParseComputeSource(entry.path.ToString(), text.value)
+		                            : ParseShaderSource(entry.path.ToString(), text.value);
 		if (!parsed)
 		{
 			if (!requestedSource.relative.empty() && entry.path != requestedSource)

@@ -15,7 +15,7 @@ internal struct NativeHandle
 }
 
 [StructLayout(LayoutKind.Sequential)]
-internal unsafe struct NativeApiV5
+internal unsafe struct NativeApiV6
 {
 	public uint version;
 	public uint size;
@@ -59,12 +59,13 @@ internal unsafe struct NativeApiV5
 	public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> setCameraProjection;
 	public delegate* unmanaged[Cdecl]<nint, byte*, ulong, int> setWindowTitle;
 	public delegate* unmanaged[Cdecl]<nint, byte*, ulong, byte*, ulong, ulong*, int> resourceRequest;
+	public delegate* unmanaged[Cdecl]<nint, byte*, ulong, byte*, ulong, int> submitRenderBatch;
 }
 
 internal static unsafe partial class EngineApi
 {
 	[ThreadStatic]
-	private static NativeApiV5 api;
+	private static NativeApiV6 api;
 	[ThreadStatic]
 	private static bool initialized;
 
@@ -76,8 +77,24 @@ internal static unsafe partial class EngineApi
 
 	internal static void Initialize(nint nativeApi)
 	{
-		api = *(NativeApiV5*)nativeApi;
+		api = *(NativeApiV6*)nativeApi;
 		initialized = true;
+	}
+
+	internal static void SubmitRenderBatch(ReadOnlySpan<byte> token, ReadOnlySpan<byte> batch)
+	{
+		RequireInitialized();
+		if (api.submitRenderBatch == null)
+		{
+			throw new InvalidOperationException("This host does not have a native render-batch API.");
+		}
+		fixed (byte* tokenData = token)
+		fixed (byte* batchData = batch)
+		{
+			int status = api.submitRenderBatch(api.sceneContext, tokenData, (ulong)token.Length, batchData,
+			                                   (ulong)batch.Length);
+			Check(status, "submit render batch");
+		}
 	}
 
 	internal static GameObject CreateGameObject(string name)

@@ -230,6 +230,47 @@ void TestSharedAndLegacy(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& r
 	       "Material replacement, clone, or legacy color path failed");
 }
 
+void TestLegacyPbrMaterialBackingReuse(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+{
+	auto ceramic = Material(Ursa::MaterialType::PbrMetallicRoughness, {0.12f, 0.45f, 0.95f, 1});
+	auto gold = Material(Ursa::MaterialType::PbrMetallicRoughness, {0.95f, 0.55f, 0.16f, 1});
+	done(gold->SetMetallic(1.0f));
+	done(gold->SetRoughness(0.25f));
+	const Ursa::Vector<Ursa::ModelBoxInstance> boxes{
+	    box({-0.8f, 0, 0}, {0.8f, 0.8f, 0.8f}, ceramic),
+	    box({0.8f, 0, 0}, {0.8f, 0.8f, 0.8f}, gold),
+	};
+	for (Ursa::UInt32 frame = 0; frame < 24; ++frame)
+	{
+		const auto image = ReadFrame(device, renderer, boxes, sun());
+		const auto ceramicPixel = pixel(image, 20, 32);
+		const auto goldPixel = pixel(image, 44, 32);
+		Expect(ceramicPixel[2] > ceramicPixel[0] && goldPixel[0] > goldPixel[2],
+		       "Legacy PBR material backing reused another material's uniform data between frames");
+	}
+}
+
+void TestRecordedOffscreenFramesTrackDepthState(const Ursa::Rhi::DevicePtr& device)
+{
+	using namespace Ursa::Rhi;
+	auto renderer = Take(Ursa::Renderer3D::Create(device));
+	auto color = Take(
+	    device->CreateTexture({64, 64, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::Sampled}));
+	Ursa::Camera camera;
+	camera.position = {0, 0, 5};
+	camera.target = {};
+	for (Ursa::UInt32 frame = 0; frame < 4; ++frame)
+	{
+		auto command = Take(device->CreateCommandList());
+		done(command->Begin());
+		done(renderer->RecordOffscreenModels(command, color,
+		                                     frame == 0 ? ResourceState::Undefined : ResourceState::ShaderRead,
+		                                     ResourceState::ShaderRead, camera.ViewProjection(1.0f), {}));
+		done(command->End());
+		done(Take(device->Submit(command))->Wait());
+	}
+}
+
 class SwapMaterialOnUpdate final : public Ursa::Component
 {
 public:
@@ -339,6 +380,8 @@ int main()
 		TestPbrMapsAndLighting(device, *renderer);
 		TestTransformedNormals(device, *renderer);
 		TestSharedAndLegacy(device, *renderer);
+		TestLegacyPbrMaterialBackingReuse(device, *renderer);
+		TestRecordedOffscreenFramesTrackDepthState(device);
 		TestSceneMaterialReplacement(device, *renderer);
 		TestAlphaModes(device, *renderer);
 		renderer.reset();

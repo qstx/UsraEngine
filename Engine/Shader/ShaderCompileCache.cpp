@@ -222,7 +222,7 @@ String ShaderCompileCache::ComputeKey(const ShaderCompileRequest& request, const
                                       ShaderTarget target, const Vector<String>& keywords)
 {
 	StableHash hash;
-	hash.Add("UrsaShaderCompileCacheV1");
+	hash.Add("UrsaShaderCompileCacheV2");
 	hash.Add(request.sourcePath.ToString());
 	hash.Add(compilerVersion);
 	hash.Add(TargetName(target));

@@ -84,6 +84,22 @@ GameObject::Ptr GameObject::Parent() const
 	return parent ? parent->shared_from_this() : Ptr{};
 }
 
+Result<UInt32> GameObject::Layer() const
+{
+	return alive ? Result<UInt32>::Success(layer)
+	             : Result<UInt32>::Failure("Cannot query a destroyed GameObject layer");
+}
+
+Result<void> GameObject::SetLayer(UInt32 value)
+{
+	if (!alive || value > 31)
+	{
+		return Result<void>::Failure("GameObject layer must be between 0 and 31 on a live object");
+	}
+	layer = value;
+	return {};
+}
+
 Result<void> GameObject::SetParent(Ptr newParentHandle)
 {
 	GameObject* newParent = newParentHandle.get();

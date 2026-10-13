@@ -46,7 +46,9 @@ void WriteText(VirtualFileSystem& filesystem, const char* path, const char* text
 
 CompiledShaderStage MakeStage(ProgramStage stage, const char* entryPoint)
 {
-	return {stage, entryPoint, {0x03, 0x02, 0x23, 0x07}, "{\"entryPoints\":[]}", "DXC test", {}};
+	const char* mode = stage == ProgramStage::Vertex ? "vert" : stage == ProgramStage::Fragment ? "frag" : "comp";
+	const String reflection = String("{\"entryPoints\":[{\"name\":\"") + entryPoint + "\",\"mode\":\"" + mode + "\"}]}";
+	return {stage, entryPoint, {0x03, 0x02, 0x23, 0x07}, reflection, "DXC test", {}};
 }
 } // namespace
 
@@ -79,6 +81,30 @@ int main()
 		auto asset = BuildShaderAsset(*source, library.value, dependencies.value, "source-hash-1", "DXC test",
 		                              {passCompilation, optionalCompilation});
 		Expect(static_cast<bool>(asset), "Compiled Shader asset metadata could not be built");
+		auto rebuiltAsset = BuildShaderAsset(*source, library.value, dependencies.value, "source-hash-1", "DXC test",
+		                                     {passCompilation, optionalCompilation});
+		Expect(rebuiltAsset &&
+		           rebuiltAsset.value.subShaders[0].passes[0].identity ==
+		               asset.value.subShaders[0].passes[0].identity &&
+		           rebuiltAsset.value.subShaders[0].passes[0].variants[0].layoutIdentity ==
+		               asset.value.subShaders[0].passes[0].variants[0].layoutIdentity &&
+		           rebuiltAsset.value.subShaders[0].passes[0].variants[0].stages[0].reflectionIdentity ==
+		               asset.value.subShaders[0].passes[0].variants[0].stages[0].reflectionIdentity,
+		       "Shader Pass, layout, or reflection identities were not stable across imports");
+		auto changedReflection = passCompilation;
+		changedReflection.stages[0].reflectionJson =
+		    "{\"entryPoints\":[{\"name\":\"VSMain\",\"mode\":\"vert\"}],"
+		    "\"inputs\":[{\"name\":\"NORMAL\",\"type\":\"float3\",\"location\":1}]}";
+		auto changedAsset = BuildShaderAsset(*source, library.value, dependencies.value, "source-hash-1", "DXC test",
+		                                     {changedReflection});
+		Expect(changedAsset &&
+		           changedAsset.value.subShaders[0].passes[0].identity ==
+		               asset.value.subShaders[0].passes[0].identity &&
+		           changedAsset.value.subShaders[0].passes[0].variants[0].layoutIdentity !=
+		               asset.value.subShaders[0].passes[0].variants[0].layoutIdentity &&
+		           changedAsset.value.subShaders[0].passes[0].variants[0].stages[0].reflectionIdentity !=
+		               asset.value.subShaders[0].passes[0].variants[0].stages[0].reflectionIdentity,
+		       "Reflection/layout changes did not update their identities while preserving Pass identity");
 		const auto assetPath = VirtualPath::Parse("prj:Imported/Asset.ursashaderasset").value;
 		Expect(static_cast<bool>(SaveShaderAssetResource(filesystem, assetPath, asset.value)),
 		       "Shader asset could not be saved through VFS");
@@ -109,9 +135,13 @@ int main()
 		       "Shader source identity or metadata was not restored");
 		Expect(loaded.value->subShaders[0].passes[0].variants.size() == 2 &&
 		           loaded.value->subShaders[0].passes[0].variants[0].stages.size() == 2 &&
+		           !loaded.value->subShaders[0].passes[0].identity.empty() &&
+		           !loaded.value->subShaders[0].passes[0].variants[0].layoutIdentity.empty() &&
+		           !loaded.value->subShaders[0].passes[0].variants[0].stages[0].reflectionIdentity.empty() &&
 		           loaded.value->subShaders[0].passes[0].variants[0].required &&
 		           !loaded.value->subShaders[0].passes[0].variants[1].required &&
-		           loaded.value->subShaders[0].passes[0].variants[0].stages[1].reflectionJson == "{\"entryPoints\":[]}",
+		           loaded.value->subShaders[0].passes[0].variants[0].stages[1].reflectionJson ==
+		               "{\"entryPoints\":[{\"name\":\"PSMain\",\"mode\":\"frag\"}]}",
 		       "Shader variants, backend bytecode, or reflection metadata were not restored");
 		auto cached = session.value->LoadShader(source->source.id);
 		Expect(static_cast<bool>(cached) && cached.value == loaded.value,
@@ -120,6 +150,16 @@ int main()
 		Expect(loadedMaterial && loadedMaterial.value->ShaderId() == source->source.id &&
 		           loadedMaterial.value->ValidateAgainstShader(*loaded.value),
 		       "Resource session did not validate a Shader-backed material reference");
+
+		const auto oldAssetPath = Path("prj:Imported/OldFormat.ursashaderasset");
+		Expect(static_cast<bool>(SaveShaderAssetResource(filesystem, oldAssetPath, asset.value)),
+		       "Cannot save old-format Shader fixture");
+		auto oldBytes = filesystem.Read(oldAssetPath);
+		Expect(oldBytes && oldBytes.value.size() > 8, "Cannot read old-format Shader fixture");
+		oldBytes.value[8] = 1;
+		Expect(static_cast<bool>(filesystem.WriteAtomic(oldAssetPath, oldBytes.value, true)),
+		       "Cannot rewrite old Shader resource version fixture");
+		Expect(!LoadShaderAssetResource(filesystem, oldAssetPath), "Legacy Shader artifact was not rejected");
 
 		MaterialInstance missingShaderMaterial(MaterialType::Unlit);
 		const ResourceId missingShaderId = ResourceId::Generate();

@@ -7,6 +7,7 @@
 #include <Core/Memory/MemoryFactories.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/RenderResourceReferences.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -65,6 +66,26 @@ ManagedHandle ReadHandle(const Json& value)
 	}
 	return {session, Index(value.at("index")), Index(value.at("generation")),
 	        ManagedHandleKind(Index(value.at("kind"))), Index(value.at("reserved"))};
+}
+
+Rendering::RenderContextToken ReadRenderToken(const Json& value)
+{
+	return {Unsigned(value.at("sessionId")), Unsigned(value.at("frameId")), Index(value.at("index")),
+	        Index(value.at("generation"))};
+}
+
+Json RenderTokenJson(const Rendering::RenderContextToken& token)
+{
+	return {{"sessionId", token.sessionId},
+	        {"frameId", token.frameId},
+	        {"index", token.index},
+	        {"generation", token.generation}};
+}
+
+bool SameRenderToken(const Rendering::RenderContextToken& left, const Rendering::RenderContextToken& right)
+{
+	return left.sessionId == right.sessionId && left.frameId == right.frameId && left.index == right.index &&
+	       left.generation == right.generation;
 }
 
 UInt64 Unsigned(const Json& value)
@@ -273,6 +294,26 @@ Result<std::shared_ptr<MaterialInstance>> ManagedSceneApi::ResolveMaterial(const
 	                                                                      : valid.error);
 }
 
+Result<std::shared_ptr<ManagedSceneApi::ManagedRenderTexture>>
+ManagedSceneApi::ResolveRenderTexture(const ManagedHandle& handle) const
+{
+	auto valid = handles->Resolve(handle, ManagedHandleKind::RenderTexture);
+	auto found = ownedRenderTextures.find(handle.index);
+	return valid && found != ownedRenderTextures.end()
+	           ? Result<std::shared_ptr<ManagedRenderTexture>>::Success(found->second)
+	           : Result<std::shared_ptr<ManagedRenderTexture>>::Failure("RenderTexture handle is stale");
+}
+
+Result<std::shared_ptr<ManagedSceneApi::ManagedGraphicsBuffer>>
+ManagedSceneApi::ResolveGraphicsBuffer(const ManagedHandle& handle) const
+{
+	auto valid = handles->Resolve(handle, ManagedHandleKind::GraphicsBuffer);
+	auto found = ownedGraphicsBuffers.find(handle.index);
+	return valid && found != ownedGraphicsBuffers.end()
+	           ? Result<std::shared_ptr<ManagedGraphicsBuffer>>::Success(found->second)
+	           : Result<std::shared_ptr<ManagedGraphicsBuffer>>::Failure("GraphicsBuffer handle is stale");
+}
+
 Int32 ManagedSceneApi::ResourceRequest(void* context, const UInt8* input, UInt64 length, UInt8* output, UInt64 capacity,
                                        UInt64* required)
 {
@@ -311,6 +352,215 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 {
 	const auto operation = request.at("operation").get<std::string>();
 	const auto handle = ReadHandle(request.value("handle", Json(nullptr)));
+	if (operation == "render.context.begin")
+	{
+		if (std::this_thread::get_id() != ownerThread || activeRenderToken)
+		{
+			throw std::runtime_error("Render context begin requires the owner thread and a closed frame");
+		}
+		const UInt64 frameId = Unsigned(request.at("frameId"));
+		const Float32 aspect = request.at("aspect").get<Float32>();
+		if (frameId == 0 || !std::isfinite(aspect) || aspect <= 0)
+		{
+			throw std::runtime_error("Render frame ID or camera aspect is invalid");
+		}
+		auto captured = renderScene.Capture(scene, aspect);
+		if (!captured)
+		{
+			throw std::runtime_error(ToStdString(captured.error));
+		}
+		auto begun = renderSceneContext.Begin(renderSessionId, frameId, renderScene);
+		if (!begun)
+		{
+			throw std::runtime_error(ToStdString(begun.error));
+		}
+		activeRenderToken = begun.value;
+		activeRenderCamera.clear();
+		return {{"context", RenderTokenJson(begun.value)}};
+	}
+	if (operation == "render.context.end")
+	{
+		if (!activeRenderToken || !SameRenderToken(ReadRenderToken(request.at("context")), *activeRenderToken))
+		{
+			throw std::runtime_error("Render context token is stale or belongs to another session");
+		}
+		auto ended = renderSceneContext.End();
+		if (!ended)
+		{
+			throw std::runtime_error(ToStdString(ended.error));
+		}
+		activeRenderToken.reset();
+		activeRenderCamera.clear();
+		renderBatches.clear();
+		renderBatchResources.clear();
+		return nullptr;
+	}
+	if (operation == "render.camera.setup")
+	{
+		const auto token = ReadRenderToken(request.at("context"));
+		if (!activeRenderToken || !SameRenderToken(token, *activeRenderToken))
+		{
+			throw std::runtime_error("Camera setup uses a stale render context token");
+		}
+		auto cameraId = ResourceId::Parse(ToUrsaString(request.at("cameraPersistentId").get<std::string>()));
+		if (!cameraId)
+		{
+			throw std::runtime_error(ToStdString(cameraId.error));
+		}
+		const auto camera =
+		    std::find_if(renderScene.Cameras().begin(), renderScene.Cameras().end(),
+		                 [&](const Rendering::CameraData& candidate) { return candidate.identity == cameraId.value; });
+		if (camera == renderScene.Cameras().end())
+		{
+			throw std::runtime_error("Camera does not belong to the captured RenderScene");
+		}
+		activeRenderCamera = cameraId.value.ToString();
+		return nullptr;
+	}
+	if (operation == "render.cull")
+	{
+		const auto token = ReadRenderToken(request.at("context"));
+		if (!activeRenderToken || !SameRenderToken(token, *activeRenderToken))
+		{
+			throw std::runtime_error("Cull request uses a stale render context token");
+		}
+		Done(renderSceneContext.Validate(token));
+		auto cameraId = ResourceId::Parse(ToUrsaString(request.at("cameraPersistentId").get<std::string>()));
+		if (!cameraId)
+		{
+			throw std::runtime_error(ToStdString(cameraId.error));
+		}
+		const auto camera =
+		    std::find_if(renderScene.Cameras().begin(), renderScene.Cameras().end(),
+		                 [&](const Rendering::CameraData& candidate) { return candidate.identity == cameraId.value; });
+		if (camera == renderScene.Cameras().end())
+		{
+			throw std::runtime_error("Camera does not belong to the captured RenderScene");
+		}
+		if (!activeRenderCamera.empty() && activeRenderCamera != cameraId.value.ToString())
+		{
+			throw std::runtime_error("Cull camera differs from the active camera properties");
+		}
+		auto results = renderSceneContext.Cull(*camera);
+		if (!results)
+		{
+			throw std::runtime_error(ToStdString(results.error));
+		}
+		return {{"context", RenderTokenJson(results.value.context)},
+		        {"index", results.value.index},
+		        {"generation", results.value.generation}};
+	}
+	if (operation == "render.rendererList.create")
+	{
+		const auto token = ReadRenderToken(request.at("context"));
+		if (!activeRenderToken || !SameRenderToken(token, *activeRenderToken))
+		{
+			throw std::runtime_error("RendererList request uses a stale render context token");
+		}
+		Rendering::CullingResults culling;
+		culling.context = ReadRenderToken(request.at("cullingContext"));
+		culling.index = Index(request.at("cullingIndex"));
+		culling.generation = Index(request.at("cullingGeneration"));
+		Rendering::DrawingSettings drawing;
+		if (request.contains("shaderTags"))
+		{
+			if (!request["shaderTags"].is_array())
+			{
+				throw std::runtime_error("RendererList ShaderTag list must be an array");
+			}
+			for (const Json& tag : request["shaderTags"])
+			{
+				if (!tag.is_string())
+				{
+					throw std::runtime_error("RendererList ShaderTag must be a string");
+				}
+				drawing.shaderTags.push_back({ToUrsaString(tag.get<std::string>())});
+			}
+		}
+		const UInt32 criteria = request.value("sortingCriteria", UInt32{1});
+		if (criteria > static_cast<UInt32>(Rendering::SortingCriteria::CommonTransparent))
+		{
+			throw std::runtime_error("RendererList sorting criteria is invalid");
+		}
+		drawing.sorting.criteria = static_cast<Rendering::SortingCriteria>(criteria);
+		if (request.contains("cameraPosition"))
+		{
+			const auto& position = request.at("cameraPosition");
+			if (!position.is_array() || position.size() != 3 || !position[0].is_number() || !position[1].is_number() ||
+			    !position[2].is_number())
+			{
+				throw std::runtime_error("RendererList camera position must be a three-element numeric array");
+			}
+			drawing.sorting.cameraPosition = {position[0].get<Float32>(), position[1].get<Float32>(),
+			                                  position[2].get<Float32>()};
+		}
+		drawing.activePipeline = ToUrsaString(request.value("activePipeline", std::string("UrsaForward")));
+		drawing.overrideMaterialPass = request.value("overrideMaterialPass", Int32{-1});
+		const Int32 minimumQueue = request.value("minimumQueue", Int32{0});
+		const Int32 maximumQueue = request.value("maximumQueue", Int32{5000});
+		const UInt32 layerMask = request.value("layerMask", UInt32{0xffffffffu});
+		auto list = renderSceneContext.CreateRendererList(culling, drawing, {minimumQueue, maximumQueue, layerMask});
+		if (!list)
+		{
+			throw std::runtime_error(ToStdString(list.error));
+		}
+		return {{"context", RenderTokenJson(list.value.context)},
+		        {"index", list.value.index},
+		        {"generation", list.value.generation}};
+	}
+	if (operation == "scriptableasset.graph.load")
+	{
+		if (!resources)
+		{
+			throw std::runtime_error("ScriptableAsset loading requires a ResourceSession");
+		}
+		auto guid = ResourceId::Parse(ToUrsaString(request.at("guid").get<std::string>()));
+		if (!guid)
+		{
+			throw std::runtime_error(ToStdString(guid.error));
+		}
+		const AssetReference root{guid.value, Unsigned(request.at("localFileId"))};
+		auto graph = Take(LoadScriptableAssetGraph(*resources, root));
+		Json result = Json::array();
+		for (const auto& asset : graph.assets)
+		{
+			result.push_back({{"guid", ToStdString(asset.SourceGuid().ToString())},
+			                  {"localFileId", asset.LocalFileId()},
+			                  {"typeId", ToStdString(asset.TypeId())},
+			                  {"typeVersion", asset.TypeVersion()},
+			                  {"payload", asset.Payload()}});
+		}
+		return result;
+	}
+	if (operation == "gameObject.layer.get")
+	{
+		return Take(Take(Resolve(handle))->Layer());
+	}
+	if (operation == "gameObject.layer.set")
+	{
+		Done(Take(Resolve(handle))->SetLayer(request.at("value").get<UInt32>()));
+		return nullptr;
+	}
+	if (operation == "camera.settings.get" || operation == "camera.settings.set")
+	{
+		auto* camera = dynamic_cast<CameraComponent*>(Take(ResolveComponent(handle)));
+		if (!camera)
+		{
+			throw std::runtime_error("Camera rendering settings require a CameraComponent");
+		}
+		ArchiveWriter writer;
+		Done(camera->Serialize(writer));
+		auto document = Take(ArchiveToJson(writer));
+		if (operation == "camera.settings.get")
+		{
+			return document.at("rendering");
+		}
+		document["rendering"] = request.at("data");
+		auto reader = Take(ArchiveFromJson(document));
+		SerializationContext context;
+		Done(camera->Deserialize(reader, context));
+		return nullptr;
+	}
 	if (operation == "gameObject.primitive")
 	{
 		if (!resources)
@@ -378,9 +628,139 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 		{
 			return false;
 		}
-		return handle.kind == ManagedHandleKind::Mesh
-		           ? bool(ResolveMesh(handle))
-		           : handle.kind == ManagedHandleKind::Material && bool(ResolveMaterial(handle));
+		if (handle.kind == ManagedHandleKind::Asset)
+		{
+			return bool(handles->Resolve(handle, ManagedHandleKind::Asset)) &&
+			       ownedTextures.find(handle.index) != ownedTextures.end();
+		}
+		if (handle.kind == ManagedHandleKind::Mesh)
+		{
+			return bool(ResolveMesh(handle));
+		}
+		if (handle.kind == ManagedHandleKind::Material)
+		{
+			return bool(ResolveMaterial(handle));
+		}
+		if (handle.kind == ManagedHandleKind::RenderTexture)
+		{
+			return bool(ResolveRenderTexture(handle));
+		}
+		return handle.kind == ManagedHandleKind::GraphicsBuffer && bool(ResolveGraphicsBuffer(handle));
+	}
+	if (operation == "renderTexture.create")
+	{
+		if (!device)
+		{
+			throw std::runtime_error("RenderTexture creation requires an active RHI device");
+		}
+		const UInt32 width = Index(request.at("width"));
+		const UInt32 height = Index(request.at("height"));
+		const UInt32 formatIndex = Index(request.at("format"));
+		const UInt32 depthBits = Index(request.at("depthBufferBits"));
+		const bool randomWrite = request.at("enableRandomWrite").get<bool>();
+		const UInt32 samples = Index(request.at("msaaSamples"));
+		const auto& capabilities = device->Capabilities();
+		if (!width || !height || width > capabilities.maxTextureSize || height > capabilities.maxTextureSize ||
+		    formatIndex > 2 || samples != 1 || (depthBits != 0 && depthBits != 32))
+		{
+			throw std::runtime_error("RenderTexture dimensions, format, depth or sample count exceed RHI capabilities");
+		}
+		const Rhi::Format colorFormat = formatIndex == 1 ? Rhi::Format::RgbA16Float : Rhi::Format::RgbA8Unorm;
+		auto texture = std::make_shared<ManagedRenderTexture>();
+		if (formatIndex != 2)
+		{
+			auto format = Take(device->QueryFormat(colorFormat));
+			if (!format.colorAttachment || !format.sampled || (randomWrite && !format.storage))
+			{
+				throw std::runtime_error(
+				    "RenderTexture color format does not support its requested attachment/sample/storage usages");
+			}
+			Rhi::TextureUsage usage = Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled |
+			                          Rhi::TextureUsage::TransferSource | Rhi::TextureUsage::TransferDestination;
+			if (randomWrite)
+			{
+				usage = usage | Rhi::TextureUsage::Storage;
+			}
+			texture->color = Take(device->CreateTexture({width, height, colorFormat, usage, 1}));
+		}
+		if (depthBits || formatIndex == 2)
+		{
+			auto format = Take(device->QueryFormat(Rhi::Format::D32Float));
+			if (!format.depthAttachment || (randomWrite && !format.storage))
+			{
+				throw std::runtime_error("RenderTexture depth format does not support requested usage");
+			}
+			Rhi::TextureUsage usage = Rhi::TextureUsage::DepthAttachment | Rhi::TextureUsage::Sampled |
+			                          Rhi::TextureUsage::TransferSource | Rhi::TextureUsage::TransferDestination;
+			if (randomWrite)
+			{
+				usage = usage | Rhi::TextureUsage::Storage;
+			}
+			texture->depth = Take(device->CreateTexture({width, height, Rhi::Format::D32Float, usage, 1}));
+		}
+		auto handleResult = handles->Register(texture.get(), ManagedHandleKind::RenderTexture);
+		if (!handleResult)
+		{
+			throw std::runtime_error(ToStdString(handleResult.error));
+		}
+		ownedRenderTextures[handleResult.value.index] = std::move(texture);
+		return HandleJson(handleResult.value);
+	}
+	if (operation == "renderTexture.release")
+	{
+		Take(handles->Resolve(handle, ManagedHandleKind::RenderTexture));
+		Done(handles->Invalidate(handle));
+		ownedRenderTextures.erase(handle.index);
+		return nullptr;
+	}
+	if (operation == "graphicsBuffer.create")
+	{
+		if (!device)
+		{
+			throw std::runtime_error("GraphicsBuffer creation requires an active RHI device");
+		}
+		const UInt32 target = Index(request.at("target"));
+		const UInt32 count = Index(request.at("count"));
+		const UInt32 stride = Index(request.at("stride"));
+		if (!target || (target & ~31u) || !count || !stride ||
+		    Size(count) > (std::numeric_limits<Size>::max)() / stride)
+		{
+			throw std::runtime_error("GraphicsBuffer target, count or stride is invalid");
+		}
+		const Size byteSize = Size(count) * stride;
+		if ((target & (4u | 8u)) && byteSize > device->Capabilities().maxStorageBufferRange)
+		{
+			throw std::runtime_error("GraphicsBuffer exceeds the RHI storage buffer range capability");
+		}
+		Rhi::BufferUsage usage = Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::TransferDestination;
+		if (target & 1u)
+		{
+			usage = usage | Rhi::BufferUsage::Vertex;
+		}
+		if (target & 2u)
+		{
+			usage = usage | Rhi::BufferUsage::Index;
+		}
+		if (target & (4u | 8u | 16u))
+		{
+			usage = usage | Rhi::BufferUsage::Storage;
+		}
+		auto resource = std::make_shared<ManagedGraphicsBuffer>();
+		resource->buffer = Take(device->CreateBuffer({byteSize, usage, Rhi::Memory::Gpu}));
+		auto handleResult = handles->Register(resource.get(), ManagedHandleKind::GraphicsBuffer);
+		if (!handleResult)
+		{
+			throw std::runtime_error(ToStdString(handleResult.error));
+		}
+		ownedGraphicsBuffers[handleResult.value.index] = std::move(resource);
+		return HandleJson(handleResult.value);
+	}
+	if (operation == "graphicsBuffer.release")
+	{
+		Take(handles->Resolve(handle, ManagedHandleKind::GraphicsBuffer));
+		Done(handles->Invalidate(handle));
+		ownedGraphicsBuffers.erase(handle.index);
+		return nullptr;
 	}
 	if (operation == "resource.reference")
 	{

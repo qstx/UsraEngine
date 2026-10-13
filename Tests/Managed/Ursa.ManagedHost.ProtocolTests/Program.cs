@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -28,6 +29,41 @@ internal static unsafe class Program
 		internal float[] values = Array.Empty<float>();
 	}
 
+	private sealed class PipelineProbeAsset : Ursa.Rendering.RenderPipelineAsset
+	{
+		internal int renders;
+		internal int disposals;
+		internal int cameraCount;
+		internal System.Collections.Generic.List<CameraComponent>? receivedCameras;
+		internal bool failFactory;
+
+		protected override Ursa.Rendering.RenderPipeline CreatePipeline()
+		{
+			if (failFactory) throw new InvalidOperationException("pipeline factory probe");
+			return new PipelineProbe(this);
+		}
+	}
+
+	private sealed class PipelineProbe : Ursa.Rendering.RenderPipeline
+	{
+		private readonly PipelineProbeAsset owner;
+		internal PipelineProbe(PipelineProbeAsset selected) => owner = selected;
+		public override void Render(Ursa.Rendering.ScriptableRenderContext context,
+			System.Collections.Generic.List<CameraComponent> cameras)
+		{
+			++owner.renders;
+			owner.receivedCameras = cameras;
+			foreach (CameraComponent camera in cameras)
+			{
+				++owner.cameraCount;
+				Ursa.Rendering.RenderPipelineManager.BeginCamera(context, camera);
+				try { context.SetupCameraProperties(camera); }
+				finally { Ursa.Rendering.RenderPipelineManager.EndCamera(context, camera); }
+			}
+		}
+		protected override void Dispose(bool disposing) => ++owner.disposals;
+	}
+
 	private static readonly System.Collections.Generic.Dictionary<uint, FakeObject> fakeObjects = new();
 	private static readonly System.Collections.Generic.Dictionary<uint, FakeComponent> fakeComponents = new();
 	private static uint nextFakeObject = 1;
@@ -40,6 +76,9 @@ internal static unsafe class Program
 	private static string fakeLog = string.Empty;
 	private static uint fakeLogLevel;
 	private static string fakeWindowTitle = string.Empty;
+	private static int renderBatchSubmissions;
+	private static readonly System.Collections.Generic.List<byte[]> submittedRenderBatches = new();
+	private static ulong renderSessionIdentity = 90;
 	private const string fakeTextureGuid = "11111111-1111-4111-8111-111111111111";
 	private const string fakeMaterialGuid = "22222222-2222-4222-8222-222222222222";
 
@@ -55,6 +94,21 @@ internal static unsafe class Program
 
 	private static void Log(nint context, uint level, byte* message, ulong length)
 	{
+	}
+
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+	private static int SubmitRenderBatch(nint context, byte* token, ulong tokenSize, byte* batch, ulong batchSize)
+	{
+		if (token == null || tokenSize != 24 || batch == null || batchSize < 16 || batchSize > 64 * 1024 * 1024)
+			return 1;
+		var bytes = new ReadOnlySpan<byte>(batch, checked((int)batchSize));
+		if (BinaryPrimitives.ReadUInt32LittleEndian(bytes) != 1 ||
+		    BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]) != 16 ||
+		    BinaryPrimitives.ReadUInt32LittleEndian(bytes[12..]) != batchSize)
+			return 1;
+		submittedRenderBatches.Add(bytes.ToArray());
+		++renderBatchSubmissions;
+		return 0;
 	}
 
 	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
@@ -493,8 +547,13 @@ internal static unsafe class Program
 			var request = document.RootElement;
 			object response = request.GetProperty("operation").GetString() switch
 			{
+				"render.context.begin" => new { value = (object)new { context = new { sessionId = ++renderSessionIdentity, frameId = request.GetProperty("frameId").GetUInt64(), index = 1U, generation = 1U } } },
+				"render.camera.setup" => new { value = (object?)null },
+				"render.cull" => new { value = (object)new { context = request.GetProperty("context"), index = 0U, generation = 1U } },
+				"render.rendererList.create" => new { value = (object)new { context = request.GetProperty("context"), index = 0U, generation = 1U } },
+				"render.context.end" => new { value = (object?)null },
 				"material.load" when request.GetProperty("guid").GetString() == fakeMaterialGuid => new { value = (object)new { sessionId = 1UL, index = 202U, generation = 1U, kind = 5U, reserved = 0U } },
-				"resource.valid" => new { value = (object)(request.GetProperty("handle").GetProperty("index").GetUInt32() == 202U) },
+				"resource.valid" => new { value = (object)(request.GetProperty("handle").GetProperty("index").GetUInt32() is 201U or 202U) },
 				_ => (object)new { error = "Unsupported protocol fixture resource request" }
 			};
 			resourceResponse = System.Text.Json.JsonSerializer.Serialize(response);
@@ -509,21 +568,220 @@ internal static unsafe class Program
 
 	private static int Validate(uint version, uint size, bool hasCallback, int argumentSize)
 	{
-		Bootstrap.NativeApiV5 api = new() { version = version, size = size, context = 0, sceneContext = 123,
-			                                logUtf8 = hasCallback ? &Log : null };
+		Bootstrap.NativeApiV6 api = new() { version = version, size = size, context = 0, sceneContext = 123,
+			                                logUtf8 = hasCallback ? &Log : null,
+			                                submitRenderBatch = hasCallback ? &SubmitRenderBatch : null };
 		return Bootstrap.Validate((nint)(&api), argumentSize);
+	}
+
+	private static void ManagedRenderContextApiTests()
+	{
+		GameObject owner = GameObject.Create("Render Camera");
+		CameraComponent camera = owner.AddComponent<CameraComponent>();
+		var drawing = new Ursa.Rendering.DrawingSettings { ShaderTags = new[] { "SRPDefaultUnlit" } };
+		var filtering = new Ursa.Rendering.FilteringSettings();
+		using var context = new Ursa.Rendering.ScriptableRenderContext(1.0f);
+		context.SetupCameraProperties(camera);
+		var culling = context.Cull(camera);
+		var list = context.CreateRendererList(culling, drawing, filtering);
+		Expect(list.Generation != 0, "Managed ScriptableRenderContext did not create a RendererList");
+		using var commands = new Ursa.Rendering.CommandBuffer("two-camera-lists");
+		commands.DrawRendererList(list, context);
+		int previousBatchCount = submittedRenderBatches.Count;
+		commands.Execute(context);
+		commands.Clear();
+		GameObject secondOwner = GameObject.Create("Second Render Camera");
+		CameraComponent secondCamera = secondOwner.AddComponent<CameraComponent>();
+		context.SetupCameraProperties(secondCamera);
+		var secondList = context.CreateRendererList(context.Cull(secondCamera), drawing, filtering);
+		commands.DrawRendererList(secondList, context);
+		commands.Execute(context);
+		Expect(submittedRenderBatches.Count == previousBatchCount + 2 &&
+		       BinaryPrimitives.ReadUInt32LittleEndian(submittedRenderBatches[^2].AsSpan(8)) == 1 &&
+		       BinaryPrimitives.ReadUInt32LittleEndian(submittedRenderBatches[^1].AsSpan(8)) == 1,
+		       "Managed context did not submit RendererLists for two cameras in order");
+		using var otherContext = new Ursa.Rendering.ScriptableRenderContext(1.0f);
+		bool staleRejected = false;
+		try
+		{
+			otherContext.CreateRendererList(culling, drawing, filtering);
+		}
+		catch (InvalidOperationException)
+		{
+			staleRejected = true;
+		}
+		Expect(staleRejected, "Managed ScriptableRenderContext accepted CullingResults from another frame/session");
+	}
+
+	private static void ManagedCommandBufferApiTests()
+	{
+		using var context = new Ursa.Rendering.ScriptableRenderContext(1.0f);
+		using var commands = new Ursa.Rendering.CommandBuffer("command-buffer-test");
+		var mesh = Ursa.Mesh.FromHandle(new Ursa.NativeHandle { sessionId = 1, index = 201, generation = 1, kind = 4 });
+		var meshReference = new WeakReference(mesh!);
+		var material = Ursa.Material.Load(new AssetReference(fakeMaterialGuid, 0));
+		commands.SetRenderTarget(12);
+		commands.ClearTarget(true, true, false, new Ursa.Vector4(0.1f, 0.2f, 0.3f, 1));
+		commands.SetViewport(0, 0, 640, 480);
+		commands.SetScissor(0, 0, 640, 480);
+		commands.DrawMesh(mesh!, material!, new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 });
+		commands.Execute(context);
+		Expect(submittedRenderBatches.Count > 0, "CommandBuffer did not submit a batch");
+		byte[] executedBatch = submittedRenderBatches[^1];
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(8)) == 5,
+		       "CommandBuffer did not preserve command count");
+		uint[] expectedOpcodes = { 1, 2, 3, 12, 5 };
+		int offset = 16;
+		foreach (uint opcode in expectedOpcodes)
+		{
+			Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(offset)) == opcode,
+			       "CommandBuffer changed recorded command order");
+			offset += checked((int)BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(offset + 4)));
+		}
+		mesh = null;
+		material = null;
+		commands.Clear();
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
+		Expect(meshReference.IsAlive, "Clearing an executed CommandBuffer released a resource retained by its context");
+		commands.SetRenderTarget(13);
+		commands.Execute(context);
+		byte[] nextBatch = submittedRenderBatches[^1];
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(8)) == 1 &&
+		       BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(16)) == 1 &&
+		       BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(24)) == 13,
+		       "Cleared CommandBuffer did not execute only its newly recorded commands");
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(8)) == 5,
+		       "Clearing a CommandBuffer mutated a previously submitted batch");
+		commands.Clear();
+		var sourceTexture = Ursa.Rendering.RenderTexture.FromHandle(
+			new Ursa.NativeHandle { sessionId = 1, index = 301, generation = 1, kind = 6 })!;
+		var destinationTexture = Ursa.Rendering.RenderTexture.FromHandle(
+			new Ursa.NativeHandle { sessionId = 1, index = 302, generation = 1, kind = 6 })!;
+		var sourceBuffer = Ursa.Rendering.GraphicsBuffer.FromHandle(
+			new Ursa.NativeHandle { sessionId = 1, index = 303, generation = 1, kind = 7 })!;
+		var destinationBuffer = Ursa.Rendering.GraphicsBuffer.FromHandle(
+			new Ursa.NativeHandle { sessionId = 1, index = 304, generation = 1, kind = 7 })!;
+		var blitMaterial = Ursa.Material.Load(new AssetReference(fakeMaterialGuid, 0));
+		commands.SetGlobalFloat("_Intensity", 0.75f);
+		commands.SetGlobalVector("_Tint", new Ursa.Vector4(1, 0.5f, 0.25f, 1));
+		commands.SetGlobalTexture("_Source", sourceTexture);
+		var descriptor = new Ursa.Rendering.RenderTextureDescriptor(64, 64);
+		commands.GetTemporaryTarget(77, descriptor);
+		bool duplicateTemporaryRejected = false;
+		try { commands.GetTemporaryTarget(77, descriptor); }
+		catch (ArgumentException) { duplicateTemporaryRejected = true; }
+		Expect(duplicateTemporaryRejected, "CommandBuffer accepted a duplicate temporary target ID");
+		commands.SetRenderTarget(77);
+		commands.ReleaseTemporaryTarget(77);
+		commands.SetRenderTarget(destinationTexture);
+		commands.CopyTexture(sourceTexture, destinationTexture);
+		bool feedbackRejected = false;
+		try { commands.Blit(sourceTexture, sourceTexture, blitMaterial!); }
+		catch (InvalidOperationException) { feedbackRejected = true; }
+		Expect(feedbackRejected, "CommandBuffer accepted a same-texture Blit feedback loop");
+		commands.Blit(sourceTexture, destinationTexture, blitMaterial!);
+		commands.CopyBuffer(sourceBuffer, destinationBuffer, 128);
+		commands.Execute(context);
+		byte[] resourceBatch = submittedRenderBatches[^1];
+		uint[] resourceOpcodes = { 9, 9, 9, 10, 1, 11, 1, 13, 6, 7 };
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(resourceBatch.AsSpan(8)) == resourceOpcodes.Length,
+		       "Resource and compositing commands were not recorded");
+		offset = 16;
+		foreach (uint opcode in resourceOpcodes)
+		{
+			Expect(BinaryPrimitives.ReadUInt32LittleEndian(resourceBatch.AsSpan(offset)) == opcode,
+			       "Resource and compositing command order changed");
+			offset += checked((int)BinaryPrimitives.ReadUInt32LittleEndian(resourceBatch.AsSpan(offset + 4)));
+		}
+		commands.Clear();
+		commands.GetTemporaryTarget(88, descriptor);
+		bool unreleasedTemporaryRejected = false;
+		try { commands.Execute(context); }
+		catch (InvalidOperationException) { unreleasedTemporaryRejected = true; }
+		Expect(unreleasedTemporaryRejected, "CommandBuffer executed with an unreleased temporary target");
+		commands.Clear();
+		commands.Dispose();
+		bool disposedRejected = false;
+		try { commands.SetRenderTarget(1); }
+		catch (ObjectDisposedException) { disposedRejected = true; }
+		Expect(disposedRejected, "Disposed CommandBuffer accepted new commands");
+		disposedRejected = false;
+		try { commands.Name = "disposed"; }
+		catch (ObjectDisposedException) { disposedRejected = true; }
+		Expect(disposedRejected, "Disposed CommandBuffer accepted a name change");
+	}
+
+	private static void ManagedRenderPipelineLifecycleTests()
+	{
+		Ursa.Rendering.RenderPipelineManager.Reset();
+		var defaultTypeIdentity = (UrsaScriptTypeAttribute?)Attribute.GetCustomAttribute(
+			typeof(Ursa.Rendering.ForwardRenderPipelineAsset), typeof(UrsaScriptTypeAttribute));
+		Expect(defaultTypeIdentity?.Id == "ursa.rendering.forward" && defaultTypeIdentity.Version == 1,
+		       "Framework Forward pipeline type did not expose its stable identity");
+		var first = Ursa.ScriptableObject.CreateInstance<PipelineProbeAsset>();
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(first);
+		var second = Ursa.ScriptableObject.CreateInstance<PipelineProbeAsset>();
+		second.failFactory = true;
+		bool factoryRejected = false;
+		try { Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(second); }
+		catch (InvalidOperationException) { factoryRejected = true; }
+		Expect(factoryRejected && ReferenceEquals(Ursa.Rendering.RenderPipelineManager.ActiveAsset, first) && first.disposals == 0,
+		       "Failed pipeline candidate replaced or disposed the active pipeline");
+		int began = 0, ended = 0, camerasBegan = 0, camerasEnded = 0;
+		Ursa.Rendering.RenderPipelineManager.BeginContextRendering += _ => ++began;
+		Ursa.Rendering.RenderPipelineManager.EndContextRendering += _ => ++ended;
+		Ursa.Rendering.RenderPipelineManager.BeginCameraRendering += (_, _) => ++camerasBegan;
+		Ursa.Rendering.RenderPipelineManager.EndCameraRendering += (_, _) => ++camerasEnded;
+		var cameraList = new System.Collections.Generic.List<CameraComponent>
+		{
+			GameObject.Create("Pipeline Camera").AddComponent<CameraComponent>()
+		};
+		Ursa.Rendering.RenderPipelineManager.Render(cameraList, 1);
+		Expect(first.renders == 1 && began == 1 && ended == 1 && camerasBegan == 1 && camerasEnded == 1 &&
+		       first.cameraCount == 1 && ReferenceEquals(first.receivedCameras, cameraList),
+		       "Pipeline manager did not preserve cameras or pair context/camera events around Render");
+		Ursa.Rendering.RenderPipeline previousPipeline = Ursa.Rendering.RenderPipelineManager.ActivePipeline!;
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(null);
+		Expect(first.disposals == 1 && previousPipeline.IsDisposed &&
+		       Ursa.Rendering.RenderPipelineManager.ActivePipeline == null,
+		       "Replacing the active pipeline did not dispose its previous instance");
+		Ursa.Rendering.RenderPipelineManager.Reset();
+		first.Dispose();
+		second.Dispose();
+		var forward = Ursa.ScriptableObject.CreateInstance<Ursa.Rendering.ForwardRenderPipelineAsset>();
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(forward);
+		Expect(Ursa.Rendering.RenderPipelineManager.ActivePipeline is Ursa.Rendering.ForwardRenderPipeline,
+		       "Framework Forward pipeline asset factory returned the wrong pipeline");
+		Ursa.Rendering.RenderPipelineManager.Reset();
+		forward.Dispose();
 	}
 
 	private static int Main()
 	{
-		int tableSize = sizeof(Bootstrap.NativeApiV5);
-		Expect(tableSize == 328, "Native API struct size differs from the x64 C ABI contract");
+		ScriptableObjectTests.Run();
+		RenderCommandProtocolTests.Run();
+		Bootstrap.NativeApiV6 fieldApi = new() { version = 6, size = (uint)sizeof(Bootstrap.NativeApiV6),
+		                                         logUtf8 = &Log, sceneContext = 123,
+		                                         submitRenderBatch = &SubmitRenderBatch,
+		                                         loadTexture = &LoadTexture, loadMaterial = &LoadMaterial,
+		                                         resourceRequest = &ResourceRequest };
+		EngineApi.Initialize((nint)(&fieldApi));
+		ScriptableAssetFieldTests.Run();
+		ShaderFieldTests.Run();
+		ScriptableAssetGraphTests.Run();
+		ScriptableAssetRecoveryTests.Run();
+		int tableSize = sizeof(Bootstrap.NativeApiV6);
+		Expect(tableSize == 336, "Native API struct size differs from the x64 C ABI contract");
+		Expect(Marshal.OffsetOf<Bootstrap.NativeApiV6>(nameof(Bootstrap.NativeApiV6.submitRenderBatch)).ToInt32() == 328,
+		       "Native API render-batch callback offset differs from the x64 C ABI contract");
 		Expect(Bootstrap.Validate(0, tableSize) == 1, "Null native API pointer was accepted");
 		Expect(Validate(1, (uint)tableSize, true, tableSize - 1) == 1, "Truncated native API arguments were accepted");
-		Expect(Validate(3, (uint)tableSize, true, tableSize) == 2, "Unsupported native API version was accepted");
-		Expect(Validate(5, (uint)(tableSize - 1), true, tableSize) == 2, "Truncated native API table was accepted");
-		Expect(Validate(5, (uint)tableSize, false, tableSize) == 3, "Missing required callback was accepted");
-		Expect(Validate(5, (uint)tableSize, true, tableSize) == 0, "Valid native API table was rejected");
+		Expect(Validate(5, (uint)tableSize, true, tableSize) == 2, "Legacy native API version was accepted");
+		Expect(Validate(6, (uint)(tableSize - 1), true, tableSize) == 2, "Truncated native API table was accepted");
+		Expect(Validate(6, (uint)tableSize, false, tableSize) == 3, "Missing required callback was accepted");
+		Expect(Validate(6, (uint)tableSize, true, tableSize) == 0, "Valid native API table was rejected");
 		var serializedFields = ScriptFieldSchema.Describe(typeof(SchemaProbeBehaviour));
 		Expect(
 		    serializedFields.Count == 3 &&
@@ -628,10 +886,11 @@ internal static unsafe class Program
 		}
 		Expect(migrationVersionRejected, "Managed script fields accepted an incompatible type version");
 
-		Bootstrap.NativeApiV5 api = new() { version = 5,
-			                                size = (uint)sizeof(Bootstrap.NativeApiV5),
+		Bootstrap.NativeApiV6 api = new() { version = 6,
+			                                size = (uint)sizeof(Bootstrap.NativeApiV6),
 			                                sceneContext = 123,
 			                                logUtf8 = &Log,
+			                                submitRenderBatch = &SubmitRenderBatch,
 			                                createGameObject = &CreateGameObject,
 			                                getGameObjectName = &GetName,
 			                                setGameObjectName = &SetName,
@@ -667,6 +926,19 @@ internal static unsafe class Program
 			                                setWindowTitle = &SetWindowTitle,
 			                                resourceRequest = &ResourceRequest };
 		EngineApi.Initialize((nint)(&api));
+		ManagedRenderContextApiTests();
+		ManagedCommandBufferApiTests();
+		ManagedRenderPipelineLifecycleTests();
+		byte[] renderBatch = new byte[16];
+		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch, 1);
+		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(4), 16);
+		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(8), 0);
+		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(12), 16);
+		Ursa.Rendering.RenderContextToken renderToken = new() { sessionId = 7, frameId = 9, index = 2, generation = 3 };
+		int submissionsBeforeProtocol = renderBatchSubmissions;
+		Ursa.Rendering.RenderCommandProtocol.Submit(renderToken, renderBatch);
+		Expect(renderBatchSubmissions == submissionsBeforeProtocol + 1,
+		       "Managed RenderCommandProtocol did not submit its fixed-layout batch");
 		GameObject parent = GameObject.Create("父对象");
 		GameObject child = GameObject.Create("子对象");
 		child.Parent = parent;
@@ -807,6 +1079,7 @@ internal static unsafe class Program
 		       "GameObject.AddComponent did not attach a managed Behaviour instance");
 		addedBehaviour.Remove();
 		TextureAsset textureAsset = TextureAsset.Load(new AssetReference(fakeTextureGuid));
+		TextureFieldTests.Run(textureAsset);
 		MaterialAsset materialAsset = MaterialAsset.Load(new AssetReference(fakeMaterialGuid));
 		Expect(textureAsset.IsValid && materialAsset.IsValid && textureAsset.Reference.Guid == fakeTextureGuid,
 		       "Managed Texture/Material asset wrappers failed to preserve stable references");

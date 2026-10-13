@@ -1,4 +1,6 @@
 #include <Assets/ShaderAssetImporter.hpp>
+#include <Assets/ProjectAssetImporter.hpp>
+#include <Shader/ShaderAssetResource.hpp>
 #include <Workspace/ProjectWorkspace.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
 #include <Core/StringInterop.hpp>
@@ -33,7 +35,20 @@ int main()
 {
 	try
 	{
-		const auto root = std::filesystem::temp_directory_path() / ToStdString(ResourceId::Generate().ToString());
+		const auto root =
+		    std::filesystem::current_path() / "ShaderImportTest" / ToStdString(ResourceId::Generate().ToString());
+
+		struct Cleanup
+		{
+			std::filesystem::path path;
+
+			~Cleanup()
+			{
+				std::error_code error;
+				std::filesystem::remove_all(path, error);
+			}
+		} cleanup{root};
+
 		std::filesystem::create_directories(root / "Assets");
 		auto workspace =
 		    Take(ProjectWorkspace::Open(root, {{engineScheme, URSA_TEST_ENGINE_SOURCE, MountAccess::ReadOnly}}));
@@ -100,6 +115,27 @@ int main()
 		if (copyImport.asset.id == identity || copyImport.asset.id != Take(database->Metadata(copied)).guid)
 		{
 			throw std::runtime_error("Copying source text reused the original Shader identity");
+		}
+		const auto computeSource = Take(VirtualPath::Parse("prj:Compute/Project.compute"));
+		const String computeText = "#pragma kernel Fill\n[numthreads(4, 2, 1)]\n"
+		                           "void Fill(uint3 id : SV_DispatchThreadID) {}\n";
+		Done(files.WriteAtomic(computeSource,
+		                       Vector<UInt8>(computeText.data(), computeText.data() + computeText.size())));
+		Done(database->Refresh());
+		const ResourceId computeGuid = Take(database->Metadata(computeSource)).guid;
+		ProjectAssetImporter projectImporter;
+		const auto projectCompute = Take(projectImporter.Import(*database, computeSource));
+		if (projectCompute.guid != computeGuid || projectCompute.artifacts.size() != 1 ||
+		    projectCompute.artifacts[0].kind != "Shader")
+		{
+			throw std::runtime_error("Project .compute import lost its source identity or compiled artifact");
+		}
+		const auto computeArtifact = Take(Shader::LoadShaderAssetResource(files, projectCompute.artifacts[0].path));
+		if (computeArtifact.id != computeGuid || computeArtifact.subShaders.empty() ||
+		    computeArtifact.subShaders[0].passes.empty() || !computeArtifact.subShaders[0].passes[0].computeKernel ||
+		    computeArtifact.subShaders[0].passes[0].threadGroupSize != Array<UInt32, 3>{4, 2, 1})
+		{
+			throw std::runtime_error("Project .compute import did not publish the named kernel metadata");
 		}
 		std::cout << "Project-owned shader import tests passed\n";
 		return 0;

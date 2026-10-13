@@ -40,7 +40,8 @@ int main()
 		const auto cacheRoot = VirtualPath::Parse("user:ShaderCache").value;
 		DxcShaderCompiler compiler({std::filesystem::u8path(URSA_TEST_DXC_EXECUTABLE),
 		                            std::filesystem::u8path(URSA_TEST_SPIRV_VAL_EXECUTABLE),
-		                            std::filesystem::u8path(URSA_TEST_SPIRV_CROSS_EXECUTABLE)});
+		                            std::filesystem::u8path(URSA_TEST_SPIRV_CROSS_EXECUTABLE),
+		                            std::filesystem::u8path(URSA_SHADER_STAGING_ROOT)});
 		const String compilerVersion = compiler.Version().value;
 		const Vector<String> keywords{"FOG_ON", "ALPHA_TEST"};
 		auto first = MakeRequest("float4 MakePosition(float3 value) { return float4(value, 1.0); }\n");

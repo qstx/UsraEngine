@@ -16,6 +16,7 @@
 #include <functional>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace Ursa
@@ -187,6 +188,13 @@ struct GpuModelMesh
 	Rhi::BufferPtr vertexBuffer;
 	Rhi::BufferPtr indexBuffer;
 	Ursa::UInt32 indexCount = 0;
+};
+
+struct ResolvedMaterialCacheEntry
+{
+	std::weak_ptr<MaterialInstance> source;
+	Ursa::UInt64 sourceVersion = 0;
+	std::shared_ptr<MaterialInstance> resolved;
 };
 
 AlphaMode ShaderAlphaMode(const std::shared_ptr<MaterialInstance>& material);
@@ -628,6 +636,60 @@ struct ShaderPassPlan
 	UInt32 passIndex = 0;
 };
 
+struct ShaderPipelineKey
+{
+	String propertyShaderId;
+	String programShaderId;
+	UInt32 propertySourceFormatVersion = 0;
+	UInt32 programSourceFormatVersion = 0;
+	String propertySourceHash;
+	String programSourceHash;
+	String compilerVersion;
+	String passIdentity;
+	String layoutIdentity;
+	UInt32 subShaderIndex = 0;
+	UInt32 passIndex = 0;
+	String activePipeline;
+	Rhi::Format colorFormat = Rhi::Format::RgbA8Unorm;
+	Rhi::Format depthFormat = Rhi::Format::D32Float;
+	AlphaMode alphaMode = AlphaMode::Opaque;
+	Vector<String> keywords;
+	Vector<String> renderStates;
+
+	bool operator<(const ShaderPipelineKey& other) const
+	{
+		const auto left =
+		    std::tie(propertyShaderId, programShaderId, propertySourceFormatVersion, programSourceFormatVersion,
+		             propertySourceHash, programSourceHash, compilerVersion, passIdentity, layoutIdentity,
+		             subShaderIndex, passIndex, activePipeline, colorFormat, depthFormat, alphaMode);
+		const auto right =
+		    std::tie(other.propertyShaderId, other.programShaderId, other.propertySourceFormatVersion,
+		             other.programSourceFormatVersion, other.propertySourceHash, other.programSourceHash,
+		             other.compilerVersion, other.passIdentity, other.layoutIdentity, other.subShaderIndex,
+		             other.passIndex, other.activePipeline, other.colorFormat, other.depthFormat, other.alphaMode);
+		if (left < right)
+		{
+			return true;
+		}
+		if (right < left)
+		{
+			return false;
+		}
+		if (std::lexicographical_compare(keywords.begin(), keywords.end(), other.keywords.begin(),
+		                                 other.keywords.end()))
+		{
+			return true;
+		}
+		if (std::lexicographical_compare(other.keywords.begin(), other.keywords.end(), keywords.begin(),
+		                                 keywords.end()))
+		{
+			return false;
+		}
+		return std::lexicographical_compare(renderStates.begin(), renderStates.end(), other.renderStates.begin(),
+		                                    other.renderStates.end());
+	}
+};
+
 const ShaderPassAsset* FindNamedPass(const ShaderAsset& shader, const String& name, UInt32& subShaderIndex,
                                      UInt32& passIndex)
 {
@@ -646,7 +708,72 @@ const ShaderPassAsset* FindNamedPass(const ShaderAsset& shader, const String& na
 	return nullptr;
 }
 
-Result<Vector<ShaderPassPlan>> SelectForwardPasses(const std::shared_ptr<const ShaderAsset>& rootShader)
+String ForwardPassCacheKey(const std::shared_ptr<const ShaderAsset>& rootShader, const String& activePipeline)
+{
+	Vector<String> versions;
+	Vector<std::shared_ptr<const ShaderAsset>> pending{rootShader};
+	Set<String> visited;
+	while (!pending.empty())
+	{
+		auto shader = std::move(pending.back());
+		pending.pop_back();
+		if (!shader || !shader->id)
+		{
+			continue;
+		}
+		const String identity = shader->id.ToString();
+		if (!visited.insert(identity).second)
+		{
+			continue;
+		}
+		String version = identity + "|" + shader->sourceHash + "|" + shader->compilerVersion;
+		for (const ShaderSubShaderAsset& subShader : shader->subShaders)
+		{
+			version += "|sub=";
+			for (const TagDeclaration& tag : subShader.tags)
+			{
+				version += tag.name + "=" + tag.value + ";";
+			}
+			for (const ShaderPassAsset& pass : subShader.passes)
+			{
+				version += "|pass=" + pass.identity + ":" + pass.name;
+				for (const TagDeclaration& tag : pass.tags)
+				{
+					version += ";" + tag.name + "=" + tag.value;
+				}
+				for (const RenderStateDeclaration& state : pass.renderStates)
+				{
+					version += ";" + state.name + "=" + state.value;
+				}
+			}
+		}
+		for (const ResolvedShaderReference& reference : shader->resolvedReferences)
+		{
+			version += reference.reference.fallback ? "|fallback:" : "|usepass:";
+			version += reference.reference.shaderName;
+			version += "/";
+			version += reference.reference.passName;
+			if (reference.asset)
+			{
+				pending.push_back(reference.asset);
+				version += "=";
+				version += reference.asset->id.ToString();
+			}
+		}
+		versions.push_back(std::move(version));
+	}
+	std::sort(versions.begin(), versions.end());
+	String key = "UrsaForwardPassSelectionV1|" + activePipeline;
+	for (const String& version : versions)
+	{
+		key += "|";
+		key += version;
+	}
+	return key;
+}
+
+Result<Vector<ShaderPassPlan>> BuildForwardPasses(const std::shared_ptr<const ShaderAsset>& rootShader,
+                                                  const String& activePipeline)
 {
 	Set<String> active;
 	auto visit = [&](auto&& self, const std::shared_ptr<const ShaderAsset>& shader) -> Result<Vector<ShaderPassPlan>>
@@ -663,7 +790,7 @@ Result<Vector<ShaderPassPlan>> SelectForwardPasses(const std::shared_ptr<const S
 			bool pipelineMatches = true;
 			for (const TagDeclaration& tag : subShader.tags)
 			{
-				if (tag.name == "RenderPipeline" && tag.value != "UrsaForward")
+				if (tag.name == "RenderPipeline" && tag.value != activePipeline)
 				{
 					pipelineMatches = false;
 				}
@@ -763,6 +890,28 @@ Result<Vector<ShaderPassPlan>> SelectForwardPasses(const std::shared_ptr<const S
 		                                               shader->name);
 	};
 	return visit(visit, rootShader);
+}
+
+Result<Vector<ShaderPassPlan>> SelectForwardPasses(const std::shared_ptr<const ShaderAsset>& rootShader,
+                                                   const String& activePipeline,
+                                                   Map<String, Vector<ShaderPassPlan>>& cache)
+{
+	const String key = ForwardPassCacheKey(rootShader, activePipeline);
+	if (const auto found = cache.find(key); found != cache.end())
+	{
+		return Result<Vector<ShaderPassPlan>>::Success(found->second);
+	}
+	auto selected = BuildForwardPasses(rootShader, activePipeline);
+	if (!selected)
+	{
+		return selected;
+	}
+	if (cache.size() >= 64)
+	{
+		cache.erase(cache.begin());
+	}
+	cache.emplace(key, selected.value);
+	return selected;
 }
 
 Rhi::ShaderStage ShaderStageFor(ProgramStage stage)
@@ -907,6 +1056,19 @@ struct Renderer3D::Impl
 		Rhi::PipelinePtr pipeline;
 	};
 
+	Rhi::SamplerPtr SamplerFor(const MaterialSampler& samplerSettings)
+	{
+		const String key =
+		    String(samplerSettings.linear ? "linear:" : "nearest:") + (samplerSettings.repeat ? "repeat" : "clamp");
+		if (const auto found = samplerCache.find(key); found != samplerCache.end())
+		{
+			return found->second;
+		}
+		auto sampler = Take(device->CreateSampler({samplerSettings.linear, samplerSettings.repeat}));
+		samplerCache.emplace(key, sampler);
+		return sampler;
+	}
+
 	explicit Impl(Rhi::DevicePtr selectedDevice) : device(std::move(selectedDevice))
 	{
 		fallback = std::make_shared<MaterialInstance>(MaterialType::Unlit);
@@ -1028,6 +1190,19 @@ struct Renderer3D::Impl
 				++it;
 			}
 		}
+		for (auto it = resolvedMaterialCache.begin(); it != resolvedMaterialCache.end();)
+		{
+			auto source = it->second.source.lock();
+			if (!source || !source->IsValid() || source->Version() != it->second.sourceVersion ||
+			    !it->second.resolved || !it->second.resolved->IsValid())
+			{
+				it = resolvedMaterialCache.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
 	}
 
 	void PrepareTarget(const Rhi::TexturePtr& color, bool needsStencil = false)
@@ -1042,6 +1217,7 @@ struct Renderer3D::Impl
 		{
 			depth = Take(device->CreateTexture(
 			    {color->desc.width, color->desc.height, depthFormat, Rhi::TextureUsage::DepthAttachment}));
+			depthState = Rhi::ResourceState::Undefined;
 		}
 	}
 
@@ -1050,6 +1226,31 @@ struct Renderer3D::Impl
 	                                       Rhi::Format colorFormat, Rhi::Format depthFormat,
 	                                       const MaterialInstance& material)
 	{
+		ShaderPipelineKey key;
+		key.propertyShaderId = propertyShader->id.ToString();
+		key.programShaderId = plan.programShader->id.ToString();
+		key.propertySourceFormatVersion = propertyShader->sourceFormatVersion;
+		key.programSourceFormatVersion = plan.programShader->sourceFormatVersion;
+		key.propertySourceHash = propertyShader->sourceHash;
+		key.programSourceHash = plan.programShader->sourceHash;
+		key.compilerVersion = plan.programShader->compilerVersion;
+		key.passIdentity = plan.pass->identity;
+		key.layoutIdentity = variant.layoutIdentity;
+		key.subShaderIndex = plan.subShaderIndex;
+		key.passIndex = plan.passIndex;
+		key.activePipeline = "UrsaForward";
+		key.colorFormat = colorFormat;
+		key.depthFormat = depthFormat;
+		key.alphaMode = material.Parameters().alphaMode;
+		key.keywords = variant.keywords;
+		for (const RenderStateDeclaration& state : plan.renderStates)
+		{
+			key.renderStates.push_back(state.name + "=" + state.value);
+		}
+		if (auto found = shaderPipelines.find(key); found != shaderPipelines.end())
+		{
+			return found->second;
+		}
 		auto builtReflection = BuildShaderBindingLayout(*propertyShader, variant);
 		if (!builtReflection)
 		{
@@ -1078,69 +1279,6 @@ struct Renderer3D::Impl
 			description.blendState.sourceColor = Rhi::BlendFactor::SourceAlpha;
 			description.blendState.destinationColor = Rhi::BlendFactor::OneMinusSourceAlpha;
 			description.depthWrite = false;
-		}
-		String key =
-		    propertyShader->id.ToString() + ":" + plan.programShader->id.ToString() + ":" +
-		    ToUrsaString(std::to_string(propertyShader->sourceFormatVersion)) + ":" + propertyShader->sourceHash + ":" +
-		    ToUrsaString(std::to_string(plan.programShader->sourceFormatVersion)) + ":" +
-		    plan.programShader->sourceHash + ":" + plan.programShader->compilerVersion + ":" +
-		    ToUrsaString(std::to_string(plan.subShaderIndex)) + ":" + ToUrsaString(std::to_string(plan.passIndex)) +
-		    ":" + ToUrsaString(std::to_string(static_cast<int>(colorFormat))) + ":" +
-		    ToUrsaString(std::to_string(static_cast<int>(depthFormat)));
-		const auto append = [&](Ursa::UInt64 value) { key += ":" + ToUrsaString(std::to_string(value)); };
-		for (const String& keyword : variant.keywords)
-		{
-			key += ":kw=" + keyword;
-		}
-		append(description.vertexStride);
-		for (const Rhi::LayoutBinding& binding : builtReflection.value.descriptors)
-		{
-			append(binding.binding);
-			append(static_cast<Ursa::UInt32>(binding.type));
-			append(binding.count);
-			append(binding.stages);
-		}
-		for (const Rhi::VertexAttribute& attribute : description.attributes)
-		{
-			append(attribute.location);
-			append(attribute.offset);
-			append(static_cast<Ursa::UInt32>(attribute.format));
-		}
-		append(static_cast<Ursa::UInt32>(description.cullMode));
-		append(description.depthTest);
-		append(description.depthWrite);
-		append(static_cast<Ursa::UInt32>(description.depthCompare));
-		append(description.blend);
-		append(description.blendState.enabled);
-		append(static_cast<Ursa::UInt32>(description.blendState.sourceColor));
-		append(static_cast<Ursa::UInt32>(description.blendState.destinationColor));
-		append(static_cast<Ursa::UInt32>(description.blendState.colorOperation));
-		append(static_cast<Ursa::UInt32>(description.blendState.sourceAlpha));
-		append(static_cast<Ursa::UInt32>(description.blendState.destinationAlpha));
-		append(static_cast<Ursa::UInt32>(description.blendState.alphaOperation));
-		append(static_cast<Ursa::UInt32>(description.colorWriteMask));
-		append(description.stencil.enabled);
-		append(description.stencil.reference);
-		append(description.stencil.readMask);
-		append(description.stencil.writeMask);
-		const auto appendStencilFace = [&](const Rhi::StencilFaceState& face)
-		{
-			append(static_cast<Ursa::UInt32>(face.compare));
-			append(static_cast<Ursa::UInt32>(face.failOperation));
-			append(static_cast<Ursa::UInt32>(face.passOperation));
-			append(static_cast<Ursa::UInt32>(face.depthFailOperation));
-		};
-		appendStencilFace(description.stencil.front);
-		appendStencilFace(description.stencil.back);
-		append(static_cast<Ursa::UInt32>(description.depthBiasConstant));
-		Ursa::UInt32 biasSlopeBits = 0;
-		static_assert(sizeof(biasSlopeBits) == sizeof(description.depthBiasSlope), "Unexpected float size");
-		std::memcpy(&biasSlopeBits, &description.depthBiasSlope, sizeof(biasSlopeBits));
-		append(biasSlopeBits);
-		auto found = shaderPipelines.find(key);
-		if (found != shaderPipelines.end())
-		{
-			return found->second;
 		}
 		ShaderPipelineCache cache;
 		cache.reflection = std::move(builtReflection.value);
@@ -1189,12 +1327,49 @@ struct Renderer3D::Impl
 	}
 
 	Rhi::BindGroupPtr ShaderGroupFor(const std::shared_ptr<const ShaderAsset>& propertyShader,
-	                                 const ShaderPipelineCache& cache,
+	                                 const ShaderPipelineCache& cache, const ShaderPassPlan& plan,
+	                                 const ShaderVariantAsset& variant,
 	                                 const std::shared_ptr<MaterialInstance>& material, const Mat4& viewProjection,
 	                                 const ModelBoxInstance& item, const GpuFrameHeader& frame,
 	                                 const Rhi::CommandListPtr& command)
 	{
 		const Mat4& model = item.model;
+		bool cacheableMaterialGroup = true;
+		for (const Rhi::LayoutBinding& descriptor : cache.reflection.descriptors)
+		{
+			if (descriptor.type == Rhi::BindingType::StorageBuffer)
+			{
+				cacheableMaterialGroup = false;
+				break;
+			}
+		}
+		for (const ShaderUniformBufferLayout& buffer : cache.reflection.uniformBuffers)
+		{
+			for (const ShaderUniformMember& member : buffer.members)
+			{
+				if (member.name.rfind("_Ursa", 0) == 0)
+				{
+					cacheableMaterialGroup = false;
+					break;
+				}
+			}
+		}
+		String materialGroupKey;
+		if (cacheableMaterialGroup)
+		{
+			materialGroupKey = "material-group-v1:" + propertyShader->id.ToString() + ":" + propertyShader->sourceHash +
+			                   ":" + plan.programShader->sourceHash + ":" + variant.layoutIdentity + ":" +
+			                   material->LocalIdentity().ToString() + ":" +
+			                   ToUrsaString(std::to_string(material->Version()));
+			for (const String& keyword : variant.keywords)
+			{
+				materialGroupKey += ":kw=" + keyword;
+			}
+			if (const auto found = materialGroups.find(materialGroupKey); found != materialGroups.end())
+			{
+				return found->second;
+			}
+		}
 		Vector<Rhi::BindingResource> resources;
 		Vector<Rhi::BufferPtr> buffers;
 		Vector<Rhi::SamplerPtr> samplers;
@@ -1227,20 +1402,34 @@ struct Renderer3D::Impl
 		{
 			if (descriptor.type == Rhi::BindingType::StorageBuffer)
 			{
-				Vector<Mat4> palette = item.jointPalette;
-				if (palette.empty())
+				Vector<Mat4> identityPalette;
+				const Vector<Mat4>* palette = &item.jointPalette;
+				if (palette->empty())
 				{
-					palette.push_back(Mat4::Identity());
+					identityPalette.push_back(Mat4::Identity());
+					palette = &identityPalette;
 				}
-				const Ursa::Size byteSize = palette.size() * sizeof(Mat4);
+				const Ursa::Size byteSize = palette->size() * sizeof(Mat4);
 				const Ursa::UInt32 maxStorageRange = device->Capabilities().maxStorageBufferRange;
 				if (maxStorageRange == 0 || byteSize > maxStorageRange)
 				{
 					throw std::runtime_error("Model bone palette exceeds the RHI storage buffer limit");
 				}
-				auto buffer = Take(device->CreateBuffer({byteSize, Rhi::BufferUsage::Storage, Rhi::Memory::Upload}));
-				done(buffer->Write(0, palette.data(), byteSize));
-				done(command->Barrier(buffer, Rhi::ResourceState::Undefined, Rhi::ResourceState::StorageReadWrite));
+				String paletteKey = ToUrsaString(std::to_string(byteSize)) + ":";
+				paletteKey.append(reinterpret_cast<const char*>(palette->data()), byteSize);
+				auto found = boneUploadCache.find(paletteKey);
+				Rhi::BufferPtr buffer;
+				if (found != boneUploadCache.end())
+				{
+					buffer = found->second;
+				}
+				else
+				{
+					buffer = Take(device->CreateBuffer({byteSize, Rhi::BufferUsage::Storage, Rhi::Memory::Upload}));
+					done(buffer->Write(0, palette->data(), byteSize));
+					done(command->Barrier(buffer, Rhi::ResourceState::Undefined, Rhi::ResourceState::StorageReadWrite));
+					boneUploadCache.emplace(std::move(paletteKey), buffer);
+				}
 				resources.push_back({descriptor.binding, buffer, {}, {}});
 				buffers.push_back(std::move(buffer));
 				continue;
@@ -1255,7 +1444,31 @@ struct Renderer3D::Impl
 					throw std::runtime_error("Reflected uniform descriptor has no member layout");
 				}
 				Vector<UInt8> bytes(uniform->byteSize, 0);
-				bool perObject = false;
+				String materialUniformKey =
+				    "material-uniform-v1:" + propertyShader->id.ToString() + ":" + propertyShader->sourceHash + ":" +
+				    variant.layoutIdentity + ":" + ToUrsaString(std::to_string(descriptor.binding)) + ":" +
+				    material->LocalIdentity().ToString() + ":" + ToUrsaString(std::to_string(material->Version()));
+				if (const auto materialBacking = materialUniformBacking.find(materialUniformKey);
+				    materialBacking != materialUniformBacking.end())
+				{
+					bytes = materialBacking->second;
+				}
+				else
+				{
+					auto packed =
+					    PackMaterialUniformBuffer(*propertyShader, cache.reflection, *material, descriptor.binding);
+					if (!packed)
+					{
+						throw std::runtime_error(ToStdString(packed.error));
+					}
+					bytes = packed.value;
+					if (materialUniformBacking.size() >= 512)
+					{
+						materialUniformBacking.erase(materialUniformBacking.begin());
+					}
+					materialUniformBacking.emplace(std::move(materialUniformKey), std::move(packed.value));
+				}
+				bool perCamera = false;
 				bool perFrame = false;
 				Mat4 inverseModel = model.InverseAffine();
 				Mat4 normalMatrix;
@@ -1272,17 +1485,15 @@ struct Renderer3D::Impl
 					if (member.name == "_UrsaViewProjection")
 					{
 						source = viewProjection.values.data();
-						perObject = true;
+						perCamera = true;
 					}
 					else if (member.name == "_UrsaModel")
 					{
 						source = model.values.data();
-						perObject = true;
 					}
 					else if (member.name == "_UrsaNormal")
 					{
 						source = normalMatrix.values.data();
-						perObject = true;
 					}
 					else if (member.name == "_UrsaCameraPosition")
 					{
@@ -1311,7 +1522,7 @@ struct Renderer3D::Impl
 					}
 					if (source)
 					{
-						const Ursa::Size copySize = perFrame && member.byteSize != 0    ? member.byteSize
+						const Ursa::Size copySize = (perFrame || perCamera) && member.byteSize != 0 ? member.byteSize
 						                            : member.name == "_UrsaCounts"      ? sizeof(frame.counts)
 						                            : member.name == "_UrsaDirectional" ? sizeof(frame.directional)
 						                            : member.name == "_UrsaPoint"       ? sizeof(frame.point)
@@ -1323,20 +1534,22 @@ struct Renderer3D::Impl
 						std::memcpy(bytes.data() + member.byteOffset, source, copySize);
 					}
 				}
-				if (!perObject && !perFrame)
+				String uniformKey =
+				    variant.layoutIdentity + ":" + ToUrsaString(std::to_string(descriptor.binding)) + ":";
+				uniformKey.append(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+				auto cachedUniform = uniformUploadCache.find(uniformKey);
+				Rhi::BufferPtr buffer;
+				if (cachedUniform != uniformUploadCache.end())
 				{
-					auto packed =
-					    PackMaterialUniformBuffer(*propertyShader, cache.reflection, *material, descriptor.binding);
-					if (!packed)
-					{
-						throw std::runtime_error(ToStdString(packed.error));
-					}
-					bytes = std::move(packed.value);
+					buffer = cachedUniform->second;
 				}
-				auto buffer =
-				    Take(device->CreateBuffer({bytes.size(), Rhi::BufferUsage::Uniform, Rhi::Memory::Upload}));
-				done(buffer->Write(0, bytes.data(), bytes.size()));
-				done(command->Barrier(buffer, Rhi::ResourceState::Undefined, Rhi::ResourceState::UniformRead));
+				else
+				{
+					buffer = Take(device->CreateBuffer({bytes.size(), Rhi::BufferUsage::Uniform, Rhi::Memory::Upload}));
+					done(buffer->Write(0, bytes.data(), bytes.size()));
+					done(command->Barrier(buffer, Rhi::ResourceState::Undefined, Rhi::ResourceState::UniformRead));
+					uniformUploadCache.emplace(std::move(uniformKey), buffer);
+				}
 				resources.push_back({descriptor.binding, buffer, {}, {}});
 				buffers.push_back(std::move(buffer));
 			}
@@ -1355,7 +1568,7 @@ struct Renderer3D::Impl
 					const MaterialSampler samplerSettings = material->SamplerOverridden()
 					                                            ? material->Parameters().sampler
 					                                            : texture->second->DefaultSampler();
-					sampler = Take(device->CreateSampler({samplerSettings.linear, samplerSettings.repeat}));
+					sampler = SamplerFor(samplerSettings);
 					samplers.push_back(sampler);
 				}
 				resources.push_back({descriptor.binding, {}, gpuTexture, sampler});
@@ -1367,7 +1580,7 @@ struct Renderer3D::Impl
 				{
 					samplerSettings = texturesByBinding.begin()->second->DefaultSampler();
 				}
-				auto sampler = Take(device->CreateSampler({samplerSettings.linear, samplerSettings.repeat}));
+				auto sampler = SamplerFor(samplerSettings);
 				resources.push_back({descriptor.binding, {}, {}, sampler});
 				samplers.push_back(std::move(sampler));
 			}
@@ -1380,7 +1593,16 @@ struct Renderer3D::Impl
 		{
 			return {};
 		}
-		return Take(device->CreateBindGroup({cache.layout, std::move(resources)}));
+		auto group = Take(device->CreateBindGroup({cache.layout, std::move(resources)}));
+		if (cacheableMaterialGroup)
+		{
+			if (materialGroups.size() >= 256)
+			{
+				materialGroups.erase(materialGroups.begin());
+			}
+			materialGroups.emplace(std::move(materialGroupKey), group);
+		}
+		return group;
 	}
 
 	std::shared_ptr<MaterialInstance> ResolveMaterial(const std::shared_ptr<MaterialInstance>& source, Color color)
@@ -1417,6 +1639,25 @@ struct Renderer3D::Impl
 		{
 			return source;
 		}
+		const Ursa::UInt64 sourceVersion = source->Version();
+		if (const auto found = resolvedMaterialCache.find(source.get()); found != resolvedMaterialCache.end())
+		{
+			auto owner = found->second.source.lock();
+			if (owner == source && found->second.sourceVersion == sourceVersion && found->second.resolved &&
+			    found->second.resolved->IsValid())
+			{
+				return found->second.resolved;
+			}
+		}
+		const auto cacheResolved = [&](std::shared_ptr<MaterialInstance> resolved)
+		{
+			if (resolvedMaterialCache.size() >= 256)
+			{
+				resolvedMaterialCache.erase(resolvedMaterialCache.begin());
+			}
+			resolvedMaterialCache[source.get()] = {source, sourceVersion, resolved};
+			return resolved;
+		};
 		auto material = source->Clone();
 		if (material->IsShaderBacked())
 		{
@@ -1435,7 +1676,7 @@ struct Renderer3D::Impl
 				                         ToStdString(material->ShaderId().ToString()));
 			}
 			done(material->SetShaderAsset(std::move(asset)));
-			return material;
+			return cacheResolved(std::move(material));
 		}
 		const auto& shader = material->Type() == MaterialType::PbrMetallicRoughness ? builtinPbr : builtinUnlit;
 		for (Ursa::UInt32 slotIndex = 0; slotIndex < 5; ++slotIndex)
@@ -1448,7 +1689,7 @@ struct Renderer3D::Impl
 		}
 		done(material->MigrateLegacyToShader(shader->id));
 		done(material->SetShaderAsset(shader));
-		return material;
+		return cacheResolved(std::move(material));
 	}
 
 	Rhi::TexturePtr TextureFor(const MaterialTexturePtr& source, const Rhi::CommandListPtr& command)
@@ -1545,19 +1786,7 @@ struct Renderer3D::Impl
 				{
 					continue;
 				}
-				bool compiled = false;
-				for (const ShaderSubShaderAsset& subShader : shader->subShaders)
-				{
-					for (const ShaderPassAsset& pass : subShader.passes)
-					{
-						compiled = compiled || !pass.variants.empty();
-					}
-				}
-				if (!compiled)
-				{
-					continue;
-				}
-				auto plans = SelectForwardPasses(shader);
+				auto plans = SelectForwardPasses(shader, "UrsaForward", forwardPassCache);
 				if (!plans)
 				{
 					throw std::runtime_error(ToStdString(plans.error));
@@ -1594,23 +1823,11 @@ struct Renderer3D::Impl
 					MeshFor(item.box->mesh, item.box->meshSnapshot);
 				}
 				const auto shader = item.material->Shader();
-				bool hasCompiledShader = false;
-				if (item.material->IsShaderBacked() && shader)
+				if (!item.material->IsShaderBacked() || !shader)
 				{
-					for (const ShaderSubShaderAsset& subShader : shader->subShaders)
-					{
-						for (const ShaderPassAsset& pass : subShader.passes)
-						{
-							hasCompiledShader = hasCompiledShader || !pass.variants.empty();
-						}
-					}
+					throw std::runtime_error("Renderer material has no Shader asset");
 				}
-				if (!hasCompiledShader)
-				{
-					throw std::runtime_error("Shader asset has no compiled graphics Pass: " +
-					                         ToStdString(shader->name));
-				}
-				auto plans = SelectForwardPasses(shader);
+				auto plans = SelectForwardPasses(shader, "UrsaForward", forwardPassCache);
 				if (!plans)
 				{
 					throw std::runtime_error(ToStdString(plans.error));
@@ -1629,7 +1846,8 @@ struct Renderer3D::Impl
 					Rhi::BindGroupPtr group;
 					{
 						URSA_PROFILE_SCOPE("Renderer3D.Record.BuildBindGroups");
-						group = ShaderGroupFor(shader, cache, item.material, viewProjection, *item.box, frame, command);
+						group = ShaderGroupFor(shader, cache, plan, *variant, item.material, viewProjection, *item.box,
+						                       frame, command);
 					}
 					recordedPasses.push_back({itemIndex, cache.pipeline, std::move(group)});
 				}
@@ -1638,7 +1856,7 @@ struct Renderer3D::Impl
 		{
 			URSA_PROFILE_SCOPE("Renderer3D.Record.EncodeCommands");
 			done(command->Barrier(color, before, Rhi::ResourceState::ColorAttachment));
-			done(command->Barrier(depth, Rhi::ResourceState::Undefined, Rhi::ResourceState::DepthAttachment));
+			done(command->Barrier(depth, depthState, Rhi::ResourceState::DepthAttachment));
 			Rhi::RenderTarget target;
 			target.color = color;
 			target.depth = depth;
@@ -1699,6 +1917,9 @@ struct Renderer3D::Impl
 	                   Vec3 cameraPosition, const Rhi::SwapchainPtr& swapchain = {})
 	{
 		URSA_PROFILE_SCOPE("Renderer3D.Draw");
+		WaitPrevious();
+		boneUploadCache.clear();
+		uniformUploadCache.clear();
 		auto command = [&]()
 		{
 			URSA_PROFILE_SCOPE("Renderer3D.Draw.CreateCommandList");
@@ -1718,6 +1939,7 @@ struct Renderer3D::Impl
 			URSA_PROFILE_SCOPE("Renderer3D.QueueSubmit");
 			return Take(device->Submit(command, swapchain));
 		}();
+		depthState = Rhi::ResourceState::DepthAttachment;
 		return lastFence;
 	}
 
@@ -1734,9 +1956,17 @@ struct Renderer3D::Impl
 	Rhi::BufferPtr vertexBuffer;
 	Rhi::BufferPtr indexBuffer;
 	Rhi::TexturePtr depth;
+	Rhi::ResourceState depthState = Rhi::ResourceState::Undefined;
 	Rhi::FencePtr lastFence;
-	Map<String, ShaderPipelineCache> shaderPipelines;
+	Map<ShaderPipelineKey, ShaderPipelineCache> shaderPipelines;
+	Map<String, Vector<ShaderPassPlan>> forwardPassCache;
+	Map<String, Rhi::BindGroupPtr> materialGroups;
+	Map<String, Vector<UInt8>> materialUniformBacking;
+	Map<String, Rhi::SamplerPtr> samplerCache;
+	Map<String, Rhi::BufferPtr> boneUploadCache;
+	Map<String, Rhi::BufferPtr> uniformUploadCache;
 	UnorderedMap<const MaterialTexture*, GpuTexture> textureCache;
+	UnorderedMap<const MaterialInstance*, ResolvedMaterialCacheEntry> resolvedMaterialCache;
 	Map<String, GpuModelMesh> modelMeshes;
 };
 
@@ -1806,7 +2036,7 @@ Result<void> Renderer3D::Render(const Rhi::SwapchainPtr& swapchain, const Camera
 
 Result<void> Renderer3D::RenderModels(const Rhi::SwapchainPtr& swapchain, const Mat4& viewProjection,
                                       const Vector<ModelBoxInstance>& boxes, const SceneLighting& lighting,
-                                      Vec3 cameraPosition)
+                                      Vec3 cameraPosition, Rendering::FrameCapture* capture)
 {
 	URSA_PROFILE_SCOPE("Renderer3D.RenderModels");
 	try
@@ -1830,6 +2060,10 @@ Result<void> Renderer3D::RenderModels(const Rhi::SwapchainPtr& swapchain, const 
 		}
 		impl->Draw(acquired.texture, acquired.initialState, Rhi::ResourceState::Present, viewProjection, boxes,
 		           lighting, cameraPosition, swapchain);
+		if (capture)
+		{
+			done(capture->Capture(impl->device, acquired.texture, Rhi::ResourceState::Present));
+		}
 		{
 			URSA_PROFILE_SCOPE("Renderer3D.SwapchainPresent");
 			done(swapchain->Present());
@@ -1893,6 +2127,7 @@ Result<void> Renderer3D::RecordOffscreenModels(const Rhi::CommandListPtr& comman
 	{
 		impl->WaitPrevious();
 		impl->record(command, color, initialState, finalState, viewProjection, boxes, lighting, cameraPosition);
+		impl->depthState = Rhi::ResourceState::DepthAttachment;
 		return {};
 	}
 	catch (const std::exception& error)

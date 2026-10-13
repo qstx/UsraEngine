@@ -11,6 +11,11 @@ ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/Test
 ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/TestOffset.frag)
 ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/State.vert)
 ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/State.frag)
+ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/DepthSample.vert)
+ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/DepthSample.frag)
+ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/Fullscreen.vert)
+ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/MultipleTargets.frag)
+ursa_test_shader(UrsaRhiTests ${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders/Parameters.frag)
 
 add_test(NAME UrsaRhiTests COMMAND UrsaRhiTests)
 

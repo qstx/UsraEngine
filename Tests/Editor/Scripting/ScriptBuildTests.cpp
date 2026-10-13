@@ -81,6 +81,16 @@ int main(int argumentCount, char** arguments)
 		            "using Ursa; namespace DemoScripts.Editor; "
 		            "[UrsaScriptType(\"editor.scene-tool\")] public sealed class SceneTool : Behaviour { } "
 		            "public sealed class EditorUtility { }\n");
+		WriteSource(assets / "Scripts" / "Settings.cs",
+		            "using Ursa; namespace DemoScripts; "
+		            "[UrsaScriptType(\"demo.settings\")] public sealed class Settings : ScriptableObject { "
+		            "public Vector2 size = new(8,4); public Vector4 tint = new(1,2,3,4); "
+		            "public OtherSettings other = null!; public Shader shader = null!; "
+		            "public ComputeShader[] kernels = System.Array.Empty<ComputeShader>(); "
+		            "public System.Collections.Generic.List<Shader> shaders = new(); } "
+		            "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {} "
+		            "public abstract class AbstractSettings : ScriptableObject {} "
+		            "public sealed class GenericSettings<T> : ScriptableObject {}\n");
 
 		VirtualFileSystem filesystem;
 		auto projectMount = filesystem.Mount(projectScheme, assets, MountAccess::ReadWrite);
@@ -96,7 +106,7 @@ int main(int argumentCount, char** arguments)
 		Expect(static_cast<bool>(service), "Could not create ScriptBuild service");
 		auto projects = service.value->GenerateProjects();
 		Expect(static_cast<bool>(projects), "ScriptBuild did not generate its projects");
-		Expect(service.value->ScriptTypes().size() == 3,
+		Expect(service.value->ScriptTypes().size() == 5,
 		       "Roslyn script catalog included abstract/generic types or missed a concrete Behaviour");
 		const auto findType = [&service](const char* id) -> ScriptTypeRecord
 		{
@@ -112,6 +122,26 @@ int main(int argumentCount, char** arguments)
 		const ScriptTypeRecord moverType = findType("demo.mover");
 		const ScriptTypeRecord followerType = findType("demo.follower");
 		const ScriptTypeRecord editorType = findType("editor.scene-tool");
+		const ScriptTypeRecord settingsType = findType("demo.settings");
+		const ScriptTypeRecord otherSettingsType = findType("demo.other-settings");
+		const auto settingsField = [&](const String& name) -> const ScriptFieldTypeDescriptor&
+		{
+			for (const auto& field : settingsType.fields)
+			{
+				if (field.name == name)
+				{
+					return field;
+				}
+			}
+			throw std::runtime_error("Missing settings field");
+		};
+		Expect(settingsType.kind == ScriptTypeKind::ScriptableObject && settingsType.fields.size() == 6 &&
+		           settingsType.sourceGuid == otherSettingsType.sourceGuid &&
+		           settingsType.localFileId != otherSettingsType.localFileId &&
+		           moverType.kind == ScriptTypeKind::Behaviour && settingsField("shader").kind == "ShaderReference" &&
+		           settingsField("kernels").elementKind == "ComputeShaderReference" &&
+		           settingsField("shaders").elementKind == "ShaderReference",
+		       "ScriptableObject classification or stable subasset identity was lost");
 		Expect(moverType.group == ScriptAssemblyGroup::Game && moverType.version == 2 && moverType.localFileId != 0 &&
 		           followerType.group == ScriptAssemblyGroup::Game && editorType.group == ScriptAssemblyGroup::Editor &&
 		           moverType.fields.size() == 1 && moverType.fields[0].name == "step" &&
@@ -223,13 +253,46 @@ int main(int argumentCount, char** arguments)
 		            "public sealed class DuplicateMover : Behaviour { }\n");
 		Expect(static_cast<bool>(database.value->Refresh()),
 		       "AssetDatabase could not discover duplicate ScriptType fixture");
-		Expect(!service.value->GenerateProjects(), "Script catalog accepted duplicate ScriptType identities");
+		const auto lastGoodCatalog = filesystem.Read(projects.value.typeCatalog);
+		const auto duplicateCatalog = service.value->GenerateProjects();
+		const auto retainedCatalog = filesystem.Read(projects.value.typeCatalog);
+		Expect(!duplicateCatalog && duplicateCatalog.error.find("DuplicateMover") != String::npos &&
+		           duplicateCatalog.error.find("RenamedMover") != String::npos &&
+		           duplicateCatalog.error.find("prj:Scripts/Duplicate.cs") != String::npos &&
+		           duplicateCatalog.error.find("prj:Scripts/GameMover.cs") != String::npos && lastGoodCatalog &&
+		           retainedCatalog && retainedCatalog.value == lastGoodCatalog.value,
+		       "Duplicate ScriptType diagnostics lost either origin or replaced the last good catalog");
 		Expect(static_cast<bool>(filesystem.Remove(Path("prj:Scripts/Duplicate.cs"))) &&
 		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/Duplicate.cs.meta"))) &&
 		           static_cast<bool>(database.value->Refresh()),
 		       "Could not remove duplicate ScriptType fixture");
 		Expect(static_cast<bool>(service.value->GenerateProjects()),
 		       "Script catalog did not recover after duplicate removal");
+		WriteSource(assets / "Scripts" / "ForwardCollision.cs",
+		            "using Ursa; namespace DemoScripts; "
+		            "[UrsaScriptType(\"ursa.rendering.forward\")] public sealed class ForwardCollision : "
+		            "ScriptableObject {}\n");
+		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase missed the framework identity collision");
+		auto reservedIdentity = service.value->GenerateProjects();
+		Expect(!reservedIdentity &&
+		           reservedIdentity.error.find("framework type Ursa.Rendering.ForwardRenderPipelineAsset") !=
+		               String::npos &&
+		           reservedIdentity.error.find("ForwardCollision") != String::npos,
+		       "Project ScriptableObject was allowed to shadow the stable Forward pipeline type identity");
+		Expect(static_cast<bool>(filesystem.Remove(Path("prj:Scripts/ForwardCollision.cs"))) &&
+		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/ForwardCollision.cs.meta"))) &&
+		           static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()),
+		       "Script catalog did not recover after removing the framework identity collision");
+		WriteSource(
+		    assets / "Scripts" / "Settings.cs",
+		    "using Ursa; namespace DemoScripts; "
+		    "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {} "
+		    "[UrsaScriptType(\"demo.settings\")] public sealed partial class RenamedSettings : ScriptableObject {} "
+		    "public sealed partial class RenamedSettings { public int value = 5; }\n");
+		Expect(static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()) &&
+		           findType("demo.settings").localFileId == settingsType.localFileId &&
+		           findType("demo.settings").sourceGuid == settingsType.sourceGuid,
+		       "ScriptableObject identity changed after a CLR type rename");
 
 		auto lastGoodAssembly = filesystem.Read(projects.value.gameAssembly);
 		Expect(static_cast<bool>(lastGoodAssembly), "Could not read the last good script assembly");

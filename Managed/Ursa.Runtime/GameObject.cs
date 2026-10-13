@@ -31,6 +31,16 @@ public sealed class GameObject
 		set => EngineApi.SetActive(handle, value);
 	}
 
+	public int Layer
+	{
+		get => EngineApi.ResourceRequest<int>(new { operation = "gameObject.layer.get", handle });
+		set
+		{
+			if (value < 0 || value > 31) throw new ArgumentOutOfRangeException(nameof(value));
+			EngineApi.ResourceRequest(new { operation = "gameObject.layer.set", handle, value });
+		}
+	}
+
 	public bool ActiveInHierarchy
 	{
 		get

@@ -3,6 +3,17 @@ namespace Ursa;
 [NativeComponentType("ursa.Camera")]
 public sealed unsafe class CameraComponent : Component
 {
+	public CameraRenderingSettings RenderingSettings
+	{
+		get => CameraRenderingSettings.FromPayload(EngineApi.ResourceRequest<CameraSettingsPayload>(
+			new { operation = "camera.settings.get", handle = NativeHandle }));
+		set
+		{
+			System.ArgumentNullException.ThrowIfNull(value);
+			EngineApi.ResourceRequest(new { operation = "camera.settings.set", handle = NativeHandle, data = value.ToPayload() });
+		}
+	}
+
 	public float VerticalFovRadians
 	{
 		get {

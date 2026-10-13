@@ -6,6 +6,7 @@
 #include <Math/Transform.hpp>
 #include <Mesh/Mesh.hpp>
 #include <Rhi/RHI.hpp>
+#include <Rendering/Diagnostics/FrameCapture.hpp>
 #include <Scene/Lighting.hpp>
 #include <memory>
 
@@ -47,7 +48,7 @@ public:
 
 	Result<void> RenderModels(const Rhi::SwapchainPtr& swapchain, const Mat4& viewProjection,
 	                          const Vector<ModelBoxInstance>& boxes, const SceneLighting& lighting = {},
-	                          Vec3 cameraPosition = {});
+	                          Vec3 cameraPosition = {}, Rendering::FrameCapture* capture = nullptr);
 
 	// Leaves an offscreen color target in TransferSource state for readback.
 	Result<Rhi::FencePtr> RenderOffscreen(const Rhi::TexturePtr& color, const Camera& camera,

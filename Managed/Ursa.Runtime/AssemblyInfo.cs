@@ -4,3 +4,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("Ursa.ManagedHost.ProtocolTests")]
 
 [assembly: InternalsVisibleTo("Ursa.Editor")]
+[assembly: InternalsVisibleTo("Ursa.Rendering")]

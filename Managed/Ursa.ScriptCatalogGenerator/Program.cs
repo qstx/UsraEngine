@@ -12,6 +12,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 internal sealed class Manifest
 {
 	public string RuntimeAssembly { get; set; } = string.Empty;
+	public string RenderingAssembly { get; set; } = string.Empty;
 	public string EditorAssembly { get; set; } = string.Empty;
 	public string ReferenceDirectory { get; set; } = string.Empty;
 	public string OutputPath { get; set; } = string.Empty;
@@ -36,6 +37,7 @@ internal sealed class ScriptRecord
 	public string VirtualPath { get; set; } = string.Empty;
 	public string Group { get; set; } = string.Empty;
 	public List<ScriptFieldRecord> Fields { get; set; } = new();
+	public string Kind { get; set; } = "Behaviour";
 }
 
 internal sealed class ScriptFieldRecord
@@ -84,6 +86,8 @@ internal static class Program
 			var references = Directory.GetFiles(manifest.ReferenceDirectory, "*.dll")
 				.Select(path => MetadataReference.CreateFromFile(path)).ToList();
 			references.Add(MetadataReference.CreateFromFile(manifest.RuntimeAssembly));
+			if (!string.IsNullOrEmpty(manifest.RenderingAssembly))
+				references.Add(MetadataReference.CreateFromFile(manifest.RenderingAssembly));
 			references.Add(MetadataReference.CreateFromFile(manifest.EditorAssembly));
 			var compilation = CSharpCompilation.Create("Ursa.ScriptCatalog", trees, references,
 				new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -111,6 +115,8 @@ internal static class Program
 
 			INamedTypeSymbol behaviorBase = compilation.GetTypeByMetadataName("Ursa.Behaviour")
 			                                ?? throw new InvalidDataException("Ursa.Runtime does not define Ursa.Behaviour.");
+			INamedTypeSymbol assetBase = compilation.GetTypeByMetadataName("Ursa.ScriptableObject")
+			                            ?? throw new InvalidDataException("Ursa.Runtime does not define Ursa.ScriptableObject.");
 			INamedTypeSymbol? scriptTypeAttribute = compilation.GetTypeByMetadataName("Ursa.UrsaScriptTypeAttribute");
 			INamedTypeSymbol? behaviorType = compilation.GetTypeByMetadataName("Ursa.Behaviour");
 			INamedTypeSymbol? componentType = compilation.GetTypeByMetadataName("Ursa.Component");
@@ -119,8 +125,23 @@ internal static class Program
 				compilation.GetTypeByMetadataName("Ursa.FormerlySerializedAsAttribute");
 			INamedTypeSymbol? nonSerializedAttribute = compilation.GetTypeByMetadataName("System.NonSerializedAttribute");
 			var catalog = new Catalog();
-			var typeIds = new HashSet<string>(StringComparer.Ordinal);
-			var localIds = new HashSet<ulong>();
+			var typeIds = new Dictionary<string, string>(StringComparer.Ordinal);
+			var localIds = new Dictionary<ulong, string>();
+			INamedTypeSymbol? forwardPipeline = compilation.GetTypeByMetadataName("Ursa.Rendering.ForwardRenderPipelineAsset");
+			if (forwardPipeline != null && scriptTypeAttribute != null)
+			{
+				AttributeData? identity = forwardPipeline.GetAttributes().FirstOrDefault(attribute =>
+					SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, scriptTypeAttribute));
+				if (identity?.ConstructorArguments.FirstOrDefault().Value is string builtInId &&
+				    !string.IsNullOrWhiteSpace(builtInId))
+				{
+					string origin = "framework type Ursa.Rendering.ForwardRenderPipelineAsset";
+					ulong localFileId = MakeLocalFileId(builtInId);
+					typeIds.Add(builtInId, origin);
+					localIds.Add(localFileId, origin);
+				}
+			}
+			var declaredTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 			foreach (SyntaxTree tree in trees)
 			{
 				SourceEntry source = manifest.Sources.First(item => item.VirtualPath == tree.FilePath);
@@ -130,21 +151,25 @@ internal static class Program
 				{
 					if (semanticModel.GetDeclaredSymbol(declaration) is not INamedTypeSymbol type ||
 					    type.DeclaredAccessibility != Accessibility.Public || type.IsAbstract || type.Arity != 0 ||
-					    !DerivesFrom(type, behaviorBase))
+					    (!DerivesFrom(type, behaviorBase) && !DerivesFrom(type, assetBase)) ||
+					    !declaredTypes.Add(type))
 					{
 						continue;
 					}
 
 					(string scriptTypeId, uint version) = ReadScriptType(type, scriptTypeAttribute, source);
-					if (!typeIds.Add(scriptTypeId))
+					string origin = $"{type.ToDisplayString()} in {source.VirtualPath}";
+					if (typeIds.TryGetValue(scriptTypeId, out string? previousType))
 					{
-						throw new InvalidDataException($"Duplicate ScriptType '{scriptTypeId}' in {source.VirtualPath}.");
+						throw new InvalidDataException($"Duplicate ScriptType '{scriptTypeId}': {previousType}; {origin}.");
 					}
+					typeIds.Add(scriptTypeId, origin);
 					ulong localFileId = MakeLocalFileId(scriptTypeId);
-					if (!localIds.Add(localFileId))
+					if (localIds.TryGetValue(localFileId, out string? previousLocalId))
 					{
-						throw new InvalidDataException($"Duplicate ScriptType local file ID for '{scriptTypeId}'.");
+						throw new InvalidDataException($"Duplicate ScriptType local file ID {localFileId}: {previousLocalId}; {origin}.");
 					}
+					localIds.Add(localFileId, origin);
 					catalog.Scripts.Add(new ScriptRecord
 					{
 						SourceGuid = source.Guid,
@@ -155,7 +180,8 @@ internal static class Program
 						              (source.Group == "Editor" ? "Ursa.EditorScripts" : "Ursa.Game"),
 						VirtualPath = source.VirtualPath,
 						Group = source.Group,
-						Fields = DescribeFields(type, compilation, behaviorType, componentType, serializeFieldAttribute,
+						Kind = DerivesFrom(type, assetBase) ? "ScriptableObject" : "Behaviour",
+						Fields = DescribeFields(type, compilation, behaviorType, componentType, assetBase, serializeFieldAttribute,
 						                        formerlySerializedAsAttribute, nonSerializedAttribute)
 					});
 				}
@@ -223,13 +249,14 @@ internal static class Program
 	}
 
 	private static List<ScriptFieldRecord> DescribeFields(INamedTypeSymbol scriptType, Compilation compilation,
-		INamedTypeSymbol? behaviorBase, INamedTypeSymbol? componentBase, INamedTypeSymbol? serializeFieldAttribute,
+		INamedTypeSymbol? behaviorBase, INamedTypeSymbol? componentBase, INamedTypeSymbol? assetBase, INamedTypeSymbol? serializeFieldAttribute,
 		INamedTypeSymbol? formerNameAttribute, INamedTypeSymbol? nonSerializedAttribute)
 	{
 		var fields = new List<ScriptFieldRecord>();
 		for (INamedTypeSymbol? current = scriptType;
 		     current != null && !SymbolEqualityComparer.Default.Equals(current, behaviorBase) &&
-	     !SymbolEqualityComparer.Default.Equals(current, componentBase);
+	     !SymbolEqualityComparer.Default.Equals(current, componentBase) &&
+	     !SymbolEqualityComparer.Default.Equals(current, assetBase);
 		     current = current.BaseType)
 		{
 			foreach (IFieldSymbol field in current.GetMembers().OfType<IFieldSymbol>())
@@ -313,14 +340,22 @@ internal static class Program
 		for (INamedTypeSymbol? current = type as INamedTypeSymbol; current != null; current = current.BaseType)
 		{
 			if (current.ToDisplayString() == "Ursa.Component") return "ComponentReference";
+			if (current.ToDisplayString() == "Ursa.ScriptableObject") return "ScriptableObjectReference";
+			if (current.ToDisplayString() == "Ursa.Material") return "MaterialReference";
+			if (current.ToDisplayString() == "Ursa.Texture") return "TextureReference";
 		}
 		if (type.ContainingNamespace.ToDisplayString() != "Ursa") return "Unsupported";
 		return type.Name switch
 		{
+			"Vector2" => "Vector2",
 			"Vector3" => "Vector3",
+			"Vector4" => "Vector4",
+			"Mesh" => "MeshReference",
 			"Quaternion" => "Quaternion",
 			"Color" => "Color",
 			"AssetReference" => "AssetReference",
+			"Shader" => "ShaderReference",
+			"ComputeShader" => "ComputeShaderReference",
 			"GameObject" => "GameObjectReference",
 			"Component" or "Behaviour" => "ComponentReference",
 			_ => "Unsupported"
@@ -350,7 +385,7 @@ internal static class Program
 			{
 				return JsonSerializer.Serialize(constant.Value);
 			}
-			if (kind is "Vector3" or "Quaternion" or "Color")
+			if (kind is "Vector2" or "Vector3" or "Vector4" or "Quaternion" or "Color")
 			{
 				IEnumerable<ArgumentSyntax>? arguments = initializer switch
 				{
@@ -366,7 +401,8 @@ internal static class Program
 					{
 						values.Add(kind == "Quaternion" && values.Count == 3 || kind == "Color" && values.Count == 3 ? 1.0 : 0.0);
 					}
-					if (kind == "Vector3") values.RemoveAt(3);
+					int componentCount = kind == "Vector2" ? 2 : kind == "Vector3" ? 3 : 4;
+					if (values.Count != componentCount) values.RemoveRange(componentCount, values.Count - componentCount);
 					return JsonSerializer.Serialize(values);
 				}
 			}
@@ -377,8 +413,9 @@ internal static class Program
 			"Boolean" => "false",
 			"SignedInteger" or "UnsignedInteger" or "FloatingPoint" => "0",
 			"String" or "GameObjectReference" or "ComponentReference" or "AssetReference" => "null",
+			"Vector2" => "[0,0]",
 			"Vector3" => "[0,0,0]",
-			"Quaternion" or "Color" => "[0,0,0,0]",
+			"Vector4" or "Quaternion" or "Color" => "[0,0,0,0]",
 			"Enumeration" => "0",
 			"Array" or "List" => "[]",
 			_ => "null"

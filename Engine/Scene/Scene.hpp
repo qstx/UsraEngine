@@ -190,6 +190,7 @@ public:
 
 private:
 	friend class GameObject;
+	friend class Rendering::RenderScene;
 
 	struct ObjectHandle
 	{

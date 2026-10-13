@@ -1,4 +1,8 @@
 if(URSA_BUILD_EDITOR)
+  ursa_add_test_executable(UrsaFrameCaptureTests FrameCaptureTests.cpp)
+  target_link_libraries(UrsaFrameCaptureTests PRIVATE Ursa::Editor Ursa::StbImage)
+  add_test(NAME UrsaFrameCaptureTests COMMAND UrsaFrameCaptureTests)
+
   if(URSA_ENABLE_DOTNET)
     ursa_add_test_executable(UrsaMeshEditorWindowTests MeshEditorWindowTests.cpp)
     target_link_libraries(UrsaMeshEditorWindowTests PRIVATE Ursa::Editor)

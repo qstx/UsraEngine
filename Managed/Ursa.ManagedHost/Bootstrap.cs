@@ -23,7 +23,7 @@ public static unsafe partial class Bootstrap
 	}
 
 	[StructLayout(LayoutKind.Sequential)]
-	internal struct NativeApiV5
+	internal struct NativeApiV6
 	{
 		public uint version;
 		public uint size;
@@ -67,6 +67,7 @@ public static unsafe partial class Bootstrap
 		public delegate* unmanaged[Cdecl]<nint, NativeHandle, float*, ulong, int> setCameraProjection;
 		public delegate* unmanaged[Cdecl]<nint, byte*, ulong, int> setWindowTitle;
 		public delegate* unmanaged[Cdecl]<nint, byte*, ulong, byte*, ulong, ulong*, int> resourceRequest;
+		public delegate* unmanaged[Cdecl]<nint, byte*, ulong, byte*, ulong, int> submitRenderBatch;
 	}
 
 	private static readonly byte[] initializedMessage = Encoding.UTF8.GetBytes("Ursa 托管运行时已初始化");
@@ -85,16 +86,16 @@ public static unsafe partial class Bootstrap
 
 	internal static int Validate(nint arguments, int argumentSize)
 	{
-		if (arguments == 0 || argumentSize < sizeof(NativeApiV5))
+		if (arguments == 0 || argumentSize < sizeof(NativeApiV6))
 		{
 			return 1;
 		}
-		NativeApiV5* api = (NativeApiV5*)arguments;
-		if (api->version != 5 || api->size < (uint)sizeof(NativeApiV5))
+		NativeApiV6* api = (NativeApiV6*)arguments;
+		if (api->version != 6 || api->size < (uint)sizeof(NativeApiV6))
 		{
 			return 2;
 		}
-		return api->logUtf8 == null ? 3 : 0;
+		return api->logUtf8 == null || api->submitRenderBatch == null ? 3 : 0;
 	}
 
 	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
@@ -107,7 +108,7 @@ public static unsafe partial class Bootstrap
 			return validation;
 		}
 
-		NativeApiV5* api = (NativeApiV5*)arguments;
+		NativeApiV6* api = (NativeApiV6*)arguments;
 		Ursa.EngineApi.Initialize(arguments);
 		fixed(byte* message = initializedMessage)
 		{

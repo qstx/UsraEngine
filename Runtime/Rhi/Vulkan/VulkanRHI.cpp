@@ -14,9 +14,11 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <new>
 #include <stdexcept>
+#include <tuple>
 #include <vk_mem_alloc.h>
 #if defined(URSA_ENABLE_TRACY)
 #include <tracy/TracyVulkan.hpp>
@@ -26,6 +28,16 @@ namespace Ursa::Rhi
 {
 namespace
 {
+struct SamplerImpl;
+struct TextureImpl;
+struct BufferImpl;
+
+struct TrackedResourceStates
+{
+	std::weak_ptr<void> owner;
+	Vector<ResourceState> states;
+};
+
 void Require(bool condition, const String& message)
 {
 	if (!condition)
@@ -83,6 +95,8 @@ VkFormat ToVkFormat(Format format)
 			return VK_FORMAT_D32_SFLOAT;
 		case Format::D32FloatS8Uint:
 			return VK_FORMAT_D32_SFLOAT_S8_UINT;
+		case Format::RgbA16Float:
+			return VK_FORMAT_R16G16B16A16_SFLOAT;
 	}
 	throw std::runtime_error("Unknown texture format");
 }
@@ -103,6 +117,8 @@ Format FromVkFormat(VkFormat format)
 			return Format::D32Float;
 		case VK_FORMAT_D32_SFLOAT_S8_UINT:
 			return Format::D32FloatS8Uint;
+		case VK_FORMAT_R16G16B16A16_SFLOAT:
+			return Format::RgbA16Float;
 		default:
 			throw std::runtime_error("Unsupported surface format");
 	}
@@ -240,7 +256,7 @@ VkColorComponentFlags ToVkColorWriteMask(ColorWriteMask mask)
 
 Ursa::UInt32 PixelSize(Format f)
 {
-	return f == Format::D32FloatS8Uint ? 8 : 4;
+	return f == Format::D32FloatS8Uint || f == Format::RgbA16Float ? 8 : 4;
 }
 
 VkBufferUsageFlags VkBufferUsage(BufferUsage usage)
@@ -351,6 +367,10 @@ VkDescriptorType VkDescriptor(BindingType type)
 			return VK_DESCRIPTOR_TYPE_SAMPLER;
 		case BindingType::CombinedImageSampler:
 			return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		case BindingType::DynamicUniformBuffer:
+			return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+		case BindingType::DynamicStorageBuffer:
+			return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
 	}
 	throw std::runtime_error("Unknown descriptor type");
 }
@@ -467,9 +487,16 @@ struct Context
 	VmaAllocator allocator = VK_NULL_HANDLE;
 	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 	VkPhysicalDeviceProperties properties{};
+	VkPhysicalDeviceFeatures features{};
 	std::atomic<Ursa::UInt32> validationErrors{0};
 	std::shared_ptr<Window> window;
 	std::mutex queueMutex;
+	std::map<const void*, TrackedResourceStates> textureStates;
+	std::map<const void*, TrackedResourceStates> bufferStates;
+	std::mutex samplerCacheMutex;
+	std::map<std::tuple<bool, bool, Float32>, std::weak_ptr<SamplerImpl>> samplers;
+	std::mutex renderPassCacheMutex;
+	std::map<std::string, VkRenderPass> renderPasses;
 #if defined(URSA_ENABLE_TRACY_MEMORY) || defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
 	DeviceMemoryProfiling* memoryProfiling = nullptr;
 #endif
@@ -527,6 +554,11 @@ struct Context
 		{
 			vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 		}
+		for (const auto& [key, renderPass] : renderPasses)
+		{
+			vkDestroyRenderPass(device, renderPass, nullptr);
+		}
+		renderPasses.clear();
 		if (allocator)
 		{
 			vmaDestroyAllocator(allocator);
@@ -692,6 +724,8 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 	queueInfo.queueCount = 1;
 	queueInfo.pQueuePriorities = &priority;
 	VkPhysicalDeviceFeatures features{};
+	vkGetPhysicalDeviceFeatures(ctx->physical, &ctx->features);
+	features.shaderStorageImageExtendedFormats = ctx->features.shaderStorageImageExtendedFormats;
 	VkDeviceCreateInfo deviceInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
 	deviceInfo.queueCreateInfoCount = 1;
 	deviceInfo.pQueueCreateInfos = &queueInfo;
@@ -719,12 +753,14 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 	allocatorInfo.pDeviceMemoryCallbacks = &ctx->memoryCallbacks;
 #endif
 	Check(vmaCreateAllocator(&allocatorInfo, &ctx->allocator), "Creating Vulkan memory allocator");
-	Array<VkDescriptorPoolSize, 6> poolSizes{{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024},
+	Array<VkDescriptorPoolSize, 8> poolSizes{{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024},
 	                                          {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1024},
 	                                          {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1024},
 	                                          {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1024},
 	                                          {VK_DESCRIPTOR_TYPE_SAMPLER, 1024},
-	                                          {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024}}};
+	                                          {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024},
+	                                          {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1024},
+	                                          {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1024}}};
 	VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
 	poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 	poolInfo.maxSets = 1024;
@@ -861,6 +897,7 @@ struct TextureImpl final : Texture
 	std::shared_ptr<SwapchainState> swapchainOwner;
 	VkImage image = VK_NULL_HANDLE;
 	VkImageView view = VK_NULL_HANDLE;
+	VkImageView attachmentView = VK_NULL_HANDLE;
 	VmaAllocation allocation = VK_NULL_HANDLE;
 
 	TextureImpl(std::shared_ptr<Context> c, TextureDesc d) : Texture(d), ctx(std::move(c))
@@ -869,6 +906,10 @@ struct TextureImpl final : Texture
 
 	~TextureImpl() override
 	{
+		if (attachmentView)
+		{
+			vkDestroyImageView(ctx->device, attachmentView, nullptr);
+		}
 		if (view)
 		{
 			vkDestroyImageView(ctx->device, view, nullptr);
@@ -877,6 +918,59 @@ struct TextureImpl final : Texture
 		{
 			vmaDestroyImage(ctx->allocator, image, allocation);
 		}
+	}
+};
+
+struct FramebufferCacheEntry
+{
+	std::shared_ptr<Context> ctx;
+	VkFramebuffer framebuffer = VK_NULL_HANDLE;
+	Vector<std::shared_ptr<TextureImpl>> attachments;
+
+	~FramebufferCacheEntry()
+	{
+		if (framebuffer)
+		{
+			vkDestroyFramebuffer(ctx->device, framebuffer, nullptr);
+		}
+	}
+};
+
+struct FramebufferCache
+{
+	std::mutex mutex;
+	std::map<std::string, std::shared_ptr<FramebufferCacheEntry>> entries;
+
+	std::shared_ptr<FramebufferCacheEntry> Acquire(const std::shared_ptr<Context>& ctx, const std::string& key,
+	                                               VkRenderPass pass, const Vector<VkImageView>& views,
+	                                               VkExtent2D extent,
+	                                               const Vector<std::shared_ptr<TextureImpl>>& attachments)
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		if (const auto found = entries.find(key); found != entries.end())
+		{
+			return found->second;
+		}
+		for (auto it = entries.begin(); entries.size() >= 64 && it != entries.end();)
+		{
+			it = it->second.use_count() == 1 ? entries.erase(it) : std::next(it);
+		}
+		auto entry = std::make_shared<FramebufferCacheEntry>();
+		entry->ctx = ctx;
+		entry->attachments = attachments;
+		VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+		info.renderPass = pass;
+		info.attachmentCount = UInt32(views.size());
+		info.pAttachments = views.data();
+		info.width = extent.width;
+		info.height = extent.height;
+		info.layers = 1;
+		Check(vkCreateFramebuffer(ctx->device, &info, nullptr, &entry->framebuffer), "Creating framebuffer");
+		if (entries.size() < 64)
+		{
+			entries.emplace(key, entry);
+		}
+		return entry;
 	}
 };
 
@@ -925,18 +1019,76 @@ struct LayoutImpl final : BindGroupLayout
 	}
 };
 
+struct DescriptorPoolState
+{
+	std::shared_ptr<Context> ctx;
+	VkDescriptorPool pool = VK_NULL_HANDLE;
+	UInt64 generation = 1;
+	std::weak_ptr<CommandList> owner;
+	UInt32 liveSets = 0;
+	UInt64 totalSets = 0;
+
+	~DescriptorPoolState()
+	{
+		if (pool)
+		{
+			vkDestroyDescriptorPool(ctx->device, pool, nullptr);
+		}
+	}
+};
+
+std::shared_ptr<DescriptorPoolState> CreateTemporaryDescriptorPool(const std::shared_ptr<Context>& ctx)
+{
+	auto pool = std::make_shared<DescriptorPoolState>();
+	pool->ctx = ctx;
+	Array<VkDescriptorPoolSize, 8> sizes{{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024},
+	                                      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1024},
+	                                      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1024},
+	                                      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1024},
+	                                      {VK_DESCRIPTOR_TYPE_SAMPLER, 1024},
+	                                      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024},
+	                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1024},
+	                                      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1024}}};
+	VkDescriptorPoolCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+	info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	info.maxSets = 4096;
+	info.poolSizeCount = UInt32(sizes.size());
+	info.pPoolSizes = sizes.data();
+	Check(vkCreateDescriptorPool(ctx->device, &info, nullptr, &pool->pool), "Creating frame descriptor pool");
+	return pool;
+}
+
 struct GroupImpl final : BindGroup
 {
+	struct DynamicBuffer
+	{
+		std::shared_ptr<BufferImpl> buffer;
+		Size offset = 0;
+		Size range = 0;
+		Size alignment = 1;
+	};
+
 	std::shared_ptr<Context> ctx;
 	std::shared_ptr<LayoutImpl> layout;
 	VkDescriptorSet set = VK_NULL_HANDLE;
 	Vector<std::shared_ptr<void>> keepAlive;
+	Vector<TextureImpl*> sampledTextures;
+	Vector<DynamicBuffer> dynamicBuffers;
+	std::shared_ptr<DescriptorPoolState> temporaryPool;
+	UInt64 poolGeneration = 0;
 
 	~GroupImpl() override
 	{
 		if (set && ctx->descriptorPool)
 		{
-			vkFreeDescriptorSets(ctx->device, ctx->descriptorPool, 1, &set);
+			if (!temporaryPool || temporaryPool->generation == poolGeneration)
+			{
+				vkFreeDescriptorSets(ctx->device, temporaryPool ? temporaryPool->pool : ctx->descriptorPool, 1, &set);
+				if (temporaryPool)
+				{
+					--temporaryPool->liveSets;
+				}
+			}
 		}
 	}
 };
@@ -944,14 +1096,37 @@ struct GroupImpl final : BindGroup
 struct PipelineImpl final : Pipeline
 {
 	std::shared_ptr<Context> ctx;
-	std::shared_ptr<LayoutImpl> groupLayout;
+	Vector<std::shared_ptr<LayoutImpl>> groupLayouts;
 	ShaderPtr shaderA, shaderB;
 	VkPipelineLayout layout = VK_NULL_HANDLE;
 	VkRenderPass renderPass = VK_NULL_HANDLE;
 	VkPipeline pipeline = VK_NULL_HANDLE;
 	bool compute = false;
+	bool renderPassCached = false;
 	Format colorFormat{}, depthFormat{};
+	Vector<Format> colorFormats;
 	bool hasDepth = false;
+
+	Vector<VkDescriptorSetLayout> InitializeLayouts(const LayoutPtr& legacy, const Vector<LayoutPtr>& selected)
+	{
+		Require(!legacy || selected.empty(), "Choose either legacy descriptor layout or explicit descriptor layouts");
+		Vector<LayoutPtr> layouts = selected;
+		if (legacy)
+		{
+			layouts.push_back(legacy);
+		}
+		Require(layouts.size() <= ctx->properties.limits.maxBoundDescriptorSets,
+		        "Descriptor group count exceeds adapter limit");
+		Vector<VkDescriptorSetLayout> result;
+		for (const auto& input : layouts)
+		{
+			auto group = std::dynamic_pointer_cast<LayoutImpl>(input);
+			Require(group && group->ctx == ctx, "Invalid or foreign descriptor layout");
+			groupLayouts.push_back(group);
+			result.push_back(group->layout);
+		}
+		return result;
+	}
 
 	~PipelineImpl() override
 	{
@@ -959,7 +1134,7 @@ struct PipelineImpl final : Pipeline
 		{
 			vkDestroyPipeline(ctx->device, pipeline, nullptr);
 		}
-		if (renderPass)
+		if (renderPass && !renderPassCached)
 		{
 			vkDestroyRenderPass(ctx->device, renderPass, nullptr);
 		}
@@ -978,44 +1153,188 @@ std::shared_ptr<T> checked(const std::shared_ptr<B>& base, const std::shared_ptr
 	return object;
 }
 
-VkRenderPass MakeRenderPass(VkDevice device, Format colorFormat, bool depth, Format depthFormat, bool clearColor,
-                            bool clearDepth, bool clearStencil)
+BindGroupPtr CreateDescriptorGroup(const std::shared_ptr<Context>& ctx, const BindGroupDesc& desc,
+                                   const std::shared_ptr<DescriptorPoolState>& temporaryPool)
 {
-	Array<VkAttachmentDescription, 2> attachments{};
-	attachments[0].format = ToVkFormat(colorFormat);
-	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-	attachments[0].loadOp = clearColor ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-	attachments[0].initialLayout = attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-	VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-	VkAttachmentReference depthRef{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+	auto layout = checked<LayoutImpl>(desc.layout, ctx, "descriptor layout");
+	Require(desc.resources.size() == layout->bindings.size(), "Descriptor group resource count does not match layout");
+	auto group = std::make_shared<GroupImpl>();
+	group->ctx = ctx;
+	group->layout = layout;
+	group->temporaryPool = temporaryPool;
+	group->poolGeneration = temporaryPool ? temporaryPool->generation : 0;
+	VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+	alloc.descriptorPool = temporaryPool ? temporaryPool->pool : ctx->descriptorPool;
+	alloc.descriptorSetCount = 1;
+	alloc.pSetLayouts = &layout->layout;
+	Check(vkAllocateDescriptorSets(ctx->device, &alloc, &group->set), "Allocating descriptor group");
+	if (temporaryPool)
+	{
+		++temporaryPool->liveSets;
+		++temporaryPool->totalSets;
+	}
+	Vector<VkDescriptorBufferInfo> bufferInfos;
+	bufferInfos.reserve(desc.resources.size());
+	Vector<VkDescriptorImageInfo> imageInfos;
+	imageInfos.reserve(desc.resources.size());
+	Vector<VkWriteDescriptorSet> writes;
+	writes.reserve(desc.resources.size());
+	for (const auto& binding : layout->bindings)
+	{
+		auto it = std::find_if(desc.resources.begin(), desc.resources.end(),
+		                       [&](const auto& r) { return r.binding == binding.binding; });
+		Require(it != desc.resources.end(),
+		        String("Missing descriptor binding ") + ToUrsaString(std::to_string(binding.binding)));
+		VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+		write.dstSet = group->set;
+		write.dstBinding = binding.binding;
+		write.descriptorCount = 1;
+		write.descriptorType = VkDescriptor(binding.type);
+		if (binding.type == BindingType::UniformBuffer || binding.type == BindingType::StorageBuffer ||
+		    binding.type == BindingType::DynamicUniformBuffer || binding.type == BindingType::DynamicStorageBuffer)
+		{
+			auto b = checked<BufferImpl>(it->buffer, ctx, "descriptor buffer");
+			const bool uniform =
+			    binding.type == BindingType::UniformBuffer || binding.type == BindingType::DynamicUniformBuffer;
+			const bool dynamic =
+			    binding.type == BindingType::DynamicUniformBuffer || binding.type == BindingType::DynamicStorageBuffer;
+			Require(Has(b->desc.usage, uniform ? BufferUsage::Uniform : BufferUsage::Storage),
+			        "Buffer lacks descriptor usage");
+			const Size alignment = Size(uniform ? ctx->properties.limits.minUniformBufferOffsetAlignment
+			                                    : ctx->properties.limits.minStorageBufferOffsetAlignment);
+			Require(it->offset <= b->desc.size && it->offset % alignment == 0,
+			        "Descriptor buffer offset is out of range or not aligned");
+			const Size range = it->size ? it->size : b->desc.size - it->offset;
+			Require(range && range <= b->desc.size - it->offset &&
+			            range <= (uniform ? ctx->properties.limits.maxUniformBufferRange
+			                              : ctx->properties.limits.maxStorageBufferRange),
+			        "Descriptor buffer range exceeds its buffer or adapter limit");
+			bufferInfos.push_back({b->buffer, it->offset, range});
+			if (dynamic)
+			{
+				group->dynamicBuffers.push_back({b, it->offset, range, alignment});
+			}
+			write.pBufferInfo = &bufferInfos.back();
+			group->keepAlive.push_back(b);
+		}
+		else
+		{
+			VkDescriptorImageInfo image{};
+			if (binding.type != BindingType::Sampler)
+			{
+				auto t = checked<TextureImpl>(it->texture, ctx, "descriptor texture");
+				Require(Has(t->desc.usage, binding.type == BindingType::StorageTexture ? TextureUsage::Storage
+				                                                                       : TextureUsage::Sampled),
+				        "Texture lacks descriptor usage");
+				image.imageView = t->view;
+				image.imageLayout = binding.type == BindingType::StorageTexture
+				                        ? VK_IMAGE_LAYOUT_GENERAL
+				                        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				group->keepAlive.push_back(t);
+				if (binding.type == BindingType::SampledTexture || binding.type == BindingType::CombinedImageSampler)
+				{
+					group->sampledTextures.push_back(t.get());
+				}
+			}
+			if (binding.type == BindingType::Sampler || binding.type == BindingType::CombinedImageSampler)
+			{
+				auto s = checked<SamplerImpl>(it->sampler, ctx, "descriptor sampler");
+				image.sampler = s->sampler;
+				group->keepAlive.push_back(s);
+			}
+			imageInfos.push_back(image);
+			write.pImageInfo = &imageInfos.back();
+		}
+		writes.push_back(write);
+	}
+	vkUpdateDescriptorSets(ctx->device, static_cast<Ursa::UInt32>(writes.size()), writes.data(), 0, nullptr);
+	return std::static_pointer_cast<BindGroup>(group);
+}
+
+struct PassAttachment
+{
+	Format format = Format::RgbA8Unorm;
+	AttachmentLoadOp load = AttachmentLoadOp::Clear;
+	AttachmentStoreOp store = AttachmentStoreOp::Store;
+	AttachmentLoadOp stencilLoad = AttachmentLoadOp::DontCare;
+	AttachmentStoreOp stencilStore = AttachmentStoreOp::DontCare;
+};
+
+VkAttachmentLoadOp ToVkLoadOp(AttachmentLoadOp value)
+{
+	switch (value)
+	{
+		case AttachmentLoadOp::Load:
+			return VK_ATTACHMENT_LOAD_OP_LOAD;
+		case AttachmentLoadOp::Clear:
+			return VK_ATTACHMENT_LOAD_OP_CLEAR;
+		case AttachmentLoadOp::DontCare:
+			return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	}
+	throw std::runtime_error("Unknown attachment load operation");
+}
+
+VkAttachmentStoreOp ToVkStoreOp(AttachmentStoreOp value)
+{
+	switch (value)
+	{
+		case AttachmentStoreOp::Store:
+			return VK_ATTACHMENT_STORE_OP_STORE;
+		case AttachmentStoreOp::DontCare:
+			return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	}
+	throw std::runtime_error("Unknown attachment store operation");
+}
+
+VkRenderPass MakeRenderPass(VkDevice device, const Vector<PassAttachment>& colors, bool depth,
+                            PassAttachment depthDescription)
+{
+	Vector<VkAttachmentDescription> attachments(colors.size() + (depth ? 1 : 0));
+	Vector<VkAttachmentReference> colorReferences;
+	for (Size index = 0; index < colors.size(); ++index)
+	{
+		auto& attachment = attachments[index];
+		attachment = {};
+		attachment.format = ToVkFormat(colors[index].format);
+		attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		attachment.loadOp = ToVkLoadOp(colors[index].load);
+		attachment.storeOp = ToVkStoreOp(colors[index].store);
+		attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachment.initialLayout = attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		colorReferences.push_back({UInt32(index), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+	}
+	VkAttachmentReference depthRef{UInt32(colors.size()), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
 	if (depth)
 	{
-		attachments[1].format = ToVkFormat(depthFormat);
-		attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-		attachments[1].loadOp = clearDepth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-		attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		const bool stencil = depthFormat == Format::D32FloatS8Uint;
-		attachments[1].stencilLoadOp = stencil
-		                                   ? (clearStencil ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD)
-		                                   : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		attachments[1].stencilStoreOp = stencil ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[1].initialLayout = attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		auto& attachment = attachments.back();
+		attachment = {};
+		attachment.format = ToVkFormat(depthDescription.format);
+		attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		attachment.loadOp = ToVkLoadOp(depthDescription.load);
+		attachment.storeOp = ToVkStoreOp(depthDescription.store);
+		const bool stencil = depthDescription.format == Format::D32FloatS8Uint;
+		attachment.stencilLoadOp = stencil ? ToVkLoadOp(depthDescription.stencilLoad) : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachment.stencilStoreOp =
+		    stencil ? ToVkStoreOp(depthDescription.stencilStore) : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachment.initialLayout = attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 	}
 	VkSubpassDescription subpass{};
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorRef;
+	subpass.colorAttachmentCount = UInt32(colors.size());
+	subpass.pColorAttachments = colorReferences.data();
 	subpass.pDepthStencilAttachment = depth ? &depthRef : nullptr;
 	Array<VkSubpassDependency, 2> deps{};
 	deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
 	deps[0].dstSubpass = 0;
 	deps[0].srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 	deps[0].dstStageMask =
-	    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | (depth ? VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT : 0);
+	    (colors.empty() ? 0 : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT) |
+	    (depth ? VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT : 0);
 	deps[0].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
 	deps[0].dstAccessMask =
-	    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | (depth ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT : 0);
+	    (colors.empty() ? 0 : VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT) |
+	    (depth ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT : 0);
 	deps[1].srcSubpass = 0;
 	deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
 	deps[1].srcStageMask = deps[0].dstStageMask;
@@ -1023,7 +1342,7 @@ VkRenderPass MakeRenderPass(VkDevice device, Format colorFormat, bool depth, For
 	deps[1].srcAccessMask = deps[0].dstAccessMask;
 	deps[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 	VkRenderPassCreateInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-	info.attachmentCount = depth ? 2 : 1;
+	info.attachmentCount = UInt32(attachments.size());
 	info.pAttachments = attachments.data();
 	info.subpassCount = 1;
 	info.pSubpasses = &subpass;
@@ -1034,18 +1353,85 @@ VkRenderPass MakeRenderPass(VkDevice device, Format colorFormat, bool depth, For
 	return pass;
 }
 
-struct CommandImpl final : CommandList
+struct CachedRenderPass
+{
+	VkRenderPass pass = VK_NULL_HANDLE;
+	bool cached = false;
+};
+
+CachedRenderPass GetRenderPass(const std::shared_ptr<Context>& ctx, const Vector<PassAttachment>& colors, bool depth,
+                               PassAttachment depthDescription)
+{
+	std::string key;
+	const auto append = [&](UInt32 value) { key.append(reinterpret_cast<const char*>(&value), sizeof(value)); };
+	append(UInt32(colors.size()));
+	append(depth ? 1u : 0u);
+	for (const auto& color : colors)
+	{
+		append(UInt32(color.format));
+		append(UInt32(color.load));
+		append(UInt32(color.store));
+	}
+	if (depth)
+	{
+		append(UInt32(depthDescription.format));
+		append(UInt32(depthDescription.load));
+		append(UInt32(depthDescription.store));
+		append(UInt32(depthDescription.stencilLoad));
+		append(UInt32(depthDescription.stencilStore));
+	}
+	std::lock_guard<std::mutex> lock(ctx->renderPassCacheMutex);
+	if (const auto found = ctx->renderPasses.find(key); found != ctx->renderPasses.end())
+	{
+		return {found->second, true};
+	}
+	VkRenderPass pass = MakeRenderPass(ctx->device, colors, depth, depthDescription);
+	if (ctx->renderPasses.size() < 64)
+	{
+		ctx->renderPasses.emplace(std::move(key), pass);
+		return {pass, true};
+	}
+	return {pass, false};
+}
+
+struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl>
 {
 	std::shared_ptr<Context> ctx;
 	VkCommandPool pool = VK_NULL_HANDLE;
 	VkCommandBuffer command = VK_NULL_HANDLE;
 	Vector<VkRenderPass> transientPasses;
-	Vector<VkFramebuffer> framebuffers;
+	std::shared_ptr<FramebufferCache> framebufferCache;
 	Vector<std::shared_ptr<void>> keepAlive;
+	std::map<TextureImpl*, Vector<ResourceState>> textureStates;
+	std::map<BufferImpl*, ResourceState> bufferStates;
+	std::map<UInt32, std::shared_ptr<GroupImpl>> boundGroups;
+	Vector<TextureImpl*> activeAttachments;
+
+	struct TextureTransition
+	{
+		std::shared_ptr<TextureImpl> texture;
+		TextureSubresourceRange range;
+		ResourceState before;
+		ResourceState after;
+	};
+
+	struct BufferTransition
+	{
+		std::shared_ptr<BufferImpl> buffer;
+		ResourceState before;
+		ResourceState after;
+	};
+
+	Vector<TextureTransition> textureTransitions;
+	Vector<BufferTransition> bufferTransitions;
 	std::shared_ptr<PipelineImpl> boundPipeline;
 	std::shared_ptr<BufferImpl> boundIndexBuffer;
+	std::weak_ptr<Fence> completion;
+	std::shared_ptr<DescriptorPoolState> temporaryPool;
+	UInt64 resets = 0;
 	VkExtent2D extent{};
 	Format colorFormat{};
+	Vector<Format> colorFormats;
 	Format depthFormat{};
 	bool hasDepth = false;
 	bool rendering = false;
@@ -1056,10 +1442,6 @@ struct CommandImpl final : CommandList
 		if (!ctx)
 		{
 			return;
-		}
-		for (auto frame : framebuffers)
-		{
-			vkDestroyFramebuffer(ctx->device, frame, nullptr);
 		}
 		for (auto pass : transientPasses)
 		{
@@ -1106,19 +1488,100 @@ struct CommandImpl final : CommandList
 		    });
 	}
 
+	Result<void> Reset() override
+	{
+		return GuardedVoid(
+		    [&]
+		    {
+			    Require(!rendering, "End rendering before resetting a command list");
+			    if (state == 3)
+			    {
+				    auto fence = completion.lock();
+				    Require(!fence || fence->Completed(), "Command list is still in use by the GPU");
+			    }
+			    Check(vkResetCommandPool(ctx->device, pool, 0), "Resetting completed command pool");
+			    if (temporaryPool)
+			    {
+				    Require(temporaryPool->generation != (std::numeric_limits<UInt64>::max)(),
+				            "Frame descriptor generation exhausted");
+				    Check(vkResetDescriptorPool(ctx->device, temporaryPool->pool, 0),
+				          "Resetting completed descriptor pool");
+				    ++temporaryPool->generation;
+				    temporaryPool->liveSets = 0;
+			    }
+			    for (auto pass : transientPasses)
+			    {
+				    vkDestroyRenderPass(ctx->device, pass, nullptr);
+			    }
+			    transientPasses.clear();
+			    keepAlive.clear();
+			    textureStates.clear();
+			    bufferStates.clear();
+			    textureTransitions.clear();
+			    bufferTransitions.clear();
+			    boundGroups.clear();
+			    activeAttachments.clear();
+			    boundPipeline.reset();
+			    boundIndexBuffer.reset();
+			    completion.reset();
+			    colorFormats.clear();
+			    state = 0;
+			    ++resets;
+		    });
+	}
+
+	Result<BindGroupPtr> CreateTransientBindGroup(const BindGroupDesc& desc) override
+	{
+		return Guarded<BindGroupPtr>(
+		    [&]
+		    {
+			    Recording();
+			    if (!temporaryPool)
+			    {
+				    temporaryPool = CreateTemporaryDescriptorPool(ctx);
+				    temporaryPool->owner = shared_from_this();
+			    }
+			    return CreateDescriptorGroup(ctx, desc, temporaryPool);
+		    });
+	}
+
+	CommandListStatistics Statistics() const override
+	{
+		return {resets, temporaryPool ? 1u : 0u, temporaryPool ? temporaryPool->totalSets : 0,
+		        temporaryPool ? temporaryPool->liveSets : 0};
+	}
+
 	Result<void> Barrier(const TexturePtr& texture, ResourceState before, ResourceState after) override
+	{
+		return Barrier(texture, TextureSubresourceRange{}, before, after);
+	}
+
+	Result<void> Barrier(const TexturePtr& texture, TextureSubresourceRange range, ResourceState before,
+	                     ResourceState after) override
 	{
 		return GuardedVoid(
 		    [&]
 		    {
 			    Recording(true);
 			    auto t = checked<TextureImpl>(texture, ctx, "texture");
+			    Require(range.baseMipLevel < t->desc.mipLevels, "Texture barrier base mip is out of range");
+			    const UInt32 mipCount =
+			        range.mipLevelCount ? range.mipLevelCount : t->desc.mipLevels - range.baseMipLevel;
+			    Require(mipCount && mipCount <= t->desc.mipLevels - range.baseMipLevel,
+			            "Texture barrier mip range is out of range");
 			    Require(before != ResourceState::VertexBuffer && before != ResourceState::IndexBuffer &&
 			                before != ResourceState::UniformRead && before != ResourceState::StorageReadWrite,
 			            "Invalid texture state");
 			    Require(after != ResourceState::VertexBuffer && after != ResourceState::IndexBuffer &&
 			                after != ResourceState::UniformRead && after != ResourceState::StorageReadWrite,
 			            "Invalid texture state");
+			    auto [tracked, inserted] =
+			        textureStates.try_emplace(t.get(), Vector<ResourceState>(t->desc.mipLevels, before));
+			    for (UInt32 mip = range.baseMipLevel; mip < range.baseMipLevel + mipCount; ++mip)
+			    {
+				    Require(tracked->second[mip] == before,
+				            "Texture barrier before-state does not match the preceding transition");
+			    }
 			    const auto src = Access(before), dst = Access(after);
 			    VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
 			    b.srcAccessMask = src.access;
@@ -1128,9 +1591,15 @@ struct CommandImpl final : CommandList
 			    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			    b.image = t->image;
 			    b.subresourceRange.aspectMask = ImageAspect(t->desc.format);
-			    b.subresourceRange.levelCount = t->desc.mipLevels;
+			    b.subresourceRange.baseMipLevel = range.baseMipLevel;
+			    b.subresourceRange.levelCount = mipCount;
 			    b.subresourceRange.layerCount = 1;
 			    vkCmdPipelineBarrier(command, src.stage, dst.stage, 0, 0, nullptr, 0, nullptr, 1, &b);
+			    for (UInt32 mip = range.baseMipLevel; mip < range.baseMipLevel + mipCount; ++mip)
+			    {
+				    tracked->second[mip] = after;
+			    }
+			    textureTransitions.push_back({t, range, before, after});
 			    keepAlive.push_back(t);
 		    });
 	}
@@ -1142,6 +1611,9 @@ struct CommandImpl final : CommandList
 		    {
 			    Recording(true);
 			    auto b = checked<BufferImpl>(buffer, ctx, "buffer");
+			    const auto tracked = bufferStates.find(b.get());
+			    Require(tracked == bufferStates.end() || tracked->second == before,
+			            "Buffer barrier before-state does not match the preceding transition");
 			    const auto src = Access(before), dst = Access(after);
 			    VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
 			    barrier.srcAccessMask = src.access;
@@ -1151,6 +1623,8 @@ struct CommandImpl final : CommandList
 			    barrier.offset = 0;
 			    barrier.size = VK_WHOLE_SIZE;
 			    vkCmdPipelineBarrier(command, src.stage, dst.stage, 0, 0, nullptr, 1, &barrier, 0, nullptr);
+			    bufferStates[b.get()] = after;
+			    bufferTransitions.push_back({b, before, after});
 			    keepAlive.push_back(b);
 		    });
 	}
@@ -1218,17 +1692,18 @@ struct CommandImpl final : CommandList
 			    Recording(true);
 			    auto src = checked<TextureImpl>(source, ctx, "source texture");
 			    auto dst = checked<BufferImpl>(destination, ctx, "destination buffer");
-			    Require(!IsDepthFormat(src->desc.format), "Texture readback does not support depth formats");
 			    Require(Has(src->desc.usage, TextureUsage::TransferSource) &&
 			                Has(dst->desc.usage, BufferUsage::TransferDestination),
 			            "Texture-to-buffer transfer usage missing");
 			    Require(mipLevel < src->desc.mipLevels, "Texture-to-buffer mip level is out of range");
 			    const Ursa::UInt32 width = (std::max)(1u, src->desc.width >> mipLevel);
 			    const Ursa::UInt32 height = (std::max)(1u, src->desc.height >> mipLevel);
-			    Require(dst->desc.size >= Ursa::Size(width) * height * PixelSize(src->desc.format),
+			    Require(dst->desc.size >= Ursa::Size(width) * height *
+			                                  (IsDepthFormat(src->desc.format) ? 4 : PixelSize(src->desc.format)),
 			            "Readback buffer too small");
 			    VkBufferImageCopy region{};
-			    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			    region.imageSubresource.aspectMask =
+			        IsDepthFormat(src->desc.format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 			    region.imageSubresource.mipLevel = mipLevel;
 			    region.imageSubresource.layerCount = 1;
 			    region.imageExtent = {width, height, 1};
@@ -1245,60 +1720,152 @@ struct CommandImpl final : CommandList
 		    [&]
 		    {
 			    Recording(true);
-			    auto color = checked<TextureImpl>(target.color, ctx, "color target");
-			    Require(Has(color->desc.usage, TextureUsage::ColorAttachment), "Texture lacks color-attachment usage");
-			    Require(!IsDepthFormat(color->desc.format), "Depth format cannot be a color target");
-			    std::shared_ptr<TextureImpl> depth;
+			    Vector<ColorAttachment> colors = target.colors;
+			    if (target.color)
+			    {
+				    Require(colors.empty(), "Choose either legacy color target or explicit color attachments");
+				    ColorAttachment attachment;
+				    attachment.texture = target.color;
+				    attachment.load = target.clearColor ? AttachmentLoadOp::Clear : AttachmentLoadOp::Load;
+				    std::copy(target.colorValue, target.colorValue + 4, attachment.clearValue.begin());
+				    colors.push_back(std::move(attachment));
+			    }
+			    DepthAttachment depthDescription = target.depthAttachment;
 			    if (target.depth)
 			    {
-				    depth = checked<TextureImpl>(target.depth, ctx, "depth target");
-				    Require(IsDepthFormat(depth->desc.format) && Has(depth->desc.usage, TextureUsage::DepthAttachment),
-				            "Invalid depth target");
-				    Require(depth->desc.width == color->desc.width && depth->desc.height == color->desc.height,
-				            "Attachment sizes differ");
+				    Require(!depthDescription.texture,
+				            "Choose either legacy depth target or explicit depth attachment");
+				    depthDescription.texture = target.depth;
+				    depthDescription.load = target.clearDepth ? AttachmentLoadOp::Clear : AttachmentLoadOp::Load;
+				    depthDescription.stencilLoad =
+				        target.clearStencil ? AttachmentLoadOp::Clear : AttachmentLoadOp::Load;
+				    depthDescription.clearDepth = target.depthValue;
+				    depthDescription.clearStencil = target.stencilValue;
 			    }
-			    VkRenderPass pass = MakeRenderPass(ctx->device, color->desc.format, !!depth,
-			                                       depth ? depth->desc.format : Format::D32Float, target.clearColor,
-			                                       target.clearDepth, target.clearStencil);
-			    transientPasses.push_back(pass);
-			    VkImageView views[2]{color->view, depth ? depth->view : VK_NULL_HANDLE};
-			    VkFramebufferCreateInfo frameInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-			    frameInfo.renderPass = pass;
-			    frameInfo.attachmentCount = depth ? 2 : 1;
-			    frameInfo.pAttachments = views;
-			    frameInfo.width = color->desc.width;
-			    frameInfo.height = color->desc.height;
-			    frameInfo.layers = 1;
-			    VkFramebuffer frame = VK_NULL_HANDLE;
-			    Check(vkCreateFramebuffer(ctx->device, &frameInfo, nullptr, &frame), "Creating framebuffer");
-			    framebuffers.push_back(frame);
-			    VkClearValue clears[2]{};
-			    for (int i = 0; i < 4; ++i)
+			    Require(!colors.empty() || depthDescription.texture, "Rendering requires at least one attachment");
+			    Require(colors.size() <= ctx->properties.limits.maxColorAttachments,
+			            "Color attachment count exceeds adapter limit");
+			    Vector<std::shared_ptr<TextureImpl>> attachments;
+			    Vector<VkImageView> views;
+			    Vector<VkClearValue> clears;
+			    Vector<PassAttachment> passColors;
+			    Vector<Format> formats;
+			    VkExtent2D selectedExtent{};
+			    const auto add = [&](const std::shared_ptr<TextureImpl>& texture)
 			    {
-				    clears[0].color.float32[i] = target.colorValue[i];
+				    if (attachments.empty())
+				    {
+					    selectedExtent = {texture->desc.width, texture->desc.height};
+				    }
+				    Require(texture->desc.width == selectedExtent.width &&
+				                texture->desc.height == selectedExtent.height,
+				            "Attachment sizes differ");
+				    for (const auto& existing : attachments)
+				    {
+					    Require(existing != texture, "Duplicate render attachment");
+				    }
+				    attachments.push_back(texture);
+				    views.push_back(texture->attachmentView ? texture->attachmentView : texture->view);
+			    };
+			    for (const auto& color : colors)
+			    {
+				    auto texture = checked<TextureImpl>(color.texture, ctx, "color target");
+				    Require(!IsDepthFormat(texture->desc.format) &&
+				                Has(texture->desc.usage, TextureUsage::ColorAttachment),
+				            "Invalid color attachment format or usage");
+				    add(texture);
+				    formats.push_back(texture->desc.format);
+				    passColors.push_back({texture->desc.format, color.load, color.store});
+				    VkClearValue value{};
+				    for (Size channel = 0; channel < 4; ++channel)
+				    {
+					    if (texture->desc.format == Format::R32Uint)
+					    {
+						    value.color.uint32[channel] = color.clearUint[channel];
+					    }
+					    else
+					    {
+						    Require(std::isfinite(color.clearValue[channel]), "Color clear value must be finite");
+						    value.color.float32[channel] = color.clearValue[channel];
+					    }
+				    }
+				    clears.push_back(value);
 			    }
-			    clears[1].depthStencil.depth = target.depthValue;
-			    clears[1].depthStencil.stencil = target.stencilValue;
+			    PassAttachment passDepth;
+			    if (depthDescription.texture)
+			    {
+				    auto texture = checked<TextureImpl>(depthDescription.texture, ctx, "depth target");
+				    Require(IsDepthFormat(texture->desc.format) &&
+				                Has(texture->desc.usage, TextureUsage::DepthAttachment),
+				            "Invalid depth attachment format or usage");
+				    Require(std::isfinite(depthDescription.clearDepth) && depthDescription.clearDepth >= 0 &&
+				                depthDescription.clearDepth <= 1,
+				            "Depth clear value must be in [0,1]");
+				    add(texture);
+				    passDepth = {texture->desc.format, depthDescription.load, depthDescription.store,
+				                 depthDescription.stencilLoad, depthDescription.stencilStore};
+				    VkClearValue value{};
+				    value.depthStencil = {depthDescription.clearDepth, depthDescription.clearStencil};
+				    clears.push_back(value);
+			    }
+			    for (const auto& [index, group] : boundGroups)
+			    {
+				    for (auto* sampled : group->sampledTextures)
+				    {
+					    Require(std::none_of(attachments.begin(), attachments.end(),
+					                         [&](const auto& attachment) { return attachment.get() == sampled; }),
+					            "A render attachment cannot also be sampled in the same pass");
+				    }
+			    }
+			    transientPasses.reserve(transientPasses.size() + 1);
+			    keepAlive.reserve(keepAlive.size() + attachments.size());
+			    const auto [pass, passCached] =
+			        GetRenderPass(ctx, passColors, bool(depthDescription.texture), passDepth);
+			    if (!passCached)
+			    {
+				    transientPasses.push_back(pass);
+			    }
+			    std::string framebufferKey;
+			    const auto appendFramebufferKey = [&](UInt64 value)
+			    { framebufferKey.append(reinterpret_cast<const char*>(&value), sizeof(value)); };
+			    appendFramebufferKey(reinterpret_cast<UIntPtr>(pass));
+			    appendFramebufferKey(selectedExtent.width);
+			    appendFramebufferKey(selectedExtent.height);
+			    for (const auto view : views)
+			    {
+				    appendFramebufferKey(reinterpret_cast<UIntPtr>(view));
+			    }
+			    const auto framebufferResource =
+			        framebufferCache->Acquire(ctx, framebufferKey, pass, views, selectedExtent, attachments);
+			    const VkFramebuffer framebuffer = framebufferResource->framebuffer;
+			    keepAlive.push_back(framebufferResource);
 			    VkRenderPassBeginInfo beginInfo{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
 			    beginInfo.renderPass = pass;
-			    beginInfo.framebuffer = frame;
-			    beginInfo.renderArea.extent = {color->desc.width, color->desc.height};
-			    beginInfo.clearValueCount = depth ? 2 : 1;
-			    beginInfo.pClearValues = clears;
+			    beginInfo.framebuffer = framebuffer;
+			    beginInfo.renderArea.extent = selectedExtent;
+			    beginInfo.clearValueCount = UInt32(clears.size());
+			    beginInfo.pClearValues = clears.data();
 			    vkCmdBeginRenderPass(command, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
-			    extent = beginInfo.renderArea.extent;
-			    colorFormat = color->desc.format;
-			    hasDepth = !!depth;
-			    if (depth)
-			    {
-				    depthFormat = depth->desc.format;
-			    }
+			    extent = selectedExtent;
+			    colorFormats = std::move(formats);
+			    hasDepth = bool(depthDescription.texture);
+			    depthFormat = passDepth.format;
 			    rendering = true;
-			    boundPipeline.reset();
-			    keepAlive.push_back(color);
-			    if (depth)
+			    activeAttachments.clear();
+			    activeAttachments.reserve(attachments.size());
+			    for (const auto& attachment : attachments)
 			    {
-				    keepAlive.push_back(depth);
+				    activeAttachments.push_back(attachment.get());
+			    }
+			    VkViewport viewport{0.0f, Float32(extent.height), Float32(extent.width), -Float32(extent.height), 0.0f,
+			                        1.0f};
+			    VkRect2D scissor{{0, 0}, extent};
+			    vkCmdSetViewport(command, 0, 1, &viewport);
+			    vkCmdSetScissor(command, 0, 1, &scissor);
+			    boundPipeline.reset();
+			    for (const auto& attachment : attachments)
+			    {
+				    keepAlive.push_back(attachment);
 			    }
 		    });
 	}
@@ -1311,7 +1878,27 @@ struct CommandImpl final : CommandList
 			    Require(state == 1 && rendering, "No active render pass");
 			    vkCmdEndRenderPass(command);
 			    rendering = false;
+			    activeAttachments.clear();
 			    boundPipeline.reset();
+		    });
+	}
+
+	Result<void> SetViewport(const ViewportRect& rect) override
+	{
+		return GuardedVoid(
+		    [&]
+		    {
+			    Require(state == 1 && rendering, "Viewport requires an active render pass");
+			    Require(std::isfinite(rect.x) && std::isfinite(rect.y) && std::isfinite(rect.width) &&
+			                std::isfinite(rect.height) && std::isfinite(rect.minimumDepth) &&
+			                std::isfinite(rect.maximumDepth) && rect.x >= 0 && rect.y >= 0 && rect.width > 0 &&
+			                rect.height > 0 && rect.x + rect.width <= Float32(extent.width) &&
+			                rect.y + rect.height <= Float32(extent.height) && rect.minimumDepth >= 0 &&
+			                rect.maximumDepth <= 1 && rect.minimumDepth <= rect.maximumDepth,
+			            "Viewport must be a finite positive rectangle inside the target, with depth in [0,1]");
+			    VkViewport viewport{rect.x,       rect.y + rect.height, rect.width,
+			                        -rect.height, rect.minimumDepth,    rect.maximumDepth};
+			    vkCmdSetViewport(command, 0, 1, &viewport);
 		    });
 	}
 
@@ -1325,31 +1912,25 @@ struct CommandImpl final : CommandList
 			    Require(p->compute != rendering, "Pipeline type does not match active render pass");
 			    if (rendering)
 			    {
-				    Require(p->colorFormat == colorFormat && p->hasDepth == hasDepth &&
+				    Require(p->colorFormats == colorFormats && p->hasDepth == hasDepth &&
 				                (!hasDepth || p->depthFormat == depthFormat),
 				            "Pipeline and render target formats differ");
 			    }
 			    vkCmdBindPipeline(command,
 			                      p->compute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS,
 			                      p->pipeline);
-			    if (rendering)
-			    {
-				    VkViewport viewport{0.0f,
-				                        static_cast<Ursa::Float32>(extent.height),
-				                        static_cast<Ursa::Float32>(extent.width),
-				                        -static_cast<Ursa::Float32>(extent.height),
-				                        0.0f,
-				                        1.0f};
-				    VkRect2D scissor{{0, 0}, extent};
-				    vkCmdSetViewport(command, 0, 1, &viewport);
-				    vkCmdSetScissor(command, 0, 1, &scissor);
-			    }
 			    boundPipeline = p;
+			    boundGroups.clear();
 			    keepAlive.push_back(p);
 		    });
 	}
 
 	Result<void> BindGroup(const BindGroupPtr& group) override
+	{
+		return BindGroup(0, group, {});
+	}
+
+	Result<void> BindGroup(UInt32 index, const BindGroupPtr& group, const Vector<UInt32>& dynamicOffsets) override
 	{
 		return GuardedVoid(
 		    [&]
@@ -1357,10 +1938,36 @@ struct CommandImpl final : CommandList
 			    Recording();
 			    Require(bool(boundPipeline), "Bind a pipeline before its descriptor group");
 			    auto g = checked<GroupImpl>(group, ctx, "descriptor group");
-			    Require(boundPipeline->groupLayout == g->layout, "Descriptor group layout does not match pipeline");
+			    Require(!g->temporaryPool || (g->poolGeneration == g->temporaryPool->generation &&
+			                                  g->temporaryPool->owner.lock().get() == this),
+			            "Transient descriptor group belongs to an expired frame");
+			    Require(index < boundPipeline->groupLayouts.size() && boundPipeline->groupLayouts[index] == g->layout,
+			            "Descriptor group index/layout does not match pipeline");
+			    Require(dynamicOffsets.size() == g->dynamicBuffers.size(),
+			            "Dynamic offset count does not match descriptor layout");
+			    for (Size slot = 0; slot < dynamicOffsets.size(); ++slot)
+			    {
+				    const auto& binding = g->dynamicBuffers[slot];
+				    const Size offset = dynamicOffsets[slot];
+				    Require(offset % binding.alignment == 0, "Dynamic buffer offset is not aligned");
+				    Require(binding.offset <= binding.buffer->desc.size &&
+				                offset <= binding.buffer->desc.size - binding.offset &&
+				                binding.range <= binding.buffer->desc.size - binding.offset - offset,
+				            "Dynamic buffer offset/range exceeds its buffer");
+			    }
+			    if (rendering)
+			    {
+				    for (auto* sampled : g->sampledTextures)
+				    {
+					    Require(std::find(activeAttachments.begin(), activeAttachments.end(), sampled) ==
+					                activeAttachments.end(),
+					            "A render attachment cannot also be sampled in the same pass");
+				    }
+			    }
 			    vkCmdBindDescriptorSets(
 			        command, boundPipeline->compute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS,
-			        boundPipeline->layout, 0, 1, &g->set, 0, nullptr);
+			        boundPipeline->layout, index, 1, &g->set, UInt32(dynamicOffsets.size()), dynamicOffsets.data());
+			    boundGroups[index] = g;
 			    keepAlive.push_back(g);
 		    });
 	}
@@ -1549,6 +2156,7 @@ struct SwapchainImpl final : Swapchain
 		const Ursa::UInt32 width = ctx->window->FramebufferWidth(), height = ctx->window->FramebufferHeight();
 		Require(width && height, "Cannot rebuild swapchain for zero-sized window");
 		Check(vkDeviceWaitIdle(ctx->device), "Waiting before swapchain rebuild");
+		auto previous = state;
 		slotFences = {};
 		textures.clear();
 		state.reset();
@@ -1615,6 +2223,11 @@ struct SwapchainImpl final : Swapchain
 		info.imageExtent = next->extent;
 		info.imageArrayLayers = 1;
 		info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+		const bool readable = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+		if (readable)
+		{
+			info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+		}
 		info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		info.preTransform = caps.currentTransform;
 		info.compositeAlpha = (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
@@ -1623,6 +2236,7 @@ struct SwapchainImpl final : Swapchain
 		                                                                     (~caps.supportedCompositeAlpha + 1));
 		info.presentMode = mode;
 		info.clipped = VK_TRUE;
+		info.oldSwapchain = previous ? previous->swapchain : VK_NULL_HANDLE;
 		Check(vkCreateSwapchainKHR(ctx->device, &info, nullptr, &next->swapchain), "Creating swapchain");
 		Ursa::UInt32 actualCount = 0;
 		Check(vkGetSwapchainImagesKHR(ctx->device, next->swapchain, &actualCount, nullptr), "Getting swapchain images");
@@ -1647,7 +2261,8 @@ struct SwapchainImpl final : Swapchain
 		for (auto image : next->images)
 		{
 			TextureDesc textureDesc{next->extent.width, next->extent.height, next->format,
-			                        TextureUsage::ColorAttachment};
+			                        readable ? TextureUsage::ColorAttachment | TextureUsage::TransferSource
+			                                 : TextureUsage::ColorAttachment};
 			auto texture = std::make_shared<TextureImpl>(ctx, textureDesc);
 			texture->swapchainOwner = next;
 			texture->image = image;
@@ -1685,8 +2300,11 @@ struct SwapchainImpl final : Swapchain
 			    }
 			    if (slotFences[slot])
 			    {
-				    auto done = slotFences[slot]->Wait();
-				    Require(bool(done), done.error);
+				    if (!slotFences[slot]->Completed())
+				    {
+					    auto done = slotFences[slot]->Wait();
+					    Require(bool(done), done.error);
+				    }
 				    slotFences[slot].reset();
 			    }
 			    VkResult result = vkAcquireNextImageKHR(ctx->device, state->swapchain, UINT64_MAX,
@@ -1738,8 +2356,10 @@ struct SwapchainImpl final : Swapchain
 struct DeviceImpl final : Device
 {
 	std::shared_ptr<Context> ctx;
+	std::shared_ptr<FramebufferCache> framebufferCache;
 
-	explicit DeviceImpl(std::shared_ptr<Context> c) : ctx(std::move(c))
+	explicit DeviceImpl(std::shared_ptr<Context> c)
+	    : ctx(std::move(c)), framebufferCache(std::make_shared<FramebufferCache>())
 	{
 	}
 
@@ -1758,7 +2378,32 @@ struct DeviceImpl final : Device
 		        true,
 		        ctx->properties.limits.maxImageDimension2D,
 		        ctx->properties.limits.maxPushConstantsSize,
-		        ctx->properties.limits.maxStorageBufferRange};
+		        ctx->properties.limits.maxStorageBufferRange,
+		        ctx->properties.limits.maxColorAttachments,
+		        ctx->properties.limits.maxBoundDescriptorSets,
+		        ctx->properties.limits.maxUniformBufferRange,
+		        ctx->properties.limits.minUniformBufferOffsetAlignment,
+		        ctx->properties.limits.minStorageBufferOffsetAlignment};
+	}
+
+	Result<FormatCapabilities> QueryFormat(Format format) const override
+	{
+		return Guarded<FormatCapabilities>(
+		    [&]
+		    {
+			    VkFormatProperties properties{};
+			    vkGetPhysicalDeviceFormatProperties(ctx->physical, ToVkFormat(format), &properties);
+			    const auto flags = properties.optimalTilingFeatures;
+			    return FormatCapabilities{
+			        bool(flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT),
+			        bool(flags & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) &&
+			            (format != Format::RgbA16Float || bool(ctx->features.shaderStorageImageExtendedFormats)),
+			        bool(flags & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT),
+			        bool(flags & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT),
+			        bool(flags & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT),
+			        bool(flags & VK_FORMAT_FEATURE_TRANSFER_DST_BIT),
+			        bool(flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)};
+		    });
 	}
 
 	Result<BufferPtr> CreateBuffer(const BufferDesc& desc) override
@@ -1808,6 +2453,15 @@ struct DeviceImpl final : Device
 			            "Depth texture cannot be a color attachment");
 			    Require(desc.format != Format::RgbA8Srgb || !Has(desc.usage, TextureUsage::Storage),
 			            "sRGB texture cannot be a storage image");
+			    const auto support = QueryFormat(desc.format);
+			    Require(bool(support), support.error);
+			    Require((!Has(desc.usage, TextureUsage::Sampled) || support.value.sampled) &&
+			                (!Has(desc.usage, TextureUsage::Storage) || support.value.storage) &&
+			                (!Has(desc.usage, TextureUsage::ColorAttachment) || support.value.colorAttachment) &&
+			                (!Has(desc.usage, TextureUsage::DepthAttachment) || support.value.depthAttachment) &&
+			                (!Has(desc.usage, TextureUsage::TransferSource) || support.value.transferSource) &&
+			                (!Has(desc.usage, TextureUsage::TransferDestination) || support.value.transferDestination),
+			            "Texture format does not support its requested usage");
 			    auto texture = std::make_shared<TextureImpl>(ctx, desc);
 			    VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
 			    info.imageType = VK_IMAGE_TYPE_2D;
@@ -1828,10 +2482,22 @@ struct DeviceImpl final : Device
 			    view.image = texture->image;
 			    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
 			    view.format = info.format;
-			    view.subresourceRange.aspectMask = ImageAspect(desc.format);
+			    view.subresourceRange.aspectMask = IsDepthFormat(desc.format) && Has(desc.usage, TextureUsage::Sampled)
+			                                           ? VK_IMAGE_ASPECT_DEPTH_BIT
+			                                           : ImageAspect(desc.format);
 			    view.subresourceRange.levelCount = desc.mipLevels;
 			    view.subresourceRange.layerCount = 1;
 			    Check(vkCreateImageView(ctx->device, &view, nullptr, &texture->view), "Creating texture view");
+			    if ((Has(desc.usage, TextureUsage::ColorAttachment) ||
+			         Has(desc.usage, TextureUsage::DepthAttachment)) &&
+			        (desc.mipLevels > 1 ||
+			         (desc.format == Format::D32FloatS8Uint && Has(desc.usage, TextureUsage::Sampled))))
+			    {
+				    view.subresourceRange.aspectMask = ImageAspect(desc.format);
+				    view.subresourceRange.levelCount = 1;
+				    Check(vkCreateImageView(ctx->device, &view, nullptr, &texture->attachmentView),
+				          "Creating attachment view");
+			    }
 			    return std::static_pointer_cast<Texture>(texture);
 		    });
 	}
@@ -1841,6 +2507,22 @@ struct DeviceImpl final : Device
 		return Guarded<SamplerPtr>(
 		    [&]
 		    {
+			    Require(std::isfinite(desc.maxLod) && desc.maxLod >= 0,
+			            "Sampler max LOD must be finite and nonnegative");
+			    const auto key = std::make_tuple(desc.linear, desc.repeat, desc.maxLod);
+			    std::lock_guard<std::mutex> lock(ctx->samplerCacheMutex);
+			    auto cached = ctx->samplers.find(key);
+			    if (cached != ctx->samplers.end())
+			    {
+				    if (auto sampler = cached->second.lock())
+				    {
+					    return std::static_pointer_cast<Sampler>(std::move(sampler));
+				    }
+			    }
+			    for (auto entry = ctx->samplers.begin(); entry != ctx->samplers.end();)
+			    {
+				    entry = entry->second.expired() ? ctx->samplers.erase(entry) : std::next(entry);
+			    }
 			    auto sampler = std::make_shared<SamplerImpl>();
 			    sampler->ctx = ctx;
 			    VkSamplerCreateInfo info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -1851,6 +2533,7 @@ struct DeviceImpl final : Device
 			    info.maxLod = desc.maxLod;
 			    info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
 			    Check(vkCreateSampler(ctx->device, &info, nullptr, &sampler->sampler), "Creating sampler");
+			    ctx->samplers[key] = sampler;
 			    return std::static_pointer_cast<Sampler>(sampler);
 		    });
 	}
@@ -1887,10 +2570,12 @@ struct DeviceImpl final : Device
 			    auto layout = std::make_shared<LayoutImpl>();
 			    layout->ctx = ctx;
 			    layout->bindings = bindings;
+			    std::sort(layout->bindings.begin(), layout->bindings.end(),
+			              [](const LayoutBinding& a, const LayoutBinding& b) { return a.binding < b.binding; });
 			    Vector<VkDescriptorSetLayoutBinding> vkBindings;
-			    for (const auto& binding : bindings)
+			    for (const auto& binding : layout->bindings)
 			    {
-				    Require(binding.count == 1 && VkStages(binding.stages) != 0,
+				    Require(binding.count == 1 && VkStages(binding.stages) != 0 && (binding.stages & ~7u) == 0,
 				            "Descriptor binding requires one resource and at least one shader stage");
 				    Require(std::none_of(vkBindings.begin(), vkBindings.end(),
 				                         [&](const auto& b) { return b.binding == binding.binding; }),
@@ -1913,78 +2598,7 @@ struct DeviceImpl final : Device
 
 	Result<BindGroupPtr> CreateBindGroup(const BindGroupDesc& desc) override
 	{
-		return Guarded<BindGroupPtr>(
-		    [&]
-		    {
-			    auto layout = checked<LayoutImpl>(desc.layout, ctx, "descriptor layout");
-			    Require(desc.resources.size() == layout->bindings.size(),
-			            "Descriptor group resource count does not match layout");
-			    auto group = std::make_shared<GroupImpl>();
-			    group->ctx = ctx;
-			    group->layout = layout;
-			    VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-			    alloc.descriptorPool = ctx->descriptorPool;
-			    alloc.descriptorSetCount = 1;
-			    alloc.pSetLayouts = &layout->layout;
-			    Check(vkAllocateDescriptorSets(ctx->device, &alloc, &group->set), "Allocating descriptor group");
-			    Vector<VkDescriptorBufferInfo> bufferInfos;
-			    bufferInfos.reserve(desc.resources.size());
-			    Vector<VkDescriptorImageInfo> imageInfos;
-			    imageInfos.reserve(desc.resources.size());
-			    Vector<VkWriteDescriptorSet> writes;
-			    writes.reserve(desc.resources.size());
-			    for (const auto& binding : layout->bindings)
-			    {
-				    auto it = std::find_if(desc.resources.begin(), desc.resources.end(),
-				                           [&](const auto& r) { return r.binding == binding.binding; });
-				    Require(it != desc.resources.end(),
-				            String("Missing descriptor binding ") + ToUrsaString(std::to_string(binding.binding)));
-				    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-				    write.dstSet = group->set;
-				    write.dstBinding = binding.binding;
-				    write.descriptorCount = 1;
-				    write.descriptorType = VkDescriptor(binding.type);
-				    if (binding.type == BindingType::UniformBuffer || binding.type == BindingType::StorageBuffer)
-				    {
-					    auto b = checked<BufferImpl>(it->buffer, ctx, "descriptor buffer");
-					    Require(Has(b->desc.usage, binding.type == BindingType::UniformBuffer ? BufferUsage::Uniform
-					                                                                          : BufferUsage::Storage),
-					            "Buffer lacks descriptor usage");
-					    bufferInfos.push_back({b->buffer, 0, b->desc.size});
-					    write.pBufferInfo = &bufferInfos.back();
-					    group->keepAlive.push_back(b);
-				    }
-				    else
-				    {
-					    VkDescriptorImageInfo image{};
-					    if (binding.type != BindingType::Sampler)
-					    {
-						    auto t = checked<TextureImpl>(it->texture, ctx, "descriptor texture");
-						    Require(Has(t->desc.usage, binding.type == BindingType::StorageTexture
-						                                   ? TextureUsage::Storage
-						                                   : TextureUsage::Sampled),
-						            "Texture lacks descriptor usage");
-						    image.imageView = t->view;
-						    image.imageLayout = binding.type == BindingType::StorageTexture
-						                            ? VK_IMAGE_LAYOUT_GENERAL
-						                            : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-						    group->keepAlive.push_back(t);
-					    }
-					    if (binding.type == BindingType::Sampler || binding.type == BindingType::CombinedImageSampler)
-					    {
-						    auto s = checked<SamplerImpl>(it->sampler, ctx, "descriptor sampler");
-						    image.sampler = s->sampler;
-						    group->keepAlive.push_back(s);
-					    }
-					    imageInfos.push_back(image);
-					    write.pImageInfo = &imageInfos.back();
-				    }
-				    writes.push_back(write);
-			    }
-			    vkUpdateDescriptorSets(ctx->device, static_cast<Ursa::UInt32>(writes.size()), writes.data(), 0,
-			                           nullptr);
-			    return std::static_pointer_cast<BindGroup>(group);
-		    });
+		return Guarded<BindGroupPtr>([&] { return CreateDescriptorGroup(ctx, desc, {}); });
 	}
 
 	Result<PipelinePtr> CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) override
@@ -1993,18 +2607,30 @@ struct DeviceImpl final : Device
 		    [&]
 		    {
 			    auto vertex = checked<ShaderImpl>(desc.vertex, ctx, "vertex shader");
-			    auto fragment = checked<ShaderImpl>(desc.fragment, ctx, "fragment shader");
-			    Require(vertex->stage == ShaderStage::Vertex && fragment->stage == ShaderStage::Fragment,
+			    auto fragment = desc.fragment ? checked<ShaderImpl>(desc.fragment, ctx, "fragment shader") : nullptr;
+			    Require(vertex->stage == ShaderStage::Vertex &&
+			                (!fragment || fragment->stage == ShaderStage::Fragment) && (fragment || desc.depthOnly),
 			            "Graphics pipeline shader stages are invalid");
-			    Require(!IsDepthFormat(desc.colorFormat), "Graphics pipeline needs a color format");
-			    const bool useDepthStencil = desc.depthTest || desc.stencil.enabled;
+			    Require(!desc.depthOnly || desc.colorFormats.empty(), "Depth-only pipeline cannot have color formats");
+			    Vector<Format> formats = desc.depthOnly              ? Vector<Format>{}
+			                             : desc.colorFormats.empty() ? Vector<Format>{desc.colorFormat}
+			                                                         : desc.colorFormats;
+			    Require(formats.size() <= ctx->properties.limits.maxColorAttachments,
+			            "Pipeline color attachment count exceeds adapter limit");
+			    const bool useDepthStencil = desc.depthTest || desc.stencil.enabled || desc.depthOnly;
 			    Require(!useDepthStencil || IsDepthFormat(desc.depthFormat),
 			            "Depth or stencil testing requires a depth-stencil format");
 			    Require(!desc.stencil.enabled || desc.depthFormat == Format::D32FloatS8Uint,
 			            "Stencil testing requires D32FloatS8Uint format");
 			    const bool blendingEnabled = desc.blend || desc.blendState.enabled;
-			    Require(!blendingEnabled || desc.colorFormat != Format::R32Uint,
-			            "Blending is invalid for integer color format");
+			    for (Format format : formats)
+			    {
+				    Require(!IsDepthFormat(format), "Graphics pipeline needs color formats");
+				    auto support = QueryFormat(format);
+				    Require(support && support.value.colorAttachment, "Pipeline color format is unsupported");
+				    Require(!blendingEnabled || format != Format::R32Uint,
+				            "Blending is invalid for integer color format");
+			    }
 			    Require((static_cast<Ursa::UInt32>(desc.colorWriteMask) &
 			             ~static_cast<Ursa::UInt32>(ColorWriteMask::All)) == 0,
 			            "Color write mask contains unsupported channels");
@@ -2014,30 +2640,34 @@ struct DeviceImpl final : Device
 			    pipeline->shaderA = vertex;
 			    pipeline->shaderB = fragment;
 			    pipeline->colorFormat = desc.colorFormat;
+			    pipeline->colorFormats = formats;
 			    pipeline->hasDepth = useDepthStencil;
 			    pipeline->depthFormat = desc.depthFormat;
-			    if (desc.layout)
-			    {
-				    pipeline->groupLayout = checked<LayoutImpl>(desc.layout, ctx, "descriptor layout");
-			    }
+			    const auto layouts = pipeline->InitializeLayouts(desc.layout, desc.layouts);
 			    VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-			    if (pipeline->groupLayout)
-			    {
-				    layoutInfo.setLayoutCount = 1;
-				    layoutInfo.pSetLayouts = &pipeline->groupLayout->layout;
-			    }
+			    layoutInfo.setLayoutCount = UInt32(layouts.size());
+			    layoutInfo.pSetLayouts = layouts.data();
 			    Check(vkCreatePipelineLayout(ctx->device, &layoutInfo, nullptr, &pipeline->layout),
 			          "Creating graphics pipeline layout");
-			    pipeline->renderPass =
-			        MakeRenderPass(ctx->device, desc.colorFormat, useDepthStencil, desc.depthFormat, true, true, true);
+			    Vector<PassAttachment> passColors;
+			    for (Format format : formats)
+			    {
+				    passColors.push_back({format});
+			    }
+			    const auto renderPass =
+			        GetRenderPass(ctx, passColors, useDepthStencil,
+			                      {desc.depthFormat, AttachmentLoadOp::Clear, AttachmentStoreOp::Store,
+			                       AttachmentLoadOp::Clear, AttachmentStoreOp::Store});
+			    pipeline->renderPass = renderPass.pass;
+			    pipeline->renderPassCached = renderPass.cached;
 			    VkPipelineShaderStageCreateInfo stages[2]{};
 			    stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 			    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
 			    stages[0].module = vertex->module;
 			    stages[0].pName = vertex->entry.c_str();
 			    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-			    stages[1].module = fragment->module;
-			    stages[1].pName = fragment->entry.c_str();
+			    stages[1].module = fragment ? fragment->module : VK_NULL_HANDLE;
+			    stages[1].pName = fragment ? fragment->entry.c_str() : nullptr;
 			    VkVertexInputBindingDescription binding{};
 			    binding.binding = 0;
 			    binding.stride = desc.vertexStride;
@@ -2120,14 +2750,15 @@ struct DeviceImpl final : Device
 			    blend.alphaBlendOp = ToVkBlendOperation(desc.blendState.alphaOperation);
 			    VkPipelineColorBlendStateCreateInfo blendState{
 			        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-			    blendState.attachmentCount = 1;
-			    blendState.pAttachments = &blend;
+			    Vector<VkPipelineColorBlendAttachmentState> blends(formats.size(), blend);
+			    blendState.attachmentCount = UInt32(blends.size());
+			    blendState.pAttachments = blends.data();
 			    VkDynamicState dynamics[]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
 			    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
 			    dynamic.dynamicStateCount = 2;
 			    dynamic.pDynamicStates = dynamics;
 			    VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-			    info.stageCount = 2;
+			    info.stageCount = fragment ? 2 : 1;
 			    info.pStages = stages;
 			    info.pVertexInputState = &vertexInput;
 			    info.pInputAssemblyState = &assembly;
@@ -2156,16 +2787,10 @@ struct DeviceImpl final : Device
 			    pipeline->ctx = ctx;
 			    pipeline->shaderA = shader;
 			    pipeline->compute = true;
-			    if (desc.layout)
-			    {
-				    pipeline->groupLayout = checked<LayoutImpl>(desc.layout, ctx, "descriptor layout");
-			    }
+			    const auto layouts = pipeline->InitializeLayouts(desc.layout, desc.layouts);
 			    VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-			    if (pipeline->groupLayout)
-			    {
-				    layoutInfo.setLayoutCount = 1;
-				    layoutInfo.pSetLayouts = &pipeline->groupLayout->layout;
-			    }
+			    layoutInfo.setLayoutCount = UInt32(layouts.size());
+			    layoutInfo.pSetLayouts = layouts.data();
 			    Check(vkCreatePipelineLayout(ctx->device, &layoutInfo, nullptr, &pipeline->layout),
 			          "Creating compute pipeline layout");
 			    VkComputePipelineCreateInfo info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
@@ -2187,6 +2812,7 @@ struct DeviceImpl final : Device
 		    {
 			    auto list = std::make_shared<CommandImpl>();
 			    list->ctx = ctx;
+			    list->framebufferCache = framebufferCache;
 			    VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
 			    pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 			    pool.queueFamilyIndex = ctx->family;
@@ -2254,10 +2880,62 @@ struct DeviceImpl final : Device
 			    }
 			    {
 				    std::lock_guard<std::mutex> lock(ctx->queueMutex);
+				    auto nextTextureStates = ctx->textureStates;
+				    auto nextBufferStates = ctx->bufferStates;
+				    for (auto it = nextTextureStates.begin(); it != nextTextureStates.end();)
+				    {
+					    it = it->second.owner.expired() ? nextTextureStates.erase(it) : std::next(it);
+				    }
+				    for (auto it = nextBufferStates.begin(); it != nextBufferStates.end();)
+				    {
+					    it = it->second.owner.expired() ? nextBufferStates.erase(it) : std::next(it);
+				    }
+				    for (const auto& transition : command->textureTransitions)
+				    {
+					    auto [tracked, inserted] = nextTextureStates.try_emplace(transition.texture.get());
+					    if (inserted || tracked->second.owner.lock() != transition.texture)
+					    {
+						    tracked->second.owner = transition.texture;
+						    tracked->second.states.assign(transition.texture->desc.mipLevels, transition.before);
+					    }
+					    const UInt32 mipCount = transition.range.mipLevelCount ? transition.range.mipLevelCount
+					                                                           : transition.texture->desc.mipLevels -
+					                                                                 transition.range.baseMipLevel;
+					    for (UInt32 mip = transition.range.baseMipLevel; mip < transition.range.baseMipLevel + mipCount;
+					         ++mip)
+					    {
+						    if (tracked->second.states[mip] != transition.before)
+						    {
+							    throw std::runtime_error(
+							        std::string(
+							            "Submitted texture transition does not match the queue resource state (") +
+							        std::to_string(transition.texture->desc.width) + "x" +
+							        std::to_string(transition.texture->desc.height) + ", mip " + std::to_string(mip) +
+							        ", expected " + std::to_string(static_cast<int>(transition.before)) + ", actual " +
+							        std::to_string(static_cast<int>(tracked->second.states[mip])) + ")");
+						    }
+						    tracked->second.states[mip] = transition.after;
+					    }
+				    }
+				    for (const auto& transition : command->bufferTransitions)
+				    {
+					    auto [tracked, inserted] = nextBufferStates.try_emplace(transition.buffer.get());
+					    if (inserted || tracked->second.owner.lock() != transition.buffer)
+					    {
+						    tracked->second.owner = transition.buffer;
+						    tracked->second.states.assign(1, transition.before);
+					    }
+					    Require(tracked->second.states.front() == transition.before,
+					            "Submitted buffer transition does not match the queue resource state");
+					    tracked->second.states.front() = transition.after;
+				    }
 				    Check(vkQueueSubmit(ctx->queue, 1, &info, fence->fence), "Submitting GPU work");
+				    ctx->textureStates = std::move(nextTextureStates);
+				    ctx->bufferStates = std::move(nextBufferStates);
 			    }
 			    fence->submitted = true;
 			    command->state = 3;
+			    command->completion = fence;
 #if defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
 			    ctx->SampleMemory();
 #endif

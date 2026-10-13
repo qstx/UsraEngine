@@ -277,6 +277,7 @@ Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>
 	const std::filesystem::path catalogOutputPath = catalogOutputDirectory.value / "ScriptTypeCatalog.json";
 	Json manifest = Json::object();
 	manifest["RuntimeAssembly"] = ToStdString(PathToUrsaString(runtimeAssembly));
+	manifest["RenderingAssembly"] = ToStdString(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Rendering.dll"));
 	manifest["EditorAssembly"] = ToStdString(PathToUrsaString(editorAssembly));
 	manifest["ReferenceDirectory"] = ToStdString(PathToUrsaString(referenceAssemblyDirectory));
 	manifest["OutputPath"] = ToStdString(PathToUrsaString(catalogOutputPath));
@@ -365,9 +366,10 @@ Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>
 			const String scriptType = ToUrsaString(item["ScriptType"].get<std::string>());
 			const Ursa::UInt64 localFileId = item["LocalFileId"].get<Ursa::UInt64>();
 			const std::string group = item["Group"].get<std::string>();
+			const std::string kind = item.value("Kind", std::string{"Behaviour"});
 			if (!guid || !sourcePath || scriptType.empty() || localFileId == 0 ||
-			    (group != "Game" && group != "Editor") || !typeIds.insert(scriptType).second ||
-			    !localFileIds.insert(localFileId).second)
+			    (group != "Game" && group != "Editor") || (kind != "Behaviour" && kind != "ScriptableObject") ||
+			    !typeIds.insert(scriptType).second || !localFileIds.insert(localFileId).second)
 			{
 				return Result<void>::Failure("ScriptCatalog contains a duplicate or invalid stable script identity");
 			}
@@ -436,10 +438,11 @@ Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>
 				}
 				fields.push_back(std::move(descriptor));
 			}
-			records.push_back({guid.value, scriptType, item["Version"].get<Ursa::UInt32>(), localFileId,
-			                   ToUrsaString(item["ClrTypeName"].get<std::string>()), sourcePath.value,
-			                   group == "Editor" ? ScriptAssemblyGroup::Editor : ScriptAssemblyGroup::Game,
-			                   std::move(fields)});
+			records.push_back(
+			    {guid.value, scriptType, item["Version"].get<Ursa::UInt32>(), localFileId,
+			     ToUrsaString(item["ClrTypeName"].get<std::string>()), sourcePath.value,
+			     group == "Editor" ? ScriptAssemblyGroup::Editor : ScriptAssemblyGroup::Game, std::move(fields),
+			     kind == "ScriptableObject" ? ScriptTypeKind::ScriptableObject : ScriptTypeKind::Behaviour});
 		}
 		scriptTypes = std::move(records);
 		return {};
@@ -518,6 +521,9 @@ Result<void> ScriptBuildService::WriteProject(const VirtualPath& path, const Vec
 	}
 	document += "  </ItemGroup>\n  <ItemGroup>\n";
 	document += "    <Reference Include=\"Ursa.Runtime\"><HintPath>" + XmlEscape(PathToUrsaString(runtimeAssembly)) +
+	            "</HintPath></Reference>\n";
+	document += "    <Reference Include=\"Ursa.Rendering\"><HintPath>" +
+	            XmlEscape(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Rendering.dll")) +
 	            "</HintPath></Reference>\n";
 	if (editorProject)
 	{
@@ -941,7 +947,8 @@ Result<String> ScriptBuildService::BuildFingerprint(ScriptAssemblyGroup group, c
 		}
 		HashBytes(hash, bytes.value.data(), bytes.value.size());
 	}
-	Vector<std::filesystem::path> dependencies{runtimeAssembly, catalogGeneratorAssembly};
+	Vector<std::filesystem::path> dependencies{runtimeAssembly, runtimeAssembly.parent_path() / "Ursa.Rendering.dll",
+	                                           catalogGeneratorAssembly};
 	if (group == ScriptAssemblyGroup::Editor)
 	{
 		dependencies.push_back(editorAssembly);

@@ -2,9 +2,14 @@
 #include <Serialization/TextureResource.hpp>
 #include <Serialization/MaterialResource.hpp>
 #include <Serialization/ResourceSession.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/PakBuilder.hpp>
+#include <Vfs/PakArchive.hpp>
 #include <Core/StringInterop.hpp>
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -141,6 +146,122 @@ int main()
 		const auto package = Take(output.Read(Path("out:Content.pak")));
 		Done(PakBuilder::Build(updated.runtimeFiles, {engineScheme, projectScheme}, output, Path("out:Content.pak")));
 		Expect(package == Take(output.Read(Path("out:Content.pak"))), "Prepared content package was not deterministic");
+		const auto scriptableRoot = std::filesystem::current_path() / "ScriptableImportTest" /
+		                            ("UrsaScriptableImport-" + ToStdString(ResourceId::Generate().ToString()));
+		std::filesystem::create_directories(scriptableRoot);
+		std::filesystem::create_directories(scriptableRoot / "Assets");
+
+		struct ScriptableCleanup
+		{
+			std::filesystem::path path;
+
+			~ScriptableCleanup()
+			{
+				std::error_code error;
+				std::filesystem::remove_all(path, error);
+			}
+		} scriptableCleanup{scriptableRoot};
+
+		auto scriptableWorkspace = Take(
+		    ProjectWorkspace::Open(scriptableRoot, {{engineScheme, URSA_TEST_ENGINE_SOURCE, MountAccess::ReadOnly}}));
+		Done(scriptableWorkspace->InitializeBuiltinAssets());
+		auto& scriptableFiles = scriptableWorkspace->Index().Filesystem();
+		const auto scriptMaterialGuid = ResourceId::Generate();
+		const auto scriptTextureGuid = ResourceId::Generate();
+		const auto scriptTexture = Take(MaterialTexture::Create(1, 1, TextureColorSpace::Srgb, {40, 80, 120, 255}));
+		Done(SaveTextureResource(scriptableFiles, Path("prj:Dependency.ursatex"), scriptTextureGuid, *scriptTexture));
+		MaterialInstance scriptMaterial(MaterialType::Unlit);
+		Done(scriptMaterial.SetTexture(MaterialTextureSlot::BaseColor, scriptTexture));
+		Done(SaveMaterialResource(scriptableFiles, Path("prj:Dependency.ursamat"), scriptMaterialGuid, scriptMaterial,
+		                          [scriptTextureGuid](MaterialTexturePtr)
+		                          { return Result<ResourceId>::Success(scriptTextureGuid); }));
+		Text(scriptableFiles, Path("prj:Scripts/Settings.cs"),
+		     "using Ursa; namespace Demo; [UrsaScriptType(\"demo.render-settings\")] "
+		     "public sealed class RenderSettings : ScriptableObject { public Shader shader = null!; "
+		     "public Material material = null!; }\n");
+		const auto shaderPath = Path("prj:Shaders/Dependency.ursashader");
+		const String shaderSource = "Shader \"Tests/Dependency\" { SubShader { Pass { HLSLPROGRAM\n"
+		                            "#pragma vertex VSMain\n#pragma fragment PSMain\n"
+		                            "float4 VSMain(float3 p: POSITION): SV_Position { return float4(p,1); }\n"
+		                            "float4 PSMain(): SV_Target0 { return float4(1,1,1,1); }\nENDHLSL } } }";
+		Text(scriptableFiles, shaderPath, shaderSource);
+		Done(scriptableWorkspace->Refresh());
+		options.buildScripts = true;
+		auto scriptBuild = Take(AssetImportPipeline::Prepare(*scriptableWorkspace, options));
+		const auto typeCatalog = nlohmann::json::parse(
+		    ToStdString(Take(scriptableFiles.ReadText(Path("lib:ScriptBuild/Catalog/ScriptTypeCatalog.json")))));
+		const auto type =
+		    std::find_if(typeCatalog.at("Scripts").begin(), typeCatalog.at("Scripts").end(),
+		                 [](const auto& record) { return record.at("ScriptType") == "demo.render-settings"; });
+		Expect(type != typeCatalog.at("Scripts").end(), "Script build omitted the ScriptableObject type");
+		const auto settingsPath = Path("prj:Settings.ursaasset");
+		Text(scriptableFiles, settingsPath, "{}");
+		Done(scriptableWorkspace->Refresh());
+		const auto settingsMetadata = Take(scriptableWorkspace->Database()->Metadata(settingsPath));
+		const auto typeMetadata = Take(scriptableWorkspace->Database()->Metadata(Path("prj:Scripts/Settings.cs")));
+		const auto shaderMetadata = Take(scriptableWorkspace->Database()->Metadata(shaderPath));
+		const auto materialReference =
+		    nlohmann::json{{"$ursaReference",
+		                    {{"Kind", "Material"},
+		                     {"Resource", {{"guid", scriptMaterialGuid.ToString().c_str()}, {"localFileId", 0}}}}}};
+		const auto shaderReference =
+		    nlohmann::json{{"$ursaReference",
+		                    {{"Kind", "Shader"},
+		                     {"Resource", {{"guid", shaderMetadata.guid.ToString().c_str()}, {"localFileId", 0}}}}}};
+		nlohmann::json payload{{"SourceGuid", typeMetadata.guid.ToString().c_str()},
+		                       {"LocalFileId", type->at("LocalFileId").get<UInt64>()},
+		                       {"Fields", {{"shader", shaderReference}, {"material", materialReference}}},
+		                       {"FieldTypes",
+		                        {{"shader",
+		                          {{"Kind", "ShaderReference"},
+		                           {"ElementKind", "Unsupported"},
+		                           {"TypeName", "Ursa.Shader"},
+		                           {"ElementTypeName", ""}}},
+		                         {"material",
+		                          {{"Kind", "MaterialReference"},
+		                           {"ElementKind", "Unsupported"},
+		                           {"TypeName", "Ursa.Material"},
+		                           {"ElementTypeName", ""}}}}}};
+		ScriptableAsset settings;
+		Done(settings.SetDescription(settingsMetadata.guid, 1, "demo.render-settings", 1, std::move(payload)));
+		Done(SaveScriptableAssetSource(scriptableFiles, settingsPath, settings));
+		Done(scriptableWorkspace->Refresh());
+		auto scriptableImport = Take(AssetImportPipeline::Prepare(*scriptableWorkspace, options));
+		Expect(scriptableImport.importedAssets > 0 && scriptBuild.importedAssets > 0,
+		       "ScriptableAsset import did not rebuild and publish project content");
+		auto scriptableResources = Take(ResourceSession::Open(scriptableImport.runtimeFiles));
+		Expect(Take(scriptableResources->LoadMaterial(scriptMaterialGuid))->Texture(MaterialTextureSlot::BaseColor) !=
+		               nullptr &&
+		           Take(scriptableResources->LoadShader(shaderMetadata.guid))->id == shaderMetadata.guid,
+		       "ScriptableAsset material or Shader dependency was not published for loose runtime loading");
+		auto settingsGraph = Take(LoadScriptableAssetGraph(*scriptableResources, {settingsMetadata.guid, 1}));
+		Expect(settingsGraph.assets.size() == 1 && settingsGraph.assets[0].TypeId() == "demo.render-settings",
+		       "Loose runtime did not load the imported ScriptableAsset artifact");
+		VirtualFileSystem scriptablePackageOutput;
+		Done(scriptablePackageOutput.MountProvider("out", std::make_shared<MemoryFileProvider>(),
+		                                           MountAccess::ReadWrite));
+		Done(PakBuilder::Build(scriptableImport.runtimeFiles, {engineScheme, projectScheme}, scriptablePackageOutput,
+		                       Path("out:ScriptableContent.pak")));
+		const auto scriptablePackage = Take(scriptablePackageOutput.Read(Path("out:ScriptableContent.pak")));
+		const auto scriptablePackagePath = scriptableRoot / "ScriptableContent.pak";
+		{
+			std::ofstream packageFile(scriptablePackagePath, std::ios::binary | std::ios::trunc);
+			Expect(static_cast<bool>(packageFile), "Cannot create ScriptableAsset Pak fixture");
+			packageFile.write(reinterpret_cast<const char*>(scriptablePackage.data()),
+			                  static_cast<std::streamsize>(scriptablePackage.size()));
+			Expect(static_cast<bool>(packageFile), "Cannot write ScriptableAsset Pak fixture");
+		}
+		auto scriptableArchive = Take(PakArchive::Open(scriptablePackagePath));
+		VirtualFileSystem packedScriptableFiles;
+		Done(scriptableArchive->Mount(packedScriptableFiles));
+		auto packedScriptableResources = Take(ResourceSession::Open(packedScriptableFiles));
+		Expect(
+		    Take(packedScriptableResources->LoadMaterial(scriptMaterialGuid))
+		                ->Texture(MaterialTextureSlot::BaseColor) != nullptr &&
+		        Take(packedScriptableResources->LoadShader(shaderMetadata.guid))->id == shaderMetadata.guid &&
+		        Take(LoadScriptableAssetGraph(*packedScriptableResources, {settingsMetadata.guid, 1})).assets.size() ==
+		            1,
+		    "Pak runtime could not load ScriptableAsset, Shader and Material dependencies");
 		std::cout << "Shared pipeline isolation, scope, concurrent writer, source generation, live references and "
 		             "package tests passed\n";
 		return 0;

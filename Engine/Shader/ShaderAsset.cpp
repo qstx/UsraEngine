@@ -1,4 +1,5 @@
 #include <Shader/ShaderAsset.hpp>
+#include <Shader/ShaderReflection.hpp>
 
 #include <Core/StringInterop.hpp>
 #include <Serialization/JsonArchiveInterop.hpp>
@@ -34,6 +35,103 @@ String PropertyTypeName(PropertyType type)
 			return "Texture2D";
 	}
 	return "Unknown";
+}
+
+String StableDigest(const String& value)
+{
+	UInt64 first = 14695981039346656037ull;
+	UInt64 second = 0x6a09e667f3bcc909ull;
+	for (const unsigned char byte : value)
+	{
+		first = (first ^ byte) * 1099511628211ull;
+		second ^= static_cast<UInt64>(byte) + 0x9e3779b97f4a7c15ull + (second << 6) + (second >> 2);
+		second *= 0x100000001b3ull;
+	}
+	static constexpr char digits[] = "0123456789abcdef";
+	String result = "v1-";
+	for (UInt64 part : {first, second})
+	{
+		for (Int32 shift = 60; shift >= 0; shift -= 4)
+		{
+			result.push_back(digits[(part >> shift) & 0xf]);
+		}
+	}
+	return result;
+}
+
+String PassIdentity(ResourceId shader, UInt32 subShaderIndex, UInt32 passIndex, const String& name)
+{
+	String key = "UrsaShaderPassV1|";
+	key += shader.ToString();
+	key += "|";
+	key += ToUrsaString(std::to_string(subShaderIndex));
+	key += "|";
+	key += ToUrsaString(std::to_string(passIndex));
+	key += "|";
+	key += name;
+	return StableDigest(key);
+}
+
+Result<String> ReflectionIdentity(const ShaderStageAsset& stage)
+{
+	const Json reflection = Json::parse(stage.reflectionJson.begin(), stage.reflectionJson.end(), nullptr, false);
+	if (reflection.is_discarded() || !reflection.is_object())
+	{
+		return Result<String>::Failure("Invalid Shader reflection JSON");
+	}
+	String key = "UrsaShaderReflectionV";
+	key += ToUrsaString(std::to_string(stage.reflectionVersion));
+	key += "|";
+	key += ToUrsaString(std::to_string(static_cast<UInt32>(stage.target)));
+	key += "|";
+	key += ToUrsaString(std::to_string(static_cast<UInt32>(stage.stage)));
+	key += "|";
+	key += stage.entryPoint;
+	key += "|";
+	key += ToUrsaString(reflection.dump());
+	return Result<String>::Success(StableDigest(key));
+}
+
+Result<String> LayoutIdentity(const ShaderAsset& shader, const ShaderVariantAsset& variant)
+{
+	auto built = BuildShaderBindingLayout(shader, variant);
+	if (!built)
+	{
+		return Result<String>::Failure(built.error);
+	}
+	Json layout;
+	layout["descriptors"] = Json::array();
+	for (const Rhi::LayoutBinding& descriptor : built.value.descriptors)
+	{
+		layout["descriptors"].push_back({{"binding", descriptor.binding},
+		                                 {"type", static_cast<UInt32>(descriptor.type)},
+		                                 {"count", descriptor.count},
+		                                 {"stages", descriptor.stages}});
+	}
+	layout["uniformBuffers"] = Json::array();
+	for (const ShaderUniformBufferLayout& buffer : built.value.uniformBuffers)
+	{
+		Json members = Json::array();
+		for (const ShaderUniformMember& member : buffer.members)
+		{
+			members.push_back({{"name", ToStdString(member.name)},
+			                   {"type", ToStdString(member.type)},
+			                   {"offset", member.byteOffset},
+			                   {"size", member.byteSize}});
+		}
+		layout["uniformBuffers"].push_back({{"binding", buffer.binding},
+		                                    {"size", buffer.byteSize},
+		                                    {"stages", buffer.stages},
+		                                    {"members", std::move(members)}});
+	}
+	layout["vertexInputs"] = Json::array();
+	for (const ShaderVertexInput& input : built.value.vertexInputs)
+	{
+		layout["vertexInputs"].push_back({{"location", input.location},
+		                                  {"semantic", ToStdString(input.semantic)},
+		                                  {"format", static_cast<UInt32>(input.format)}});
+	}
+	return Result<String>::Success(StableDigest(ToUrsaString(layout.dump())));
 }
 
 Result<PropertyType> ParsePropertyType(const String& value)
@@ -194,6 +292,7 @@ Json ToJson(const ShaderAsset& shader)
 		}
 		for (const ShaderPassAsset& pass : subShader.passes)
 		{
+			Json threadGroupSize{pass.threadGroupSize[0], pass.threadGroupSize[1], pass.threadGroupSize[2]};
 			Json reusedPasses = Json::array();
 			for (const String& reusedPass : pass.reusedPasses)
 			{
@@ -213,13 +312,20 @@ Json ToJson(const ShaderAsset& shader)
 					stages.push_back({{"target", ToStdString(TargetName(stage.target))},
 					                  {"stage", ToStdString(StageName(stage.stage))},
 					                  {"entryPoint", ToStdString(stage.entryPoint)},
+					                  {"reflectionVersion", stage.reflectionVersion},
+					                  {"reflectionIdentity", ToStdString(stage.reflectionIdentity)},
 					                  {"spirv", BytesToJson(stage.spirv)},
 					                  {"reflectionJson", ToStdString(stage.reflectionJson)}});
 				}
-				variants.push_back(
-				    {{"keywords", std::move(keywords)}, {"stages", std::move(stages)}, {"required", variant.required}});
+				variants.push_back({{"keywords", std::move(keywords)},
+				                    {"stages", std::move(stages)},
+				                    {"required", variant.required},
+				                    {"layoutIdentity", ToStdString(variant.layoutIdentity)}});
 			}
 			passes.push_back({{"name", ToStdString(pass.name)},
+			                  {"identity", ToStdString(pass.identity)},
+			                  {"computeKernel", pass.computeKernel},
+			                  {"threadGroupSize", std::move(threadGroupSize)},
 			                  {"tags", TagsToJson(pass.tags)},
 			                  {"renderStates", StatesToJson(pass.renderStates)},
 			                  {"reusedPasses", std::move(reusedPasses)},
@@ -243,7 +349,7 @@ Json ToJson(const ShaderAsset& shader)
 	{
 		includes.push_back(ToStdString(include));
 	}
-	return {{"serializationVersion", 3},
+	return {{"serializationVersion", 4},
 	        {"id", ToStdString(shader.id.ToString())},
 	        {"name", ToStdString(shader.name)},
 	        {"customEditor", ToStdString(shader.customEditor)},
@@ -494,8 +600,9 @@ Result<ShaderAsset> DecodeShader(const Json& document)
 		property.location = {line.value, column.value};
 		shader.properties.push_back(std::move(property));
 	}
-	for (const Json& subValue : document["subShaders"])
+	for (UInt32 subShaderIndex = 0; subShaderIndex < document["subShaders"].size(); ++subShaderIndex)
 	{
+		const Json& subValue = document["subShaders"][subShaderIndex];
 		ShaderSubShaderAsset subShader;
 		if (!subValue.contains("tags") || !subValue.contains("renderStates") || !subValue.contains("passes") ||
 		    !subValue.contains("passOrder") || !subValue["passOrder"].is_array() || !subValue["passes"].is_array())
@@ -521,8 +628,9 @@ Result<ShaderAsset> DecodeShader(const Json& document)
 			subShader.passOrder.push_back(
 			    {localIndex.value, std::move(reusedPass.value), orderValue["isReused"].get<bool>()});
 		}
-		for (const Json& passValue : subValue["passes"])
+		for (UInt32 passIndex = 0; passIndex < subValue["passes"].size(); ++passIndex)
 		{
+			const Json& passValue = subValue["passes"][passIndex];
 			ShaderPassAsset pass;
 			auto passName = Text(passValue, "name");
 			if (!passName)
@@ -530,6 +638,37 @@ Result<ShaderAsset> DecodeShader(const Json& document)
 				return Result<ShaderAsset>::Failure(passName.error);
 			}
 			pass.name = std::move(passName.value);
+			if (version.value >= 4)
+			{
+				auto identity = Text(passValue, "identity");
+				if (!identity || identity.value != PassIdentity(shader.id, subShaderIndex, passIndex, pass.name))
+				{
+					return Result<ShaderAsset>::Failure("Shader Pass identity is invalid");
+				}
+				pass.identity = std::move(identity.value);
+				auto computeKernel = passValue.value("computeKernel", false);
+				if (!passValue.contains("computeKernel") || !passValue["computeKernel"].is_boolean() ||
+				    !passValue.contains("threadGroupSize") || !passValue["threadGroupSize"].is_array() ||
+				    passValue["threadGroupSize"].size() != 3)
+				{
+					return Result<ShaderAsset>::Failure("Invalid Shader kernel metadata");
+				}
+				pass.computeKernel = computeKernel;
+				for (Ursa::Size dimension = 0; dimension < pass.threadGroupSize.size(); ++dimension)
+				{
+					if (!passValue["threadGroupSize"][dimension].is_number_unsigned() &&
+					    !passValue["threadGroupSize"][dimension].is_number_integer())
+					{
+						return Result<ShaderAsset>::Failure("Invalid Shader kernel thread-group size");
+					}
+					const Int64 value = passValue["threadGroupSize"][dimension].get<Int64>();
+					if (value <= 0 || value > 1024)
+					{
+						return Result<ShaderAsset>::Failure("Shader kernel thread-group size is out of range");
+					}
+					pass.threadGroupSize[dimension] = static_cast<UInt32>(value);
+				}
+			}
 			if (!passValue.contains("tags") || !passValue.contains("renderStates") ||
 			    !passValue.contains("reusedPasses") || !passValue.contains("variants") ||
 			    !passValue["variants"].is_array())
@@ -557,6 +696,15 @@ Result<ShaderAsset> DecodeShader(const Json& document)
 					return Result<ShaderAsset>::Failure(keywords ? "Invalid Shader variant stages" : keywords.error);
 				}
 				variant.keywords = std::move(keywords.value);
+				if (version.value >= 4)
+				{
+					auto layoutIdentity = Text(variantValue, "layoutIdentity");
+					if (!layoutIdentity || layoutIdentity.value.empty())
+					{
+						return Result<ShaderAsset>::Failure("Shader variant layout identity is missing");
+					}
+					variant.layoutIdentity = std::move(layoutIdentity.value);
+				}
 				if (version.value >= 2)
 				{
 					if (!variantValue.contains("required") || !variantValue["required"].is_boolean())
@@ -572,7 +720,13 @@ Result<ShaderAsset> DecodeShader(const Json& document)
 					auto stageName = Text(stageValue, "stage");
 					auto entryPoint = Text(stageValue, "entryPoint");
 					auto reflectionJson = Text(stageValue, "reflectionJson");
-					if (!targetName || !stageName || !entryPoint || !reflectionJson || !stageValue.contains("spirv"))
+					auto reflectionVersion = version.value >= 4
+					                             ? Unsigned(stageValue, "reflectionVersion")
+					                             : Result<UInt32>::Success(shaderReflectionFormatVersion);
+					auto reflectionIdentity =
+					    version.value >= 4 ? Text(stageValue, "reflectionIdentity") : Result<String>::Success({});
+					if (!targetName || !stageName || !entryPoint || !reflectionJson || !reflectionVersion ||
+					    !reflectionIdentity || !stageValue.contains("spirv"))
 					{
 						return Result<ShaderAsset>::Failure(!targetName       ? targetName.error
 						                                    : !stageName      ? stageName.error
@@ -599,9 +753,32 @@ Result<ShaderAsset> DecodeShader(const Json& document)
 					stage.target = target.value;
 					stage.stage = parsedStage.value;
 					stage.entryPoint = std::move(entryPoint.value);
+					if (reflectionVersion.value != shaderReflectionFormatVersion)
+					{
+						return Result<ShaderAsset>::Failure("Unsupported Shader reflection version");
+					}
+					stage.reflectionVersion = static_cast<UInt32>(reflectionVersion.value);
 					stage.spirv = std::move(bytecode.value);
 					stage.reflectionJson = std::move(reflectionJson.value);
+					auto expectedReflectionIdentity = ReflectionIdentity(stage);
+					if (!expectedReflectionIdentity ||
+					    (version.value >= 4 && expectedReflectionIdentity.value != reflectionIdentity.value))
+					{
+						return Result<ShaderAsset>::Failure("Shader reflection identity is invalid");
+					}
+					stage.reflectionIdentity = version.value >= 4 ? std::move(reflectionIdentity.value)
+					                                              : std::move(expectedReflectionIdentity.value);
 					variant.stages.push_back(std::move(stage));
+				}
+				if (version.value >= 4)
+				{
+					auto expectedLayoutIdentity = LayoutIdentity(shader, variant);
+					if (!expectedLayoutIdentity || expectedLayoutIdentity.value != variant.layoutIdentity)
+					{
+						return Result<ShaderAsset>::Failure(expectedLayoutIdentity
+						                                        ? "Shader variant layout identity is invalid"
+						                                        : expectedLayoutIdentity.error);
+					}
 				}
 				pass.variants.push_back(std::move(variant));
 			}
@@ -670,7 +847,7 @@ String ShaderAsset::SerializationType() const
 
 UInt32 ShaderAsset::SerializationVersion() const
 {
-	return 3;
+	return 4;
 }
 
 Result<void> ShaderAsset::Serialize(ArchiveWriter& writer) const
@@ -679,6 +856,40 @@ Result<void> ShaderAsset::Serialize(ArchiveWriter& writer) const
 	    compilerVersion.empty())
 	{
 		return Result<void>::Failure("Shader asset identity, source version, hash, or compiler version is invalid");
+	}
+	for (UInt32 subShaderIndex = 0; subShaderIndex < subShaders.size(); ++subShaderIndex)
+	{
+		const ShaderSubShaderAsset& subShader = subShaders[subShaderIndex];
+		for (UInt32 passIndex = 0; passIndex < subShader.passes.size(); ++passIndex)
+		{
+			const ShaderPassAsset& pass = subShader.passes[passIndex];
+			if (pass.identity != PassIdentity(id, subShaderIndex, passIndex, pass.name))
+			{
+				return Result<void>::Failure("Shader Pass has a missing or stale stable identity");
+			}
+			for (const ShaderVariantAsset& variant : pass.variants)
+			{
+				if (variant.layoutIdentity.empty())
+				{
+					return Result<void>::Failure("Shader variant has no stable layout identity");
+				}
+				auto expectedLayoutIdentity = LayoutIdentity(*this, variant);
+				if (!expectedLayoutIdentity || expectedLayoutIdentity.value != variant.layoutIdentity)
+				{
+					return Result<void>::Failure(expectedLayoutIdentity ? "Shader variant layout identity is stale"
+					                                                    : expectedLayoutIdentity.error);
+				}
+				for (const ShaderStageAsset& stage : variant.stages)
+				{
+					auto expectedReflectionIdentity = ReflectionIdentity(stage);
+					if (stage.reflectionVersion != shaderReflectionFormatVersion || !expectedReflectionIdentity ||
+					    stage.reflectionIdentity != expectedReflectionIdentity.value)
+					{
+						return Result<void>::Failure("Shader stage reflection version or identity is invalid");
+					}
+				}
+			}
+		}
 	}
 	return ArchiveWriteJson(writer, ToJson(*this));
 }
@@ -730,8 +941,9 @@ Result<ShaderAsset> BuildShaderAsset(const ShaderSourceAsset& source, const Shad
 		}
 		asset.references.push_back({fallback->source.name, fallback->source.id, {}, true});
 	}
-	for (const SubShaderDeclaration& sourceSubShader : source.source.subShaders)
+	for (UInt32 subShaderIndex = 0; subShaderIndex < source.source.subShaders.size(); ++subShaderIndex)
 	{
+		const SubShaderDeclaration& sourceSubShader = source.source.subShaders[subShaderIndex];
 		ShaderSubShaderAsset subShader;
 		subShader.tags = sourceSubShader.tags;
 		subShader.renderStates = sourceSubShader.renderStates;
@@ -752,10 +964,14 @@ Result<ShaderAsset> BuildShaderAsset(const ShaderSourceAsset& source, const Shad
 			const String passName = reference.substr(reference.rfind('/') + 1);
 			asset.references.push_back({reusedShader->source.name, reusedShader->source.id, passName, false});
 		}
-		for (const PassDeclaration& sourcePass : sourceSubShader.passes)
+		for (UInt32 passIndex = 0; passIndex < sourceSubShader.passes.size(); ++passIndex)
 		{
+			const PassDeclaration& sourcePass = sourceSubShader.passes[passIndex];
 			ShaderPassAsset pass;
 			pass.name = sourcePass.name;
+			pass.identity = PassIdentity(asset.id, subShaderIndex, passIndex, pass.name);
+			pass.computeKernel = sourcePass.computeKernel;
+			pass.threadGroupSize = sourcePass.threadGroupSize;
 			pass.tags = sourcePass.tags;
 			pass.renderStates = sourcePass.renderStates;
 			pass.reusedPasses = sourcePass.reusedPasses;
@@ -800,13 +1016,26 @@ Result<ShaderAsset> BuildShaderAsset(const ShaderSourceAsset& source, const Shad
 					{
 						return Result<ShaderAsset>::Failure("Compiled stage has invalid reflection metadata");
 					}
-					variant.stages.push_back({ShaderTarget::VulkanSpirv, compiled.stage, compiled.entryPoint,
-					                          compiled.spirv, compiled.reflectionJson});
+					ShaderStageAsset stage{ShaderTarget::VulkanSpirv, compiled.stage, compiled.entryPoint,
+					                       compiled.spirv, compiled.reflectionJson};
+					auto reflectionIdentity = ReflectionIdentity(stage);
+					if (!reflectionIdentity)
+					{
+						return Result<ShaderAsset>::Failure(reflectionIdentity.error);
+					}
+					stage.reflectionIdentity = std::move(reflectionIdentity.value);
+					variant.stages.push_back(std::move(stage));
 				}
 				if (variant.stages.size() != expectedStages.size())
 				{
 					return Result<ShaderAsset>::Failure("Compiled variant is missing a declared Shader stage");
 				}
+				auto layoutIdentity = LayoutIdentity(asset, variant);
+				if (!layoutIdentity)
+				{
+					return Result<ShaderAsset>::Failure(source.path.ToString() + ": " + layoutIdentity.error);
+				}
+				variant.layoutIdentity = std::move(layoutIdentity.value);
 				pass.variants.push_back(std::move(variant));
 			}
 			if (!expectedStages.empty() && pass.variants.empty())

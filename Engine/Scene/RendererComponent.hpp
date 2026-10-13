@@ -5,6 +5,11 @@
 
 namespace Ursa
 {
+namespace Rendering
+{
+class RenderScene;
+}
+
 class RendererComponent : public Component
 {
 public:
@@ -36,6 +41,7 @@ protected:
 	Result<void> RequireInstanceAccess() const;
 
 private:
+	friend class Rendering::RenderScene;
 	Vector<std::shared_ptr<MaterialInstance>> materials;
 	Vector<bool> instantiated;
 };

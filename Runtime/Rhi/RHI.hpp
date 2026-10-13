@@ -22,7 +22,8 @@ enum class Format
 	BgrA8Unorm,
 	R32Uint,
 	D32Float,
-	D32FloatS8Uint
+	D32FloatS8Uint,
+	RgbA16Float
 };
 enum class ShaderFormat
 {
@@ -104,7 +105,9 @@ enum class BindingType
 	SampledTexture,
 	StorageTexture,
 	Sampler,
-	CombinedImageSampler
+	CombinedImageSampler,
+	DynamicUniformBuffer,
+	DynamicStorageBuffer
 };
 enum class VertexFormat
 {
@@ -241,6 +244,22 @@ struct Capabilities
 	Ursa::UInt32 maxTextureSize = 0;
 	Ursa::UInt32 maxPushConstants = 0;
 	Ursa::UInt32 maxStorageBufferRange = 0;
+	UInt32 maxColorAttachments = 0;
+	UInt32 maxBindGroups = 0;
+	UInt32 maxUniformBufferRange = 0;
+	UInt64 minUniformBufferOffsetAlignment = 0;
+	UInt64 minStorageBufferOffsetAlignment = 0;
+};
+
+struct FormatCapabilities
+{
+	bool sampled = false;
+	bool storage = false;
+	bool colorAttachment = false;
+	bool depthAttachment = false;
+	bool transferSource = false;
+	bool transferDestination = false;
+	bool linearFilter = false;
 };
 
 struct BufferDesc
@@ -256,6 +275,13 @@ struct TextureDesc
 	Format format = Format::RgbA8Unorm;
 	TextureUsage usage = TextureUsage::None;
 	Ursa::UInt32 mipLevels = 1;
+};
+
+struct TextureSubresourceRange
+{
+	Ursa::UInt32 baseMipLevel = 0;
+	// Zero selects every remaining mip level.
+	Ursa::UInt32 mipLevelCount = 0;
 };
 
 struct SamplerDesc
@@ -375,6 +401,8 @@ struct BindingResource
 	BufferPtr buffer;
 	TexturePtr texture;
 	SamplerPtr sampler;
+	Size offset = 0;
+	Size size = 0;
 };
 
 struct BindGroupDesc
@@ -402,12 +430,49 @@ struct GraphicsPipelineDesc
 	Ursa::Float32 depthBiasSlope = 0.0f;
 	Ursa::UInt32 vertexStride = 0;
 	Vector<VertexAttribute> attributes;
+	Vector<Format> colorFormats;
+	bool depthOnly = false;
+	Vector<LayoutPtr> layouts;
 };
 
 struct ComputePipelineDesc
 {
 	ShaderPtr compute;
 	LayoutPtr layout;
+	Vector<LayoutPtr> layouts;
+};
+
+enum class AttachmentLoadOp
+{
+	Load,
+	Clear,
+	DontCare
+};
+
+enum class AttachmentStoreOp
+{
+	Store,
+	DontCare
+};
+
+struct ColorAttachment
+{
+	TexturePtr texture;
+	AttachmentLoadOp load = AttachmentLoadOp::Clear;
+	AttachmentStoreOp store = AttachmentStoreOp::Store;
+	Array<Float32, 4> clearValue{0, 0, 0, 1};
+	Array<UInt32, 4> clearUint{};
+};
+
+struct DepthAttachment
+{
+	TexturePtr texture;
+	AttachmentLoadOp load = AttachmentLoadOp::Clear;
+	AttachmentStoreOp store = AttachmentStoreOp::Store;
+	AttachmentLoadOp stencilLoad = AttachmentLoadOp::Clear;
+	AttachmentStoreOp stencilStore = AttachmentStoreOp::Store;
+	Float32 clearDepth = 1;
+	UInt32 clearStencil = 0;
 };
 
 struct RenderTarget
@@ -420,6 +485,8 @@ struct RenderTarget
 	Ursa::Float32 depthValue = 1.0f;
 	bool clearStencil = true;
 	Ursa::UInt32 stencilValue = 0;
+	Vector<ColorAttachment> colors;
+	DepthAttachment depthAttachment;
 };
 
 struct ScissorRect
@@ -430,10 +497,28 @@ struct ScissorRect
 	Ursa::UInt32 height = 0;
 };
 
+struct ViewportRect
+{
+	Float32 x = 0;
+	Float32 y = 0;
+	Float32 width = 0;
+	Float32 height = 0;
+	Float32 minimumDepth = 0;
+	Float32 maximumDepth = 1;
+};
+
 struct AcquiredImage
 {
 	TexturePtr texture;
 	ResourceState initialState = ResourceState::Undefined;
+};
+
+struct CommandListStatistics
+{
+	UInt64 resets = 0;
+	UInt64 descriptorPoolsCreated = 0;
+	UInt64 transientGroupsCreated = 0;
+	UInt32 activeTransientGroups = 0;
 };
 
 class CommandList
@@ -445,7 +530,19 @@ public:
 
 	virtual Result<void> End() = 0;
 
+	// Reuse a completed command list; pending GPU submissions are rejected.
+	virtual Result<void> Reset() = 0;
+
+	virtual Result<BindGroupPtr> CreateTransientBindGroup(const BindGroupDesc& desc) = 0;
+
+	virtual CommandListStatistics Statistics() const = 0;
+
 	virtual Result<void> Barrier(const TexturePtr& texture, ResourceState before, ResourceState after) = 0;
+
+	virtual Result<void> Barrier(const TexturePtr&, TextureSubresourceRange, ResourceState, ResourceState)
+	{
+		return Result<void>::Failure("Texture subresource barriers are not supported by this backend");
+	}
 
 	virtual Result<void> Barrier(const BufferPtr& buffer, ResourceState before, ResourceState after) = 0;
 
@@ -466,11 +563,16 @@ public:
 
 	virtual Result<void> BindGroup(const BindGroupPtr& group) = 0;
 
+	virtual Result<void> BindGroup(UInt32 index, const BindGroupPtr& group,
+	                               const Vector<UInt32>& dynamicOffsets = {}) = 0;
+
 	virtual Result<void> BindVertexBuffer(const BufferPtr& buffer) = 0;
 
 	virtual Result<void> BindIndexBuffer(const BufferPtr& buffer) = 0;
 
 	virtual Result<void> SetScissor(const ScissorRect& rect) = 0;
+
+	virtual Result<void> SetViewport(const ViewportRect& rect) = 0;
 
 	virtual Result<void> Draw(Ursa::UInt32 vertexCount, Ursa::UInt32 instanceCount = 1) = 0;
 
@@ -502,6 +604,8 @@ public:
 	virtual AdapterInfo AdapterInfo() const = 0;
 
 	virtual Capabilities Capabilities() const = 0;
+
+	virtual Result<FormatCapabilities> QueryFormat(Format format) const = 0;
 
 	virtual Result<BufferPtr> CreateBuffer(const BufferDesc&) = 0;
 

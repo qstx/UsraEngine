@@ -61,7 +61,7 @@ Result<void> SaveShaderAssetResource(VirtualFileSystem& filesystem, const Virtua
 		return Result<void>::Failure(path.ToString() + ": " + document.error);
 	}
 	document.value["format"] = "UrsaShader";
-	document.value["version"] = resourceFormatVersion;
+	document.value["version"] = shaderResourceFormatVersion;
 	document.value["id"] = shader.id.ToString();
 	try
 	{
@@ -76,7 +76,7 @@ Result<void> SaveShaderAssetResource(VirtualFileSystem& filesystem, const Virtua
 		}
 		Vector<UInt8> bytes(shaderHeaderBytes, 0);
 		std::copy(shaderMagic.begin(), shaderMagic.end(), bytes.begin());
-		EncodeUint32(bytes, 8, resourceFormatVersion);
+		EncodeUint32(bytes, 8, shaderResourceFormatVersion);
 		std::copy(shader.id.bytes.begin(), shader.id.bytes.end(), bytes.begin() + 12);
 		EncodeUint64(bytes, 28, static_cast<UInt64>(json.size()));
 		const auto* payload = reinterpret_cast<const UInt8*>(json.data());
@@ -113,7 +113,7 @@ Result<ShaderAsset> LoadShaderAssetResource(const VirtualFileSystem& filesystem,
 	const auto document = nlohmann::json::parse(jsonText, nullptr, false);
 	if (document.is_discarded() || !document.is_object() || !document.contains("format") ||
 	    document["format"] != "UrsaShader" || !document.contains("version") ||
-	    document["version"] != resourceFormatVersion || !document.contains("id") || !document["id"].is_string())
+	    document["version"] != shaderResourceFormatVersion || !document.contains("id") || !document["id"].is_string())
 	{
 		return Result<ShaderAsset>::Failure("Invalid Shader resource payload at " + path.ToString());
 	}

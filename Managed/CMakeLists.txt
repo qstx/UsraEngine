@@ -6,6 +6,7 @@ set(managedOutputs
   "${URSA_MANAGED_OUTPUT_DIR}/Ursa.ManagedHost.deps.json"
   "${URSA_MANAGED_OUTPUT_DIR}/Ursa.ManagedHost.runtimeconfig.json"
   "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Runtime.dll"
+  "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Rendering.dll"
   "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Editor.dll")
 add_custom_command(OUTPUT "${URSA_MANAGED_OUTPUT_DIR}/Built.stamp" ${managedOutputs}
   COMMAND "${CMAKE_COMMAND}" "-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"

@@ -89,12 +89,13 @@ private:
 				                                             window->SetTitle(title);
 			                                             }
 		                                             });
+		sceneApi->SetRenderDevice(device);
 		host = Take(DotNetHost::Create());
 		ManagedHostFiles bootstrap;
 		bootstrap.runtimeConfig = Path("ursa:Managed/Ursa.ManagedHost.runtimeconfig.json");
 		bootstrap.entryAssembly = Path("ursa:Managed/Ursa.ManagedHost.dll");
 		bootstrap.dependencies = {Path("ursa:Managed/Ursa.ManagedHost.deps.json"),
-		                          Path("ursa:Managed/Ursa.Runtime.dll")};
+		                          Path("ursa:Managed/Ursa.Runtime.dll"), Path("ursa:Managed/Ursa.Rendering.dll")};
 		Done(host->Start(*files, bootstrap,
 		                 [](UInt32 level, const String& message)
 		                 {
@@ -136,6 +137,18 @@ private:
 		{
 			window->Resize(800, 600);
 		}
+		if (stressWindow && frame == 20)
+		{
+			window->Resize(960, 720);
+		}
+		if (stressWindow && frame == 35)
+		{
+			window->Resize(1280, 720);
+		}
+		if (stressWindow && frame == 50)
+		{
+			window->Resize(1024, 768);
+		}
 		if (stressWindow && frame == 10)
 		{
 			window->Minimize();
@@ -166,6 +179,8 @@ int main(int argc, char** argv)
 	{
 		bool visible = true;
 		UInt32 frames = 0;
+		std::filesystem::path captureOutput;
+		UInt32 captureFrame = 1;
 		std::filesystem::path content = CurrentExecutablePath().parent_path() / "Content";
 		std::filesystem::path project;
 		std::filesystem::path engineAssets;
@@ -186,6 +201,21 @@ int main(int argc, char** argv)
 			else if (argument == "--pak" && index + 1 < argc)
 			{
 				package = std::filesystem::absolute(std::filesystem::u8path(argv[++index]));
+			}
+			else if (argument == "--capture" && index + 1 < argc)
+			{
+				captureOutput = std::filesystem::u8path(argv[++index]);
+			}
+			else if (argument == "--capture-frame" && index + 1 < argc)
+			{
+				const std::string text = argv[++index];
+				std::size_t end = 0;
+				const auto value = std::stoull(text, &end);
+				if (!value || value > UINT32_MAX || end != text.size())
+				{
+					throw std::runtime_error("--capture-frame must be between 1 and 4294967295");
+				}
+				captureFrame = static_cast<UInt32>(value);
 			}
 			else if (argument == "--content" && index + 1 < argc)
 			{
@@ -211,7 +241,7 @@ int main(int argc, char** argv)
 			{
 				throw std::runtime_error("Usage: UrsaScriptPlayer [--project <directory> | --content <directory> | "
 				                         "--pak <Content.pak>] [--engine <Engine/Assets>] [--scene <asset path>] "
-				                         "[--hidden] [--frames N]");
+				                         "[--hidden] [--frames N] [--capture <output.png>] [--capture-frame N]");
 			}
 		}
 		if (!package.empty() && !project.empty())
@@ -268,6 +298,10 @@ int main(int argc, char** argv)
 		auto files = std::make_shared<VirtualFileSystem>(Take(OpenRuntimeFileSystem(profile)));
 		ConfigureEngineFileSystem(files);
 		ScriptPlayer player(files, scenePath, manifestPath, stressWindow);
+		if (!captureOutput.empty())
+		{
+			Done(player.SetFrameCapture(captureOutput, captureFrame));
+		}
 		Done(player.Run(1024, 720, "Ursa Script Player", visible, frames));
 		return 0;
 	}

@@ -83,9 +83,18 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		const auto now = std::chrono::steady_clock::now();
 		const Ursa::Float32 dt = std::chrono::duration<Ursa::Float32>(now - previous).count();
 		previous = now;
-		if (scene)
+		if (!scene)
 		{
-			result = sceneFrameRunner.Tick(*scene, dt, window.get(), FrameInput::Capture(*window));
+			URSA_PROFILE_SCOPE("Engine.GameFrame");
+			result = OnFrame(dt);
+		}
+		else
+		{
+			result = OnFrame(dt);
+			if (result)
+			{
+				result = sceneFrameRunner.Tick(*scene, dt, window.get(), FrameInput::Capture(*window));
+			}
 			if (result)
 			{
 				URSA_PROFILE_SCOPE("Engine.RenderPreparation");
@@ -99,14 +108,9 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 				else
 				{
 					result = sceneRenderer->RenderModels(swapchain, data.value.viewProjection, data.value.boxes,
-					                                     data.value.lighting, data.value.cameraPosition);
+					                                     data.value.lighting, data.value.cameraPosition, &frameCapture);
 				}
 			}
-		}
-		else
-		{
-			URSA_PROFILE_SCOPE("Engine.GameFrame");
-			result = OnFrame(dt);
 		}
 		if (!result)
 		{
@@ -132,6 +136,6 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 	{
 		return result;
 	}
-	return idle;
+	return idle ? frameCapture.Finish() : idle;
 }
 } // namespace Ursa

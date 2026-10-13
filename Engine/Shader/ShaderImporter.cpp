@@ -48,6 +48,10 @@ String SourceFingerprint(const VirtualFileSystem& filesystem, const ShaderSource
 		}
 	};
 	Ursa::UInt64 hash = 14695981039346656037ull;
+	constexpr char importerVersion[] = "UrsaShaderImportV2";
+	hashBytes(hash, importerVersion, sizeof(importerVersion) - 1);
+	hashBytes(hash, &source.source.formatVersion, sizeof(source.source.formatVersion));
+	hashBytes(hash, &shaderReflectionFormatVersion, sizeof(shaderReflectionFormatVersion));
 	const auto sourceBytes = filesystem.Read(source.path);
 	if (!sourceBytes)
 	{
@@ -64,6 +68,15 @@ String SourceFingerprint(const VirtualFileSystem& filesystem, const ShaderSource
 			throw std::runtime_error("Shader dependency identity is missing");
 		}
 		hashBytes(hash, dependency->source.id.bytes.data(), dependency->source.id.bytes.size());
+		const String dependencyPath = dependency->path.ToString();
+		hashBytes(hash, dependencyPath.data(), dependencyPath.size());
+		hashBytes(hash, &dependency->source.formatVersion, sizeof(dependency->source.formatVersion));
+		const auto dependencyBytes = filesystem.Read(dependency->path);
+		if (!dependencyBytes)
+		{
+			throw std::runtime_error(ToStdString(dependencyBytes.error));
+		}
+		hashBytes(hash, dependencyBytes.value.data(), dependencyBytes.value.size());
 	}
 	for (const VirtualPath& includePath : dependencies.includes)
 	{
@@ -72,7 +85,8 @@ String SourceFingerprint(const VirtualFileSystem& filesystem, const ShaderSource
 		{
 			throw std::runtime_error(ToStdString(include.error));
 		}
-		hashBytes(hash, includePath.ToString().data(), includePath.ToString().size());
+		const String includeName = includePath.ToString();
+		hashBytes(hash, includeName.data(), includeName.size());
 		hashBytes(hash, include.value.data(), include.value.size());
 	}
 	std::ostringstream text;

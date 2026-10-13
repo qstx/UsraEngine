@@ -1,6 +1,7 @@
 #include <Shader/ShaderSource.hpp>
 
 #include <algorithm>
+#include <Core/StringInterop.hpp>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -1372,6 +1373,209 @@ Result<ShaderSourceDocument> ParseShaderSource(const String& sourcePath, const S
 	}
 	Parser parser(sourcePath, std::move(tokens.value));
 	return parser.Run();
+}
+
+Result<ShaderSourceDocument> ParseComputeSource(const String& sourcePath, const String& source)
+{
+	struct Kernel
+	{
+		String name;
+		SourceLocation location;
+		Array<UInt32, 3> threadGroup{1, 1, 1};
+		bool hasThreadGroup = false;
+	};
+
+	Vector<Kernel> kernels;
+	String compiledSource;
+	UInt32 lineNumber = 1;
+	for (Ursa::Size lineStart = 0; lineStart < source.size();)
+	{
+		const Ursa::Size newline = source.find('\n', lineStart);
+		const Ursa::Size lineEnd = newline == String::npos ? source.size() : newline;
+		String line = source.substr(lineStart, lineEnd - lineStart);
+		Ursa::Size cursor = 0;
+		while (cursor < line.size() && (line[cursor] == ' ' || line[cursor] == '\t' || line[cursor] == '\r'))
+		{
+			++cursor;
+		}
+		bool kernelDirective = false;
+		constexpr char directive[] = "#pragma kernel";
+		if (line.compare(cursor, sizeof(directive) - 1, directive) == 0)
+		{
+			cursor += sizeof(directive) - 1;
+			if (cursor >= line.size() || (line[cursor] != ' ' && line[cursor] != '\t'))
+			{
+				return Result<ShaderSourceDocument>::Failure(sourcePath + ":" +
+				                                             ToUrsaString(std::to_string(lineNumber)) +
+				                                             ": malformed #pragma kernel directive");
+			}
+			while (cursor < line.size() && (line[cursor] == ' ' || line[cursor] == '\t'))
+			{
+				++cursor;
+			}
+			const Ursa::Size nameStart = cursor;
+			if (cursor >= line.size() || !IsIdentifierStart(line[cursor]))
+			{
+				return Result<ShaderSourceDocument>::Failure(
+				    sourcePath + ":" + ToUrsaString(std::to_string(lineNumber)) + ": kernel name is missing");
+			}
+			while (cursor < line.size() && IsIdentifierPart(line[cursor]))
+			{
+				++cursor;
+			}
+			Kernel kernel;
+			kernel.name = line.substr(nameStart, cursor - nameStart);
+			kernel.location = {lineNumber, static_cast<UInt32>(nameStart + 1)};
+			if (std::find_if(kernels.begin(), kernels.end(),
+			                 [&](const Kernel& existing) { return existing.name == kernel.name; }) != kernels.end())
+			{
+				return Result<ShaderSourceDocument>::Failure(sourcePath + ": duplicate compute kernel " + kernel.name);
+			}
+			kernels.push_back(std::move(kernel));
+			kernelDirective = true;
+		}
+		if (!kernelDirective)
+		{
+			compiledSource.append(line.data(), line.size());
+		}
+		if (newline == String::npos)
+		{
+			break;
+		}
+		compiledSource.push_back('\n');
+		lineStart = newline + 1;
+		++lineNumber;
+	}
+	if (kernels.empty())
+	{
+		return Result<ShaderSourceDocument>::Failure(sourcePath + ": no #pragma kernel declarations found");
+	}
+	const auto parseDimension = [&](Ursa::Size begin, Ursa::Size end) -> Result<UInt32>
+	{
+		while (begin < end && (source[begin] == ' ' || source[begin] == '\t'))
+		{
+			++begin;
+		}
+		while (end > begin && (source[end - 1] == ' ' || source[end - 1] == '\t'))
+		{
+			--end;
+		}
+		UInt32 value = 0;
+		if (begin == end)
+		{
+			return Result<UInt32>::Failure("Empty numthreads dimension");
+		}
+		for (Ursa::Size index = begin; index < end; ++index)
+		{
+			if (source[index] < '0' || source[index] > '9' ||
+			    value > ((std::numeric_limits<UInt32>::max)() - UInt32(source[index] - '0')) / 10)
+			{
+				return Result<UInt32>::Failure("Invalid numthreads dimension");
+			}
+			value = value * 10 + UInt32(source[index] - '0');
+		}
+		return Result<UInt32>::Success(value);
+	};
+	for (Ursa::Size cursor = 0; (cursor = source.find("[numthreads", cursor)) != String::npos;)
+	{
+		const Ursa::Size open = source.find('(', cursor);
+		const Ursa::Size close = open == String::npos ? String::npos : source.find(')', open + 1);
+		const Ursa::Size bracket = close == String::npos ? String::npos : source.find(']', close + 1);
+		if (open == String::npos || close == String::npos || bracket == String::npos)
+		{
+			return Result<ShaderSourceDocument>::Failure(sourcePath + ": malformed [numthreads] attribute");
+		}
+		Array<UInt32, 3> dimensions{};
+		Ursa::Size valueStart = open + 1;
+		bool valid = true;
+		for (Ursa::Size dimension = 0; dimension < dimensions.size(); ++dimension)
+		{
+			const Ursa::Size comma = dimension + 1 == dimensions.size() ? close : source.find(',', valueStart);
+			if (comma == String::npos || comma > close)
+			{
+				valid = false;
+				break;
+			}
+			auto parsed = parseDimension(valueStart, comma);
+			if (!parsed || parsed.value == 0 || parsed.value > 1024)
+			{
+				valid = false;
+				break;
+			}
+			dimensions[dimension] = parsed.value;
+			valueStart = comma + 1;
+		}
+		if (!valid || Ursa::UInt64(dimensions[0]) * dimensions[1] * dimensions[2] > 1024)
+		{
+			return Result<ShaderSourceDocument>::Failure(sourcePath + ": invalid [numthreads] dimensions");
+		}
+		Ursa::Size function = bracket + 1;
+		while (function < source.size() && std::isspace(static_cast<unsigned char>(source[function])) != 0)
+		{
+			++function;
+		}
+		if (source.compare(function, 4, "void") != 0)
+		{
+			return Result<ShaderSourceDocument>::Failure(sourcePath + ": [numthreads] must decorate a void kernel");
+		}
+		function += 4;
+		while (function < source.size() && std::isspace(static_cast<unsigned char>(source[function])) != 0)
+		{
+			++function;
+		}
+		const Ursa::Size functionStart = function;
+		while (function < source.size() && IsIdentifierPart(source[function]))
+		{
+			++function;
+		}
+		const String functionName = source.substr(functionStart, function - functionStart);
+		auto kernel = std::find_if(kernels.begin(), kernels.end(),
+		                           [&](const Kernel& current) { return current.name == functionName; });
+		if (kernel != kernels.end())
+		{
+			if (kernel->hasThreadGroup)
+			{
+				return Result<ShaderSourceDocument>::Failure(sourcePath + ": duplicate [numthreads] for kernel " +
+				                                             kernel->name);
+			}
+			kernel->threadGroup = dimensions;
+			kernel->hasThreadGroup = true;
+		}
+		cursor = bracket + 1;
+	}
+	ShaderSourceDocument document;
+	document.sourcePath = sourcePath;
+	String sourceName = sourcePath.substr(sourcePath.rfind('/') == String::npos ? 0 : sourcePath.rfind('/') + 1);
+	const Ursa::Size extension = sourceName.rfind('.');
+	if (extension != String::npos)
+	{
+		sourceName = sourceName.substr(0, extension);
+	}
+	document.name = "Compute/" + sourceName;
+	SubShaderDeclaration subShader;
+	for (Kernel& kernel : kernels)
+	{
+		if (!kernel.hasThreadGroup)
+		{
+			return Result<ShaderSourceDocument>::Failure(sourcePath + ": missing [numthreads] for kernel " +
+			                                             kernel.name);
+		}
+		PassDeclaration pass;
+		pass.name = kernel.name;
+		pass.computeKernel = true;
+		pass.threadGroupSize = kernel.threadGroup;
+		pass.location = kernel.location;
+		ProgramBlock program;
+		program.kind = ProgramBlockKind::Program;
+		program.source = compiledSource;
+		program.location = kernel.location;
+		program.entryPoints.push_back({ProgramStage::Compute, kernel.name, kernel.location});
+		pass.programs.push_back(std::move(program));
+		subShader.passOrder.push_back({static_cast<UInt32>(subShader.passes.size()), {}, false});
+		subShader.passes.push_back(std::move(pass));
+	}
+	document.subShaders.push_back(std::move(subShader));
+	return Result<ShaderSourceDocument>::Success(std::move(document));
 }
 
 Result<Vector<ShaderKeywordVariant>> ExpandShaderKeywordVariants(const Vector<ShaderKeywordDirective>& directives,

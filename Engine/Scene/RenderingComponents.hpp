@@ -8,6 +8,7 @@
 #include <Scene/SkinnedMeshRendererComponent.hpp>
 #include <Scene/RendererComponent.hpp>
 #include <Scene/MeshFilterComponent.hpp>
+#include <Rendering/Scene/CameraData.hpp>
 
 namespace Ursa
 {
@@ -26,6 +27,7 @@ public:
 	Ursa::Float32 verticalFovRadians = 0.78539816f;
 	Ursa::Float32 nearPlane = 0.1f;
 	Ursa::Float32 farPlane = 100.0f;
+	Rendering::CameraSettings rendering;
 };
 
 struct SceneRenderData

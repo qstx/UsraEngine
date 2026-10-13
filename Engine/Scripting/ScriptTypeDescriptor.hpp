@@ -26,6 +26,12 @@ enum class ScriptAssemblyGroup
 	Editor
 };
 
+enum class ScriptTypeKind
+{
+	Behaviour,
+	ScriptableObject
+};
+
 struct ScriptTypeDescriptor
 {
 	ResourceId sourceGuid;
@@ -36,5 +42,6 @@ struct ScriptTypeDescriptor
 	VirtualPath sourcePath;
 	ScriptAssemblyGroup group = ScriptAssemblyGroup::Game;
 	Vector<ScriptFieldTypeDescriptor> fields;
+	ScriptTypeKind kind = ScriptTypeKind::Behaviour;
 };
 } // namespace Ursa

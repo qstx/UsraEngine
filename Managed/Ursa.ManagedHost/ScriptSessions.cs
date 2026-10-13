@@ -33,6 +33,8 @@ internal static unsafe class ScriptSessions
 		{
 			string identity = name.Name ?? throw new InvalidOperationException("Assembly identity is empty.");
 			if (identity == typeof(Behaviour).Assembly.GetName().Name) return typeof(Behaviour).Assembly;
+			if (identity == typeof(Ursa.Rendering.RenderContextToken).Assembly.GetName().Name)
+				return typeof(Ursa.Rendering.RenderContextToken).Assembly;
 			if (identity == "Ursa.Editor")
 			{
 				if (!editor) throw new InvalidOperationException("Player sessions cannot load Ursa.Editor.");
@@ -73,12 +75,12 @@ internal static unsafe class ScriptSessions
 	private sealed class Session
 	{
 		internal readonly ProjectContext context;
-		internal NativeApiV5 api;
+		internal NativeApiV6 api;
 		internal IEditorExtensionSession? extensions;
 		internal string preparedReload = string.Empty;
 		internal readonly Dictionary<string, ScriptIdentity> identities = new(StringComparer.Ordinal);
 
-		internal Session(ulong id, bool editor, NativeApiV5 api)
+		internal Session(ulong id, bool editor, NativeApiV6 api)
 		{
 			context = new ProjectContext(id, editor);
 			this.api = api;
@@ -103,7 +105,7 @@ internal static unsafe class ScriptSessions
 		if (ownerThread != Environment.CurrentManagedThreadId) throw new InvalidOperationException("Script sessions require the host main thread.");
 	}
 
-	internal static ulong Create(bool editor, NativeApiV5 api)
+	internal static ulong Create(bool editor, NativeApiV6 api)
 	{
 		RequireThread();
 		if (faulted) throw new InvalidOperationException("A project context did not unload. Restart before creating another script session.");
@@ -118,15 +120,34 @@ internal static unsafe class ScriptSessions
 		RequireThread();
 		if (!sessions.TryGetValue(id, out Session? session)) throw new InvalidOperationException("Script session is closed or unknown.");
 		BehaviourRegistry.currentSession = id;
+		ScriptableObjectRegistry.SelectSession(id);
+		ScriptableObjectRegistry.graphLoader = LoadScriptableAssetGraph;
 		BehaviourRegistry.typeResolver = session.context.ResolveType;
 		BehaviourRegistry.identityResolver = type => session.identities.TryGetValue(type.FullName ?? type.Name, out ScriptIdentity identity)
 			? identity : BehaviourRegistry.DeclaredIdentity(type);
 		BehaviourRegistry.assemblyResolver = () => session.context.assemblies.Values.Append(typeof(Behaviour).Assembly);
-		NativeApiV5 api = session.api;
+			NativeApiV6 api = session.api;
 		EngineApi.Initialize((nint)(&api));
 	}
 
-	internal static void Bind(ulong id, NativeApiV5 api)
+	private static IReadOnlyList<ScriptableAssetData> LoadScriptableAssetGraph(AssetReference reference)
+	{
+		using JsonDocument response = JsonDocument.Parse(EngineApi.ResourceRequest(new
+		{
+			operation = "scriptableasset.graph.load", guid = reference.Guid, localFileId = reference.LocalFileId
+		}).GetRawText());
+		var data = new List<ScriptableAssetData>();
+		foreach (JsonElement record in response.RootElement.EnumerateArray())
+		{
+			AssetReference identity = new(record.GetProperty("guid").GetString()!, record.GetProperty("localFileId").GetUInt64());
+			string typeId = record.GetProperty("typeId").GetString()!;
+			uint typeVersion = record.GetProperty("typeVersion").GetUInt32();
+			data.Add(new ScriptableAssetData(identity, typeId, typeVersion, record.GetProperty("payload").GetRawText()));
+		}
+		return data;
+	}
+
+	internal static void Bind(ulong id, NativeApiV6 api)
 	{
 		RequireThread();
 		if (!sessions.TryGetValue(id, out Session? session)) throw new InvalidOperationException("Script session is closed or unknown.");
@@ -144,7 +165,7 @@ internal static unsafe class ScriptSessions
 		string name = metadata.GetString(metadata.GetAssemblyDefinition().Name);
 		if (name.StartsWith("Ursa.Editor", StringComparison.Ordinal) && !context.editor)
 			throw new InvalidOperationException("Game sessions cannot load Editor assemblies.");
-		if (name == "Ursa.Runtime" || name == "Ursa.ManagedHost" || frameworkNames.Contains(name))
+		if (name == "Ursa.Runtime" || name == "Ursa.Rendering" || name == "Ursa.ManagedHost" || frameworkNames.Contains(name))
 			throw new InvalidOperationException("Project content cannot replace shared host or framework assemblies.");
 		if (!context.images.TryAdd(name, bytes)) throw new InvalidOperationException($"Duplicate project assembly '{name}'.");
 		// Validate separately so dependencies may be registered in any manifest order.
@@ -205,6 +226,10 @@ internal static unsafe class ScriptSessions
 			if (record.GetProperty("Group").GetString() != "Game") continue;
 			string typeName = record.GetProperty("ClrTypeName").GetString()!;
 			Type type = session.context.ResolveType(typeName) ?? throw new InvalidOperationException($"Script type is missing: {typeName}");
+			string kind = record.TryGetProperty("Kind", out JsonElement kindValue) ? kindValue.GetString()! : "Behaviour";
+			if ((kind != "Behaviour" && kind != "ScriptableObject") || type.IsAbstract || type.ContainsGenericParameters ||
+			    !(kind == "Behaviour" ? typeof(Behaviour).IsAssignableFrom(type) : typeof(ScriptableObject).IsAssignableFrom(type)))
+				throw new InvalidOperationException($"Script catalog type kind differs: {typeName}.");
 			string stableId = record.GetProperty("ScriptType").GetString()!;
 			uint version = record.GetProperty("Version").GetUInt32();
 			string source = record.GetProperty("SourceGuid").GetString()!;
@@ -300,9 +325,11 @@ internal static unsafe class ScriptSessions
 			foreach (AssemblyName dependency in assembly.GetReferencedAssemblies()) context.LoadFromAssemblyName(dependency);
 			foreach (Type type in assembly.GetTypes())
 			{
-				if (!type.IsAbstract && !type.ContainsGenericParameters && typeof(Behaviour).IsAssignableFrom(type))
+				if (!type.IsAbstract && !type.ContainsGenericParameters &&
+				    (typeof(Behaviour).IsAssignableFrom(type) || typeof(ScriptableObject).IsAssignableFrom(type)))
 				{
-					if (type.GetConstructor(Type.EmptyTypes) == null) throw new InvalidOperationException($"Behaviour '{type.FullName}' needs a public default constructor.");
+					if (typeof(Behaviour).IsAssignableFrom(type) && type.GetConstructor(Type.EmptyTypes) == null)
+						throw new InvalidOperationException($"Behaviour '{type.FullName}' needs a public default constructor.");
 					foreach (ScriptFieldDescriptor field in ScriptFieldSchema.Describe(type))
 						if (!field.IsSupported) throw new InvalidOperationException(field.Diagnostic);
 				}
@@ -315,6 +342,9 @@ internal static unsafe class ScriptSessions
 	private static WeakReference Release(ulong id)
 	{
 		Session session = sessions[id];
+		Select(id);
+		foreach (Exception error in ScriptableObjectRegistry.ClearSession(id))
+			Console.Error.WriteLine($"ScriptableObject session cleanup failed: {error}");
 		session.extensions?.Dispose();
 		session.extensions = null;
 		sessions.Remove(id);
@@ -323,6 +353,7 @@ internal static unsafe class ScriptSessions
 		BehaviourRegistry.assemblyResolver = null;
 		BehaviourRegistry.identityResolver = null;
 		BehaviourRegistry.currentSession = 0;
+		ScriptableObjectRegistry.SelectSession(0);
 		EngineApi.Clear();
 		session.context.assemblies.Clear();
 		session.context.images.Clear();
@@ -434,7 +465,7 @@ public static unsafe partial class Bootstrap
 	public static int CreateScriptSession(uint kind, nint api, int size, ulong* output)
 	{
 		if (kind > 1 || output == null || Validate(api, size) != 0) return 1;
-		try { *output = ScriptSessions.Create(kind == 1, *(Ursa.NativeApiV5*)api); return 0; }
+		try { *output = ScriptSessions.Create(kind == 1, *(Ursa.NativeApiV6*)api); return 0; }
 		catch (Exception error) { Console.Error.WriteLine($"脚本会话创建失败：{error}"); return 2; }
 	}
 
@@ -449,7 +480,7 @@ public static unsafe partial class Bootstrap
 	public static int BindScriptSession(ulong id, nint api, int size)
 	{
 		if (Validate(api, size) != 0) return 1;
-		try { ScriptSessions.Bind(id, *(Ursa.NativeApiV5*)api); return 0; }
+		try { ScriptSessions.Bind(id, *(Ursa.NativeApiV6*)api); return 0; }
 		catch (Exception error) { Console.Error.WriteLine($"脚本会话绑定失败：{error}"); return 2; }
 	}
 

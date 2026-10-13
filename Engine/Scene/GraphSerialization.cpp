@@ -25,6 +25,10 @@ Result<void> GameObject::Serialize(ArchiveWriter& writer) const
 	{
 		result = writer.Write("enabled", active.value);
 	}
+	if (result)
+	{
+		result = writer.Write("layer", UInt64(layer));
+	}
 	auto local = writer.Object("localTransform");
 	if (!result || !local)
 	{
@@ -53,9 +57,10 @@ Result<void> GameObject::Deserialize(const ArchiveReader& reader, SerializationC
 	auto idText = reader.Text("id");
 	auto objectName = reader.Text("name");
 	auto active = reader.Boolean("enabled");
+	auto loadedLayer = reader.Contains("layer") ? reader.Unsigned("layer") : Result<UInt64>::Success(0);
 	auto local = reader.Object("localTransform");
-	if (!idText || !objectName || !active || !local || objectName.value.size() > 256 ||
-	    objectName.value.find('\0') != String::npos)
+	if (!idText || !objectName || !active || !loadedLayer || loadedLayer.value > 31 || !local ||
+	    objectName.value.size() > 256 || objectName.value.find('\0') != String::npos)
 	{
 		return Result<void>::Failure("Invalid GameObject archive fields");
 	}
@@ -79,6 +84,7 @@ Result<void> GameObject::Deserialize(const ArchiveReader& reader, SerializationC
 	id = loadedId.value;
 	name = std::move(objectName.value);
 	activeSelf = active.value;
+	layer = UInt32(loadedLayer.value);
 	return {};
 }
 

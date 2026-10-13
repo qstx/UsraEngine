@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Assets/AssetDatabase.hpp>
+#include <Scripting/ScriptTypeDescriptor.hpp>
 #include <functional>
 
 namespace Ursa::Editor
@@ -22,6 +23,8 @@ public:
 	ProjectAssetImporter();
 
 	Result<void> Register(const String& extension, ImportFunction importer);
+
+	Result<void> RegisterScriptableAssets(Vector<Ursa::ScriptTypeDescriptor> types);
 
 	static Result<AssetImportResult> LoadCurrent(AssetDatabase& database, const VirtualPath& source);
 

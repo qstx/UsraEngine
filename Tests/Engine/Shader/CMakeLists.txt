@@ -16,6 +16,7 @@ add_test(NAME UrsaShaderSourceLibraryTests COMMAND UrsaShaderSourceLibraryTests)
 ursa_add_test_executable(UrsaShaderCompilerTests ShaderCompilerTests.cpp)
 target_link_libraries(UrsaShaderCompilerTests PRIVATE Ursa::Engine)
 target_compile_definitions(UrsaShaderCompilerTests PRIVATE
+  URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
   URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
   URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
   URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
@@ -25,6 +26,7 @@ add_test(NAME UrsaShaderCompilerTests COMMAND UrsaShaderCompilerTests)
 ursa_add_test_executable(UrsaShaderCompileCacheTests ShaderCompileCacheTests.cpp)
 target_link_libraries(UrsaShaderCompileCacheTests PRIVATE Ursa::Engine)
 target_compile_definitions(UrsaShaderCompileCacheTests PRIVATE
+  URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
   URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
   URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
   URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
@@ -33,6 +35,7 @@ add_test(NAME UrsaShaderCompileCacheTests COMMAND UrsaShaderCompileCacheTests)
 
 ursa_add_test_executable(UrsaShaderExampleImportTests ShaderExampleImportTests.cpp)
 target_link_libraries(UrsaShaderExampleImportTests PRIVATE Ursa::Engine)
+target_compile_definitions(UrsaShaderExampleImportTests PRIVATE URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging")
 target_compile_definitions(UrsaShaderExampleImportTests PRIVATE
   URSA_ENGINE_SHADER_ASSET_DIR="${URSA_SOURCE_ROOT}/Assets"
   URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"

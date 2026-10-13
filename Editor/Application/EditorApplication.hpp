@@ -4,6 +4,7 @@
 #include <Core/Types.hpp>
 #include <Core/Result.hpp>
 #include <Rhi/RHI.hpp>
+#include <Rendering/Diagnostics/FrameCapture.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <Window/Window.hpp>
 #include <Ui/ImGuiBridge.hpp>
@@ -64,9 +65,24 @@ public:
 
 	Result<void> OpenProject(const std::filesystem::path& root, const std::filesystem::path& package = {});
 
+	Result<void> SetFrameCapture(std::filesystem::path output, UInt32 frame = 1)
+	{
+		return frameCapture.Configure(std::move(output), frame);
+	}
+
 	void SetStartupAsset(VirtualPath path)
 	{
 		startupAsset = std::move(path);
+	}
+
+	void SetStartupWindow(String name)
+	{
+		startupWindow = std::move(name);
+	}
+
+	void SetStartupPlay(bool enabled)
+	{
+		startupPlay = enabled;
 	}
 
 protected:
@@ -166,9 +182,11 @@ protected:
 	}
 
 private:
+	Rendering::FrameCapture frameCapture;
+
 	void FinishAssetJobs();
 
-	Result<void> PresentGuiFrame();
+	Result<void> PresentGuiFrame(bool capture = true);
 
 	void RequestAssetImport(const VirtualPath& scope = {}, bool force = false);
 
@@ -213,6 +231,8 @@ private:
 
 	EditorProjectSetup projectSetup;
 	VirtualPath startupAsset;
+	String startupWindow;
+	bool startupPlay = false;
 	std::unique_ptr<EditorProject> project;
 	String activeEditorTool;
 	std::unique_ptr<ImGuiBridge> gui;

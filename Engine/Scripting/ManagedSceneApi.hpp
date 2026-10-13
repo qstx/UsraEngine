@@ -1,17 +1,32 @@
 #pragma once
 
 #include <Scene/Scene.hpp>
+#include <Rendering/Scene/RendererList.hpp>
+#include <Rhi/RHI.hpp>
 #include <Scripting/ManagedHandleRegistry.hpp>
 #include <Scripting/ManagedBehaviourRuntime.hpp>
 #include <Scripting/NativeApi.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <functional>
+#include <optional>
+#include <thread>
 
 namespace Ursa::Scripting
 {
 class ManagedSceneApi final
 {
 public:
+	struct ManagedRenderTexture
+	{
+		Rhi::TexturePtr color;
+		Rhi::TexturePtr depth;
+	};
+
+	struct ManagedGraphicsBuffer
+	{
+		Rhi::BufferPtr buffer;
+	};
+
 	explicit ManagedSceneApi(Scene& scene, ResourceSession* resources = nullptr,
 	                         std::function<void(const String&)> setWindowTitle = {});
 
@@ -31,7 +46,27 @@ public:
 		behaviourRuntime = runtime;
 	}
 
-	NativeApiV5 Bind(NativeApiV5 api);
+	NativeApiV6 Bind(NativeApiV6 api);
+
+	void SetRenderContextToken(Rendering::RenderContextToken token)
+	{
+		activeRenderToken = token;
+	}
+
+	void ClearRenderContextToken()
+	{
+		activeRenderToken.reset();
+	}
+
+	void SetRenderDevice(Rhi::DevicePtr selectedDevice)
+	{
+		device = std::move(selectedDevice);
+	}
+
+	UInt64 AcceptedRenderBatchCount() const
+	{
+		return acceptedRenderBatchCount;
+	}
 
 private:
 	static ManagedSceneApi* FromContext(void* context);
@@ -120,6 +155,9 @@ private:
 	static Int32 ResourceRequest(void* context, const UInt8* input, UInt64 length, UInt8* output, UInt64 capacity,
 	                             UInt64* required);
 
+	static Int32 SubmitRenderBatch(void* context, const UInt8* tokenBytes, UInt64 tokenByteCount, const UInt8* batch,
+	                               UInt64 batchByteCount);
+
 	nlohmann::json DispatchResourceRequest(const nlohmann::json& request);
 
 	Result<ManagedHandle> RegisterMesh(const MeshPtr& mesh);
@@ -130,9 +168,16 @@ private:
 
 	Result<std::shared_ptr<MaterialInstance>> ResolveMaterial(const ManagedHandle& handle) const;
 
+	Result<std::shared_ptr<ManagedRenderTexture>> ResolveRenderTexture(const ManagedHandle& handle) const;
+
+	Result<std::shared_ptr<ManagedGraphicsBuffer>> ResolveGraphicsBuffer(const ManagedHandle& handle) const;
+
 	String resourceResponse;
 	UnorderedMap<UInt32, MeshPtr> ownedMeshes;
 	UnorderedMap<UInt32, std::shared_ptr<MaterialInstance>> ownedMaterials;
+	UnorderedMap<UInt32, MaterialTexturePtr> ownedTextures;
+	UnorderedMap<UInt32, std::shared_ptr<ManagedRenderTexture>> ownedRenderTextures;
+	UnorderedMap<UInt32, std::shared_ptr<ManagedGraphicsBuffer>> ownedGraphicsBuffers;
 	Scene& scene;
 	std::unique_ptr<ManagedHandleRegistry> handles;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> objects;
@@ -140,7 +185,17 @@ private:
 	ComponentRegistry componentTypes;
 	const FrameContext* frameContext = nullptr;
 	ResourceSession* resources = nullptr;
+	Rhi::DevicePtr device;
 	ManagedBehaviourRuntime* behaviourRuntime = nullptr;
 	std::function<void(const String&)> setWindowTitle;
+	std::thread::id ownerThread = std::this_thread::get_id();
+	std::optional<Rendering::RenderContextToken> activeRenderToken;
+	Rendering::RenderScene renderScene;
+	Rendering::RenderSceneContext renderSceneContext;
+	UInt64 renderSessionId = 0;
+	String activeRenderCamera;
+	Vector<Vector<UInt8>> renderBatches;
+	Vector<Vector<std::shared_ptr<void>>> renderBatchResources;
+	UInt64 acceptedRenderBatchCount = 0;
 };
 } // namespace Ursa::Scripting

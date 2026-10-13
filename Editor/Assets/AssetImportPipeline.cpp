@@ -8,6 +8,7 @@
 #include <Serialization/ResourceFile.hpp>
 #include <Serialization/PrefabResource.hpp>
 #include <Serialization/ComponentRegistry.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <algorithm>
 
 namespace Ursa::Editor
@@ -40,7 +41,8 @@ VirtualPath Path(const String& text)
 
 bool IsShader(const VirtualPath& path)
 {
-	return PathFromUrsaString(path.relative).extension() == ".ursashader";
+	const auto extension = PathFromUrsaString(path.relative).extension();
+	return extension == ".ursashader" || extension == ".compute";
 }
 
 bool BootstrapAsset(const AssetRecord& asset)
@@ -54,7 +56,8 @@ bool RuntimeAsset(const AssetRecord& asset)
 {
 	const auto extension = PathFromUrsaString(asset.path.relative).extension();
 	return extension != ".cs" && extension != ".hlsli" && extension != ".hlsl" && extension != ".frag" &&
-	       extension != ".vert" && extension != ".comp" && extension != ".md" && extension != ".mtl";
+	       extension != ".vert" && extension != ".comp" && extension != ".compute" && extension != ".md" &&
+	       extension != ".mtl";
 }
 
 void AddEntry(RuntimeContentSnapshot& snapshot, const VirtualFileSystem& files, const VirtualPath& logical,
@@ -79,11 +82,32 @@ Vector<UInt8> JsonBytes(const Json& document)
 
 void ValidateResourceClosure(const VirtualFileSystem& files, const RuntimeContentSnapshot& snapshot)
 {
-	auto resources = Take(ResourceSession::Open(files));
-	ComponentRegistry registry;
-	Done(RegisterBuiltinComponents(registry));
 	const auto catalog =
 	    Json::parse(ToStdString(Take(files.ReadText(Path("prj:__UrsaCooked/AssetCatalog.ursacatalog")))));
+	Map<String, VirtualPath> assetsByIdentity;
+	for (const auto& asset : catalog.at("assets"))
+	{
+		const auto guid = ToUrsaString(asset.at("guid").get<std::string>());
+		const auto localFileId = ToUrsaString(std::to_string(asset.at("localFileId").get<UInt64>()));
+		const String key = guid + ":" + localFileId;
+		auto path = VirtualPath::Parse(ToUrsaString(asset.at("path").get<std::string>()));
+		if (!path || !assetsByIdentity.emplace(key, std::move(path.value)).second)
+		{
+			throw std::runtime_error(
+			    ToStdString("Runtime asset catalog has an invalid or duplicate asset identity: " + key));
+		}
+	}
+	auto resources = Take(ResourceSession::Open(
+	    files,
+	    [&](ResourceId guid, UInt64 localFileId)
+	    {
+		    const String key = guid.ToString() + ":" + ToUrsaString(std::to_string(localFileId));
+		    const auto found = assetsByIdentity.find(key);
+		    return found != assetsByIdentity.end() ? Result<VirtualPath>::Success(found->second)
+		                                           : Result<VirtualPath>::Failure("Missing runtime asset " + key);
+	    }));
+	ComponentRegistry registry;
+	Done(RegisterBuiltinComponents(registry));
 	for (const auto& asset : catalog.at("assets"))
 	{
 		const auto localId = asset.at("localFileId").get<UInt64>();
@@ -112,6 +136,79 @@ void ValidateResourceClosure(const VirtualFileSystem& files, const RuntimeConten
 		else if (kind == "AnimationClip")
 		{
 			Take(resources->LoadAnimationClip(guid, localId));
+		}
+		else if (kind == "ScriptableAsset")
+		{
+			if (localId == 0)
+			{
+				throw std::runtime_error("ScriptableAsset is missing its local file ID");
+			}
+			auto graph = Take(LoadScriptableAssetGraph(*resources, {guid, localId}));
+			for (const auto& scriptableAsset : graph.assets)
+			{
+				auto dependencies = ScriptableAssetDependencies(scriptableAsset);
+				if (!dependencies)
+				{
+					throw std::runtime_error(ToStdString(dependencies.error));
+				}
+				const auto validateDependency = [&](AssetReference reference)
+				{
+					if (reference.guid == scriptableAsset.SourceGuid() &&
+					    reference.localFileId == scriptableAsset.LocalFileId())
+					{
+						return;
+					}
+					const auto& fields = scriptableAsset.Payload().at("Fields");
+					std::function<void(const Json&)> visit = [&](const Json& value)
+					{
+						if (value.is_object() && value.contains("$ursaReference"))
+						{
+							const auto& record = value.at("$ursaReference");
+							if (!record.contains("Resource") ||
+							    record.at("Resource").value("guid", std::string{}) !=
+							        ToStdString(reference.guid.ToString()) ||
+							    record.at("Resource").value("localFileId", UInt64{0}) != reference.localFileId)
+							{
+								return;
+							}
+							const String referenceKind = ToUrsaString(record.at("Kind").get<std::string>());
+							if (referenceKind == "Texture")
+							{
+								Take(resources->LoadTexture(reference.guid, reference.localFileId));
+							}
+							else if (referenceKind == "Material")
+							{
+								Take(resources->LoadMaterial(reference.guid, reference.localFileId));
+							}
+							else if (referenceKind == "Mesh")
+							{
+								Take(resources->LoadMesh(reference.guid, reference.localFileId));
+							}
+							else if (referenceKind == "Shader")
+							{
+								Take(resources->LoadShader(reference.guid));
+							}
+							else if (referenceKind == "ComputeShader")
+							{
+								Take(resources->LoadShader(reference.guid));
+							}
+							return;
+						}
+						if (value.is_structured())
+						{
+							for (const auto& child : value)
+							{
+								visit(child);
+							}
+						}
+					};
+					visit(fields);
+				};
+				for (const auto reference : dependencies.value)
+				{
+					validateDependency(reference);
+				}
+			}
 		}
 	}
 	for (const auto& entry : snapshot.entries)
@@ -168,7 +265,7 @@ void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& op
 		Done(files.Mount("framework", frameworkRoot, MountAccess::ReadOnly));
 	}
 	Vector<String> bootstrap{"Ursa.ManagedHost.dll", "Ursa.ManagedHost.deps.json",
-	                         "Ursa.ManagedHost.runtimeconfig.json", "Ursa.Runtime.dll"};
+	                         "Ursa.ManagedHost.runtimeconfig.json", "Ursa.Runtime.dll", "Ursa.Rendering.dll"};
 	if (options.profile == "Editor")
 	{
 		bootstrap.push_back("Ursa.Editor.dll");
@@ -276,6 +373,36 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			Done(workspace.InitializeBuiltinAssets());
 		}
 		Done(workspace.BuiltinDatabase()->ReloadImports());
+		Vector<AssetRecord> assets = workspace.BuiltinDatabase()->Assets();
+		const auto projectAssets = workspace.Database()->Assets();
+		if (!options.bootstrapOnly)
+		{
+			assets.insert(assets.end(), projectAssets.begin(), projectAssets.end());
+		}
+		bool hasScriptableAssets = false;
+		for (const auto& asset : assets)
+		{
+			hasScriptableAssets |=
+			    !asset.metadata.folder && PathFromUrsaString(asset.path.relative).extension() == ".ursaasset";
+		}
+		Vector<ScriptTypeRecord> scriptTypes;
+		if (hasScriptableAssets)
+		{
+#if defined(URSA_ENABLE_DOTNET)
+			const auto frameworkRoot =
+			    std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path().parent_path() /
+			    ToStdString(options.configuration);
+			auto service = Take(ScriptBuildService::Open(
+			    files, *workspace.Database(), std::filesystem::u8path(URSA_DOTNET_EXECUTABLE_PATH),
+			    frameworkRoot / "Ursa.Runtime.dll", frameworkRoot / "Ursa.Editor.dll",
+			    std::filesystem::u8path(URSA_DOTNET_CATALOG_GENERATOR_PATH),
+			    std::filesystem::u8path(URSA_DOTNET_REFERENCE_PACK_PATH)));
+			Take(service->GenerateProjects());
+			scriptTypes = service->ScriptTypes();
+#else
+			return Result<AssetImportReport>::Failure("ScriptableAsset content requires the .NET script type catalog");
+#endif
+		}
 		Set<String> sourceInventory;
 		for (const String scheme : {String(engineScheme), String(projectScheme)})
 		{
@@ -287,12 +414,6 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			{
 				sourceInventory.insert(entry.path.ToString());
 			}
-		}
-		Vector<AssetRecord> assets = workspace.BuiltinDatabase()->Assets();
-		const auto projectAssets = workspace.Database()->Assets();
-		if (!options.bootstrapOnly)
-		{
-			assets.insert(assets.end(), projectAssets.begin(), projectAssets.end());
 		}
 		std::stable_sort(assets.begin(), assets.end(), [](const auto& left, const auto& right)
 		                 { return IsShader(left.path) && !IsShader(right.path); });
@@ -315,6 +436,10 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			                            asset.path.relative.rfind("Fonts/Editor/", 0) == 0));
 		                  }));
 		ProjectAssetImporter importer;
+		if (hasScriptableAssets)
+		{
+			Done(importer.RegisterScriptableAssets(std::move(scriptTypes)));
+		}
 		Vector<std::pair<AssetDatabase*, VirtualPath>> importedSources;
 		Json catalog{{"format", "UrsaAssetCatalog"}, {"version", 1u}, {"assets", Json::array()}};
 		UInt64 processed = 0;

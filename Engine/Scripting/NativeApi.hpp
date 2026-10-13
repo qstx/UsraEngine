@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Scripting/ManagedHandleRegistry.hpp>
+#include <Rendering/Commands/RenderCommandProtocol.hpp>
 #include <cstddef>
 
 namespace Ursa::Scripting
@@ -38,6 +39,7 @@ using ManagedGetComponentPersistentIdFunction = Int32(__cdecl*)(void*, ManagedHa
 using ManagedSetWindowTitleFunction = Int32(__cdecl*)(void*, const UInt8*, UInt64);
 using ManagedGetComponentValuesFunction = Int32(__cdecl*)(void*, ManagedHandle, Float32*, UInt64);
 using ManagedSetComponentValuesFunction = Int32(__cdecl*)(void*, ManagedHandle, const Float32*, UInt64);
+using ManagedSubmitRenderBatchFunction = Int32(__cdecl*)(void*, const UInt8*, UInt64, const UInt8*, UInt64);
 #else
 using ManagedLogFunction = void (*)(void*, UInt32, const UInt8*, UInt64);
 using ManagedCreateGameObjectFunction = Int32 (*)(void*, const UInt8*, UInt64, ManagedHandle*);
@@ -71,13 +73,14 @@ using ManagedGetComponentPersistentIdFunction = Int32 (*)(void*, ManagedHandle, 
 using ManagedSetWindowTitleFunction = Int32 (*)(void*, const UInt8*, UInt64);
 using ManagedGetComponentValuesFunction = Int32 (*)(void*, ManagedHandle, Float32*, UInt64);
 using ManagedSetComponentValuesFunction = Int32 (*)(void*, ManagedHandle, const Float32*, UInt64);
+using ManagedSubmitRenderBatchFunction = Int32 (*)(void*, const UInt8*, UInt64, const UInt8*, UInt64);
 #endif
 
 using ManagedResourceRequestFunction = Int32 (*)(void*, const UInt8*, UInt64, UInt8*, UInt64, UInt64*);
 
-struct NativeApiV5
+struct NativeApiV6
 {
-	UInt32 version = 5;
+	UInt32 version = 6;
 	UInt32 size = 0;
 	void* context = nullptr;
 	ManagedLogFunction logUtf8 = nullptr;
@@ -119,8 +122,12 @@ struct NativeApiV5
 	ManagedSetComponentValuesFunction setCameraProjection = nullptr;
 	ManagedSetWindowTitleFunction setWindowTitle = nullptr;
 	ManagedResourceRequestFunction resourceRequest = nullptr;
+	ManagedSubmitRenderBatchFunction submitRenderBatch = nullptr;
 };
 
-static_assert(sizeof(void*) != 8 || sizeof(NativeApiV5) == 328, "NativeApiV5 layout changed; increment its version");
-static_assert(offsetof(NativeApiV5, sceneContext) == 24, "NativeApiV5 scene context offset changed");
+using NativeApiV5 = NativeApiV6;
+
+static_assert(sizeof(void*) != 8 || sizeof(NativeApiV6) == 336, "NativeApiV6 layout changed; increment its version");
+static_assert(offsetof(NativeApiV6, sceneContext) == 24, "NativeApiV6 scene context offset changed");
+static_assert(offsetof(NativeApiV6, submitRenderBatch) == 328, "NativeApiV6 render batch offset changed");
 } // namespace Ursa::Scripting

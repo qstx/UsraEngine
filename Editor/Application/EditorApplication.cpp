@@ -208,7 +208,7 @@ Result<void> EditorApplication::EnsureManagedHost()
 	files.runtimeConfig = path("ursa:Ursa.ManagedHost.runtimeconfig.json");
 	files.entryAssembly = path("ursa:Ursa.ManagedHost.dll");
 	files.dependencies = {path("ursa:Ursa.ManagedHost.deps.json"), path("ursa:Ursa.Runtime.dll"),
-	                      path("ursa:Ursa.Editor.dll")};
+	                      path("ursa:Ursa.Editor.dll"), path("ursa:Ursa.Rendering.dll")};
 	auto started = host.value->Start(workspace->ContentFiles(), files,
 	                                 [](UInt32 level, const String& message)
 	                                 {
@@ -1643,7 +1643,7 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 								auto managed = managedHost;
 								auto activeWindow = window;
 								VirtualPath gameContent = gameAssemblyPath;
-								playSetup = [userPlaySetup, managed, gameContent, activeWindow](
+								playSetup = [this, userPlaySetup, managed, gameContent, activeWindow](
 								                ComponentLoadContext& context) -> Result<std::shared_ptr<void>>
 								{
 									std::shared_ptr<void> projectServices;
@@ -1676,8 +1676,8 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 										return Result<std::shared_ptr<void>>::Failure(validated.error);
 									}
 									context.SetSceneReadyCallback(
-									    [session, activeWindow](Scene& scene,
-									                            ComponentLoadContext& loadContext) -> Result<void>
+									    [this, session, activeWindow](Scene& scene,
+									                                  ComponentLoadContext& loadContext) -> Result<void>
 									    {
 										    session->sceneApi = std::make_unique<Scripting::ManagedSceneApi>(
 										        scene, &loadContext.Resources(),
@@ -1688,6 +1688,7 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 												        activeWindow->SetTitle(title);
 											        }
 										        });
+										    session->sceneApi->SetRenderDevice(device);
 										    auto bound = session->host->BindScriptSession(session->sessionId,
 										                                                  *session->sceneApi);
 										    if (!bound)
@@ -1835,8 +1836,12 @@ Result<void> EditorApplication::OnGui()
 		selectionContext.Clear();
 	}
 	const auto checkTime = std::chrono::steady_clock::now();
-	if (scriptBuildService && !requestRun && !play.Active() && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
-	    checkTime >= nextScriptCheck)
+	if (startupPlay && !scriptBuildJob.valid() && !scriptCheckJob.valid())
+	{
+		requestRun = true;
+	}
+	if (scriptBuildService && !startupPlay && !requestRun && !play.Active() && !scriptBuildJob.valid() &&
+	    !scriptCheckJob.valid() && checkTime >= nextScriptCheck)
 	{
 		ScriptBuildService* service = scriptBuildService.get();
 		scriptCheckJob = std::async(std::launch::async, [service] { return service->SourceFingerprint(); });
@@ -2329,6 +2334,11 @@ Result<void> EditorApplication::OnGui()
 	{
 		documents->DrawUnsavedPrompt();
 	}
+	if (!startupWindow.empty() && ImGui::FindWindowByName(startupWindow.c_str()))
+	{
+		ImGui::SetWindowFocus(startupWindow.c_str());
+		startupWindow.clear();
+	}
 	auto panelStateSaved = SavePanelVisibility();
 	if (!panelStateSaved)
 	{
@@ -2361,7 +2371,7 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 		nlohmann::json defaultSnapshots = nlohmann::json::array();
 		for (const auto& type : scriptBuildService->ScriptTypes())
 		{
-			if (type.group != ScriptAssemblyGroup::Game)
+			if (type.group != ScriptAssemblyGroup::Game || type.kind != ScriptTypeKind::Behaviour)
 			{
 				continue;
 			}
@@ -2392,7 +2402,7 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 	Set<String> currentTypes;
 	for (ScriptTypeDescriptor scriptType : scriptBuildService->ScriptTypes())
 	{
-		if (scriptType.group != ScriptAssemblyGroup::Game)
+		if (scriptType.group != ScriptAssemblyGroup::Game || scriptType.kind != ScriptTypeKind::Behaviour)
 		{
 			continue;
 		}
@@ -2447,7 +2457,8 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 			bool matchedScript = false;
 			for (const auto& scriptType : scriptBuildService->ScriptTypes())
 			{
-				if (scriptType.scriptType == target && scriptType.group == ScriptAssemblyGroup::Game)
+				if (scriptType.scriptType == target && scriptType.group == ScriptAssemblyGroup::Game &&
+				    scriptType.kind == ScriptTypeKind::Behaviour)
 				{
 					target = scriptType.clrTypeName;
 					matchedScript = true;
@@ -2620,7 +2631,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			}
 			if (drawn)
 			{
-				drawn = PresentGuiFrame();
+				drawn = PresentGuiFrame(false);
 			}
 			if (!drawn)
 			{
@@ -2733,6 +2744,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		result = OnStart();
 	}
 	auto previous = std::chrono::steady_clock::now();
+	const auto startupPlayDeadline = previous + std::chrono::seconds(60);
 	Ursa::UInt32 frames = 0;
 	while (result && !window->ShouldClose())
 	{
@@ -2792,6 +2804,14 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			URSA_PROFILE_SCOPE("Editor.BuildGui");
 			result = OnGui();
 		}
+		if (startupPlay && play.Active())
+		{
+			startupPlay = false;
+		}
+		if (startupPlay && std::chrono::steady_clock::now() >= startupPlayDeadline)
+		{
+			result = Result<void>::Failure("Startup Play did not become active: " + scriptBuildStatus + inspectorError);
+		}
 		if (result && play.Active())
 		{
 			URSA_PROFILE_SCOPE("Editor.PlayModeUpdate");
@@ -2848,12 +2868,12 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 
 		{
 			URSA_PROFILE_SCOPE("Editor.RenderPreparation");
-			result = PresentGuiFrame();
+			result = PresentGuiFrame(!startupPlay);
 			if (result)
 			{
 				URSA_PROFILE_FRAME("Editor");
 			}
-			if (frameLimit && ++frames >= frameLimit)
+			if (!startupPlay && frameLimit && ++frames >= frameLimit)
 			{
 				break;
 			}
@@ -2912,10 +2932,10 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	swapchain.reset();
 	device.reset();
 	window.reset();
-	return result ? idle : result;
+	return result ? (idle ? frameCapture.Finish() : idle) : result;
 }
 
-Result<void> EditorApplication::PresentGuiFrame()
+Result<void> EditorApplication::PresentGuiFrame(bool capture)
 {
 	Result<void> result;
 	auto acquired = swapchain->Acquire();
@@ -2977,6 +2997,10 @@ Result<void> EditorApplication::PresentGuiFrame()
 		{
 			submittedFence = std::move(submitted.value);
 		}
+	}
+	if (result && capture)
+	{
+		result = frameCapture.Capture(device, acquired.value.texture, Rhi::ResourceState::Present);
 	}
 	if (result)
 	{

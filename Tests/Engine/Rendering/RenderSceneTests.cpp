@@ -1,0 +1,366 @@
+#include <Rendering/Scene/RendererList.hpp>
+#include <Serialization/ComponentRegistry.hpp>
+#include <Serialization/PrefabAsset.hpp>
+#include <Serialization/SceneResource.hpp>
+#include <Core/Memory/Memory.hpp>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <thread>
+
+using namespace Ursa;
+using namespace Ursa::Rendering;
+
+namespace
+{
+void Expect(bool value, const char* message)
+{
+	if (!value)
+	{
+		throw std::runtime_error(message);
+	}
+}
+
+template <typename T> T Take(Result<T> value)
+{
+	if (!value)
+	{
+		throw std::runtime_error(value.error.c_str());
+	}
+	return std::move(value.value);
+}
+
+void Done(Result<void> value)
+{
+	if (!value)
+	{
+		throw std::runtime_error(value.error.c_str());
+	}
+}
+
+MeshPtr Triangle(Float32 x = 0)
+{
+	MeshData data;
+	data.positions = {{x - 0.5f, -0.5f, 0}, {x + 0.5f, -0.5f, 0}, {x, 0.5f, 0}};
+	data.indices = {0, 1, 2};
+	data.subMeshes = {{0, 3}};
+	auto mesh = Take(Mesh::Create(std::move(data)));
+	Done(mesh->RecalculateBounds());
+	return mesh;
+}
+
+GameObject::Ptr Object(Scene& scene, MeshPtr mesh, Float32 x, Float32 z, UInt32 layer, AlphaMode alpha)
+{
+	auto object = Take(scene.CreateGameObject("Mesh"));
+	LocalTransform transform;
+	transform.position = {x, 0, z};
+	transform.scale = {2, 1, 0.5f};
+	Done(object->SetLocalTransform(transform));
+	Done(object->SetLayer(layer));
+	Done(Take(object->AddComponent<MeshFilterComponent>())->SetSharedMesh(std::move(mesh)));
+	auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
+	Done(material->SetAlphaMode(alpha));
+	Done(Take(object->AddComponent<MeshRendererComponent>())->SetMaterial(material));
+	return object;
+}
+
+void TestPersistentCamera()
+{
+	Scene scene;
+	auto root = Take(scene.CreateGameObject("Camera"));
+	Done(root->SetLayer(7));
+	Expect(!root->SetLayer(32), "Invalid object layer accepted");
+	auto camera = Take(root->AddComponent<CameraComponent>());
+	camera->rendering.depth = -5;
+	camera->rendering.cullingMask = 1u << 7;
+	camera->rendering.clearFlags = CameraClearFlags::Depth;
+	camera->rendering.viewport = {0.25f, 0.0f, 0.5f, 1.0f};
+	camera->rendering.targetWidth = 800;
+	camera->rendering.targetHeight = 600;
+	ComponentRegistry registry;
+	Done(RegisterBuiltinComponents(registry));
+	VirtualFileSystem files;
+	auto resources = Take(ResourceSession::Open(files));
+	ComponentLoadContext context(*resources);
+	auto document = Take(EncodeSceneDocument("Camera.ursascene", ResourceId::Generate(), scene, registry));
+	auto loaded = Take(DecodeSceneDocument("Camera.ursascene", document, registry, context));
+	auto copy = loaded.scene->RootGameObjects()[0];
+	Expect(Take(copy->Layer()) == 7 && copy->FindComponent<CameraComponent>()->rendering.cullingMask == (1u << 7) &&
+	           copy->FindComponent<CameraComponent>()->rendering.targetWidth == 800,
+	       "Scene lost rendering settings or layer");
+	auto prefab = Take(CapturePrefabAsset(ResourceId::Generate(), scene, root, registry, context));
+	Scene instances;
+	context.ClearMappings();
+	auto instance = Take(prefab.Instantiate(instances, registry, context));
+	Expect(Take(instance->Layer()) == 7 && instance->FindComponent<CameraComponent>()->rendering.depth == -5,
+	       "Prefab lost camera or layer settings");
+	document["gameObjects"][0].erase("layer");
+	document["gameObjects"][0]["components"][0]["data"].erase("rendering");
+	context.ClearMappings();
+	loaded = Take(DecodeSceneDocument("Old.ursascene", document, registry, context));
+	copy = loaded.scene->RootGameObjects()[0];
+	Expect(Take(copy->Layer()) == 0 && copy->FindComponent<CameraComponent>()->rendering.cullingMask == 0xffffffffu,
+	       "Old scene did not get default rendering settings");
+	camera->rendering.viewport.width = 2;
+	ArchiveWriter writer;
+	Expect(!camera->Serialize(writer), "Invalid camera viewport serialized");
+}
+
+void TestSnapshotAndLists()
+{
+	Scene scene;
+	auto mesh = Triangle();
+	auto near = Object(scene, mesh, 0, -3, 0, AlphaMode::Opaque);
+	auto far = Object(scene, mesh, 0, -6, 1, AlphaMode::Blend);
+	auto outside = Object(scene, mesh, 100, -4, 0, AlphaMode::Opaque);
+	auto hidden = Object(scene, mesh, 0, -4, 0, AlphaMode::Opaque);
+	Done(hidden->SetActive(false));
+	auto firstCamera = Take(Take(scene.CreateGameObject("First"))->AddComponent<CameraComponent>());
+	auto secondCamera = Take(Take(scene.CreateGameObject("Second"))->AddComponent<CameraComponent>());
+	firstCamera->rendering.depth = 2;
+	secondCamera->rendering.depth = -1;
+	secondCamera->nearPlane = 10;
+	auto light = Take(scene.CreateGameObject("Light"));
+	Take(light->AddComponent<DirectionalLightComponent>());
+	RenderScene snapshot;
+	Done(snapshot.Capture(scene, 1));
+	Expect(snapshot.Objects().size() == 3 && snapshot.Cameras().size() == 2 &&
+	           snapshot.Cameras()[0].identity == secondCamera->PersistentId() &&
+	           snapshot.Objects()[0].worldBounds.minimum.x == -1 && snapshot.Lighting().directional.size() == 1 &&
+	           snapshot.Objects()[0].meshSnapshot == snapshot.Objects()[1].meshSnapshot,
+	       "Snapshot camera order, disabled object or scaled bounds incorrect");
+	auto material = near->FindComponent<MeshRendererComponent>()->SharedMaterials()[0];
+	const auto capturedVersion = snapshot.Objects()[0].materialVersion;
+	Done(material->SetBaseColor({0.5f, 0.0f, 0.0f, 1}));
+	Expect(snapshot.Objects()[0].materialVersion == capturedVersion && material->Version() != capturedVersion,
+	       "Material snapshot version changed after capture");
+	RenderSceneContext context;
+	auto token = Take(context.Begin(10, 1, snapshot));
+	auto firstView = Take(context.Cull(snapshot.Cameras()[0]));
+	auto secondView = Take(context.Cull(snapshot.Cameras()[1]));
+	Expect(Take(context.VisibleObjects(firstView))->empty() && Take(context.VisibleObjects(secondView))->size() == 2 &&
+	           context.Scene() == &snapshot,
+	       "Multiple cameras did not share one unchanged snapshot");
+	CameraData camera;
+	camera.viewProjection = Mat4::Perspective(1.0f, 1, 0.1f, 100);
+	auto culled = Take(context.Cull(camera));
+	Expect(Take(context.VisibleObjects(culled))->size() == 2, "Frustum culling failed");
+	DrawingSettings drawing;
+	drawing.sorting.cameraPosition = {};
+	auto opaque = Take(context.CreateRendererList(culled, drawing, {0, 2500, 0xffffffffu}));
+	Expect(Take(context.Entries(opaque))->size() == 1 &&
+	           snapshot.Objects()[Take(context.Entries(opaque))->at(0).objectIndex].objectId == near->Id(),
+	       "Opaque filtering failed");
+	drawing.sorting.criteria = SortingCriteria::CommonTransparent;
+	auto transparent = Take(context.CreateRendererList(culled, drawing, {2501, 5000, 0xffffffffu}));
+	Expect(Take(context.Entries(transparent))->size() == 1 &&
+	           snapshot.Objects()[Take(context.Entries(transparent))->at(0).objectIndex].objectId == far->Id(),
+	       "Transparent filtering failed");
+	camera.settings.cullingMask = 1u;
+	auto masked = Take(context.Cull(camera));
+	Expect(Take(context.VisibleObjects(masked))->size() == 1, "Camera layer mask failed");
+	auto replacement = std::make_shared<MaterialInstance>(MaterialType::Unlit);
+	drawing.overrideMaterial = replacement;
+	auto replaced = Take(context.CreateRendererList(culled, drawing, {}));
+	Expect(Take(context.Entries(replaced))->at(0).material == replacement, "Replacement material ignored");
+	auto wrong = culled;
+	++wrong.context.sessionId;
+	Expect(!context.VisibleObjects(wrong), "Cross-session result accepted");
+	wrong = culled;
+	++wrong.generation;
+	Expect(!context.VisibleObjects(wrong), "Stale result generation accepted");
+	bool rejectedThread = false;
+	std::thread worker([&] { rejectedThread = !context.Validate(token); });
+	worker.join();
+	Expect(rejectedThread, "Render context accepted a worker thread");
+	Done(context.End());
+	Expect(!context.Entries(opaque), "Closed frame result accepted");
+	Take(context.Begin(10, 2, snapshot));
+	Expect(!context.VisibleObjects(culled), "Previous frame result accepted");
+	Done(context.End());
+	// Warm each result slot once, then verify native container storage is retained across frames.
+	auto frame = [&]
+	{
+		Done(snapshot.Capture(scene, 1));
+		Take(context.Begin(10, 3, snapshot));
+		auto visible = Take(context.Cull(camera));
+		Take(context.CreateRendererList(visible, drawing, {}));
+		Done(context.End());
+	};
+	frame();
+	const auto before = Memory::Snapshot();
+	for (int index = 0; index < 50; ++index)
+	{
+		frame();
+	}
+	const auto after = Memory::Snapshot();
+	for (Size index = 0; index < before.categoryCount; ++index)
+	{
+		Expect(before.categories[index].allocationCount == after.categories[index].allocationCount,
+		       "Stable culling/list frames reallocated container storage");
+	}
+	Take(context.Begin(10, 4, snapshot));
+	Done(snapshot.Capture(scene, 1));
+	Expect(!context.Validate(token), "Changed scene snapshot accepted");
+	Expect(!context.End(), "Changed snapshot was not diagnosed during end");
+	Take(context.Begin(10, 5, snapshot));
+	Done(context.End());
+	(void)outside;
+}
+
+void TestSortingAndPasses()
+{
+	Scene scene;
+	auto mesh = Triangle();
+	auto near = Object(scene, mesh, 0, -3, 0, AlphaMode::Blend);
+	auto far = Object(scene, mesh, 0, -9, 0, AlphaMode::Blend);
+	auto middle = Object(scene, mesh, 0, -6, 0, AlphaMode::Blend);
+	auto shader = std::make_shared<Shader::ShaderAsset>();
+	shader->id = ResourceId::Generate();
+	shader->sourceHash = "renderer-list-shader-v1";
+	Shader::ShaderSubShaderAsset subShader;
+	subShader.tags = {{"RenderPipeline", "UrsaForward"}, {"Queue", "Transparent+10"}};
+	Shader::ShaderPassAsset depth;
+	depth.name = "Depth";
+	depth.tags = {{"LightMode", "DepthOnly"}};
+	Shader::ShaderPassAsset forward;
+	forward.name = "Forward";
+	forward.tags = {{"LightMode", "CustomForward"}};
+	subShader.passes = {depth, forward};
+	Shader::ShaderSubShaderAsset customSubShader;
+	customSubShader.tags = {{"RenderPipeline", "UrsaCustom"}};
+	Shader::ShaderPassAsset customPass;
+	customPass.name = "CustomForward";
+	customPass.tags = {{"LightMode", "CustomForward"}};
+	customSubShader.passes = {customPass};
+	shader->subShaders = {subShader, customSubShader};
+	for (const auto& object : {near, far, middle})
+	{
+		Done(object->FindComponent<MeshRendererComponent>()->SharedMaterials()[0]->SetShaderAsset(shader));
+	}
+	RenderScene snapshot;
+	Done(snapshot.Capture(scene, 1));
+	RenderSceneContext context;
+	Take(context.Begin(11, 1, snapshot));
+	CameraData camera;
+	camera.viewProjection = Mat4::Perspective(1.0f, 1, 0.1f, 100);
+	auto results = Take(context.Cull(camera));
+	DrawingSettings drawing;
+	drawing.shaderTags = {{"CustomForward"}};
+	drawing.sorting.criteria = SortingCriteria::CommonTransparent;
+	auto list = Take(context.CreateRendererList(results, drawing, {}));
+	auto entries = Take(context.Entries(list));
+	Expect(entries->size() == 3 && entries->at(0).objectIndex == 1 && entries->at(1).objectIndex == 2 &&
+	           entries->at(2).objectIndex == 0 && entries->at(0).subShaderIndex == 0 && entries->at(0).passIndex == 1 &&
+	           entries->at(0).renderQueue == 3010,
+	       "Transparent ordering or LightMode pass selection failed");
+	auto repeated = Take(context.CreateRendererList(results, drawing, {}));
+	auto repeatedEntries = Take(context.Entries(repeated));
+	Expect(repeatedEntries->at(0).objectIndex == entries->at(0).objectIndex &&
+	           repeatedEntries->at(2).objectIndex == entries->at(2).objectIndex,
+	       "Identical renderer lists have a different deterministic order");
+	drawing.shaderTags = {{"DepthOnly"}, {"CustomForward"}};
+	list = Take(context.CreateRendererList(results, drawing, {}));
+	Expect(Take(context.Entries(list))->at(0).passIndex == 0,
+	       "ShaderTag request priority did not select the first available LightMode");
+	drawing.activePipeline = "UrsaCustom";
+	drawing.shaderTags = {{"CustomForward"}};
+	list = Take(context.CreateRendererList(results, drawing, {}));
+	Expect(Take(context.Entries(list))->size() == 3 && Take(context.Entries(list))->at(0).subShaderIndex == 1 &&
+	           Take(context.Entries(list))->at(0).passIndex == 0,
+	       "Active render pipeline did not select its compatible SubShader");
+	drawing.activePipeline = "UrsaMissing";
+	list = Take(context.CreateRendererList(results, drawing, {}));
+	Expect(Take(context.Entries(list))->empty(), "Incompatible render pipeline SubShader was selected");
+	drawing.activePipeline = "UrsaForward";
+	drawing.shaderTags = {{"CustomForward"}};
+	shader->sourceHash = "renderer-list-shader-v2";
+	shader->subShaders[0].passes[0].tags = {{"LightMode", "CustomForward"}};
+	shader->subShaders[0].passes[1].tags = {{"LightMode", "Other"}};
+	list = Take(context.CreateRendererList(results, drawing, {}));
+	Expect(Take(context.Entries(list))->at(0).passIndex == 0,
+	       "Shader version change did not invalidate the LightMode selection cache");
+	drawing.sorting.criteria = SortingCriteria::CommonOpaque;
+	list = Take(context.CreateRendererList(results, drawing, {}));
+	entries = Take(context.Entries(list));
+	Expect(entries->at(0).objectIndex == 0 && entries->at(2).objectIndex == 1, "Opaque front-to-back order failed");
+	drawing.shaderTags = {{"MissingPass"}};
+	list = Take(context.CreateRendererList(results, drawing, {}));
+	Expect(Take(context.Entries(list))->empty(), "Unmatched ShaderTag was drawn");
+	drawing.overrideMaterial = near->FindComponent<MeshRendererComponent>()->SharedMaterials()[0];
+	drawing.overrideMaterialPass = 0;
+	list = Take(context.CreateRendererList(results, drawing, {}));
+	Expect(Take(context.Entries(list))->size() == 3 && Take(context.Entries(list))->at(0).passIndex == 0,
+	       "Explicit replacement material pass failed");
+	Done(context.End());
+}
+
+void TestSkinBounds()
+{
+	Scene scene;
+	auto object = Take(scene.CreateGameObject("Skinned"));
+	auto mesh = Triangle();
+	auto data = Take(mesh->GetData());
+	for (auto& position : data.positions)
+	{
+		position.x += 100;
+		position.z = -5;
+	}
+	auto skeleton = std::make_shared<ModelSkeleton>();
+	SkeletonJoint joint;
+	joint.nodeLocalFileId = 1;
+	joint.bindLocalTransform.position = {-100, 0, 0};
+	joint.inverseBindMatrix = Mat4::Identity();
+	skeleton->joints = {joint};
+	skeleton->modelGuid = ResourceId::Generate();
+	skeleton->localFileId = 1;
+	data.skeleton = skeleton;
+	data.skeletonReference = {skeleton->modelGuid, 1};
+	data.skinInfluences.resize(data.positions.size());
+	for (auto& influence : data.skinInfluences)
+	{
+		influence.weights[0] = 1;
+	}
+	Done(mesh->SetData(std::move(data)));
+	Done(mesh->RecalculateBounds());
+	auto renderer = Take(object->AddComponent<SkinnedMeshRendererComponent>());
+	Done(renderer->SetSharedMesh(mesh));
+	Done(renderer->SetMaterial(std::make_shared<MaterialInstance>(MaterialType::Unlit)));
+	RenderScene snapshot;
+	Done(snapshot.Capture(scene, 1));
+	Expect(snapshot.Objects().size() == 1 && snapshot.Objects()[0].worldBounds.minimum.x == -0.5f &&
+	           snapshot.Objects()[0].jointPalette.size() == 1,
+	       "Skin bounds used the static mesh bounds");
+	RenderSceneContext context;
+	Take(context.Begin(12, 1, snapshot));
+	CameraData camera;
+	camera.viewProjection = Mat4::Perspective(1.0f, 1, 0.1f, 100);
+	Expect(Take(context.VisibleObjects(Take(context.Cull(camera))))->size() == 1, "Visible deformed skin was culled");
+	Done(context.End());
+	// Move the joint while preserving the mesh's original bind-pose bounds.
+	skeleton->joints[0].bindLocalTransform.position.x = -90;
+	Done(snapshot.Capture(scene, 1));
+	Take(context.Begin(12, 2, snapshot));
+	Expect(Take(context.VisibleObjects(Take(context.Cull(camera))))->empty(),
+	       "Moved skin remained in its stale bounds");
+	Done(context.End());
+}
+} // namespace
+
+int main()
+{
+	try
+	{
+		TestPersistentCamera();
+		TestSnapshotAndLists();
+		TestSortingAndPasses();
+		TestSkinBounds();
+		std::cout << "Render scene, camera and renderer list tests passed\n";
+		return 0;
+	}
+	catch (const std::exception& error)
+	{
+		std::cerr << error.what() << '\n';
+		return 1;
+	}
+}

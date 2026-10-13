@@ -1,0 +1,4 @@
+ursa_add_test_executable(UrsaScriptableAssetTests ScriptableAssetTests.cpp)
+target_link_libraries(UrsaScriptableAssetTests PRIVATE Ursa::Engine)
+add_test(NAME UrsaScriptableAssetTests COMMAND UrsaScriptableAssetTests)
+ursa_finalize_test_directory()

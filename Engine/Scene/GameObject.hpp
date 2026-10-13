@@ -13,6 +13,11 @@
 
 namespace Ursa
 {
+namespace Rendering
+{
+class RenderScene;
+}
+
 class GameObject final : public Serializable, public std::enable_shared_from_this<GameObject>
 {
 public:
@@ -64,6 +69,10 @@ public:
 	Result<String> Name() const;
 
 	Result<void> SetName(String value);
+
+	Result<UInt32> Layer() const;
+
+	Result<void> SetLayer(UInt32 value);
 
 	Result<void> SetParent(Ptr newParent);
 
@@ -141,6 +150,7 @@ private:
 
 	friend class Scene;
 	friend class PrefabAsset;
+	friend class Rendering::RenderScene;
 
 	explicit GameObject(String objectName);
 
@@ -162,6 +172,7 @@ private:
 	Vector<std::unique_ptr<Component>> components;
 	LocalTransform localTransform;
 	bool activeSelf = true;
+	UInt32 layer = 0;
 	bool alive = true;
 	Scene* scene = nullptr;
 	Ursa::UInt32 sceneNodeIndex = std::numeric_limits<Ursa::UInt32>::max();

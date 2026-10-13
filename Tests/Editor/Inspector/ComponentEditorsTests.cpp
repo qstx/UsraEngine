@@ -134,6 +134,14 @@ int main()
 		scriptType.clrTypeName = "Tests.EditorBehaviour, Ursa.Game";
 		scriptType.fields.push_back({"step", "FloatingPoint", "Unsupported", "System.Single", "1.25", {}, {}});
 		Done(RegisterScriptComponentType(registry, scriptType));
+		auto assetType = scriptType;
+		assetType.kind = ScriptTypeKind::ScriptableObject;
+		assetType.scriptType = "test.editor-asset";
+		assetType.clrTypeName = "Tests.EditorAsset, Ursa.Game";
+		const auto componentTypesBeforeAsset = registry.Types().size();
+		Expect(!RegisterScriptComponentType(registry, assetType) &&
+		           registry.Types().size() == componentTypesBeforeAsset && !registry.FindType(assetType.clrTypeName),
+		       "ScriptableObject appeared in Add Component or changed the component catalog");
 		auto scriptComponent = Take(registry.Create(scriptType.clrTypeName, context));
 		auto* managedScript = dynamic_cast<Scripting::ScriptBehaviourComponent*>(scriptComponent);
 		Expect(managedScript && managedScript->TypeName() == scriptType.clrTypeName,

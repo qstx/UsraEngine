@@ -108,6 +108,8 @@ struct PassDeclaration
 	Vector<ProgramBlock> programs;
 	Vector<String> reusedPasses;
 	SourceLocation location;
+	bool computeKernel = false;
+	Array<UInt32, 3> threadGroupSize{1, 1, 1};
 };
 
 struct SubShaderPassOrderEntry
@@ -143,6 +145,7 @@ struct ShaderSourceDocument
 };
 
 Result<ShaderSourceDocument> ParseShaderSource(const String& sourcePath, const String& source);
+Result<ShaderSourceDocument> ParseComputeSource(const String& sourcePath, const String& source);
 
 Result<Vector<ShaderKeywordVariant>> ExpandShaderKeywordVariants(const Vector<ShaderKeywordDirective>& directives,
                                                                  const Vector<Vector<String>>& usedKeywordSets = {},

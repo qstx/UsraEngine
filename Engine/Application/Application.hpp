@@ -18,6 +18,11 @@ public:
 
 	Result<void> ConfigureFixedStep(Ursa::Float32 seconds, Ursa::UInt32 maxSteps = 5);
 
+	Result<void> SetFrameCapture(std::filesystem::path output, UInt32 frame = 1)
+	{
+		return frameCapture.Configure(std::move(output), frame);
+	}
+
 protected:
 	virtual Result<void> OnStart() = 0;
 
@@ -37,6 +42,7 @@ protected:
 	std::shared_ptr<Scene> scene;
 
 private:
+	Rendering::FrameCapture frameCapture;
 	SceneFrameRunner sceneFrameRunner;
 	std::unique_ptr<Renderer3D> sceneRenderer;
 };

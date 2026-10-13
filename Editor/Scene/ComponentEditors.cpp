@@ -205,8 +205,8 @@ Result<void> RegisterBuiltinComponentEditors(ComponentEditors& editors)
 
 Result<void> RegisterScriptComponentType(ComponentEditors& editors, const ScriptTypeDescriptor& scriptType)
 {
-	if (scriptType.group != ScriptAssemblyGroup::Game || scriptType.scriptType.empty() ||
-	    scriptType.clrTypeName.empty() || scriptType.version == 0)
+	if (scriptType.group != ScriptAssemblyGroup::Game || scriptType.kind != ScriptTypeKind::Behaviour ||
+	    scriptType.scriptType.empty() || scriptType.clrTypeName.empty() || scriptType.version == 0)
 	{
 		return Result<void>::Failure("Script component requires a valid Game script type descriptor");
 	}

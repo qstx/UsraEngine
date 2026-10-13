@@ -443,9 +443,12 @@ Result<GameObject::Ptr> PrefabAsset::Instantiate(
 		auto object = GameObject::Create(name.value);
 		auto setTransform = object->SetLocalTransform(local.value);
 		auto setEnabled = object->SetActive(enabled.value);
-		if (!setTransform || !setEnabled)
+		auto setLayer = object->SetLayer(source->Layer().value);
+		if (!setTransform || !setEnabled || !setLayer)
 		{
-			return Result<GameObject::Ptr>::Failure(!setTransform ? setTransform.error : setEnabled.error);
+			return Result<GameObject::Ptr>::Failure(!setTransform ? setTransform.error
+			                                        : !setEnabled ? setEnabled.error
+			                                                      : setLayer.error);
 		}
 		auto mappedObject = context.MapGameObject(source->Id(), object);
 		if (!mappedObject)

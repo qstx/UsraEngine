@@ -404,6 +404,7 @@ Result<void> CaptureInstance(const String& instanceId, Map<String, String>& know
 			CaptureFields(old["localTransform"], node["localTransform"], "/localTransform", changes, reverse);
 			CaptureFields(old.value("name", Json("")), node.value("name", Json("")), "/name", changes, reverse);
 			CaptureFields(old["enabled"], node["enabled"], "/enabled", changes, reverse);
+			CaptureFields(old.value("layer", Json(0)), node.value("layer", Json(0)), "/layer", changes, reverse);
 			if (!changes.empty())
 			{
 				auto& properties = patch["properties"][ToStdString(localId)];

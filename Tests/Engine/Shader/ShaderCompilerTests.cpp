@@ -34,7 +34,8 @@ int main()
 	{
 		DxcShaderCompiler compiler({std::filesystem::u8path(URSA_TEST_DXC_EXECUTABLE),
 		                            std::filesystem::u8path(URSA_TEST_SPIRV_VAL_EXECUTABLE),
-		                            std::filesystem::u8path(URSA_TEST_SPIRV_CROSS_EXECUTABLE)});
+		                            std::filesystem::u8path(URSA_TEST_SPIRV_CROSS_EXECUTABLE),
+		                            std::filesystem::u8path(URSA_SHADER_STAGING_ROOT)});
 		auto version = compiler.Version();
 		Expect(static_cast<bool>(version) && version.value.find("dxcompiler") != String::npos,
 		       "DXC version was not reported");

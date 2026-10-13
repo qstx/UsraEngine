@@ -15,15 +15,23 @@ int main(int argc, char** argv)
 	URSA_LOG_INFO("Editor", "Starting UrsaEditor");
 	bool visible = true;
 	Ursa::UInt32 frames = 0;
+	std::filesystem::path captureOutput;
+	Ursa::UInt32 captureFrame = 1;
 	std::filesystem::path projectRoot;
 	std::filesystem::path package;
 	std::filesystem::path initialScene;
+	Ursa::String startupWindow;
+	bool startupPlay = false;
 	for (int index = 1; index < argc; ++index)
 	{
 		const Ursa::String argument = argv[index];
 		if (argument == "--hidden")
 		{
 			visible = false;
+		}
+		else if (argument == "--play")
+		{
+			startupPlay = true;
 		}
 		else if (argument == "--frames" && index + 1 < argc)
 		{
@@ -33,13 +41,38 @@ int main(int argc, char** argv)
 		{
 			package = std::filesystem::u8path(argv[++index]);
 		}
+		else if (argument == "--capture" && index + 1 < argc)
+		{
+			captureOutput = std::filesystem::u8path(argv[++index]);
+		}
+		else if (argument == "--capture-frame" && index + 1 < argc)
+		{
+			char* end = nullptr;
+			const auto value = std::strtoull(argv[++index], &end, 10);
+			if (!value || value > UINT32_MAX || !end || *end)
+			{
+				std::cerr << "--capture-frame must be between 1 and 4294967295\n";
+				return 2;
+			}
+			captureFrame = static_cast<Ursa::UInt32>(value);
+		}
 		else if (argument == "--project" && index + 1 < argc)
 		{
 			projectRoot = std::filesystem::u8path(argv[++index]);
 		}
-		else if (argument == "--scene" && index + 1 < argc)
+		else if ((argument == "--scene" || argument == "--asset") && index + 1 < argc)
 		{
 			initialScene = std::filesystem::u8path(argv[++index]);
+		}
+		else if (argument == "--view" && index + 1 < argc)
+		{
+			const Ursa::String view = argv[++index];
+			if (view != "Scene" && view != "Game" && view != "Material Preview")
+			{
+				std::cerr << "--view must be Scene, Game or Material Preview\n";
+				return 2;
+			}
+			startupWindow = view;
 		}
 		else
 		{
@@ -51,15 +84,32 @@ int main(int argc, char** argv)
 	if (projectRoot.empty())
 	{
 		std::cerr << "Usage: UrsaEditor --project <project-directory> [--scene <relative-scene-path>] "
-		             "[--hidden] [--frames N]\n";
+		             "[--asset <asset path>] [--view <Scene|Game|Material Preview>] [--hidden] [--frames N] "
+		             "[--play] [--capture <output.png>] [--capture-frame N]\n";
 		return 2;
 	}
 	if (initialScene.is_absolute())
 	{
-		std::cerr << "--scene must be relative to the project Assets folder\n";
+		std::cerr << "--scene/--asset must be relative to the project Assets folder\n";
 		return 2;
 	}
 	Ursa::Editor::EditorApplication editor;
+	if (startupPlay && initialScene.extension() != ".ursascene")
+	{
+		std::cerr << "--play requires a .ursascene startup asset\n";
+		return 2;
+	}
+	editor.SetStartupWindow(std::move(startupWindow));
+	editor.SetStartupPlay(startupPlay);
+	if (!captureOutput.empty())
+	{
+		auto configured = editor.SetFrameCapture(captureOutput, captureFrame);
+		if (!configured)
+		{
+			URSA_LOG_CRITICAL("Capture", configured.error);
+			return 2;
+		}
+	}
 	auto opened = editor.OpenProject(projectRoot, package);
 	if (!opened)
 	{

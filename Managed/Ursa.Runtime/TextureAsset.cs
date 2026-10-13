@@ -2,22 +2,15 @@ using System;
 
 namespace Ursa;
 
-public sealed class TextureAsset
+public sealed class TextureAsset : Texture
 {
-	private readonly NativeHandle handle;
-
-	private TextureAsset(AssetReference reference, NativeHandle handle)
+	private TextureAsset(AssetReference reference, NativeHandle handle) : base(reference, handle)
 	{
-		Reference = reference;
-		this.handle = handle;
 	}
 
-	public AssetReference Reference { get; }
-
-	public static TextureAsset Load(AssetReference reference)
+	public new static TextureAsset Load(AssetReference reference)
 	{
 		return new TextureAsset(reference, EngineApi.LoadTexture(reference.Guid, reference.LocalFileId));
 	}
 
-	public bool IsValid => handle.sessionId != 0 && handle.kind == 3;
 }

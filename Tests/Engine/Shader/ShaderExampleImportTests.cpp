@@ -1,10 +1,19 @@
 #include <Shader/ShaderCompiler.hpp>
 #include <Shader/ShaderReflection.hpp>
+#include <Shader/ShaderAssetResource.hpp>
+#include <Shader/ShaderBuiltins.hpp>
+#include <Shader/ShaderImporter.hpp>
 #include <Shader/ShaderSourceLibrary.hpp>
 #include <Core/StringInterop.hpp>
 #include <Renderer3D/Renderer3D.hpp>
 #include <Rhi/RHI.hpp>
+#include <Serialization/ResourceSession.hpp>
+#include <Vfs/AssetRoots.hpp>
+#include <Vfs/MemoryFileProvider.hpp>
+#include <Vfs/PakArchive.hpp>
+#include <Vfs/PakBuilder.hpp>
 
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -12,6 +21,21 @@ namespace
 {
 using namespace Ursa;
 using namespace Ursa::Shader;
+
+template <class T> T Take(Result<T> result);
+void Done(Result<void> result);
+
+void ConfigureBuiltinShaderResources()
+{
+	auto files = std::make_shared<VirtualFileSystem>();
+	auto provider = std::make_shared<MemoryFileProvider>();
+	Done(files->MountProvider("ursa", provider, MountAccess::ReadWrite));
+	Done(SaveShaderAssetResource(*files, Take(VirtualPath::Parse("ursa:Shaders/Renderer3D/Unlit.ursashaderasset")),
+	                             CreateBuiltinUnlitShaderAsset()));
+	Done(SaveShaderAssetResource(*files, Take(VirtualPath::Parse("ursa:Shaders/Renderer3D/Pbr.ursashaderasset")),
+	                             CreateBuiltinPbrShaderAsset()));
+	ConfigureEngineFileSystem(std::move(files));
+}
 
 template <class T> T Take(Result<T> result)
 {
@@ -250,8 +274,17 @@ public:
 		return device->Capabilities();
 	}
 
+	Result<Rhi::FormatCapabilities> QueryFormat(Rhi::Format format) const override
+	{
+		return device->QueryFormat(format);
+	}
+
 	Result<Rhi::BufferPtr> CreateBuffer(const Rhi::BufferDesc& desc) override
 	{
+		if (Rhi::Has(desc.usage, Rhi::BufferUsage::Storage))
+		{
+			++storageBufferCreates;
+		}
 		return device->CreateBuffer(desc);
 	}
 
@@ -277,6 +310,7 @@ public:
 
 	Result<Rhi::BindGroupPtr> CreateBindGroup(const Rhi::BindGroupDesc& desc) override
 	{
+		++bindGroupCreates;
 		return device->CreateBindGroup(desc);
 	}
 
@@ -312,10 +346,265 @@ public:
 	}
 
 	Ursa::Size graphicsPipelineCreates = 0;
+	Ursa::Size bindGroupCreates = 0;
+	Ursa::Size storageBufferCreates = 0;
 
 private:
 	Rhi::DevicePtr device;
 };
+
+void TestMaterialBackingReuse(const DxcShaderCompiler& compiler)
+{
+	using namespace Ursa;
+	using namespace Ursa::Rhi;
+	DeviceDesc description;
+#ifndef NDEBUG
+	description.validation = true;
+#endif
+	auto device = std::make_shared<CountingDevice>(Take(CreateDevice(description)));
+	auto shader = std::make_shared<ShaderAsset>();
+	shader->id = ResourceId::Generate();
+	shader->name = "Tests/MaterialBacking";
+	shader->sourcePath = "prj:Tests/MaterialBacking.ursashader";
+	shader->sourceHash = "material-backing-v1";
+	shader->compilerVersion = Take(compiler.Version());
+	PropertyDeclaration tint;
+	tint.identifier = "_Tint";
+	tint.displayName = "Tint";
+	tint.type = PropertyType::Color;
+	tint.defaultVector = {1, 1, 1, 1};
+	shader->properties.push_back(tint);
+	ShaderSubShaderAsset subShader;
+	subShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	ShaderPassAsset pass;
+	pass.name = "Forward";
+	pass.tags.push_back({"LightMode", "Forward"});
+	ShaderVariantAsset variant;
+	variant.stages.push_back(
+	    CompileTestStage(compiler, ProgramStage::Vertex, "VSMain",
+	                     "float4 VSMain(float3 position : POSITION) : SV_Position { return float4(position, 1.0); }"));
+	variant.stages.push_back(CompileTestStage(compiler, ProgramStage::Fragment, "PSMain",
+	                                          "cbuffer MaterialData : register(b0) { float4 _Tint; }; "
+	                                          "float4 PSMain() : SV_Target0 { return _Tint; }"));
+	pass.variants.push_back(std::move(variant));
+	subShader.passes.push_back(std::move(pass));
+	shader->subShaders.push_back(std::move(subShader));
+	auto left = std::make_shared<MaterialInstance>(MaterialType::Unlit);
+	auto right = std::make_shared<MaterialInstance>(MaterialType::Unlit);
+	Done(left->SetShader(shader->id));
+	Done(right->SetShader(shader->id));
+	Done(left->SetShaderAsset(shader));
+	Done(right->SetShaderAsset(shader));
+	Done(left->SetPropertyValue("_Tint", *shader, MaterialPropertyValue::ColorValue({1, 0, 0, 1})));
+	Done(right->SetPropertyValue("_Tint", *shader, MaterialPropertyValue::ColorValue({0, 0, 1, 1})));
+	Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {}, left}};
+	auto renderer = Take(Renderer3D::Create(device));
+	const auto render = [&]()
+	{
+		constexpr UInt32 size = 64;
+		auto color = Take(device->CreateTexture(
+		    {size, size, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
+		Done(Take(renderer->RenderOffscreenModels(color, Mat4::Identity(), boxes))->Wait());
+		auto readback =
+		    Take(device->CreateBuffer({size * size * 4, BufferUsage::TransferDestination, Memory::Readback}));
+		auto command = Take(device->CreateCommandList());
+		Done(command->Begin());
+		Done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
+		Done(command->CopyTextureToBuffer(color, readback));
+		Done(command->End());
+		Done(Take(device->Submit(command))->Wait());
+		Array<UInt8, size * size * 4> pixels{};
+		Done(readback->Read(0, pixels.data(), pixels.size()));
+		return pixels;
+	};
+	const auto hasColor = [](const auto& pixels, UInt8 red, UInt8 green, UInt8 blue)
+	{
+		for (Size index = 0; index < pixels.size(); index += 4)
+		{
+			if ((red ? pixels[index] >= 240 : pixels[index] < 10) &&
+			    (green ? pixels[index + 1] >= 240 : pixels[index + 1] < 10) &&
+			    (blue ? pixels[index + 2] >= 240 : pixels[index + 2] < 10))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	const auto first = render();
+	Expect(hasColor(first, 255, 0, 0) && device->bindGroupCreates == 1,
+	       "The first Shader material did not render its tint with one backing");
+	boxes[0].material = right;
+	const auto second = render();
+	Expect(hasColor(second, 0, 0, 255) && device->bindGroupCreates == 2,
+	       "A second Shader material reused another material's parameter backing");
+	Expect(render() == second && device->bindGroupCreates == 2,
+	       "Stable material versions did not reuse their descriptor backing");
+	Done(left->SetPropertyValue("_Tint", *shader, MaterialPropertyValue::ColorValue({0, 1, 0, 1})));
+	boxes[0].material = left;
+	const auto changed = render();
+	Expect(hasColor(changed, 0, 255, 0) && device->bindGroupCreates == 3,
+	       "Changing a shared material version did not refresh its backing");
+	Done(device->WaitIdle());
+}
+
+void TestBonePaletteReuse(const DxcShaderCompiler& compiler)
+{
+	using namespace Ursa;
+	using namespace Ursa::Rhi;
+	DeviceDesc description;
+#ifndef NDEBUG
+	description.validation = true;
+#endif
+	auto device = std::make_shared<CountingDevice>(Take(CreateDevice(description)));
+	auto shader = std::make_shared<ShaderAsset>();
+	shader->id = ResourceId::Generate();
+	shader->name = "Tests/BonePalette";
+	shader->sourcePath = "prj:Tests/BonePalette.ursashader";
+	shader->sourceHash = "bone-palette-v1";
+	shader->compilerVersion = Take(compiler.Version());
+	const String vertex = "StructuredBuffer<float4x4> Bones : register(t0); "
+	                      "float4 VSMain(float3 position : POSITION) : SV_Position "
+	                      "{ return mul(Bones[0], float4(position, 1.0)); }";
+	const String fragment = "float4 PSMain() : SV_Target0 { return float4(0.4, 0.7, 0.2, 1.0); }";
+	ShaderSubShaderAsset subShader;
+	subShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	for (const char* lightMode : {"Forward", "SRPDefaultUnlit"})
+	{
+		ShaderPassAsset pass;
+		pass.name = lightMode;
+		pass.tags.push_back({"LightMode", lightMode});
+		ShaderVariantAsset variant;
+		variant.stages.push_back(CompileTestStage(compiler, ProgramStage::Vertex, "VSMain", vertex));
+		variant.stages.push_back(CompileTestStage(compiler, ProgramStage::Fragment, "PSMain", fragment));
+		pass.variants.push_back(std::move(variant));
+		subShader.passes.push_back(std::move(pass));
+	}
+	shader->subShaders.push_back(std::move(subShader));
+	auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
+	Done(material->SetShader(shader->id));
+	Done(material->SetShaderAsset(shader));
+	ModelBoxInstance box{Mat4::Identity(), {}, material};
+	box.jointPalette.push_back(Mat4::Identity());
+	Vector<ModelBoxInstance> boxes{box};
+	auto renderer = Take(Renderer3D::Create(device));
+	auto color = Take(device->CreateTexture(
+	    {32, 32, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
+	Done(Take(renderer->RenderOffscreenModels(color, Mat4::Identity(), boxes))->Wait());
+	Expect(device->storageBufferCreates == 1,
+	       "Repeated passes uploaded the same skinned-object palette more than once");
+	Done(device->WaitIdle());
+}
+
+void TestComputeAssetImport(const DxcShaderCompiler& compiler)
+{
+	using namespace Ursa;
+	using namespace Ursa::Shader;
+	VirtualFileSystem files;
+	Done(files.MountProvider("prj", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	Done(files.MountProvider("lib", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	const auto sourcePath = Take(VirtualPath::Parse("prj:Compute/Fill.compute"));
+	const auto metadataPath = Take(VirtualPath::Parse(sourcePath.ToString() + ".meta"));
+	const ResourceId identity = ResourceId::Generate();
+	const String source = "#include \"Shared.hlsli\"\n#pragma kernel Fill\n[numthreads(8, 4, 1)]\n"
+	                      "void Fill(uint3 id : SV_DispatchThreadID) { SharedValue(); }\n";
+	Done(files.WriteAtomic(sourcePath, Vector<UInt8>(source.begin(), source.end())));
+	const auto includePath = Take(VirtualPath::Parse("prj:Compute/Shared.hlsli"));
+	String includeText = "void SharedValue() {}\n";
+	Done(files.WriteAtomic(includePath, Vector<UInt8>(includeText.begin(), includeText.end())));
+	const String metadata = "{\"version\":1,\"folder\":false,\"guid\":\"" + identity.ToString() + "\"}";
+	Done(files.WriteAtomic(metadataPath, Vector<UInt8>(metadata.begin(), metadata.end())));
+	const auto cacheRoot = Take(VirtualPath::Parse("lib:ShaderCache"));
+	auto imported = Take(ShaderImporter::ImportAll(files, compiler, Take(compiler.Version()), "prj", "prj", cacheRoot,
+	                                               256, {}, sourcePath));
+	Expect(imported.size() == 1 && imported[0].id == identity && imported[0].name == "Compute/Fill" &&
+	           imported[0].subShaders.size() == 1 && imported[0].subShaders[0].passes.size() == 1,
+	       ".compute source did not publish a stable ComputeShader identity and kernel");
+	const auto& kernel = imported[0].subShaders[0].passes[0];
+	Expect(kernel.computeKernel && kernel.name == "Fill" && kernel.threadGroupSize == Array<UInt32, 3>{8, 4, 1} &&
+	           kernel.variants.size() == 1 && kernel.variants[0].stages.size() == 1 &&
+	           kernel.variants[0].stages[0].stage == ProgramStage::Compute,
+	       "Compute kernel metadata, thread-group size, or compiled stage was lost");
+	const String sourceFingerprint = imported[0].sourceHash;
+	includeText = "void SharedValue() { uint value = 1; }\n";
+	Done(files.WriteAtomic(includePath, Vector<UInt8>(includeText.begin(), includeText.end())));
+	auto reimported = Take(ShaderImporter::ImportAll(files, compiler, Take(compiler.Version()), "prj", "prj", cacheRoot,
+	                                                 256, {}, sourcePath));
+	Expect(reimported.size() == 1 && reimported[0].id == identity && reimported[0].sourceHash != sourceFingerprint,
+	       "Changing a compute include did not invalidate the compiled ComputeShader artifact");
+	imported = std::move(reimported);
+	Expect(!ParseComputeSource("prj:Compute/Missing.compute", "void Missing() {}\n"),
+	       "Compute source without a named #pragma kernel was accepted");
+	Expect(!ParseComputeSource("prj:Compute/Invalid.compute",
+	                           "#pragma kernel Invalid\n[numthreads(1024, 1024, 1)]\nvoid Invalid() {}\n"),
+	       "Invalid compute thread-group dimensions were accepted");
+	const auto invalidKernelPath = Take(VirtualPath::Parse("prj:Compute/InvalidBinding.compute"));
+	const auto invalidKernelMetadata = Take(VirtualPath::Parse(invalidKernelPath.ToString() + ".meta"));
+	const ResourceId invalidKernelId = ResourceId::Generate();
+	const String invalidKernelSource =
+	    "RWStructuredBuffer<uint> Values : register(u0, space1);\n#pragma kernel InvalidBinding\n"
+	    "[numthreads(1, 1, 1)]\nvoid InvalidBinding(uint3 id : SV_DispatchThreadID) { Values[id.x] = 1; }\n";
+	Done(files.WriteAtomic(invalidKernelPath, Vector<UInt8>(invalidKernelSource.begin(), invalidKernelSource.end())));
+	const String invalidKernelMeta = "{\"version\":1,\"folder\":false,\"guid\":\"" + invalidKernelId.ToString() + "\"}";
+	Done(files.WriteAtomic(invalidKernelMetadata, Vector<UInt8>(invalidKernelMeta.begin(), invalidKernelMeta.end())));
+	auto invalidImport = ShaderImporter::ImportAll(files, compiler, Take(compiler.Version()), "prj", "prj", cacheRoot,
+	                                               256, {}, invalidKernelPath);
+	Expect(!invalidImport &&
+	           !files.Exists(Take(VirtualPath::Parse("prj:Compute/InvalidBinding.ursashaderasset"))).value,
+	       "Unsupported compute resource binding was published as a valid artifact");
+	const auto compiledPath = Take(VirtualPath::Parse("prj:Compute/Fill.ursashaderasset"));
+	auto compiledBytes = Take(files.Read(compiledPath));
+	const auto compiledMetadataPath = Take(VirtualPath::Parse(compiledPath.ToString() + ".meta"));
+	const String compiledMetadata = "{\"version\":1,\"folder\":false,\"guid\":\"" + identity.ToString() + "\"}";
+	Done(files.WriteAtomic(compiledMetadataPath, Vector<UInt8>(compiledMetadata.begin(), compiledMetadata.end())));
+	auto header = Take(ReadResourceHeader(files, compiledPath));
+	Expect(header.id == identity && header.kind == ResourceKind::Shader,
+	       "Compute shader artifact did not preserve its source GUID");
+	auto looseOpen = ResourceSession::Open(files);
+	if (!looseOpen)
+	{
+		throw std::runtime_error("Cannot open loose compute artifact index: " + ToStdString(looseOpen.error));
+	}
+	auto looseResources = std::move(looseOpen.value);
+	auto looseResult = looseResources->LoadShader(identity);
+	if (!looseResult)
+	{
+		throw std::runtime_error("Cannot load loose compute artifact: " + ToStdString(looseResult.error));
+	}
+	auto looseShader = std::move(looseResult.value);
+	Expect(looseShader->subShaders[0].passes[0].computeKernel,
+	       "Loose imported ComputeShader artifact was not loadable by stable GUID");
+	Vector<PakEntryData> entries;
+	entries.push_back({Take(VirtualPath::Parse("ursa:Compute/Fill.ursashaderasset")), std::move(compiledBytes)});
+	entries.push_back({Take(VirtualPath::Parse("ursa:Compute/Fill.ursashaderasset.meta")),
+	                   Vector<UInt8>(compiledMetadata.begin(), compiledMetadata.end())});
+	auto package = Take(PakBuilder::Encode(std::move(entries)));
+	const auto packagePath = std::filesystem::u8path(URSA_SHADER_STAGING_ROOT) / "ComputeKernel.pak";
+	std::filesystem::create_directories(packagePath.parent_path());
+	{
+		std::ofstream output(packagePath, std::ios::binary | std::ios::trunc);
+		Expect(static_cast<bool>(output), "Cannot create compute Shader Pak fixture");
+		output.write(reinterpret_cast<const char*>(package.data()), static_cast<std::streamsize>(package.size()));
+		Expect(static_cast<bool>(output), "Cannot write compute Shader Pak fixture");
+	}
+	auto archive = Take(PakArchive::Open(packagePath));
+	VirtualFileSystem packed;
+	Done(archive->Mount(packed));
+	auto packedOpen = ResourceSession::Open(packed);
+	if (!packedOpen)
+	{
+		throw std::runtime_error("Cannot open compute Pak resource index: " + ToStdString(packedOpen.error));
+	}
+	auto resources = std::move(packedOpen.value);
+	auto packedResult = resources->LoadShader(identity);
+	if (!packedResult)
+	{
+		throw std::runtime_error("Cannot load compute Shader from Pak: " + ToStdString(packedResult.error));
+	}
+	auto loaded = std::move(packedResult.value);
+	Expect(loaded->subShaders[0].passes[0].computeKernel &&
+	           loaded->subShaders[0].passes[0].threadGroupSize == Array<UInt32, 3>{8, 4, 1},
+	       "Pak-backed compute kernel metadata was not restored");
+}
 
 void RenderShaderPasses(const DxcShaderCompiler& compiler)
 {
@@ -370,6 +659,58 @@ void RenderShaderPasses(const DxcShaderCompiler& compiler)
 	Expect(!missingVariant &&
 	           ToStdString(missingVariant.error).find("No compiled keyword variant") != std::string::npos,
 	       "Missing compiled Shader keyword variant did not return a clear runtime diagnostic");
+	Done(material->SetKeywordEnabled("URSA_MISSING_VARIANT", false));
+	auto sharedShader = std::make_shared<ShaderAsset>();
+	sharedShader->id = ResourceId::Generate();
+	sharedShader->name = "Tests/SharedPass";
+	sharedShader->sourcePath = "prj:Tests/SharedPass.ursashader";
+	sharedShader->sourceHash = "shared-pass-v1";
+	sharedShader->compilerVersion = "DXC test";
+	ShaderSubShaderAsset sharedSubShader;
+	sharedSubShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	ShaderPassAsset sharedPass;
+	sharedPass.name = "Blue";
+	sharedPass.tags.push_back({"LightMode", "Forward"});
+	ShaderVariantAsset sharedVariant;
+	sharedVariant.stages.push_back(
+	    CompileTestStage(compiler, ProgramStage::Vertex, "VSMain",
+	                     "float4 VSMain(float3 position : POSITION) : SV_Position { return float4(position, 1.0); }"));
+	sharedVariant.stages.push_back(CompileTestStage(compiler, ProgramStage::Fragment, "PSMain",
+	                                                "float4 PSMain() : SV_Target0 { return float4(0, 0, 1, 1); }"));
+	sharedPass.variants.push_back(std::move(sharedVariant));
+	sharedSubShader.passes.push_back(std::move(sharedPass));
+	sharedShader->subShaders.push_back(std::move(sharedSubShader));
+	auto usePassShader = std::make_shared<ShaderAsset>();
+	usePassShader->id = ResourceId::Generate();
+	usePassShader->name = "Tests/UsePass";
+	usePassShader->sourceHash = "use-pass-v1";
+	ShaderSubShaderAsset usePassSubShader;
+	usePassSubShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	usePassSubShader.passOrder.push_back({0, "Tests/SharedPass/Blue", true});
+	usePassShader->subShaders.push_back(std::move(usePassSubShader));
+	usePassShader->resolvedReferences.push_back({{sharedShader->name, sharedShader->id, "Blue", false}, sharedShader});
+	Done(material->SetShader(usePassShader->id));
+	Done(material->SetShaderAsset(usePassShader));
+	const auto usePassPixel = renderCenterPixel();
+	Expect(usePassPixel[2] >= 250 && usePassPixel[0] == 0 && usePassPixel[1] == 0,
+	       "UsePass selection did not resolve and render the referenced pass");
+	Expect(renderCenterPixel() == usePassPixel, "Cached UsePass selection changed the rendered output");
+	sharedShader->sourceHash = "shared-pass-v2";
+	Expect(renderCenterPixel() == usePassPixel,
+	       "Changing a referenced Shader version broke UsePass cache invalidation");
+	auto fallbackShader = std::make_shared<ShaderAsset>();
+	fallbackShader->id = ResourceId::Generate();
+	fallbackShader->name = "Tests/Fallback";
+	fallbackShader->sourceHash = "fallback-v1";
+	ShaderSubShaderAsset incompatibleFallbackSubShader;
+	incompatibleFallbackSubShader.tags.push_back({"RenderPipeline", "UrsaOther"});
+	fallbackShader->subShaders.push_back(std::move(incompatibleFallbackSubShader));
+	fallbackShader->resolvedReferences.push_back({{sharedShader->name, sharedShader->id, {}, true}, sharedShader});
+	Done(material->SetShader(fallbackShader->id));
+	Done(material->SetShaderAsset(fallbackShader));
+	const auto fallbackPixel = renderCenterPixel();
+	Expect(fallbackPixel[2] >= 250 && fallbackPixel[0] == 0 && fallbackPixel[1] == 0,
+	       "Fallback selection did not resolve the compatible referenced Shader");
 	Done(device->WaitIdle());
 }
 
@@ -441,6 +782,7 @@ int main()
 {
 	try
 	{
+		ConfigureBuiltinShaderResources();
 		VirtualFileSystem filesystem;
 		Expect(static_cast<bool>(filesystem.Mount("ursa", std::filesystem::u8path(URSA_ENGINE_SHADER_ASSET_DIR),
 		                                          MountAccess::ReadOnly)),
@@ -479,9 +821,13 @@ int main()
 		}
 		DxcShaderCompiler compiler({std::filesystem::u8path(URSA_TEST_DXC_EXECUTABLE),
 		                            std::filesystem::u8path(URSA_TEST_SPIRV_VAL_EXECUTABLE),
-		                            std::filesystem::u8path(URSA_TEST_SPIRV_CROSS_EXECUTABLE)});
+		                            std::filesystem::u8path(URSA_TEST_SPIRV_CROSS_EXECUTABLE),
+		                            std::filesystem::u8path(URSA_SHADER_STAGING_ROOT)});
 		auto compilerVersion = compiler.Version();
 		Expect(static_cast<bool>(compilerVersion), "Shader toolchain version could not be queried");
+		TestComputeAssetImport(compiler);
+		TestMaterialBackingReuse(compiler);
+		TestBonePaletteReuse(compiler);
 		ShaderPassCompilation passCompilation;
 		Ursa::Size compiledStages = 0;
 		for (const SubShaderDeclaration& subShader : asset->source.subShaders)
@@ -503,7 +849,11 @@ int main()
 						request.sharedBlocks = sharedBlocks;
 						request.includes = includes;
 						auto compiled = compiler.Compile(request);
-						Expect(static_cast<bool>(compiled), "Documented HLSL sample did not compile for Vulkan");
+						if (!compiled)
+						{
+							throw std::runtime_error("Documented HLSL sample did not compile for Vulkan: " +
+							                         ToStdString(compiled.error));
+						}
 						passCompilation.stages.push_back(std::move(compiled.value));
 						++compiledStages;
 					}

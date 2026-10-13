@@ -8,7 +8,7 @@
 
 namespace Ursa::Shader
 {
-inline constexpr const char* shaderBindingPolicyVersion = "UrsaBindingMapV3Auto";
+inline constexpr const char* shaderBindingPolicyVersion = "UrsaBindingMapV4Compute";
 
 struct ShaderIncludeSource
 {

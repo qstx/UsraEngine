@@ -4,15 +4,32 @@
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <cstring>
 #include <cmath>
+#include <atomic>
 #include <limits>
 #include <stdexcept>
 
 namespace Ursa::Scripting
 {
+namespace
+{
+std::atomic<UInt64> nextRenderSessionId{1};
+
+bool MatchesRenderToken(const Rendering::RenderContextToken& left, const Rendering::RenderContextToken& right)
+{
+	return left.sessionId == right.sessionId && left.frameId == right.frameId && left.index == right.index &&
+	       left.generation == right.generation;
+}
+} // namespace
+
 ManagedSceneApi::ManagedSceneApi(Scene& scene, ResourceSession* resources,
                                  std::function<void(const String&)> setWindowTitle)
     : scene(scene), resources(resources), setWindowTitle(std::move(setWindowTitle))
 {
+	renderSessionId = nextRenderSessionId.fetch_add(1, std::memory_order_relaxed);
+	if (renderSessionId == 0)
+	{
+		throw std::runtime_error("Render session identity space is exhausted");
+	}
 	auto registry = ManagedHandleRegistry::Create();
 	if (!registry)
 	{
@@ -40,7 +57,7 @@ Result<ManagedHandle> ManagedSceneApi::Register(const GameObject::Ptr& object)
 	return handle;
 }
 
-NativeApiV5 ManagedSceneApi::Bind(NativeApiV5 api)
+NativeApiV6 ManagedSceneApi::Bind(NativeApiV6 api)
 {
 	api.sceneContext = this;
 	api.createGameObject = &ManagedSceneApi::CreateGameObject;
@@ -77,7 +94,168 @@ NativeApiV5 ManagedSceneApi::Bind(NativeApiV5 api)
 	api.setCameraProjection = &ManagedSceneApi::SetCameraProjection;
 	api.setWindowTitle = &ManagedSceneApi::SetWindowTitle;
 	api.resourceRequest = &ManagedSceneApi::ResourceRequest;
+	api.submitRenderBatch = &ManagedSceneApi::SubmitRenderBatch;
 	return api;
+}
+
+Int32 ManagedSceneApi::SubmitRenderBatch(void* context, const UInt8* tokenBytes, UInt64 tokenByteCount,
+                                         const UInt8* batch, UInt64 batchByteCount)
+{
+	try
+	{
+		if (!context)
+		{
+			return 1;
+		}
+		auto* api = FromContext(context);
+		if (api->ownerThread != std::this_thread::get_id())
+		{
+			return 5;
+		}
+		if (!tokenBytes || tokenByteCount != sizeof(Rendering::RenderContextToken) || !batch)
+		{
+			return 1;
+		}
+		Rendering::RenderContextToken token;
+		std::memcpy(&token, tokenBytes, sizeof(token));
+		if (!api->activeRenderToken || token.sessionId == 0 || token.frameId == 0 || token.index == 0 ||
+		    token.generation == 0 || token.sessionId != api->activeRenderToken->sessionId ||
+		    token.frameId != api->activeRenderToken->frameId || token.index != api->activeRenderToken->index ||
+		    token.generation != api->activeRenderToken->generation)
+		{
+			return 6;
+		}
+		auto valid = Rendering::ValidateRenderCommandBatch(batch, static_cast<Size>(batchByteCount));
+		if (!valid)
+		{
+			return 7;
+		}
+		Rendering::RenderCommandBatchHeader header;
+		std::memcpy(&header, batch, sizeof(header));
+		Vector<std::shared_ptr<void>> retained;
+		Size offset = sizeof(header);
+		for (UInt32 index = 0; index < header.commandCount; ++index)
+		{
+			Rendering::RenderCommandRecordHeader record;
+			std::memcpy(&record, batch + offset, sizeof(record));
+			if (record.opcode == Rendering::RenderCommandOpcode::SetRenderTarget &&
+			    record.byteSize == sizeof(record) + sizeof(ManagedHandle))
+			{
+				ManagedHandle targetHandle{};
+				std::memcpy(&targetHandle, batch + offset + sizeof(record), sizeof(targetHandle));
+				auto target = api->ResolveRenderTexture(targetHandle);
+				if (!target)
+				{
+					return 8;
+				}
+				retained.push_back(target.value);
+			}
+			else if (record.opcode == Rendering::RenderCommandOpcode::DrawRendererList)
+			{
+				Rendering::RenderContextToken listToken;
+				if (record.byteSize < sizeof(record) + sizeof(listToken))
+				{
+					return 7;
+				}
+				std::memcpy(&listToken, batch + offset + sizeof(record), sizeof(listToken));
+				if (!api->activeRenderToken || !MatchesRenderToken(listToken, *api->activeRenderToken))
+				{
+					return 6;
+				}
+			}
+			else if (record.opcode == Rendering::RenderCommandOpcode::DrawMesh)
+			{
+				constexpr Size drawMeshPayloadBytes = sizeof(ManagedHandle) * 2 + sizeof(Float32) * 16 + sizeof(UInt32);
+				if (record.byteSize < sizeof(record) + drawMeshPayloadBytes)
+				{
+					return 7;
+				}
+				ManagedHandle meshHandle{}, materialHandle{};
+				std::memcpy(&meshHandle, batch + offset + sizeof(record), sizeof(meshHandle));
+				std::memcpy(&materialHandle, batch + offset + sizeof(record) + sizeof(meshHandle),
+				            sizeof(materialHandle));
+				auto mesh = api->ResolveMesh(meshHandle);
+				auto material = api->ResolveMaterial(materialHandle);
+				if (!mesh || !material || !mesh.value || !material.value)
+				{
+					return 8;
+				}
+				retained.push_back(mesh.value);
+				retained.push_back(material.value);
+			}
+			else if (record.opcode == Rendering::RenderCommandOpcode::CopyTexture ||
+			         record.opcode == Rendering::RenderCommandOpcode::Blit)
+			{
+				ManagedHandle sourceHandle{}, destinationHandle{};
+				std::memcpy(&sourceHandle, batch + offset + sizeof(record), sizeof(sourceHandle));
+				std::memcpy(&destinationHandle, batch + offset + sizeof(record) + sizeof(sourceHandle),
+				            sizeof(destinationHandle));
+				auto source = api->ResolveRenderTexture(sourceHandle);
+				auto destination = api->ResolveRenderTexture(destinationHandle);
+				if (!source || !destination)
+				{
+					return 8;
+				}
+				retained.push_back(source.value);
+				retained.push_back(destination.value);
+				if (record.opcode == Rendering::RenderCommandOpcode::Blit)
+				{
+					ManagedHandle materialHandle{};
+					std::memcpy(&materialHandle, batch + offset + sizeof(record) + sizeof(sourceHandle) * 2,
+					            sizeof(materialHandle));
+					auto material = api->ResolveMaterial(materialHandle);
+					if (!material || !material.value)
+					{
+						return 8;
+					}
+					retained.push_back(material.value);
+				}
+			}
+			else if (record.opcode == Rendering::RenderCommandOpcode::CopyBuffer)
+			{
+				ManagedHandle sourceHandle{}, destinationHandle{};
+				std::memcpy(&sourceHandle, batch + offset + sizeof(record), sizeof(sourceHandle));
+				std::memcpy(&destinationHandle, batch + offset + sizeof(record) + sizeof(sourceHandle),
+				            sizeof(destinationHandle));
+				auto source = api->ResolveGraphicsBuffer(sourceHandle);
+				auto destination = api->ResolveGraphicsBuffer(destinationHandle);
+				if (!source || !destination)
+				{
+					return 8;
+				}
+				retained.push_back(source.value);
+				retained.push_back(destination.value);
+			}
+			else if (record.opcode == Rendering::RenderCommandOpcode::SetGlobalParameters)
+			{
+				UInt32 kind = 0, nameBytes = 0;
+				std::memcpy(&kind, batch + offset + sizeof(record), sizeof(kind));
+				std::memcpy(&nameBytes, batch + offset + sizeof(record) + sizeof(kind), sizeof(nameBytes));
+				if (kind == 3)
+				{
+					ManagedHandle textureHandle{};
+					std::memcpy(&textureHandle,
+					            batch + offset + sizeof(record) + sizeof(kind) + sizeof(nameBytes) + nameBytes,
+					            sizeof(textureHandle));
+					auto texture = api->ResolveRenderTexture(textureHandle);
+					if (!texture)
+					{
+						return 8;
+					}
+					retained.push_back(texture.value);
+				}
+			}
+			offset += record.byteSize;
+		}
+		api->renderBatches.emplace_back(batch, batch + static_cast<Size>(batchByteCount));
+		api->renderBatchResources.push_back(std::move(retained));
+		++api->acceptedRenderBatchCount;
+		return 0;
+	}
+	catch (...)
+	{
+		return 8;
+	}
 }
 
 ManagedSceneApi* ManagedSceneApi::FromContext(void* context)
@@ -774,6 +952,7 @@ Int32 ManagedSceneApi::LoadTexture(void* context, const UInt8* guidBytes, UInt64
 		return 4;
 	}
 	*output = handle.value;
+	api->ownedTextures[handle.value.index] = texture.value;
 	return 0;
 }
 

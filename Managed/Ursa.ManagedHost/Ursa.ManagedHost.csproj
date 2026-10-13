@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Ursa.Runtime/Ursa.Runtime.csproj" />
+    <ProjectReference Include="../Ursa.Rendering/Ursa.Rendering.csproj" />
   </ItemGroup>
 </Project>

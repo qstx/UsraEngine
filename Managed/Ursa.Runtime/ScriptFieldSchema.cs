@@ -46,8 +46,12 @@ public enum ScriptSerializedFieldKind
 	AssetReference,
 	MeshReference,
 	MaterialReference,
+	TextureReference,
+	ScriptableObjectReference,
 	Array,
-	List
+	List,
+	ShaderReference,
+	ComputeShaderReference
 }
 
 public sealed class ScriptFieldDescriptor
@@ -117,15 +121,16 @@ public static class ScriptFieldSchema
 
 	// Do not retain serializer metadata for collectible project Types in the shared API.
 	private static JsonSerializerOptions jsonOptions => CreateJsonOptions();
-	private static readonly ConditionalWeakTable<Behaviour, List<Action>> pendingReferences = new();
+	private static readonly ConditionalWeakTable<object, List<Action>> pendingReferences = new();
 
-	public static string Serialize(Behaviour behaviour)
+	public static string Serialize(object behaviour)
 	{
 		if (behaviour == null)
 		{
 			throw new ArgumentNullException(nameof(behaviour));
 		}
 		Type scriptType = behaviour.GetType();
+		if (behaviour is ScriptableObject asset) asset.RequireValid();
 		ScriptIdentity identity = BehaviourRegistry.IdentityFor(scriptType);
 		var payload = new Payload { ScriptType = identity.Id, Version = identity.Version,
 			SourceGuid = identity.SourceGuid, LocalFileId = identity.LocalFileId };
@@ -136,6 +141,8 @@ public static class ScriptFieldSchema
 				throw new InvalidOperationException(descriptor.Diagnostic);
 			}
 			object? value = descriptor.Field.GetValue(behaviour);
+			if (behaviour is ScriptableObject)
+				ValidateAssetField(descriptor, value);
 			payload.Fields.Add(descriptor.Name, SerializeFieldValue(descriptor, value));
 			Type scalarType = descriptor.Kind == ScriptSerializedFieldKind.Array ? descriptor.ValueType.GetElementType()! :
 				descriptor.Kind == ScriptSerializedFieldKind.List ? descriptor.ValueType.GetGenericArguments()[0] : descriptor.ValueType;
@@ -158,7 +165,13 @@ public static class ScriptFieldSchema
 		return JsonSerializer.Serialize(payload, jsonOptions);
 	}
 
-	public static void Deserialize(Behaviour behaviour, string serializedPayload)
+	public static void Deserialize(object behaviour, string serializedPayload)
+	{
+		Deserialize(behaviour, serializedPayload, null);
+	}
+
+	internal static void Deserialize(object behaviour, string serializedPayload,
+		Func<AssetReference, Type, ScriptableObject>? assetResolver)
 	{
 		if (behaviour == null)
 		{
@@ -168,6 +181,7 @@ public static class ScriptFieldSchema
 		Payload payload = document.RootElement.Deserialize<Payload>(jsonOptions) ??
 		                 throw new InvalidOperationException("Script component payload is empty.");
 		Type scriptType = behaviour.GetType();
+		if (behaviour is ScriptableObject asset) asset.RequireValid();
 		ScriptIdentity identity = BehaviourRegistry.IdentityFor(scriptType);
 		if (payload.FormatVersion != 1 || payload.ScriptType != identity.Id ||
 		    payload.Version != identity.Version)
@@ -176,6 +190,8 @@ public static class ScriptFieldSchema
 			    $"Script payload identity/version does not match '{scriptType.FullName}'.");
 		}
 		var assignments = new List<Action>();
+		if (behaviour is ScriptableObject)
+			foreach (JsonElement field in payload.Fields.Values) ValidateAssetSerializedValue(field);
 		foreach (ScriptFieldDescriptor descriptor in Describe(scriptType))
 		{
 			if (!descriptor.IsSupported)
@@ -183,6 +199,7 @@ public static class ScriptFieldSchema
 				throw new InvalidOperationException(descriptor.Diagnostic);
 			}
 			bool hasValue = payload.Fields.TryGetValue(descriptor.Name, out JsonElement value);
+			string storedName = descriptor.Name;
 			if (!hasValue)
 			{
 				foreach (string formerName in descriptor.FormerNames)
@@ -190,6 +207,7 @@ public static class ScriptFieldSchema
 					if (payload.Fields.TryGetValue(formerName, out value))
 					{
 						hasValue = true;
+						storedName = formerName;
 						break;
 					}
 				}
@@ -198,6 +216,8 @@ public static class ScriptFieldSchema
 					continue;
 				}
 			}
+			if (payload.FieldTypes.TryGetValue(storedName, out FieldTypePayload? storedType))
+				ValidateFieldType(descriptor, storedType, scriptType);
 			if (value.ValueKind == JsonValueKind.Null &&
 			    descriptor.Kind is ScriptSerializedFieldKind.Array or ScriptSerializedFieldKind.List)
 			{
@@ -206,15 +226,16 @@ public static class ScriptFieldSchema
 			}
 			if (IsReferenceKind(descriptor.Kind))
 			{
-				ReferencePayload? reference = ReadReference(value);
+				ReferencePayload? reference = ReadFieldReference(value, descriptor.Kind, descriptor.Name);
 				assignments.Add(() => QueueReferenceRestore(behaviour, descriptor,
-				                      new List<ReferencePayload?> { reference }));
+				                      new List<ReferencePayload?> { reference }, assetResolver));
 			}
 			else if ((descriptor.Kind is ScriptSerializedFieldKind.Array or ScriptSerializedFieldKind.List) &&
 			         IsReferenceKind(descriptor.ElementKind))
 			{
-				List<ReferencePayload?> references = value.EnumerateArray().Select(ReadReference).ToList();
-				assignments.Add(() => QueueReferenceRestore(behaviour, descriptor, references));
+				List<ReferencePayload?> references = value.EnumerateArray()
+					.Select((item, index) => ReadFieldReference(item, descriptor.ElementKind, $"{descriptor.Name}[{index}]")).ToList();
+				assignments.Add(() => QueueReferenceRestore(behaviour, descriptor, references, assetResolver));
 			}
 			else
 			{
@@ -228,7 +249,21 @@ public static class ScriptFieldSchema
 		foreach (Action apply in assignments) apply();
 	}
 
-	internal static void ResolvePendingReferences(Behaviour behaviour)
+	private static void ValidateFieldType(ScriptFieldDescriptor descriptor, FieldTypePayload stored, Type owner)
+	{
+		Type scalar = descriptor.Kind == ScriptSerializedFieldKind.Array ? descriptor.ValueType.GetElementType()! :
+			descriptor.Kind == ScriptSerializedFieldKind.List ? descriptor.ValueType.GetGenericArguments()[0] : descriptor.ValueType;
+		bool collection = descriptor.Kind is ScriptSerializedFieldKind.Array or ScriptSerializedFieldKind.List;
+		ScriptSerializedFieldKind scalarKind = collection ? descriptor.ElementKind : descriptor.Kind;
+		bool mismatch = stored.Kind != descriptor.Kind.ToString() || stored.ElementKind != descriptor.ElementKind.ToString();
+		// Reference assignability is checked after stable identity resolution, so CLR renames remain compatible.
+		if (!IsReferenceKind(scalarKind) && scalarKind != ScriptSerializedFieldKind.Enumeration)
+			mismatch |= (collection ? stored.ElementTypeName : stored.TypeName) != scalar.FullName;
+		if (scalar.IsEnum) mismatch |= stored.EnumUnderlyingType != Enum.GetUnderlyingType(scalar).FullName;
+		if (mismatch) throw new InvalidOperationException($"Incompatible serialized field type on '{owner.FullName}.{descriptor.Name}'.");
+	}
+
+	internal static void ResolvePendingReferences(object behaviour)
 	{
 		if (!pendingReferences.TryGetValue(behaviour, out List<Action>? pending))
 		{
@@ -247,13 +282,15 @@ public static class ScriptFieldSchema
 		{
 			throw new ArgumentNullException(nameof(scriptType));
 		}
-		if (!typeof(Behaviour).IsAssignableFrom(scriptType) || scriptType.IsAbstract || scriptType.ContainsGenericParameters)
+		if ((!typeof(Behaviour).IsAssignableFrom(scriptType) && !typeof(ScriptableObject).IsAssignableFrom(scriptType)) ||
+		    scriptType.IsAbstract || scriptType.ContainsGenericParameters)
 		{
-			throw new ArgumentException("Script field schema requires a concrete Behaviour type.", nameof(scriptType));
+			throw new ArgumentException("Script field schema requires a concrete Behaviour or ScriptableObject type.", nameof(scriptType));
 		}
 
 		var fields = new List<ScriptFieldDescriptor>();
-		for (Type? current = scriptType; current != null && current != typeof(Behaviour) && current != typeof(Component);
+		for (Type? current = scriptType; current != null && current != typeof(Behaviour) && current != typeof(Component) &&
+		     current != typeof(ScriptableObject);
 		     current = current.BaseType)
 		{
 			foreach (FieldInfo field in current.GetFields(BindingFlags.Instance | BindingFlags.Public |
@@ -319,6 +356,9 @@ public static class ScriptFieldSchema
 		if (type == typeof(Vector4)) return (ScriptSerializedFieldKind.Vector4, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(Mesh)) return (ScriptSerializedFieldKind.MeshReference, ScriptSerializedFieldKind.Unsupported);
 		if (typeof(Material).IsAssignableFrom(type)) return (ScriptSerializedFieldKind.MaterialReference, ScriptSerializedFieldKind.Unsupported);
+		if (typeof(Texture).IsAssignableFrom(type)) return (ScriptSerializedFieldKind.TextureReference, ScriptSerializedFieldKind.Unsupported);
+		if (type == typeof(Shader)) return (ScriptSerializedFieldKind.ShaderReference, ScriptSerializedFieldKind.Unsupported);
+		if (type == typeof(ComputeShader)) return (ScriptSerializedFieldKind.ComputeShaderReference, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(Vector3)) return (ScriptSerializedFieldKind.Vector3, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(Quaternion)) return (ScriptSerializedFieldKind.Quaternion, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(Color)) return (ScriptSerializedFieldKind.Color, ScriptSerializedFieldKind.Unsupported);
@@ -328,6 +368,8 @@ public static class ScriptFieldSchema
 			return (ScriptSerializedFieldKind.ComponentReference, ScriptSerializedFieldKind.Unsupported);
 		if (type == typeof(AssetReference))
 			return (ScriptSerializedFieldKind.AssetReference, ScriptSerializedFieldKind.Unsupported);
+		if (typeof(ScriptableObject).IsAssignableFrom(type))
+			return (ScriptSerializedFieldKind.ScriptableObjectReference, ScriptSerializedFieldKind.Unsupported);
 		return (ScriptSerializedFieldKind.Unsupported, ScriptSerializedFieldKind.Unsupported);
 	}
 
@@ -525,6 +567,36 @@ public static class ScriptFieldSchema
 
 	private static JsonElement SerializeReference(object value, ScriptSerializedFieldKind kind)
 	{
+		if (value is Shader or ComputeShader)
+		{
+			AssetReference identity = value is Shader shader ? shader.Reference : ((ComputeShader)value).Reference;
+			return JsonSerializer.SerializeToElement(new Dictionary<string, ReferencePayload>
+			{
+				["$ursaReference"] = new() { Kind = value is Shader ? "Shader" : "ComputeShader",
+					Resource = JsonSerializer.SerializeToElement(new { guid = identity.Guid, localFileId = identity.LocalFileId }) }
+			}, jsonOptions);
+		}
+		if (value is Texture texture)
+		{
+			if (!texture.IsValid || string.IsNullOrEmpty(texture.Reference.Guid))
+				throw new InvalidOperationException("A texture field requires a valid persistent asset identity.");
+			return JsonSerializer.SerializeToElement(new Dictionary<string, ReferencePayload>
+			{
+				["$ursaReference"] = new() { Kind = "Texture", Resource = JsonSerializer.SerializeToElement(
+					new { guid = texture.Reference.Guid, localFileId = texture.Reference.LocalFileId }) }
+			}, jsonOptions);
+		}
+		if (value is ScriptableObject asset)
+		{
+			asset.RequireValid();
+			AssetReference assetIdentity = asset.AssetReference ??
+				throw new InvalidOperationException("An unsaved ScriptableObject has no persistent asset identity.");
+			return JsonSerializer.SerializeToElement(new Dictionary<string, ReferencePayload>
+			{
+				["$ursaReference"] = new() { Kind = "ScriptableObject", Resource = JsonSerializer.SerializeToElement(
+					new { guid = assetIdentity.Guid, localFileId = assetIdentity.LocalFileId }) }
+			}, jsonOptions);
+		}
 		if (value is RenderResource resource)
 		{
 			var binding = EngineApi.ResourceRequest(new { operation = "resource.reference", handle = resource.Handle });
@@ -562,8 +634,33 @@ public static class ScriptFieldSchema
 			Resource = reference.TryGetProperty("Resource", out var binding) && binding.ValueKind != JsonValueKind.Null ? binding.Clone() : null };
 	}
 
-	private static void QueueReferenceRestore(Behaviour behaviour, ScriptFieldDescriptor descriptor,
-	                                          List<ReferencePayload?> references)
+	private static ReferencePayload? ReadFieldReference(JsonElement value, ScriptSerializedFieldKind kind, string path)
+	{
+		ReferencePayload? reference = ReadReference(value);
+		if (reference == null) return null;
+		string expected = kind switch
+		{
+			ScriptSerializedFieldKind.GameObjectReference => "GameObject",
+			ScriptSerializedFieldKind.ComponentReference => "Component",
+			ScriptSerializedFieldKind.MeshReference => "Mesh",
+			ScriptSerializedFieldKind.MaterialReference => "Material",
+			ScriptSerializedFieldKind.TextureReference => "Texture",
+			ScriptSerializedFieldKind.ScriptableObjectReference => "ScriptableObject",
+			ScriptSerializedFieldKind.ShaderReference => "Shader",
+			ScriptSerializedFieldKind.ComputeShaderReference => "ComputeShader",
+			_ => throw new InvalidOperationException($"Unknown reference field '{path}'.")
+		};
+		if (reference.Kind != expected)
+			throw new InvalidOperationException($"Reference kind '{reference.Kind}' differs from '{expected}' on field '{path}'.");
+		if (kind is not (ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference) &&
+		    reference.Resource == null)
+			throw new InvalidOperationException($"Reference field '{path}' has no persistent resource binding.");
+		return reference;
+	}
+
+	private static void QueueReferenceRestore(object behaviour, ScriptFieldDescriptor descriptor,
+	                                          List<ReferencePayload?> references,
+	                                          Func<AssetReference, Type, ScriptableObject>? assetResolver)
 	{
 		if (!pendingReferences.TryGetValue(behaviour, out List<Action>? pending))
 		{
@@ -589,6 +686,27 @@ public static class ScriptFieldSchema
 					var handle = EngineApi.ResourceRequest<NativeHandle>(new { operation = "resource.restore", type = reference.Kind, data = reference.Resource });
 					if (reference.Kind == "Mesh") return Mesh.FromHandle(handle);
 					return elementType == typeof(MaterialAsset) ? MaterialAsset.FromBinding(reference.Resource.Value, handle) : Material.FromHandle(handle);
+				}
+				if (reference.Kind == "ScriptableObject")
+				{
+					if (reference.Resource == null) throw new InvalidOperationException("Asset reference is missing its identity.");
+					var identity = new AssetReference(reference.Resource.Value.GetProperty("guid").GetString()!,
+						reference.Resource.Value.GetProperty("localFileId").GetUInt64());
+					return assetResolver != null ? assetResolver(identity, elementType!) : ScriptableObjectRegistry.ResolveAsset(identity, elementType!);
+				}
+				if (reference.Kind == "Texture")
+				{
+					if (reference.Resource == null) throw new InvalidOperationException("Texture reference is missing its identity.");
+					var identity = new AssetReference(reference.Resource.Value.GetProperty("guid").GetString()!,
+						reference.Resource.Value.GetProperty("localFileId").GetUInt64());
+					return elementType == typeof(TextureAsset) ? TextureAsset.Load(identity) : Texture.Load(identity);
+				}
+				if (reference.Kind is "Shader" or "ComputeShader")
+				{
+					JsonElement identityValue = reference.Resource!.Value;
+					var identity = new AssetReference(identityValue.GetProperty("guid").GetString()!,
+						identityValue.GetProperty("localFileId").GetUInt64());
+					return reference.Kind == "Shader" ? (object)Shader.FromReference(identity) : ComputeShader.FromReference(identity);
 				}
 				if (reference.Kind == "GameObject")
 				{
@@ -626,8 +744,8 @@ public static class ScriptFieldSchema
 				descriptor.Field.SetValue(behaviour, Resolve(references[0]));
 			}
 		};
-		if (descriptor.Kind is ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference ||
-		    descriptor.ElementKind is ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference)
+		if (descriptor.Kind is ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference or ScriptSerializedFieldKind.TextureReference or ScriptSerializedFieldKind.ShaderReference or ScriptSerializedFieldKind.ComputeShaderReference ||
+		    descriptor.ElementKind is ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference or ScriptSerializedFieldKind.TextureReference or ScriptSerializedFieldKind.ShaderReference or ScriptSerializedFieldKind.ComputeShaderReference)
 		{
 			restore();
 		}
@@ -637,6 +755,52 @@ public static class ScriptFieldSchema
 	private static bool IsReferenceKind(ScriptSerializedFieldKind kind)
 	{
 		return kind is ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference or
-		       ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference;
+		       ScriptSerializedFieldKind.MeshReference or ScriptSerializedFieldKind.MaterialReference or
+		       ScriptSerializedFieldKind.ScriptableObjectReference or ScriptSerializedFieldKind.TextureReference or
+		       ScriptSerializedFieldKind.ShaderReference or ScriptSerializedFieldKind.ComputeShaderReference;
+	}
+
+	private static void ValidateAssetField(ScriptFieldDescriptor descriptor, object? value)
+	{
+		void Validate(object? item)
+		{
+			if (item is GameObject or Component)
+				throw new InvalidOperationException($"Persistent asset field '{descriptor.Name}' cannot reference a scene instance.");
+			if (item is ScriptableObject asset && !asset.IsPersistent)
+				throw new InvalidOperationException($"Persistent asset field '{descriptor.Name}' references an unsaved asset.");
+			if (item is Texture texture)
+			{
+				if (string.IsNullOrEmpty(texture.Reference.Guid))
+					throw new InvalidOperationException($"Persistent asset field '{descriptor.Name}' references an unsaved texture.");
+			}
+			else if (item is RenderResource resource)
+			{
+				JsonElement binding = EngineApi.ResourceRequest(new { operation = "resource.reference", handle = resource.Handle });
+				if (binding.GetProperty("kind").GetString() == "local")
+					throw new InvalidOperationException($"Persistent asset field '{descriptor.Name}' references a document-local resource.");
+			}
+		}
+		if (descriptor.Kind is ScriptSerializedFieldKind.Array or ScriptSerializedFieldKind.List && value is IEnumerable values)
+			foreach (object? item in values) Validate(item);
+		else Validate(value);
+	}
+
+	private static void ValidateAssetSerializedValue(JsonElement value)
+	{
+		if (value.ValueKind == JsonValueKind.Object)
+		{
+			if (value.TryGetProperty("$ursaReference", out JsonElement reference))
+			{
+				string kind = reference.GetProperty("Kind").GetString() ?? string.Empty;
+				if ((kind is "GameObject" or "Component") && reference.GetProperty("Id").GetString() != string.Empty)
+					throw new InvalidOperationException("A persistent asset cannot reference a scene instance.");
+				if (reference.TryGetProperty("Resource", out JsonElement resource) && resource.ValueKind == JsonValueKind.Object &&
+				    resource.TryGetProperty("kind", out JsonElement bindingKind) && bindingKind.GetString() == "local")
+					throw new InvalidOperationException("A persistent asset cannot reference a document-local resource.");
+			}
+			foreach (JsonProperty property in value.EnumerateObject()) ValidateAssetSerializedValue(property.Value);
+		}
+		else if (value.ValueKind == JsonValueKind.Array)
+			foreach (JsonElement item in value.EnumerateArray()) ValidateAssetSerializedValue(item);
 	}
 }

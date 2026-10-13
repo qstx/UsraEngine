@@ -75,7 +75,8 @@ Result<ResourceHeader> FinishHeader(ResourceHeader header, const String& where)
 	        ? header.version == resourceFormatVersion || header.version == materialResourceFormatVersion
 	    : header.kind == ResourceKind::Texture
 	        ? header.version == resourceFormatVersion || header.version == textureResourceFormatVersion
-	        : header.version == resourceFormatVersion;
+	    : header.kind == ResourceKind::Shader ? header.version == shaderResourceFormatVersion
+	                                          : header.version == resourceFormatVersion;
 	if (!supportedVersion)
 	{
 		return Result<ResourceHeader>::Failure("Unsupported resource version " +
