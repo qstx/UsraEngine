@@ -10,6 +10,7 @@ public abstract class ScriptableObject : IDisposable
 	private bool disposing;
 	private bool enabled;
 	private AssetReference? assetReference;
+	internal ulong ValidationRevision { get; private set; }
 
 	public bool IsValid => alive && ScriptableObjectRegistry.IsCurrentSession(sessionId);
 
@@ -107,6 +108,7 @@ public abstract class ScriptableObject : IDisposable
 	{
 		RequireValid();
 		OnValidate();
+		ValidationRevision = checked(ValidationRevision + 1);
 	}
 
 	internal void Release()

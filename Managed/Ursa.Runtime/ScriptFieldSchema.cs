@@ -258,10 +258,19 @@ public static class ScriptFieldSchema
 		bool mismatch = stored.Kind != descriptor.Kind.ToString() || stored.ElementKind != descriptor.ElementKind.ToString();
 		// Reference assignability is checked after stable identity resolution, so CLR renames remain compatible.
 		if (!IsReferenceKind(scalarKind) && scalarKind != ScriptSerializedFieldKind.Enumeration)
-			mismatch |= (collection ? stored.ElementTypeName : stored.TypeName) != scalar.FullName;
-		if (scalar.IsEnum) mismatch |= stored.EnumUnderlyingType != Enum.GetUnderlyingType(scalar).FullName;
+			mismatch |= ClrTypeName(collection ? stored.ElementTypeName : stored.TypeName) != scalar.FullName;
+		if (scalar.IsEnum) mismatch |= ClrTypeName(stored.EnumUnderlyingType) != Enum.GetUnderlyingType(scalar).FullName;
 		if (mismatch) throw new InvalidOperationException($"Incompatible serialized field type on '{owner.FullName}.{descriptor.Name}'.");
 	}
+
+	private static string ClrTypeName(string name) => name switch
+	{
+		"bool" => "System.Boolean", "sbyte" => "System.SByte", "byte" => "System.Byte",
+		"short" => "System.Int16", "ushort" => "System.UInt16", "int" => "System.Int32",
+		"uint" => "System.UInt32", "long" => "System.Int64", "ulong" => "System.UInt64",
+		"float" => "System.Single", "double" => "System.Double", "string" => "System.String",
+		_ => name
+	};
 
 	internal static void ResolvePendingReferences(object behaviour)
 	{

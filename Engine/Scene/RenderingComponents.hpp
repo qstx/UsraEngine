@@ -1,7 +1,8 @@
 #pragma once
 #include <Core/Types.hpp>
 #include <Core/Containers.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <Rendering/Scene/RenderObject.hpp>
+#include <Math/Camera.hpp>
 #include <Scene/Component.hpp>
 #include <Scene/Lighting.hpp>
 #include <Scene/MeshRendererComponent.hpp>
@@ -35,6 +36,6 @@ struct SceneRenderData
 	Mat4 viewProjection;
 	Vec3 cameraPosition{};
 	SceneLighting lighting;
-	Vector<ModelBoxInstance> boxes;
+	Vector<Rendering::RenderObject> objects;
 };
 } // namespace Ursa

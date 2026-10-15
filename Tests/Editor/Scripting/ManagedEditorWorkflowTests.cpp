@@ -1,6 +1,7 @@
 #include <Application/EditorApplication.hpp>
 #include <Assets/SceneDraft.hpp>
 #include <Core/StringInterop.hpp>
+#include <Scene/RenderingComponents.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Serialization/SerializedObject.hpp>
 #include <chrono>
@@ -58,6 +59,8 @@ protected:
 		auto document = Take(NewSceneDocument(path, ResourceKind::Scene, Project().components, Documents()->Session()));
 		draft = document->Payload<SceneDraft>();
 		owner = Take(draft->GetScene().CreateGameObject("Editor root"));
+		auto camera = Take(owner->AddComponent<CameraComponent>());
+		Done(draft->GetScene().SetActiveCamera(camera->Id()));
 		document->MarkDirty();
 		Done(Documents()->RequestOpen(std::move(document)));
 		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(90);
@@ -154,6 +157,24 @@ protected:
 					    "Unexpected Run clone: runtime=" + ToStdString(Take(runtimeOwner->Name())) + ", edit=" +
 					    ToStdString(Take(owner->Name())) + ", payload=" + ToStdString(script->SerializedPayload()));
 				}
+				if (runs == 0)
+				{
+					if (!changedDuringRun)
+					{
+						WriteSource(String(source) + "[Ursa.UrsaScriptType(\"workflow.added\")] public sealed class "
+						                             "Added : Ursa.Behaviour {}\n");
+						Expect(!CompileScripts(), "Run allowed an explicit script reload");
+						changedDuringRun = true;
+						deferredDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+						return {};
+					}
+					Expect(Project().componentEditors.FindType("Workflow.Added, Ursa.Game") == nullptr,
+					       "Run published source changes into the active editing catalog");
+					if (std::chrono::steady_clock::now() < deferredDeadline)
+					{
+						return {};
+					}
+				}
 				RequestPlayToggle();
 				phase = 5;
 			}
@@ -163,6 +184,10 @@ protected:
 			}
 			else if (phase == 5 && !RunningScene())
 			{
+				if (runs == 0 && Project().componentEditors.FindType("Workflow.Added, Ursa.Game") == nullptr)
+				{
+					return {};
+				}
 				Expect(Documents()->Current()->Dirty() && Take(owner->Name()) == "Editor root",
 				       "Stop lost the original editing document");
 				if (++runs < 3)
@@ -200,6 +225,8 @@ private:
 	UInt32 runs = 0;
 	UInt32 responsiveFrames = 0;
 	bool completed = false;
+	bool changedDuringRun = false;
+	std::chrono::steady_clock::time_point deferredDeadline;
 };
 } // namespace
 

@@ -40,7 +40,7 @@ Result<void> ResourceIndex::Rebuild()
 	bool catalogRead = false;
 	for (const String& scheme : filesystem.Schemes())
 	{
-		if (scheme == userDataScheme || scheme == editorLibraryScheme)
+		if (scheme == userDataScheme || scheme == editorLibraryScheme || scheme == projectSettingsScheme)
 		{
 			continue;
 		}

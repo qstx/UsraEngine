@@ -1,5 +1,7 @@
 #include <Rendering/Scene/RenderScene.hpp>
 #include <Animation/AnimatorComponent.hpp>
+#include <Shader/ShaderBuiltins.hpp>
+#include <Core/StringInterop.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -80,7 +82,8 @@ Bounds WorldBounds(const MeshSnapshot& snapshot, const Vector<Mat4>& palette, co
 }
 } // namespace
 
-Result<void> RenderScene::Capture(const Scene& scene, Float32 aspect)
+Result<void> RenderScene::Capture(const Scene& scene, Float32 aspect, std::optional<CameraType> cameraFilter,
+                                  std::optional<CameraData> cameraOverride, const BuiltinShaderResolver& resolveBuiltin)
 {
 	valid = false;
 	objectCount = 0;
@@ -102,13 +105,32 @@ Result<void> RenderScene::Capture(const Scene& scene, Float32 aspect)
 			{
 				continue;
 			}
-			auto result = Collect(scene, root, aspect);
+			auto result = Collect(scene, root, aspect, resolveBuiltin);
 			if (!result)
 			{
 				objects.clear();
 				cameras.clear();
 				return result;
 			}
+		}
+		if (cameraFilter)
+		{
+			cameras.erase(std::remove_if(cameras.begin(), cameras.end(), [&](const CameraData& camera)
+			                             { return camera.settings.type != *cameraFilter; }),
+			              cameras.end());
+		}
+		if (cameraOverride)
+		{
+			auto settingsValid = cameraOverride->settings.Validate();
+			if (!settingsValid || !cameraOverride->identity ||
+			    (cameraFilter && cameraOverride->settings.type != *cameraFilter) ||
+			    std::any_of(cameras.begin(), cameras.end(),
+			                [&](const CameraData& camera) { return camera.identity == cameraOverride->identity; }))
+			{
+				return Result<void>::Failure(settingsValid ? "RenderScene camera override is invalid or duplicated"
+				                                           : settingsValid.error);
+			}
+			cameras.push_back(*cameraOverride);
 		}
 		std::sort(cameras.begin(), cameras.end(),
 		          [](const CameraData& a, const CameraData& b)
@@ -118,10 +140,17 @@ Result<void> RenderScene::Capture(const Scene& scene, Float32 aspect)
 			                     : std::lexicographical_compare(a.identity.bytes.begin(), a.identity.bytes.end(),
 			                                                    b.identity.bytes.begin(), b.identity.bytes.end());
 		          });
-		if (lighting.point.size() > SceneLighting::maxPointLights ||
-		    lighting.directional.size() > SceneLighting::maxDirectionalLights)
+		if (lighting.point.size() > SceneLighting::maxPointLights)
 		{
-			return Result<void>::Failure("RenderScene light count exceeds the supported lighting budget");
+			return Result<void>::Failure(
+			    "Active point light count " + ToUrsaString(std::to_string(lighting.point.size())) +
+			    " exceeds renderer capacity " + ToUrsaString(std::to_string(SceneLighting::maxPointLights)));
+		}
+		if (lighting.directional.size() > SceneLighting::maxDirectionalLights)
+		{
+			return Result<void>::Failure(
+			    "Active directional light count " + ToUrsaString(std::to_string(lighting.directional.size())) +
+			    " exceeds renderer capacity " + ToUrsaString(std::to_string(SceneLighting::maxDirectionalLights)));
 		}
 		valid = true;
 		objects.resize(objectCount);
@@ -135,7 +164,8 @@ Result<void> RenderScene::Capture(const Scene& scene, Float32 aspect)
 	}
 }
 
-Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& object, Float32 aspect)
+Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& object, Float32 aspect,
+                                  const BuiltinShaderResolver& resolveBuiltin)
 {
 	auto active = object->ActiveInHierarchy();
 	if (!active || !active.value)
@@ -270,6 +300,17 @@ Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& obj
 					output.meshSnapshot = snapshot;
 					output.material = material;
 					output.shader = material ? material->Shader() : nullptr;
+					if (resolveBuiltin && output.shader && output.shader->subShaders.empty() &&
+					    (output.shader->id == Shader::BuiltinUnlitShaderId() ||
+					     output.shader->id == Shader::BuiltinPbrShaderId()))
+					{
+						auto resolved = resolveBuiltin(output.shader->id);
+						if (!resolved)
+						{
+							return Result<void>::Failure(resolved.error);
+						}
+						output.shader = std::move(resolved.value);
+					}
 					output.materialVersion = material ? material->Version() : 0;
 					output.parameters = material ? material->Parameters() : MaterialParameters{};
 					output.jointPalette = palette;
@@ -290,7 +331,7 @@ Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& obj
 	}
 	for (const auto& child : object->children)
 	{
-		auto collected = Collect(scene, child, aspect);
+		auto collected = Collect(scene, child, aspect, resolveBuiltin);
 		if (!collected)
 		{
 			return collected;

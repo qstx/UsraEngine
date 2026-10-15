@@ -141,7 +141,7 @@ int main()
 			ComponentLoadContext context(*session);
 			context.Provide(registry);
 			auto restored = Take(LoadSceneResource(*filesystem, Path("prj:Scene.ursascene"), registry, context));
-			Expect(Take(restored.scene->CollectRenderData(1)).boxes.size() == 1,
+			Expect(Take(restored.scene->CollectRenderData(1)).objects.size() == 1,
 			       "Scene graph did not load through VFS");
 			auto prefab = Take(LoadPrefabAssetResource(*filesystem, Path("prj:Box.ursaprefab"), registry, context));
 			Expect(prefab.Id() == prefabId && prefab.Root()->FindComponent<MeshRendererComponent>(),
@@ -159,7 +159,7 @@ int main()
 			Done(restored.scene->Serialize(writer));
 			Scene binaryScene;
 			Done(binaryScene.Deserialize(Take(BinaryArchive::Decode(Take(BinaryArchive::Encode(writer)))), context));
-			Expect(Take(binaryScene.CollectRenderData(1)).boxes.size() == 1,
+			Expect(Take(binaryScene.CollectRenderData(1)).objects.size() == 1,
 			       "Serializable Scene binary round trip failed");
 			auto active = std::move(restored.scene);
 			auto previous = active.get();

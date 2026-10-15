@@ -27,6 +27,6 @@ ursa_finalize_test_directory()
 
 if(TEST UrsaManagedEditorWorkflowTests)
   set_tests_properties(UrsaManagedEditorWorkflowTests PROPERTIES
-    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/ManagedWorkflowUser")
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/ManagedWorkflowUser;TEMP=${URSA_BINARY_ROOT}/temp;TMP=${URSA_BINARY_ROOT}/temp")
   add_dependencies(UrsaManagedEditorWorkflowTests UrsaManagedTestAssemblies)
 endif()

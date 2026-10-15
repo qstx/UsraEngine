@@ -5,6 +5,9 @@
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../Docs/Examples/ClassicRendering.cs" Link="ClassicRendering.cs" />
+    <Compile Include="../../../Docs/Examples/ProjectPipeline.cs" Link="ProjectPipeline.cs" />
+    <ProjectReference Include="../../../Managed/Ursa.Rendering/Ursa.Rendering.csproj" />
     <ProjectReference Include="../../../Managed/Ursa.Runtime/Ursa.Runtime.csproj" />
     <ProjectReference Include="../Ursa.SessionDependency/Ursa.SessionDependency.csproj" />
   </ItemGroup>

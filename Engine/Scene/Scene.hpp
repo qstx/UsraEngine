@@ -277,8 +277,6 @@ private:
 
 	void CollectComponents(ObjectHandle object, TemporaryVector<ComponentId>& out) const;
 
-	void CollectRendering(ObjectHandle object, SceneRenderData& out) const;
-
 	Result<SceneRenderData> CollectWithCamera(const Mat4& viewProjection, Vec3 cameraPosition) const;
 
 	void DestroySubtree(ObjectHandle object);

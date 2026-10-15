@@ -1,5 +1,5 @@
 #include <Core/StringInterop.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Shader/ShaderBuiltins.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -57,16 +57,17 @@ int main()
 		description.validation = true;
 #endif
 		auto device = Take(CreateDevice(description));
-		auto renderer = Take(Renderer3D::Create(device));
+		auto renderer = Take(Test::SceneRenderer::Create(device));
 		auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 		Done(material->SetShaderAsset(shader));
 		Done(material->SetPropertyValue("_BaseColor", *shader,
 		                                MaterialPropertyValue::ColorValue({0.1f, 0.8f, 0.2f, 1.0f})));
 		auto color = Take(device->CreateTexture(
 		    {64, 64, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-		Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {}, material}};
-		Done(Take(renderer->RenderOffscreenModels(color, Mat4::Identity(), boxes))->Wait());
-		auto readback = Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Memory::Readback}));
+		Vector<Test::MeshDraw> boxes{{Mat4::Identity(), {}, material}};
+		Done(Take(renderer->DrawOffscreen(color, Mat4::Identity(), boxes))->Wait());
+		auto readback =
+		    Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
 		auto command = Take(device->CreateCommandList());
 		Done(command->Begin());
 		Done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));

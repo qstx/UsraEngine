@@ -67,9 +67,9 @@ int main(int argc, char** argv)
 		else if (argument == "--view" && index + 1 < argc)
 		{
 			const Ursa::String view = argv[++index];
-			if (view != "Scene" && view != "Game" && view != "Material Preview")
+			if (view != "Scene" && view != "Game" && view != "Material Preview" && view != "Inspector")
 			{
-				std::cerr << "--view must be Scene, Game or Material Preview\n";
+				std::cerr << "--view must be Scene, Game, Material Preview or Inspector\n";
 				return 2;
 			}
 			startupWindow = view;
@@ -84,7 +84,7 @@ int main(int argc, char** argv)
 	if (projectRoot.empty())
 	{
 		std::cerr << "Usage: UrsaEditor --project <project-directory> [--scene <relative-scene-path>] "
-		             "[--asset <asset path>] [--view <Scene|Game|Material Preview>] [--hidden] [--frames N] "
+		             "[--asset <asset path>] [--view <Scene|Game|Material Preview|Inspector>] [--hidden] [--frames N] "
 		             "[--play] [--capture <output.png>] [--capture-frame N]\n";
 		return 2;
 	}

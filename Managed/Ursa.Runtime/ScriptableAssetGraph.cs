@@ -122,6 +122,19 @@ internal sealed class ScriptableAssetGraph : IDisposable
 		return current.ToJsonString();
 	}
 
+	internal IReadOnlyList<ScriptableAssetData> Capture()
+	{
+		var result = new List<ScriptableAssetData>(descriptions.Count);
+		foreach (var description in descriptions.Values)
+			result.Add(description with { Payload = Serialize(description.Reference) });
+		return result;
+	}
+
+	internal void ValidateFields()
+	{
+		foreach (ScriptableObject instance in owned) instance.ValidateFields();
+	}
+
 	public void Dispose()
 	{
 		ScriptableObjectRegistry.RequireThread();

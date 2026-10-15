@@ -33,28 +33,28 @@ int main()
 			RenderCommandRecordHeader header{static_cast<RenderCommandOpcode>(opcode), size};
 			std::memcpy(bytes.data() + 16, &header, sizeof(header));
 		};
-		batch(1, 0, 16);
+		batch(renderCommandProtocolVersion, 0, 16);
 		Expect(bool(ValidateRenderCommandBatch(bytes.data(), 16)), "Empty batch rejected");
-		batch(1, 1, 32);
+		batch(renderCommandProtocolVersion, 1, 32);
 		record(1, 16);
 		Expect(bool(ValidateRenderCommandBatch(bytes.data(), 32)), "Valid batch rejected");
-		batch(1, 1, 72);
+		batch(renderCommandProtocolVersion, 1, 72);
 		record(13, 56);
 		const auto copyResult = ValidateRenderCommandBatch(bytes.data(), 72);
 		Expect(bool(copyResult), copyResult.error.c_str());
 		Expect(!ValidateRenderCommandBatch(nullptr, 32) && !ValidateRenderCommandBatch(bytes.data(), 15),
 		       "Invalid range accepted");
-		batch(2, 1, 32);
+		batch(renderCommandProtocolVersion + 1, 1, 32);
 		Expect(!ValidateRenderCommandBatch(bytes.data(), 32), "Unknown version accepted");
-		batch(1, 2, 32);
+		batch(renderCommandProtocolVersion, 2, 32);
 		Expect(!ValidateRenderCommandBatch(bytes.data(), 32), "Truncated command accepted");
-		batch(1, 1, 32);
+		batch(renderCommandProtocolVersion, 1, 32);
 		for (UInt32 size : {0u, 7u, 9u, 24u, 0xfffffff8u})
 		{
 			record(1, size);
 			Expect(!ValidateRenderCommandBatch(bytes.data(), 32), "Invalid record size accepted");
 		}
-		for (UInt32 opcode : {0u, 14u, 0xffffffffu})
+		for (UInt32 opcode : {0u, 17u, 0xffffffffu})
 		{
 			record(opcode, 16);
 			Expect(!ValidateRenderCommandBatch(bytes.data(), 32), "Unknown opcode accepted");

@@ -1714,6 +1714,47 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 		    });
 	}
 
+	Result<void> CopyTexture(const TexturePtr& source, const TexturePtr& destination) override
+	{
+		return GuardedVoid(
+		    [&]
+		    {
+			    Recording(true);
+			    auto src = checked<TextureImpl>(source, ctx, "source texture");
+			    auto dst = checked<TextureImpl>(destination, ctx, "destination texture");
+			    Require(src != dst, "Texture copies cannot read and write the same texture");
+			    Require(Has(src->desc.usage, TextureUsage::TransferSource) &&
+			                Has(dst->desc.usage, TextureUsage::TransferDestination),
+			            "Texture copy transfer usage missing");
+			    Require(src->desc.width == dst->desc.width && src->desc.height == dst->desc.height &&
+			                src->desc.format == dst->desc.format && src->desc.mipLevels == dst->desc.mipLevels,
+			            "Texture copy dimensions, format and mip count must match");
+			    Vector<VkImageCopy> regions;
+			    for (UInt32 mip = 0; mip < src->desc.mipLevels; ++mip)
+			    {
+				    VkImageCopy region{};
+				    region.srcSubresource.aspectMask =
+				        IsDepthFormat(src->desc.format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+				    region.srcSubresource.mipLevel = mip;
+				    region.srcSubresource.layerCount = 1;
+				    region.dstSubresource = region.srcSubresource;
+				    region.extent = {(std::max)(1u, src->desc.width >> mip), (std::max)(1u, src->desc.height >> mip),
+				                     1};
+				    regions.push_back(region);
+				    if (src->desc.format == Format::D32FloatS8Uint)
+				    {
+					    region.srcSubresource.aspectMask = region.dstSubresource.aspectMask =
+					        VK_IMAGE_ASPECT_STENCIL_BIT;
+					    regions.push_back(region);
+				    }
+			    }
+			    vkCmdCopyImage(command, src->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->image,
+			                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, UInt32(regions.size()), regions.data());
+			    keepAlive.push_back(src);
+			    keepAlive.push_back(dst);
+		    });
+	}
+
 	Result<void> BeginRendering(const RenderTarget& target) override
 	{
 		return GuardedVoid(
@@ -1808,15 +1849,8 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 				    value.depthStencil = {depthDescription.clearDepth, depthDescription.clearStencil};
 				    clears.push_back(value);
 			    }
-			    for (const auto& [index, group] : boundGroups)
-			    {
-				    for (auto* sampled : group->sampledTextures)
-				    {
-					    Require(std::none_of(attachments.begin(), attachments.end(),
-					                         [&](const auto& attachment) { return attachment.get() == sampled; }),
-					            "A render attachment cannot also be sampled in the same pass");
-				    }
-			    }
+			    // A new graphics pass has no descriptor bindings until its pipeline/groups are bound.
+			    boundGroups.clear();
 			    transientPasses.reserve(transientPasses.size() + 1);
 			    keepAlive.reserve(keepAlive.size() + attachments.size());
 			    const auto [pass, passCached] =
@@ -1843,6 +1877,15 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 			    beginInfo.renderPass = pass;
 			    beginInfo.framebuffer = framebuffer;
 			    beginInfo.renderArea.extent = selectedExtent;
+			    if (target.renderArea)
+			    {
+				    const auto& area = *target.renderArea;
+				    Require(area.x >= 0 && area.y >= 0 && area.width && area.height &&
+				                UInt64(area.x) + area.width <= selectedExtent.width &&
+				                UInt64(area.y) + area.height <= selectedExtent.height,
+				            "Render area exceeds attachment bounds");
+				    beginInfo.renderArea = {{area.x, area.y}, {area.width, area.height}};
+			    }
 			    beginInfo.clearValueCount = UInt32(clears.size());
 			    beginInfo.pClearValues = clears.data();
 			    vkCmdBeginRenderPass(command, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
@@ -1880,6 +1923,7 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 			    rendering = false;
 			    activeAttachments.clear();
 			    boundPipeline.reset();
+			    boundGroups.clear();
 		    });
 	}
 
@@ -2077,6 +2121,10 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 			    Recording(true);
 			    Require(boundPipeline && boundPipeline->compute, "Dispatch requires a compute pipeline");
 			    Require(x && y && z, "Dispatch dimensions must be positive");
+			    Require(x <= ctx->properties.limits.maxComputeWorkGroupCount[0] &&
+			                y <= ctx->properties.limits.maxComputeWorkGroupCount[1] &&
+			                z <= ctx->properties.limits.maxComputeWorkGroupCount[2],
+			            "Dispatch dimensions exceed device limits");
 #if defined(URSA_ENABLE_TRACY)
 			    if (ctx->tracyGpu)
 			    {
@@ -2144,6 +2192,12 @@ struct SwapchainImpl final : Swapchain
 	Array<FencePtr, 2> slotFences;
 	Ursa::UInt32 slot = 0, imageIndex = 0;
 	bool acquired = false, submitted = false, recreate = false;
+	SwapchainStatistics statistics;
+
+	SwapchainStatistics Statistics() const override
+	{
+		return statistics;
+	}
 
 	Ursa::Rhi::Format Format() const override
 	{
@@ -2281,6 +2335,7 @@ struct SwapchainImpl final : Swapchain
 		acquired = false;
 		submitted = false;
 		recreate = false;
+		++statistics.rebuilds;
 	}
 
 	Result<AcquiredImage> Acquire() override
@@ -2320,6 +2375,7 @@ struct SwapchainImpl final : Swapchain
 			                ")");
 			    acquired = true;
 			    submitted = false;
+			    ++statistics.acquisitions;
 			    return AcquiredImage{textures[imageIndex],
 			                         state->presented[imageIndex] ? ResourceState::Present : ResourceState::Undefined};
 		    });
@@ -2349,6 +2405,7 @@ struct SwapchainImpl final : Swapchain
 			    recreate = result != VK_SUCCESS;
 			    acquired = submitted = false;
 			    slot = (slot + 1) % 2;
+			    ++statistics.presentations;
 		    });
 	}
 };
@@ -2383,7 +2440,12 @@ struct DeviceImpl final : Device
 		        ctx->properties.limits.maxBoundDescriptorSets,
 		        ctx->properties.limits.maxUniformBufferRange,
 		        ctx->properties.limits.minUniformBufferOffsetAlignment,
-		        ctx->properties.limits.minStorageBufferOffsetAlignment};
+		        ctx->properties.limits.minStorageBufferOffsetAlignment,
+		        {ctx->properties.limits.maxComputeWorkGroupCount[0], ctx->properties.limits.maxComputeWorkGroupCount[1],
+		         ctx->properties.limits.maxComputeWorkGroupCount[2]},
+		        {ctx->properties.limits.maxComputeWorkGroupSize[0], ctx->properties.limits.maxComputeWorkGroupSize[1],
+		         ctx->properties.limits.maxComputeWorkGroupSize[2]},
+		        ctx->properties.limits.maxComputeWorkGroupInvocations};
 	}
 
 	Result<FormatCapabilities> QueryFormat(Format format) const override

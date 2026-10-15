@@ -4,7 +4,7 @@
 #include <Animation/AnimatorComponent.hpp>
 #include <Core/StringInterop.hpp>
 #include <Math/Camera.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <Serialization/ResourceId.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Serialization/SceneResource.hpp>
@@ -419,7 +419,7 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	deviceDescription.validation = true;
 #endif
 	auto device = Take(Rhi::CreateDevice(deviceDescription));
-	auto renderer = Take(Renderer3D::Create(device));
+	auto renderer = Take(Test::SceneRenderer::Create(device));
 	auto color = Take(device->CreateTexture(
 	    {64, 64, Rhi::Format::RgbA8Unorm, Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource}));
 	Scene scene;
@@ -447,14 +447,14 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	loadContext.Provide(componentRegistry);
 	auto loadedScene = Take(LoadSceneResource(filesystem, scenePath, componentRegistry, loadContext));
 	const auto renderData = Take(loadedScene.scene->CollectRenderData(1.0f));
-	Expect(renderData.boxes.size() == 1 && renderData.boxes[0].mesh == runtimeMesh &&
-	           renderData.boxes[0].material == Take(session->LoadMaterial(imported.value.guid, materialId)) &&
-	           std::abs(renderData.boxes[0].model.At(0, 3) - meshTransform.position.x) < 0.001f,
+	Expect(renderData.objects.size() == 1 && renderData.objects[0].mesh == runtimeMesh &&
+	           renderData.objects[0].material == Take(session->LoadMaterial(imported.value.guid, materialId)) &&
+	           std::abs(renderData.objects[0].world.At(0, 3) - meshTransform.position.x) < 0.001f,
 	       "Reloaded MeshRenderer lost its sub-asset, material, or GameObject world transform");
-	Vector<ModelBoxInstance> gpuDraws = renderData.boxes;
+	Vector<Rendering::RenderObject> gpuDraws = renderData.objects;
 	gpuDraws[0].material.reset();
-	auto rendered = Take(renderer->RenderOffscreenModels(color, renderData.viewProjection, gpuDraws,
-	                                                     renderData.lighting, renderData.cameraPosition));
+	auto rendered = Take(renderer->DrawOffscreen(color, renderData.viewProjection, gpuDraws, renderData.lighting,
+	                                             renderData.cameraPosition));
 	Done(rendered->Wait());
 	auto readback =
 	    Take(device->CreateBuffer({64 * 64 * 4, Rhi::BufferUsage::TransferDestination, Rhi::Memory::Readback}));
@@ -782,7 +782,7 @@ void TestSkeletalAnimationImport(const std::filesystem::path& root)
 	deviceDescription.validation = true;
 #endif
 	auto device = Take(Rhi::CreateDevice(deviceDescription));
-	auto renderer = Take(Renderer3D::Create(device));
+	auto renderer = Take(Test::SceneRenderer::Create(device));
 	Camera camera;
 	camera.position = {0.0f, 0.0f, 10.0f};
 	camera.target = {};
@@ -793,8 +793,8 @@ void TestSkeletalAnimationImport(const std::filesystem::path& root)
 		const auto frame = Take(draft->GetScene().CollectPreviewRenderData(camera, 1.0f));
 		const auto color = Take(device->CreateTexture(
 		    {96, 96, Rhi::Format::RgbA8Unorm, Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource}));
-		Done(Take(renderer->RenderOffscreenModels(color, frame.viewProjection, frame.boxes, frame.lighting,
-		                                          frame.cameraPosition))
+		Done(Take(renderer->DrawOffscreen(color, frame.viewProjection, frame.objects, frame.lighting,
+		                                  frame.cameraPosition))
 		         ->Wait());
 		const auto readback =
 		    Take(device->CreateBuffer({96 * 96 * 4, Rhi::BufferUsage::TransferDestination, Rhi::Memory::Readback}));

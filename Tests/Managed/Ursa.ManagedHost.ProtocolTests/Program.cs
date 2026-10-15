@@ -34,8 +34,11 @@ internal static unsafe class Program
 		internal int renders;
 		internal int disposals;
 		internal int cameraCount;
-		internal System.Collections.Generic.List<CameraComponent>? receivedCameras;
+		internal System.Collections.Generic.List<Ursa.Rendering.Camera>? receivedCameras;
 		internal bool failFactory;
+		internal bool failDispose;
+		internal bool failRender;
+		internal Ursa.Rendering.RenderPipelineAsset? switchDuringRender;
 
 		protected override Ursa.Rendering.RenderPipeline CreatePipeline()
 		{
@@ -49,11 +52,18 @@ internal static unsafe class Program
 		private readonly PipelineProbeAsset owner;
 		internal PipelineProbe(PipelineProbeAsset selected) => owner = selected;
 		public override void Render(Ursa.Rendering.ScriptableRenderContext context,
-			System.Collections.Generic.List<CameraComponent> cameras)
+			System.Collections.Generic.List<Ursa.Rendering.Camera> cameras)
 		{
 			++owner.renders;
+			if (owner.switchDuringRender != null)
+			{
+				Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(owner.switchDuringRender);
+				Expect(ReferenceEquals(Ursa.Rendering.RenderPipelineManager.ActiveAsset, owner) && owner.disposals == 0,
+				       "A pipeline switch disposed the active instance inside its Render callback");
+			}
+			if (owner.failRender) throw new InvalidOperationException("pipeline render probe");
 			owner.receivedCameras = cameras;
-			foreach (CameraComponent camera in cameras)
+			foreach (Ursa.Rendering.Camera camera in cameras)
 			{
 				++owner.cameraCount;
 				Ursa.Rendering.RenderPipelineManager.BeginCamera(context, camera);
@@ -61,7 +71,11 @@ internal static unsafe class Program
 				finally { Ursa.Rendering.RenderPipelineManager.EndCamera(context, camera); }
 			}
 		}
-		protected override void Dispose(bool disposing) => ++owner.disposals;
+		protected override void Dispose(bool disposing)
+		{
+			++owner.disposals;
+			if (owner.failDispose) throw new InvalidOperationException("pipeline dispose probe");
+		}
 	}
 
 	private static readonly System.Collections.Generic.Dictionary<uint, FakeObject> fakeObjects = new();
@@ -102,7 +116,7 @@ internal static unsafe class Program
 		if (token == null || tokenSize != 24 || batch == null || batchSize < 16 || batchSize > 64 * 1024 * 1024)
 			return 1;
 		var bytes = new ReadOnlySpan<byte>(batch, checked((int)batchSize));
-		if (BinaryPrimitives.ReadUInt32LittleEndian(bytes) != 1 ||
+		if (BinaryPrimitives.ReadUInt32LittleEndian(bytes) != Ursa.Rendering.RenderCommandProtocol.version ||
 		    BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]) != 16 ||
 		    BinaryPrimitives.ReadUInt32LittleEndian(bytes[12..]) != batchSize)
 			return 1;
@@ -548,10 +562,16 @@ internal static unsafe class Program
 			object response = request.GetProperty("operation").GetString() switch
 			{
 				"render.context.begin" => new { value = (object)new { context = new { sessionId = ++renderSessionIdentity, frameId = request.GetProperty("frameId").GetUInt64(), index = 1U, generation = 1U } } },
-				"render.camera.setup" => new { value = (object?)null },
+				"render.camera.setup" => new { value = (object)new { width = 64u, height = 64u,
+					settings = new { type = 0u, depth = 0f, clearFlags = 0u, cullingMask = uint.MaxValue,
+						background = new float[] { 0.05f, 0.05f, 0.05f, 1 }, viewport = new float[] { 0, 0, 1, 1 } } } },
 				"render.cull" => new { value = (object)new { context = request.GetProperty("context"), index = 0U, generation = 1U } },
 				"render.rendererList.create" => new { value = (object)new { context = request.GetProperty("context"), index = 0U, generation = 1U } },
 				"render.context.end" => new { value = (object?)null },
+				"render.context.submit" => new { value = (object?)null },
+				"render.context.abort" => new { value = (object?)null },
+				"computeShader.findKernel" when request.GetProperty("name").GetString() == "Fill" => new { value = (object)0 },
+				"computeShader.threadGroup" => new { value = (object)new uint[] {8, 8, 1} },
 				"material.load" when request.GetProperty("guid").GetString() == fakeMaterialGuid => new { value = (object)new { sessionId = 1UL, index = 202U, generation = 1U, kind = 5U, reserved = 0U } },
 				"resource.valid" => new { value = (object)(request.GetProperty("handle").GetProperty("index").GetUInt32() is 201U or 202U) },
 				_ => (object)new { error = "Unsupported protocol fixture resource request" }
@@ -582,6 +602,16 @@ internal static unsafe class Program
 		var filtering = new Ursa.Rendering.FilteringSettings();
 		using var context = new Ursa.Rendering.ScriptableRenderContext(1.0f);
 		context.SetupCameraProperties(camera);
+		var cameraView = Ursa.Rendering.Camera.FromComponent(camera);
+		Expect(ReferenceEquals(cameraView, Ursa.Rendering.Camera.FromComponent(camera)) && cameraView.PixelWidth == 64,
+		       "Camera wrappers were not reused or did not receive captured target dimensions");
+		ulong previousCameraSession = BehaviourRegistry.currentSession;
+		BehaviourRegistry.currentSession = 99999;
+		bool cameraSessionRejected = false;
+		try { context.SetupCameraProperties(cameraView); }
+		catch (ObjectDisposedException) { cameraSessionRejected = true; }
+		finally { BehaviourRegistry.currentSession = previousCameraSession; }
+		Expect(cameraSessionRejected, "A camera wrapper was accepted in another script session");
 		var culling = context.Cull(camera);
 		var list = context.CreateRendererList(culling, drawing, filtering);
 		Expect(list.Generation != 0, "Managed ScriptableRenderContext did not create a RendererList");
@@ -697,10 +727,50 @@ internal static unsafe class Program
 		}
 		commands.Clear();
 		commands.GetTemporaryTarget(88, descriptor);
-		bool unreleasedTemporaryRejected = false;
-		try { commands.Execute(context); }
-		catch (InvalidOperationException) { unreleasedTemporaryRejected = true; }
-		Expect(unreleasedTemporaryRejected, "CommandBuffer executed with an unreleased temporary target");
+		commands.Execute(context);
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(submittedRenderBatches[^1].AsSpan(8)) == 1,
+		       "Temporary target creation could not be delivered separately from its use");
+		commands.Clear();
+		commands.SetGlobalTexture("_Source", (Ursa.Rendering.RenderTargetIdentifier)88u);
+		commands.SetGlobalInt("_Mode", 3);
+		commands.SetGlobalMatrix("_Transform", new float[] {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+		commands.SetGlobalBuffer("_Data", sourceBuffer);
+		commands.Blit(88u, Ursa.Rendering.RenderTargetIdentifier.CameraTarget, blitMaterial!);
+		commands.SetRenderTarget(Ursa.Rendering.RenderTargetIdentifier.CameraTarget);
+		commands.SetRenderTargets(new Ursa.Rendering.RenderTargetIdentifier[] {sourceTexture, destinationTexture});
+		commands.DrawFullscreen(blitMaterial!);
+		commands.CopyTexture((Ursa.Rendering.RenderTargetIdentifier)sourceTexture,
+		                     (Ursa.Rendering.RenderTargetIdentifier)destinationTexture);
+		commands.ReleaseTemporaryTarget(88);
+		commands.Execute(context);
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(submittedRenderBatches[^1].AsSpan(8)) == 10,
+		       "Extended target/global/fullscreen commands were not delivered");
+		commands.Clear();
+		var compute = ComputeShader.FromReference(new AssetReference("12345678-1234-5678-9012-345678901234"));
+		int kernel = compute.FindKernel("Fill");
+		Expect(kernel == 0 && compute.GetKernelThreadGroupSizes(kernel) == (8u, 8u, 1u),
+		       "ComputeShader lookup did not preserve the imported kernel metadata");
+		commands.SetComputeFloat(compute, kernel, "_Intensity", 0.75f);
+		commands.SetComputeInt(compute, kernel, "_Bias", 7);
+		commands.SetComputeVector(compute, kernel, "_Color", new Vector4(0.5f, 0.25f, 0.75f, 1));
+		commands.SetComputeMatrix(compute, kernel, "_Matrix", new float[] {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+		commands.SetComputeTexture(compute, kernel, "_Output", sourceTexture);
+		commands.SetComputeBuffer(compute, kernel, "_Data", sourceBuffer);
+		commands.DispatchCompute(compute, kernel, 1);
+		commands.Execute(context);
+		byte[] computeBatch = submittedRenderBatches[^1];
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(computeBatch.AsSpan(8)) == 7 &&
+		           BinaryPrimitives.ReadUInt32LittleEndian(computeBatch.AsSpan(16)) == 16 &&
+		           computeBatch[24] == 0x12 && computeBatch[25] == 0x34 && computeBatch[26] == 0x56 && computeBatch[27] == 0x78,
+		       "Compute commands lost their persistent identity, parameter framing or GUID byte order");
+		bool invalidComputeRejected = false;
+		try { commands.DispatchCompute(compute, -1, 1); }
+		catch (ArgumentOutOfRangeException) { invalidComputeRejected = true; }
+		Expect(invalidComputeRejected, "Compute dispatch accepted a negative kernel index");
+		invalidComputeRejected = false;
+		try { commands.DispatchCompute(compute, kernel, 0); }
+		catch (ArgumentOutOfRangeException) { invalidComputeRejected = true; }
+		Expect(invalidComputeRejected, "Compute dispatch accepted an empty group range");
 		commands.Clear();
 		commands.Dispose();
 		bool disposedRejected = false;
@@ -722,11 +792,20 @@ internal static unsafe class Program
 		       "Framework Forward pipeline type did not expose its stable identity");
 		var first = Ursa.ScriptableObject.CreateInstance<PipelineProbeAsset>();
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(first);
+		Expect(Ursa.Rendering.RenderPipelineManager.ActivePipeline == null,
+		       "A pipeline request created an instance before a render boundary");
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
 		var second = Ursa.ScriptableObject.CreateInstance<PipelineProbeAsset>();
 		second.failFactory = true;
 		bool factoryRejected = false;
-		try { Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(second); }
-		catch (InvalidOperationException) { factoryRejected = true; }
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(second);
+		try { Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges(); }
+		catch (InvalidOperationException error)
+		{
+			factoryRejected = error.Message.Contains(nameof(PipelineProbeAsset)) &&
+			                  error.Message.Contains("CreatePipeline") &&
+			                  error.InnerException?.Message == "pipeline factory probe";
+		}
 		Expect(factoryRejected && ReferenceEquals(Ursa.Rendering.RenderPipelineManager.ActiveAsset, first) && first.disposals == 0,
 		       "Failed pipeline candidate replaced or disposed the active pipeline");
 		int began = 0, ended = 0, camerasBegan = 0, camerasEnded = 0;
@@ -734,7 +813,7 @@ internal static unsafe class Program
 		Ursa.Rendering.RenderPipelineManager.EndContextRendering += _ => ++ended;
 		Ursa.Rendering.RenderPipelineManager.BeginCameraRendering += (_, _) => ++camerasBegan;
 		Ursa.Rendering.RenderPipelineManager.EndCameraRendering += (_, _) => ++camerasEnded;
-		var cameraList = new System.Collections.Generic.List<CameraComponent>
+		var cameraList = new System.Collections.Generic.List<Ursa.Rendering.Camera>
 		{
 			GameObject.Create("Pipeline Camera").AddComponent<CameraComponent>()
 		};
@@ -743,19 +822,126 @@ internal static unsafe class Program
 		       first.cameraCount == 1 && ReferenceEquals(first.receivedCameras, cameraList),
 		       "Pipeline manager did not preserve cameras or pair context/camera events around Render");
 		Ursa.Rendering.RenderPipeline previousPipeline = Ursa.Rendering.RenderPipelineManager.ActivePipeline!;
+		second.ValidateFields();
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+		Expect(ReferenceEquals(Ursa.Rendering.RenderPipelineManager.ActivePipeline, previousPipeline),
+		       "Validating a non-active asset rebuilt the active pipeline");
+		first.ValidateFields();
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+		Expect(previousPipeline.IsDisposed && first.disposals == 1 &&
+		       !ReferenceEquals(previousPipeline, Ursa.Rendering.RenderPipelineManager.ActivePipeline),
+		       "Validating the active asset did not rebuild it at the next boundary");
+		previousPipeline = Ursa.Rendering.RenderPipelineManager.ActivePipeline!;
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(null);
-		Expect(first.disposals == 1 && previousPipeline.IsDisposed &&
-		       Ursa.Rendering.RenderPipelineManager.ActivePipeline == null,
+		Expect(!previousPipeline.IsDisposed, "Requesting the default pipeline disposed the current instance immediately");
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+		Expect(first.disposals == 2 && previousPipeline.IsDisposed &&
+		       Ursa.Rendering.RenderPipelineManager.ActivePipeline is Ursa.Rendering.ForwardRenderPipeline &&
+		       Ursa.Rendering.RenderPipelineManager.ActiveAsset == null,
 		       "Replacing the active pipeline did not dispose its previous instance");
 		Ursa.Rendering.RenderPipelineManager.Reset();
 		first.Dispose();
 		second.Dispose();
 		var forward = Ursa.ScriptableObject.CreateInstance<Ursa.Rendering.ForwardRenderPipelineAsset>();
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(forward);
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
 		Expect(Ursa.Rendering.RenderPipelineManager.ActivePipeline is Ursa.Rendering.ForwardRenderPipeline,
 		       "Framework Forward pipeline asset factory returned the wrong pipeline");
 		Ursa.Rendering.RenderPipelineManager.Reset();
 		forward.Dispose();
+		using var switching = ScriptableObject.CreateInstance<PipelineProbeAsset>();
+		using var replacement = ScriptableObject.CreateInstance<PipelineProbeAsset>();
+		switching.switchDuringRender = replacement;
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(switching);
+		Ursa.Rendering.RenderPipelineManager.Render(cameraList, 1);
+		Expect(ReferenceEquals(Ursa.Rendering.RenderPipelineManager.ActiveAsset, switching),
+		       "A render callback's pending switch was applied before the next boundary");
+		Ursa.Rendering.RenderPipelineManager.Render(cameraList, 1);
+		Expect(ReferenceEquals(Ursa.Rendering.RenderPipelineManager.ActiveAsset, replacement) && switching.disposals == 1,
+		       "The pending switch did not apply at the following render boundary");
+		replacement.failDispose = true;
+		int oldEvents = 0;
+		Ursa.Rendering.RenderPipelineManager.EndContextRendering += _ => ++oldEvents;
+		bool disposeRejected = false;
+		try { Ursa.Rendering.RenderPipelineManager.Reset(); }
+		catch (InvalidOperationException) { disposeRejected = true; }
+		Expect(disposeRejected && Ursa.Rendering.RenderPipelineManager.ActivePipeline == null &&
+		       Ursa.Rendering.RenderPipelineManager.ActiveAsset == null,
+		       "A Dispose exception prevented manager state cleanup");
+		int cleanupEvents = 0;
+		using var failing = ScriptableObject.CreateInstance<PipelineProbeAsset>();
+		failing.failRender = true;
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(failing);
+		Ursa.Rendering.RenderPipelineManager.EndContextRendering += _ => ++cleanupEvents;
+		bool renderRejected = false;
+		try { Ursa.Rendering.RenderPipelineManager.Render(cameraList, 1); }
+		catch (InvalidOperationException error) { renderRejected = error.Message == "pipeline render probe"; }
+		Expect(renderRejected && cleanupEvents == 1 && oldEvents == 0,
+		       "The render failure lost its diagnostic/event or a failing Dispose retained an old event");
+		int previousRenders = failing.renders;
+		Ursa.Rendering.RenderPipelineManager.BeginContextRendering += _ => throw new InvalidOperationException("begin failure probe");
+		bool beginRejected = false;
+		try { Ursa.Rendering.RenderPipelineManager.Render(cameraList, 1); }
+		catch (InvalidOperationException error) { beginRejected = error.Message == "begin failure probe"; }
+		Expect(beginRejected && cleanupEvents == 2 && failing.renders == previousRenders,
+		       "A begin-context exception rendered a partial callback or lost its paired end event");
+		Ursa.Rendering.RenderPipelineManager.Reset();
+		int cameraEndEvents = 0;
+		Ursa.Rendering.RenderPipelineManager.BeginCameraRendering += (_, _) => throw new InvalidOperationException("camera begin failure probe");
+		Ursa.Rendering.RenderPipelineManager.EndCameraRendering += (_, _) => ++cameraEndEvents;
+		bool cameraBeginRejected = false;
+		try { Ursa.Rendering.RenderPipelineManager.Render(cameraList, 1); }
+		catch (InvalidOperationException error) { cameraBeginRejected = error.Message == "camera begin failure probe"; }
+		Expect(cameraBeginRejected && cameraEndEvents == 1,
+		       "Default Forward did not pair its camera end event after a begin-event failure");
+		Ursa.Rendering.RenderPipelineManager.Reset();
+	}
+
+	private static void ManagedRenderPipelineSessionTests()
+	{
+		const ulong editSession = 70001, runSession = 70002;
+		void Select(ulong session)
+		{
+			ScriptableObjectRegistry.SelectSession(session);
+			Ursa.Rendering.RenderPipelineManager.SelectSession(session);
+		}
+		var cameras = new System.Collections.Generic.List<Ursa.Rendering.Camera>
+		{
+			GameObject.Create("Session Pipeline Camera").AddComponent<CameraComponent>()
+		};
+		Select(editSession);
+		var edit = ScriptableObject.CreateInstance<PipelineProbeAsset>();
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(edit);
+		int editEvents = 0, runEvents = 0;
+		Ursa.Rendering.RenderPipelineManager.BeginContextRendering += _ => ++editEvents;
+		Ursa.Rendering.RenderPipelineManager.Render(cameras, 1);
+		var editPipeline = Ursa.Rendering.RenderPipelineManager.ActivePipeline!;
+		Select(runSession);
+		Expect(Ursa.Rendering.RenderPipelineManager.ActiveAsset == null,
+		       "A Run session inherited the editing pipeline instance");
+		var run = ScriptableObject.CreateInstance<PipelineProbeAsset>();
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(run);
+		Ursa.Rendering.RenderPipelineManager.BeginContextRendering += _ => ++runEvents;
+		Ursa.Rendering.RenderPipelineManager.Render(cameras, 1);
+		Expect(editEvents == 1 && runEvents == 1 && edit.disposals == 0,
+		       "Run shared editing callbacks or disposed the editing pipeline");
+		var runPipeline = Ursa.Rendering.RenderPipelineManager.ActivePipeline!;
+		Ursa.Rendering.RenderPipelineManager.ReleaseSession(runSession);
+		Expect(ScriptableObjectRegistry.ClearSession(runSession).Count == 0 && runPipeline.IsDisposed && !run.IsValid,
+		       "Session close retained its pipeline or asset instance");
+		bool oldAssetRejected = false;
+		try { _ = run.InstanceId; }
+		catch (ObjectDisposedException) { oldAssetRejected = true; }
+		Expect(oldAssetRejected, "A closed Run session retained a usable pipeline asset handle");
+		Select(editSession);
+		Expect(ReferenceEquals(Ursa.Rendering.RenderPipelineManager.ActivePipeline, editPipeline) && edit.disposals == 0,
+		       "Stop did not restore the editing pipeline instance");
+		Ursa.Rendering.RenderPipelineManager.Render(cameras, 1);
+		Expect(editEvents == 2 && runEvents == 1, "Stop retained a Run event or lost the editing callback");
+		Ursa.Rendering.RenderPipelineManager.ReleaseSession(editSession);
+		Expect(ScriptableObjectRegistry.ClearSession(editSession).Count == 0 && editPipeline.IsDisposed,
+		       "Editing session close did not release its pipeline and asset");
+		Select(0);
 	}
 
 	private static int Main()
@@ -772,6 +958,7 @@ internal static unsafe class Program
 		ShaderFieldTests.Run();
 		ScriptableAssetGraphTests.Run();
 		ScriptableAssetRecoveryTests.Run();
+		ScriptableAssetSnapshotTests.Run();
 		int tableSize = sizeof(Bootstrap.NativeApiV6);
 		Expect(tableSize == 336, "Native API struct size differs from the x64 C ABI contract");
 		Expect(Marshal.OffsetOf<Bootstrap.NativeApiV6>(nameof(Bootstrap.NativeApiV6.submitRenderBatch)).ToInt32() == 328,
@@ -929,8 +1116,9 @@ internal static unsafe class Program
 		ManagedRenderContextApiTests();
 		ManagedCommandBufferApiTests();
 		ManagedRenderPipelineLifecycleTests();
+		ManagedRenderPipelineSessionTests();
 		byte[] renderBatch = new byte[16];
-		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch, 1);
+		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch, Ursa.Rendering.RenderCommandProtocol.version);
 		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(4), 16);
 		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(8), 0);
 		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(12), 16);

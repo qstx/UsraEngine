@@ -64,6 +64,8 @@ foreach ($directory in @('Runtime', 'Engine', 'Editor', 'Tools', 'Tests')) {
     foreach ($file in Get-ChildItem -LiteralPath (Join-Path $sourceRoot $directory) -Recurse -File) {
         if ($file.Extension -notin @('.cpp','.hpp','.h','.inl')) { continue }
         $relative = $file.FullName.Substring($sourceRoot.Length + 1).Replace('\','/')
+        # Bundled tool runtimes carry dependency headers, not engine translation units.
+        if ($relative.StartsWith('Tools/Python/') -or $relative.StartsWith('Tools/TracyMcp/Release/')) { continue }
         if (-not $dotnetEnabled -and $relative -match '^Engine/Scripting/DotNet/') { continue }
         if (-not $editorEnabled -and $relative -match '^Tools/(AssetImport|AssetMigrate|ScriptCompile|ScriptPlayer)/') { continue }
         if (-not $dotnetEnabled -and $relative -match '^Tools/(ScriptCompile|ScriptPlayer)/') { continue }

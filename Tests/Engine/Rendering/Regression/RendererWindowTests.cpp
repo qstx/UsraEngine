@@ -1,6 +1,6 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <iostream>
 #include <stdexcept>
 
@@ -36,9 +36,9 @@ int main()
 #endif
 		auto device = Take(Ursa::Rhi::CreateDevice(desc));
 		auto swapchain = Take(device->CreateSwapchain({}));
-		auto renderer = Take(Ursa::Renderer3D::Create(device));
+		auto renderer = Take(Ursa::Test::SceneRenderer::Create(device));
 		Ursa::Camera camera;
-		const Ursa::Vector<Ursa::BoxInstance> boxes{{{{0, 0, 0}, {1, 1, 1}}, {0.8f, 0.2f, 0.1f, 1}}};
+		const Ursa::Vector<Ursa::Test::CubeDraw> boxes{{{{0, 0, 0}, {1, 1, 1}}, {0.8f, 0.2f, 0.1f, 1}}};
 
 		done(renderer->Render(swapchain, camera, boxes));
 		window->Resize(800, 600);
@@ -46,7 +46,11 @@ int main()
 		done(renderer->Render(swapchain, camera, boxes));
 		window->Minimize();
 		window->PollEvents();
-		done(renderer->Render(swapchain, camera, boxes));
+		const auto suspended = renderer->Render(swapchain, camera, boxes);
+		if (suspended || suspended.error.find("suspended") == Ursa::String::npos)
+		{
+			throw std::runtime_error("Minimized SRP window did not report a suspended target");
+		}
 		window->Restore();
 		window->PollEvents();
 		done(renderer->Render(swapchain, camera, boxes));

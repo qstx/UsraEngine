@@ -1,7 +1,7 @@
 #include <MeshFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <Scene/Scene.hpp>
 #include <iostream>
 #include <memory>
@@ -36,7 +36,7 @@ int main()
 		desc.validation = true;
 #endif
 		auto device = Take(Ursa::Rhi::CreateDevice(desc));
-		auto renderer = Take(Ursa::Renderer3D::Create(device));
+		auto renderer = Take(Ursa::Test::SceneRenderer::Create(device));
 		Ursa::Scene scene;
 		auto cameraNode = Take(scene.CreateGameObject());
 		Ursa::LocalTransform cameraPose;
@@ -52,8 +52,8 @@ int main()
 		auto color = Take(device->CreateTexture(
 		    {64, 64, Ursa::Rhi::Format::RgbA8Unorm,
 		     Ursa::Rhi::TextureUsage::ColorAttachment | Ursa::Rhi::TextureUsage::TransferSource}));
-		auto submitted = renderer->RenderOffscreenModels(color, frame.viewProjection, frame.boxes, frame.lighting,
-		                                                 frame.cameraPosition);
+		auto submitted =
+		    renderer->DrawOffscreen(color, frame.viewProjection, frame.objects, frame.lighting, frame.cameraPosition);
 		done(Take(std::move(submitted))->Wait());
 		auto readback = Take(device->CreateBuffer(
 		    {64 * 64 * 4, Ursa::Rhi::BufferUsage::TransferDestination, Ursa::Rhi::Memory::Readback}));

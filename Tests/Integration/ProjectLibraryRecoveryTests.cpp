@@ -1,6 +1,7 @@
 #include <Assets/ModelImporter.hpp>
 #include <Assets/TextureImporter.hpp>
 #include <Assets/ShaderImportView.hpp>
+#include <Assets/ShaderAssetImporter.hpp>
 #include <Workspace/ProjectWorkspace.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -67,6 +68,10 @@ std::unique_ptr<ProjectWorkspace> Prepare(const std::filesystem::path& project)
 		{
 			auto view = Take(ShaderImportView::Open(workspace->Index().Filesystem(), record.path));
 			Done(view->Reimport(*workspace));
+		}
+		else if (extension == ".compute")
+		{
+			Take(ShaderAssetImporter::Import(*workspace->Database(), record.path));
 		}
 	}
 	Done(workspace->Refresh());

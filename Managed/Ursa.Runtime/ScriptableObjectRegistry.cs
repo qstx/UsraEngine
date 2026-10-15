@@ -148,7 +148,7 @@ internal static class ScriptableObjectRegistry
 		}
 	}
 
-	private static Type ResolveAssetType(ScriptableAssetData data)
+	internal static Type ResolveAssetType(ScriptableAssetData data)
 	{
 		foreach (var assembly in BehaviourRegistry.Assemblies)
 		{
@@ -180,8 +180,62 @@ internal static class ScriptableObjectRegistry
 		throw new InvalidOperationException($"Missing ScriptableObject type '{data.TypeId}' for asset {data.Reference.Guid}:{data.Reference.LocalFileId}.");
 	}
 
-	private static string dataSourceGuid(string payload) => System.Text.Json.JsonDocument.Parse(payload).RootElement.GetProperty("SourceGuid").GetString() ?? string.Empty;
-	private static ulong dataSourceLocalId(string payload) => System.Text.Json.JsonDocument.Parse(payload).RootElement.GetProperty("LocalFileId").GetUInt64();
+	private static string dataSourceGuid(string payload)
+	{
+		using var document = System.Text.Json.JsonDocument.Parse(payload);
+		return document.RootElement.GetProperty("SourceGuid").GetString() ?? string.Empty;
+	}
+	private static ulong dataSourceLocalId(string payload)
+	{
+		using var document = System.Text.Json.JsonDocument.Parse(payload);
+		return document.RootElement.GetProperty("LocalFileId").GetUInt64();
+	}
+
+	internal static IReadOnlyList<ScriptableAssetData> CaptureAssets()
+	{
+		RequireThread();
+		var descriptions = new Dictionary<AssetReference, ScriptableAssetData>();
+		if (loadedGraphs.TryGetValue(currentSession, out var graphs))
+			foreach (var graph in graphs.Values)
+				foreach (var data in graph.Capture())
+				{
+					if (descriptions.TryGetValue(data.Reference, out var previous) &&
+					    (previous.TypeId != data.TypeId || previous.TypeVersion != data.TypeVersion ||
+					     !System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(previous.Payload),
+					         System.Text.Json.Nodes.JsonNode.Parse(data.Payload))))
+						throw new InvalidOperationException("Loaded asset graphs disagree about a shared persistent identity.");
+					descriptions[data.Reference] = data;
+				}
+		if (persistentAssets.TryGetValue(currentSession, out var assets))
+			foreach (var entry in assets)
+				if (!descriptions.ContainsKey(entry.Key))
+				{
+					ScriptIdentity identity = BehaviourRegistry.IdentityFor(entry.Value.GetType());
+					descriptions.Add(entry.Key, new ScriptableAssetData(entry.Key, identity.Id, identity.Version,
+						ScriptFieldSchema.Serialize(entry.Value)));
+				}
+		return new List<ScriptableAssetData>(descriptions.Values);
+	}
+
+	internal static void RestoreAssets(IReadOnlyList<ScriptableAssetData> descriptions)
+	{
+		RequireThread();
+		if (descriptions.Count == 0) return;
+		if (persistentAssets.TryGetValue(currentSession, out var assets) && assets.Count != 0)
+			throw new InvalidOperationException("Asset reload needs a fresh candidate session.");
+		ScriptableAssetGraph graph = ScriptableAssetGraph.Load(descriptions, ResolveAssetType);
+		try
+		{
+			graph.ValidateFields();
+			if (!loadedGraphs.TryGetValue(currentSession, out var roots))
+			{
+				roots = new Dictionary<AssetReference, ScriptableAssetGraph>();
+				loadedGraphs.Add(currentSession, roots);
+			}
+			roots.Add(descriptions[0].Reference, graph);
+		}
+		catch { graph.Dispose(); throw; }
+	}
 
 	internal static Action AcquireAssetLease(ScriptableObject instance, bool owned)
 	{

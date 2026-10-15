@@ -17,7 +17,8 @@ bool ValidRecordPayload(const UInt8* data, Size offset, const RenderCommandRecor
 	switch (record.opcode)
 	{
 		case RenderCommandOpcode::SetRenderTarget:
-			return record.byteSize == AlignRecordBytes(4) || record.byteSize == AlignRecordBytes(24);
+			return record.byteSize == AlignRecordBytes(4) || record.byteSize == AlignRecordBytes(24) ||
+			       record.byteSize == AlignRecordBytes(32);
 		case RenderCommandOpcode::ClearTarget:
 			expectedBytes = AlignRecordBytes(28);
 			break;
@@ -31,26 +32,33 @@ bool ValidRecordPayload(const UInt8* data, Size offset, const RenderCommandRecor
 			expectedBytes = AlignRecordBytes(116);
 			break;
 		case RenderCommandOpcode::Blit:
-			return record.byteSize == AlignRecordBytes(48) || record.byteSize == AlignRecordBytes(76);
+			return record.byteSize == AlignRecordBytes(76) || record.byteSize == AlignRecordBytes(92);
 		case RenderCommandOpcode::CopyBuffer:
 			expectedBytes = AlignRecordBytes(72);
 			break;
 		case RenderCommandOpcode::SetGlobalParameters:
+		case RenderCommandOpcode::SetComputeParameters:
 		{
-			if (payloadBytes < 8)
+			const UInt32 prefix = record.opcode == RenderCommandOpcode::SetComputeParameters ? 28u : 0u;
+			if (payloadBytes < prefix + 8)
 			{
 				return false;
 			}
 			UInt32 valueKind = 0, nameBytes = 0;
-			std::memcpy(&valueKind, data + offset + sizeof(record), sizeof(valueKind));
-			std::memcpy(&nameBytes, data + offset + sizeof(record) + sizeof(valueKind), sizeof(nameBytes));
-			const UInt32 valueBytes = valueKind == 1 ? 4u : valueKind == 2 ? 16u : valueKind == 3 ? 24u : 0u;
-			if (!valueBytes || !nameBytes || nameBytes > 1024 || nameBytes > payloadBytes - 8 ||
-			    valueBytes > payloadBytes - 8 - nameBytes)
+			std::memcpy(&valueKind, data + offset + sizeof(record) + prefix, sizeof(valueKind));
+			std::memcpy(&nameBytes, data + offset + sizeof(record) + prefix + sizeof(valueKind), sizeof(nameBytes));
+			const UInt32 valueBytes = valueKind == 1 || valueKind == 6   ? 4u
+			                          : valueKind == 2                   ? 16u
+			                          : valueKind == 3 || valueKind == 7 ? 24u
+			                          : valueKind == 4                   ? 32u
+			                          : valueKind == 5                   ? 64u
+			                                                             : 0u;
+			if (!valueBytes || !nameBytes || nameBytes > 1024 || nameBytes > payloadBytes - prefix - 8 ||
+			    valueBytes > payloadBytes - prefix - 8 - nameBytes)
 			{
 				return false;
 			}
-			expectedBytes = AlignRecordBytes(8 + nameBytes + valueBytes);
+			expectedBytes = AlignRecordBytes(prefix + 8 + nameBytes + valueBytes);
 			break;
 		}
 		case RenderCommandOpcode::GetTemporaryTarget:
@@ -63,10 +71,29 @@ bool ValidRecordPayload(const UInt8* data, Size offset, const RenderCommandRecor
 			expectedBytes = AlignRecordBytes(16);
 			break;
 		case RenderCommandOpcode::CopyTexture:
-			expectedBytes = AlignRecordBytes(48);
+			return record.byteSize == AlignRecordBytes(48) || record.byteSize == AlignRecordBytes(64);
+		case RenderCommandOpcode::DrawFullscreen:
+			expectedBytes = AlignRecordBytes(28);
 			break;
+		case RenderCommandOpcode::SetRenderTargets:
+		{
+			if (payloadBytes < 8)
+			{
+				return false;
+			}
+			UInt32 count = 0, depth = 0;
+			std::memcpy(&count, data + offset + sizeof(record), sizeof(count));
+			std::memcpy(&depth, data + offset + sizeof(record) + 4, sizeof(depth));
+			if (count > 8 || depth > 1 || (!count && !depth))
+			{
+				return false;
+			}
+			expectedBytes = AlignRecordBytes(8 + (count + depth) * 32);
+			break;
+		}
 		case RenderCommandOpcode::DispatchCompute:
-			return payloadBytes >= 8;
+			expectedBytes = AlignRecordBytes(40);
+			break;
 		default:
 			return false;
 	}
@@ -99,8 +126,8 @@ Result<void> ValidateRenderCommandBatch(const void* bytes, Size byteCount)
 		std::memcpy(&record, data + offset, sizeof(record));
 		const UInt32 opcode = static_cast<UInt32>(record.opcode);
 		if (opcode < static_cast<UInt32>(RenderCommandOpcode::SetRenderTarget) ||
-		    opcode > static_cast<UInt32>(RenderCommandOpcode::CopyTexture) || record.byteSize < sizeof(record) ||
-		    record.byteSize % 8 != 0 || record.byteSize > byteCount - offset)
+		    opcode > static_cast<UInt32>(RenderCommandOpcode::SetComputeParameters) ||
+		    record.byteSize < sizeof(record) || record.byteSize % 8 != 0 || record.byteSize > byteCount - offset)
 		{
 			return Result<void>::Failure("Render command opcode or record size is invalid");
 		}

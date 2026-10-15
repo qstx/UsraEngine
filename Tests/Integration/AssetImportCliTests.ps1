@@ -2,15 +2,26 @@ param([string]$Importer, [string]$Player, [string]$PackageTool, [string]$Project
 $ErrorActionPreference = 'Stop'
 
 function Invoke-Checked([string]$Executable, [string[]]$Arguments, [int]$Expected = 0) {
-    $output = & $Executable @Arguments 2>&1
-    $result = $LASTEXITCODE
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $Executable @Arguments 2>&1
+        $result = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousPreference }
     if ($result -ne $Expected) { throw "Unexpected exit $result from $Executable : $output" }
     return ($output -join "`n")
 }
 
+function Content-Hash([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '') }
+    finally { $hasher.Dispose(); $stream.Dispose() }
+}
+
 function Library-State {
     return (Get-ChildItem -LiteralPath "$Project/Library" -Recurse -File | Sort-Object FullName | ForEach-Object {
-        "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)|$((Get-FileHash -LiteralPath $_.FullName).Hash)"
+        "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)|$(Content-Hash $_.FullName)"
     }) -join "`n"
 }
 
@@ -58,14 +69,14 @@ if (-not (Test-Path -LiteralPath $resolved)) { throw 'Missing output did not rec
 
 $package = "$Project/Content.pak"
 Invoke-Checked $PackageTool @('--project-root',$Project,'--configuration',$Configuration,'--output',$package) | Out-Null
-$firstHash = (Get-FileHash -LiteralPath $package).Hash
+$firstHash = Content-Hash $package
 Invoke-Checked $PackageTool @('--project-root',$Project,'--configuration',$Configuration,'--output',$package) | Out-Null
-if ((Get-FileHash -LiteralPath $package).Hash -ne $firstHash) { throw 'Current content packaging was not deterministic' }
+if ((Content-Hash $package) -ne $firstHash) { throw 'Current content packaging was not deterministic' }
 $invalid = "$Project/Assets/Invalid.ursashader"
 [System.IO.File]::WriteAllText($invalid,'invalid shader source')
 try {
     Invoke-Checked $PackageTool @('--project-root',$Project,'--configuration',$Configuration,'--output',$package) 1 | Out-Null
-    if ((Get-FileHash -LiteralPath $package).Hash -ne $firstHash) { throw 'Failed import replaced complete pak' }
+    if ((Content-Hash $package) -ne $firstHash) { throw 'Failed import replaced complete pak' }
 } finally {
     Remove-Item -LiteralPath $invalid
     if (Test-Path -LiteralPath "$invalid.meta") { Remove-Item -LiteralPath "$invalid.meta" }

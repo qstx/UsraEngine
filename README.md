@@ -14,11 +14,21 @@ Initialize the top-level dependencies after checkout with `git submodule update 
 
 ## Source layout
 
-`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Renderer3D`, and `Engine/Serialization` contain the engine modules. Editor modules live under `Editor/Application`, `Editor/Assets`, `Editor/Console`, `Editor/Inspector`, `Editor/Scene`, `Editor/Ui`, and `Editor/Workspace`. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Renderer3D/Renderer3D.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. The Editor creates a generated, rebuildable `Library/` directory beside `Assets/`; keep it out of source control. Tests are grouped by layer and module under `Tests/Runtime`, `Tests/Engine`, `Tests/Editor`, with integration, benchmarks, fixtures, and managed tests in their own directories. See [build structure](Docs/BuildStructure.md) for CMake ownership, Visual Studio filters, and migration details.
+`Runtime/Core`, `Runtime/Vfs`, `Runtime/Window`, and `Runtime/Rhi` contain the runtime modules. Vulkan implementation files live under `Runtime/Rhi/Vulkan`. `Engine/Application`, `Engine/Math`, `Engine/Material`, `Engine/Scene`, `Engine/Rendering`, and `Engine/Serialization` contain the engine modules. Editor modules live under `Editor/Application`, `Editor/Assets`, `Editor/Console`, `Editor/Inspector`, `Editor/Scene`, `Editor/Ui`, and `Editor/Workspace`. Headers and corresponding source files sit directly in each module directory. Include public headers by module path, such as `<Rhi/RHI.hpp>` and `<Rendering/Pipeline/NativeForwardPipeline.hpp>`. Engine-owned resources, including the renderer's shaders, live under `Assets/`. The Editor creates a generated, rebuildable `Library/` directory beside `Assets/`; keep it out of source control. Tests are grouped by layer and module under `Tests/Runtime`, `Tests/Engine`, `Tests/Editor`, with integration, benchmarks, fixtures, and managed tests in their own directories. See [build structure](Docs/BuildStructure.md) for CMake ownership, Visual Studio filters, and migration details.
 
 CMake discovers `.cpp` and `.hpp` files within the listed module directories and checks for additions or removals during a build. New modules and test executables still need a CMake target or directory entry.
 
 For the Editor's menus, default layout, Project browser, Inspector, and Console, see [UrsaEditor 工作区](Docs/EditorWorkspace.md).
+
+## Scriptable rendering
+
+With `URSA_ENABLE_DOTNET=ON`, projects define complete rendering flows in C# by deriving `RenderPipelineAsset` and `RenderPipeline`. The public `Ursa.Rendering` API exposes camera setup, culling, RendererList, command buffers, render textures, compute kernels and logical submission. Native `Engine/Rendering` executes those commands and manages frame slots, state transitions, uploads and GPU resource lifetime. `Engine/ScriptableAssets` and `Ursa.Runtime` provide persistent `.ursaasset` configuration and resource references. RenderGraph is reserved for a later change.
+
+In UrsaEditor, create project assets through CreateAssetMenu, edit and save them in Inspector, then select one in `Window > Project Graphics Settings`. Scene, Game and Material Preview render through the selected pipeline. The selection is stored by stable GUID and local asset identity in `ProjectSettings/Graphics.json`; clearing it selects the default Forward pipeline. Failed candidate factories preserve the previous valid editing configuration. Play sessions bind their Scene/resource API before creating the selected pipeline and own their runtime resources until Stop.
+
+The sibling Demo contains `Assets/Rendering/ShowcasePipeline.ursaasset` and `ComputeShowcasePipeline.ursaasset`, demonstrating one cull reused across opaque/transparent stages, offscreen/fullscreen composition, replacement materials and compute output. Import project content explicitly for the desired configuration before starting Player or packaging it with UrsaPak. Graphics settings and shader/compute/material dependencies are published identically in loose and Pak content. A native build with .NET disabled supports the native default Forward adapter; requesting a managed project pipeline reports the unavailable capability.
+
+After an imported-format or ABI upgrade, close the project's Editor/import process and rebuild its generated Library with `UrsaAssetImport --project <project> --configuration <Debug|Release>`. Keep source `.meta` files and ProjectSettings to preserve identities and selection. Normal C++ builds do not import project content. See [Scriptable Rendering](Docs/ScriptableRendering.md), [Demo examples](../Demo/Assets/Rendering/README.md), and [validation evidence](Docs/ScriptableRenderingValidation.md) for supported APIs, commands and migration details.
 
 ## Asset metadata
 
@@ -347,42 +357,15 @@ The fixed step defaults to 1/60 second and at most five steps per frame. `config
 
 ## Basic 3D rendering
 
-Include `<Renderer3D/Renderer3D.hpp>` to draw boxes with a camera. The renderer generates one cube mesh, uploads a frame's transforms and colors, records RHI commands, manages a depth target, and rebuilds size-dependent resources after a resize. It waits for its previous GPU submission before reusing upload resources.
+项目管线通过 `Ursa.Rendering.RenderPipelineAsset` 和 `RenderPipeline` 定义，在 Project Graphics 设置中选择。默认托管 Forward 使用公开的 Cull、RendererList 和 CommandBuffer API。Scene、Game、材质 Preview 与 Player 共享同一执行服务。完整示例、支持范围与导入命令见 [Scriptable Rendering](Docs/ScriptableRendering.md)。
 
-```cpp
-auto created = Ursa::Renderer3D::create(device);
-if (!created)
-    return Ursa::Result<void>::failure(created.error);
-auto renderer = std::move(created.value);
-Ursa::Vector<Ursa::BoxInstance> boxes{
-    {{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}, {0.2f, 0.8f, 0.3f, 1.0f}},
-};
-auto frame = renderer->render(swapchain, camera, boxes);
-```
-
-`render` acquires and presents a swapchain image. `renderOffscreen` accepts an RHI color texture with color-attachment and transfer-source usage and returns a fence; after waiting for it, the texture is in transfer-source state for readback. The current renderer supports one cube mesh, positive per-axis scaling, one depth target, and one in-flight frame. Its SPIR-V shaders are compiled into the generated asset mirror and read through `ursa:Shaders/Renderer3D/`.
+原生应用使用 `<Rendering/Pipeline/NativeForwardPipeline.hpp>` 的 `NativeForwardPipeline::Create(device)`，通过 `Render(scene, swapchain)` 或 `RenderOffscreen(scene, target)` 绘制。它与托管管线共享 `RenderScene`、剔除、Pass 选择、命令执行及两个帧槽位。只有复用仍在途的槽位才等待 GPU。关闭 .NET 时，指定自定义托管管线会报告缺少运行能力。
 
 ## Scene rendering
 
-Attach `CameraComponent` and `BoxRenderComponent` to GameObjects. The camera looks along its GameObject's local negative Z axis; its world transform supplies the view, and its fields specify perspective projection. The Scene gathers active boxes with complete world matrices, including ancestor rotation and scale. Inactive GameObjects and disabled components are omitted. Without an enabled active camera, `CollectRenderData(aspect)` and an `Application` scene frame return a diagnostic error.
+为 GameObject 添加 `MeshFilterComponent` 和 `MeshRendererComponent`，设置共享 Mesh 与材质；蒙皮对象使用 `SkinnedMeshRendererComponent`。`CameraComponent` 沿本地负 Z 观察，并提供 depth、LayerMask、清除和 viewport 设置。每个渲染批次采集一次 `RenderScene`，多个相机共享对象快照，再分别剔除和创建绘制列表。
 
-```cpp
-#include <Scene/Scene.hpp>
-
-Ursa::Scene scene;
-auto cameraObject = Ursa::GameObject::Create("Camera");
-Ursa::LocalTransform cameraPose;
-cameraPose.position = {0.0f, 0.0f, 4.0f};
-cameraObject->SetLocalTransform(cameraPose);
-auto camera = cameraObject->AddComponent<Ursa::CameraComponent>();
-auto boxObject = Ursa::GameObject::Create("Box");
-boxObject->AddComponent<Ursa::BoxRenderComponent>(Ursa::Color{0.2f, 0.8f, 0.3f, 1.0f});
-scene.AttachGameObject(cameraObject);
-scene.AttachGameObject(boxObject);
-scene.SetActiveCamera(camera.value->Id());
-```
-
-An application assigns its scene to `scene_` during `onStart`; `Application` owns the renderer for that path. Direct rendering code can call `collectRenderData(aspect)` and pass the returned view-projection matrix, boxes, lighting and camera position to `Renderer3D::renderModels` or `renderOffscreenModels`. The current path supports one explicitly selected camera and colored or material-bound cubes; arbitrary meshes and multiple active cameras are outside this phase. `UrsaRendererTests` exercises the example's collection path, inherited transforms, color, visibility, and missing-camera error.
+旧 `Renderer3D`、`ModelBoxInstance`、隐式多 Pass 绘制及直接提交入口已删除。显式多 Pass 由管线按顺序录制命令。`Scene::CollectRenderData` 与 `CollectPreviewRenderData` 是使用同一 `RenderScene` 的单相机兼容查询，返回 `objects`，其中世界矩阵为 `world`；生产渲染入口使用完整快照。内置 Shader 源路径保留 `ursa:Shaders/Renderer3D/`，以维持资产身份和依赖兼容。
 
 ## Scene lighting
 
@@ -408,34 +391,9 @@ The returned `SceneRenderData::lighting` is a value snapshot; later scene change
 
 ## Material scene rendering
 
-Assign a shared `MaterialInstance` to `BoxRenderComponent::material`. When it is set, the material controls the box's appearance; `color` is used only by boxes without an explicit material. The material is independent of box geometry. `collectRenderData` captures active box transforms, material references, camera position, and scene lights after the scene update phases. `Renderer3D` reads material values once before recording that frame. In a single-threaded application, edits made during update or late update therefore appear in the same rendered frame.
+通过 `MeshRendererComponent::SetSharedMaterial` 或 `SetSharedMaterials` 设置材质。场景快照捕获材质版本、世界矩阵、子网格和蒙皮调色板；执行器保留已提交资源，材质变更生成新版本，上传数据归属当前帧槽位。共享材质的修改会影响所有使用它的 Renderer。GPU 缓存按 Shader、Pass、材质与 Mesh 版本更新。
 
-```cpp
-auto device = Ursa::Rhi::createDevice({}).value;
-auto renderer = Ursa::Renderer3D::create(device).value;
-Ursa::Scene scene;
-auto cameraObject = Ursa::GameObject::Create("Camera");
-Ursa::LocalTransform cameraPose;
-cameraPose.position = {0.0f, 0.0f, 5.0f};
-cameraObject->SetLocalTransform(cameraPose);
-auto camera = cameraObject->AddComponent<Ursa::CameraComponent>();
-scene.AttachGameObject(cameraObject);
-scene.SetActiveCamera(camera.value->Id());
-auto boxObject = Ursa::GameObject::Create("Box");
-auto box = boxObject->AddComponent<Ursa::BoxRenderComponent>();
-scene.AttachGameObject(boxObject);
-auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::Unlit);
-material->setBaseColor({1.0f, 0.0f, 0.0f, 1.0f});
-box.value->material = material;
-auto frame = scene.CollectRenderData(1.0f).value;
-auto color = device->createTexture({64, 64, Ursa::Rhi::Format::RGBA8Unorm,
-    Ursa::Rhi::TextureUsage::ColorAttachment | Ursa::Rhi::TextureUsage::TransferSource}).value;
-auto submitted = renderer->renderOffscreenModels(color, frame.viewProjection, frame.boxes,
-                                                  frame.lighting, frame.cameraPosition);
-submitted.value->wait();
-```
-
-`UrsaMaterialSceneSmoke` compiles this setup and reads back its center pixel. For direct swapchain rendering, pass the same frame data to `renderModels`. The renderer uploads immutable procedural textures only when first used, keeps pipelines and unchanged material bindings cached, and waits for its previous frame fence before replacing uploads, bindings, or textures. Destroying the renderer also waits for its last submission. Shaders are read through `ursa:`, so a packaged build only needs the merged asset mirror beside the executable.
+材质与像素回归测试位于 `Tests/Engine/Rendering/Regression`。测试专用 `RenderingFixtures` 只构建场景命令并调用 SRP 执行服务；引擎没有保留另一套旧渲染器。离屏读回使用 `RenderTextureResource` 和 `ReadRenderTexture`，显式读回会等待 GPU，性能采样不能混入读回帧。
 
 PBR uses GGX, Smith, and Schlick direct lighting from scene directional and point lights, plus an adjustable ambient approximation. It tone maps and encodes the result for UNORM output. This phase has no IBL or shadowing. Its cube mesh has per-face UVs and tangents; inverse-transpose normals handle rotated boxes under nonuniform parent scale. The material GPU test renders and reads back these cases.
 

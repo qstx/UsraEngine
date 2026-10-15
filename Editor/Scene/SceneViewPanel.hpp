@@ -5,6 +5,7 @@
 #include <Scene/GameViewSettings.hpp>
 #include <Scene/EditorGizmo.hpp>
 #include <Scene/ViewportLayout.hpp>
+#include <Scene/EditorRenderViewport.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <memory>
 
@@ -30,16 +31,16 @@ public:
 
 	Result<void> ReloadResources();
 
-	Result<void> RenderPending(SceneDraft& draft, PlaySession& play);
+	Result<void> RenderPending(SceneDraft& draft, PlaySession& play, const EditorRenderViewport& renderViewport);
 
 private:
 	struct ViewportTarget
 	{
 		std::unique_ptr<EditorScenePreview> preview;
+		std::shared_ptr<Rendering::RenderTextureResource> output;
 		Rhi::TexturePtr color;
 		ImTextureID imageId = ImTextureID_Invalid;
 		ViewportSize size;
-		bool rendered = false;
 		bool visible = false;
 	};
 
@@ -51,8 +52,6 @@ private:
 	Result<void> Initialize();
 
 	Result<void> EnsureTarget(ViewportTarget& target, ViewportSize size);
-
-	Result<void> RenderTarget(ViewportTarget& target, const Scene& scene, bool gameCamera);
 
 	void DrawGameToolbar(VirtualFileSystem* userFiles, const String& projectKey, String& diagnostic);
 
@@ -90,5 +89,6 @@ private:
 	bool gizmoWasOver = false;
 	bool gizmoWasUsing = false;
 	GizmoOperation gizmoOperation = GizmoOperation::Translate;
+	ResourceId sceneViewCameraId = ResourceId::Generate();
 };
 } // namespace Ursa::Editor

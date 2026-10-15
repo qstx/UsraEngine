@@ -3,6 +3,7 @@
 
 #include <Core/StringInterop.hpp>
 #include <imgui.h>
+#include <algorithm>
 #include <functional>
 #include <tuple>
 
@@ -32,6 +33,25 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		{
 			selection.Clear();
 		}
+	}
+	Vector<const ScriptTypeDescriptor*> scriptableAssetTypes;
+	if (actions.scriptableAssetTypes)
+	{
+		for (const ScriptTypeDescriptor& type : *actions.scriptableAssetTypes)
+		{
+			if (type.group == ScriptAssemblyGroup::Game && type.kind == ScriptTypeKind::ScriptableObject &&
+			    !type.createAssetMenuName.empty())
+			{
+				scriptableAssetTypes.push_back(&type);
+			}
+		}
+		std::sort(scriptableAssetTypes.begin(), scriptableAssetTypes.end(),
+		          [](const ScriptTypeDescriptor* left, const ScriptTypeDescriptor* right)
+		          {
+			          return left->createAssetMenuOrder != right->createAssetMenuOrder
+			                     ? left->createAssetMenuOrder < right->createAssetMenuOrder
+			                     : left->createAssetMenuName < right->createAssetMenuName;
+		          });
 	}
 	ImGui::TextWrapped("Assets: %s", PathToUrsaString(workspace.ProjectRoot()).c_str());
 	if (!diagnostic.empty())
@@ -218,6 +238,19 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 							auto created = actions.createAsset(std::get<1>(item), std::get<2>(item), String{});
 							diagnostic = created ? String{} : created.error;
 							selection.Clear();
+						}
+					}
+					for (const ScriptTypeDescriptor* type : scriptableAssetTypes)
+					{
+						if (ImGui::MenuItem(type->createAssetMenuName.c_str()) && actions.createScriptableAsset)
+						{
+							model.NavigateTo(folder.path.relative);
+							auto created = actions.createScriptableAsset(*type, type->createAssetFileName);
+							diagnostic = created ? String{} : created.error;
+							if (created)
+							{
+								model.Refresh(workspace);
+							}
 						}
 					}
 					ImGui::EndMenu();

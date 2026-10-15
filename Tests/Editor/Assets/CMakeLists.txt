@@ -4,6 +4,12 @@ if(URSA_BUILD_EDITOR)
   target_link_libraries(UrsaScriptableAssetSourceTests PRIVATE Ursa::Editor)
   add_test(NAME UrsaScriptableAssetSourceTests COMMAND UrsaScriptableAssetSourceTests)
 
+  ursa_add_test_executable(UrsaScriptableAssetInspectorTests ScriptableAssetInspectorTests.cpp)
+  target_link_libraries(UrsaScriptableAssetInspectorTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaScriptableAssetInspectorTests COMMAND UrsaScriptableAssetInspectorTests
+    "${URSA_BINARY_ROOT}/Temp/ScriptableAssetInspector.png")
+  ursa_require_test_content(UrsaScriptableAssetInspectorTests UrsaScriptableAssetInspectorTests)
+
   ursa_add_test_executable(UrsaMeshMigrationTests MeshMigrationTests.cpp)
   target_link_libraries(UrsaMeshMigrationTests PRIVATE Ursa::Editor)
   target_compile_definitions(UrsaMeshMigrationTests PRIVATE URSA_TEST_BUILTIN_SOURCE="${URSA_SOURCE_ROOT}/Assets")

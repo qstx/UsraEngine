@@ -249,10 +249,10 @@ void TestScene(const std::filesystem::path& root)
 	const auto restoredCamera = loaded.scene->FindComponent<Ursa::CameraComponent>(restoredFirst);
 	const auto frame = Take(loaded.scene->CollectRenderData(1.0f));
 	Expect(restoredCamera && restoredCamera->verticalFovRadians == 0.9f && restoredCamera->farPlane == 80.0f &&
-	           frame.boxes.size() == 1 && frame.boxes[0].material &&
-	           frame.boxes[0].material->Parameters().baseColor.blue == 0.8f && frame.lighting.directional.size() == 1 &&
-	           frame.lighting.directional[0].intensity == 2.0f && frame.lighting.point.size() == 2 &&
-	           frame.lighting.point[0].range == 7.0f,
+	           frame.objects.size() == 1 && frame.objects[0].material &&
+	           frame.objects[0].material->Parameters().baseColor.blue == 0.8f &&
+	           frame.lighting.directional.size() == 1 && frame.lighting.directional[0].intensity == 2.0f &&
+	           frame.lighting.point.size() == 2 && frame.lighting.point[0].range == 7.0f,
 	       "Built-in component fields or render snapshot changed after load");
 
 	nlohmann::json document;

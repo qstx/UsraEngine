@@ -2,6 +2,7 @@
 
 #include <Scene/Scene.hpp>
 #include <Rendering/Scene/RendererList.hpp>
+#include <Rendering/Commands/RenderCommandExecutor.hpp>
 #include <Rhi/RHI.hpp>
 #include <Scripting/ManagedHandleRegistry.hpp>
 #include <Scripting/ManagedBehaviourRuntime.hpp>
@@ -16,16 +17,8 @@ namespace Ursa::Scripting
 class ManagedSceneApi final
 {
 public:
-	struct ManagedRenderTexture
-	{
-		Rhi::TexturePtr color;
-		Rhi::TexturePtr depth;
-	};
-
-	struct ManagedGraphicsBuffer
-	{
-		Rhi::BufferPtr buffer;
-	};
+	using ManagedRenderTexture = Rendering::RenderTextureResource;
+	using ManagedGraphicsBuffer = Rendering::GraphicsBufferResource;
 
 	explicit ManagedSceneApi(Scene& scene, ResourceSession* resources = nullptr,
 	                         std::function<void(const String&)> setWindowTitle = {});
@@ -58,10 +51,14 @@ public:
 		activeRenderToken.reset();
 	}
 
-	void SetRenderDevice(Rhi::DevicePtr selectedDevice)
-	{
-		device = std::move(selectedDevice);
-	}
+	void SetRenderDevice(Rhi::DevicePtr selectedDevice);
+	void SetRenderOutput(std::shared_ptr<ManagedRenderTexture> output,
+	                     Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead);
+	void SetRenderCameraSelection(std::optional<Rendering::CameraType> filter,
+	                              std::optional<Rendering::CameraData> cameraOverride = {});
+	void SetRenderSceneOverride(Scene* source);
+	void SetRenderWindow(Rhi::SwapchainPtr output);
+	void SetFrameCapture(Rendering::FrameCapture* capture);
 
 	UInt64 AcceptedRenderBatchCount() const
 	{
@@ -172,6 +169,8 @@ private:
 
 	Result<std::shared_ptr<ManagedGraphicsBuffer>> ResolveGraphicsBuffer(const ManagedHandle& handle) const;
 
+	Result<void> ExecuteRenderBatch(const UInt8* bytes, Size byteCount);
+
 	String resourceResponse;
 	UnorderedMap<UInt32, MeshPtr> ownedMeshes;
 	UnorderedMap<UInt32, std::shared_ptr<MaterialInstance>> ownedMaterials;
@@ -179,6 +178,7 @@ private:
 	UnorderedMap<UInt32, std::shared_ptr<ManagedRenderTexture>> ownedRenderTextures;
 	UnorderedMap<UInt32, std::shared_ptr<ManagedGraphicsBuffer>> ownedGraphicsBuffers;
 	Scene& scene;
+	Scene* renderSceneOverride = nullptr;
 	std::unique_ptr<ManagedHandleRegistry> handles;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> objects;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> componentOwners;
@@ -186,6 +186,13 @@ private:
 	const FrameContext* frameContext = nullptr;
 	ResourceSession* resources = nullptr;
 	Rhi::DevicePtr device;
+	std::unique_ptr<Rendering::RenderCommandExecutor> renderExecutor;
+	std::shared_ptr<ManagedRenderTexture> renderOutput;
+	Rhi::SwapchainPtr renderWindow;
+	Rhi::ResourceState renderOutputFinalState = Rhi::ResourceState::ShaderRead;
+	std::optional<Rendering::CameraType> renderCameraFilter;
+	std::optional<Rendering::CameraData> renderCameraOverride;
+	String lastRenderError;
 	ManagedBehaviourRuntime* behaviourRuntime = nullptr;
 	std::function<void(const String&)> setWindowTitle;
 	std::thread::id ownerThread = std::this_thread::get_id();

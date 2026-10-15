@@ -108,6 +108,7 @@ internal static unsafe class ScriptSessions
 	internal static ulong Create(bool editor, NativeApiV6 api)
 	{
 		RequireThread();
+		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
 		if (faulted) throw new InvalidOperationException("A project context did not unload. Restart before creating another script session.");
 		ulong id = nextId++;
 		sessions.Add(id, new Session(id, editor, api));
@@ -119,6 +120,7 @@ internal static unsafe class ScriptSessions
 	{
 		RequireThread();
 		if (!sessions.TryGetValue(id, out Session? session)) throw new InvalidOperationException("Script session is closed or unknown.");
+		Ursa.Rendering.RenderPipelineManager.SelectSession(id);
 		BehaviourRegistry.currentSession = id;
 		ScriptableObjectRegistry.SelectSession(id);
 		ScriptableObjectRegistry.graphLoader = LoadScriptableAssetGraph;
@@ -150,6 +152,7 @@ internal static unsafe class ScriptSessions
 	internal static void Bind(ulong id, NativeApiV6 api)
 	{
 		RequireThread();
+		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
 		if (!sessions.TryGetValue(id, out Session? session)) throw new InvalidOperationException("Script session is closed or unknown.");
 		session.api = api;
 		Select(id);
@@ -315,6 +318,75 @@ internal static unsafe class ScriptSessions
 		return sessions[id].preparedReload;
 	}
 
+	internal static void TransferAssets(ulong source, ulong candidate)
+	{
+		RequireThread();
+		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
+		if (source == candidate || !sessions.TryGetValue(source, out var oldSession) ||
+		    !sessions.TryGetValue(candidate, out var newSession) || !oldSession.context.editor || !newSession.context.editor)
+			throw new InvalidOperationException("Asset reload requires distinct editing sessions.");
+		Select(source);
+		var selection = Ursa.Rendering.RenderPipelineManager.ReloadSelection();
+		var descriptions = ScriptableObjectRegistry.CaptureAssets();
+		ScriptableAssetData? transient = null;
+		AssetReference? persistent = selection.Asset?.AssetReference;
+		if (selection.Asset != null && persistent == null)
+		{
+			ScriptIdentity identity = BehaviourRegistry.IdentityFor(selection.Asset.GetType());
+			transient = new ScriptableAssetData(default, identity.Id, identity.Version,
+				ScriptFieldSchema.Serialize(selection.Asset));
+		}
+		try
+		{
+			Select(candidate);
+			ScriptableObjectRegistry.RestoreAssets(descriptions);
+			Ursa.Rendering.RenderPipelineAsset? asset = null;
+			if (persistent.HasValue)
+				asset = (Ursa.Rendering.RenderPipelineAsset)ScriptableObjectRegistry.ResolveAsset(persistent.Value,
+					typeof(Ursa.Rendering.RenderPipelineAsset));
+			else if (transient != null)
+			{
+				Type type = ScriptableObjectRegistry.ResolveAssetType(transient);
+				asset = (Ursa.Rendering.RenderPipelineAsset)ScriptableObject.CreateForLoad(type);
+				ScriptFieldSchema.Deserialize(asset, transient.Payload, ScriptableObjectRegistry.ResolveAsset);
+				ScriptFieldSchema.ResolvePendingReferences(asset);
+				asset.ValidateFields();
+				asset.Activate();
+			}
+			if (selection.HasSelection)
+			{
+				Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(asset);
+				Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+			}
+		}
+		catch
+		{
+			Select(source);
+			throw;
+		}
+	}
+
+	internal static void ConfigurePipeline(ulong id, string json)
+	{
+		Select(id);
+		using JsonDocument document = JsonDocument.Parse(json);
+		Ursa.Rendering.RenderPipelineAsset? asset = null;
+		if (document.RootElement.ValueKind != JsonValueKind.Null)
+		{
+			var reference = new AssetReference(document.RootElement.GetProperty("guid").GetString()!,
+				document.RootElement.GetProperty("localFileId").GetUInt64());
+			asset = ScriptableObject.Load<Ursa.Rendering.RenderPipelineAsset>(reference);
+		}
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(asset);
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+	}
+
+	internal static void RenderScene(ulong id, float aspect)
+	{
+		Select(id);
+		Ursa.Rendering.RenderPipelineManager.RenderScene(aspect);
+	}
+
 	internal static void Validate(ulong id)
 	{
 		Select(id);
@@ -343,6 +415,8 @@ internal static unsafe class ScriptSessions
 	{
 		Session session = sessions[id];
 		Select(id);
+		try { Ursa.Rendering.RenderPipelineManager.ReleaseSession(id); }
+		catch (Exception error) { Console.Error.WriteLine($"Render pipeline session cleanup failed: {error}"); }
 		foreach (Exception error in ScriptableObjectRegistry.ClearSession(id))
 			Console.Error.WriteLine($"ScriptableObject session cleanup failed: {error}");
 		session.extensions?.Dispose();
@@ -367,6 +441,7 @@ internal static unsafe class ScriptSessions
 	internal static bool Close(ulong id)
 	{
 		RequireThread();
+		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
 		if (!sessions.ContainsKey(id)) throw new InvalidOperationException("Script session is already closed.");
 		WeakReference weak = Release(id);
 		for (int attempt = 0; attempt < 8 && weak.IsAlive; ++attempt)
@@ -382,6 +457,26 @@ internal static unsafe class ScriptSessions
 
 public static unsafe partial class Bootstrap
 {
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+	public static int ConfigureRenderPipeline(ulong id, byte* json, ulong length)
+	{
+		if (json == null || length == 0 || length > 4096) return 1;
+		try { ScriptSessions.ConfigurePipeline(id, Encoding.UTF8.GetString(new ReadOnlySpan<byte>(json, (int)length))); return 0; }
+		catch (Exception error) { Console.Error.WriteLine($"管线配置失败：{error}"); return 2; }
+	}
+
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+	public static int RenderScene(ulong id, float aspect)
+	{
+		try { ScriptSessions.RenderScene(id, aspect); return 0; }
+		catch (Exception error) { Console.Error.WriteLine($"管线渲染失败：{error}"); return 2; }
+	}
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+	public static int TransferScriptableAssets(ulong source, ulong candidate)
+	{
+		try { ScriptSessions.TransferAssets(source, candidate); return 0; }
+		catch (Exception error) { Console.Error.WriteLine($"候选管线资产迁移失败：{error}"); return 2; }
+	}
 	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
 	public static int PrepareEditorExtensions(ulong id)
 	{

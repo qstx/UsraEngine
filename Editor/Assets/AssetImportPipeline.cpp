@@ -9,6 +9,7 @@
 #include <Serialization/PrefabResource.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
+#include <Rendering/Pipeline/GraphicsSettings.hpp>
 #include <algorithm>
 
 namespace Ursa::Editor
@@ -56,8 +57,7 @@ bool RuntimeAsset(const AssetRecord& asset)
 {
 	const auto extension = PathFromUrsaString(asset.path.relative).extension();
 	return extension != ".cs" && extension != ".hlsli" && extension != ".hlsl" && extension != ".frag" &&
-	       extension != ".vert" && extension != ".comp" && extension != ".compute" && extension != ".md" &&
-	       extension != ".mtl";
+	       extension != ".vert" && extension != ".comp" && extension != ".md" && extension != ".mtl";
 }
 
 void AddEntry(RuntimeContentSnapshot& snapshot, const VirtualFileSystem& files, const VirtualPath& logical,
@@ -403,6 +403,17 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			return Result<AssetImportReport>::Failure("ScriptableAsset content requires the .NET script type catalog");
 #endif
 		}
+		Vector<RuntimeContentInput> settingsInputs;
+		if (!options.bootstrapOnly && files.IsMounted(projectSettingsScheme))
+		{
+			for (const auto& entry : Take(files.List(projectSettingsScheme)))
+			{
+				settingsInputs.push_back(Take(CaptureRuntimeContentInput(files, entry.path)));
+			}
+		}
+		const auto graphics =
+		    options.bootstrapOnly ? Rendering::GraphicsSettings{} : Take(Rendering::ReadGraphicsSettings(files));
+		Done(Rendering::ValidatePipelineAsset(files, workspace.AssetResolver(), scriptTypes, graphics.renderPipeline));
 		Set<String> sourceInventory;
 		for (const String scheme : {String(engineScheme), String(projectScheme)})
 		{
@@ -519,6 +530,31 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 		const auto catalogBlob = StoreBlob(files, JsonBytes(catalog), ".catalog");
 		AddEntry(report.snapshot, files, Path("prj:__UrsaCooked/AssetCatalog.ursacatalog"), catalogBlob);
 		AddManagedContent(workspace, options, report.snapshot);
+		if (!options.bootstrapOnly)
+		{
+			const auto graphicsBlob = StoreBlob(files, Take(Rendering::EncodeGraphicsSettings(graphics)), ".graphics");
+			AddEntry(report.snapshot, files, Path(Rendering::graphicsSettingsRuntime), graphicsBlob);
+			if (files.IsMounted(projectSettingsScheme))
+			{
+				const auto currentSettings = Take(files.List(projectSettingsScheme));
+				if (currentSettings.size() != settingsInputs.size())
+				{
+					return Result<AssetImportReport>::Failure(
+					    "Project settings changed during import; refresh and retry");
+				}
+				for (const auto& input : settingsInputs)
+				{
+					const auto current = Take(CaptureRuntimeContentInput(files, input.path));
+					if (current.fingerprint != input.fingerprint)
+					{
+						return Result<AssetImportReport>::Failure("Project settings changed during import: " +
+						                                          input.path.ToString());
+					}
+					report.snapshot.inputs.push_back(input);
+				}
+				report.snapshot.completeSourceSchemes.push_back(projectSettingsScheme);
+			}
+		}
 		for (const String scheme : {String(engineScheme), String(projectScheme)})
 		{
 			if (options.bootstrapOnly && scheme == projectScheme)
@@ -569,8 +605,12 @@ Result<String> AssetImportPipeline::SourceFingerprint(const VirtualFileSystem& f
 	try
 	{
 		Vector<UInt8> data;
-		for (const String scheme : {String(engineScheme), String(projectScheme)})
+		for (const String scheme : {String(engineScheme), String(projectScheme), String(projectSettingsScheme)})
 		{
+			if (!files.IsMounted(scheme))
+			{
+				continue;
+			}
 			for (const auto& entry : Take(files.List(scheme)))
 			{
 				const auto input = Take(CaptureRuntimeContentInput(files, entry.path));

@@ -2,6 +2,8 @@
 #include <Core/Types.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/MaterialPreview.hpp>
+#include <Rendering/Scene/RenderScene.hpp>
+#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
 #include <Serialization/TextureResource.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -128,7 +130,28 @@ int main()
 		auto device = Take(CreateDevice(desc));
 		auto gui = Take(Editor::ImGuiBridge::Create(device));
 		auto preview = Take(Editor::MaterialPreview::Create(device, *gui, 64));
-		done(preview->Render(secondLoaded->MaterialPtr()));
+		auto forward = Take(Rendering::NativeForwardPipeline::Create(device));
+		bool previewPipelineSelected = false;
+		done(preview->Render(
+		    secondLoaded->MaterialPtr(),
+		    [&](Scene& previewScene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+		        std::optional<Rendering::CameraType> cameraFilter, std::optional<Rendering::CameraData> cameraOverride)
+		    {
+			    Expect(target && target->color == preview->ColorTexture() && target->depth &&
+			               cameraFilter == Rendering::CameraType::Preview && !cameraOverride,
+			           "Material preview did not provide its independent Preview target and camera");
+			    Rendering::RenderScene snapshot;
+			    auto captured = snapshot.Capture(previewScene, 1.0f, cameraFilter);
+			    if (!captured)
+			    {
+				    return captured;
+			    }
+			    previewPipelineSelected = snapshot.Cameras().size() == 1 &&
+			                              snapshot.Cameras()[0].settings.type == Rendering::CameraType::Preview &&
+			                              !snapshot.Objects().empty();
+			    return forward->RenderOffscreen(previewScene, target, ResourceState::ShaderRead, cameraFilter);
+		    }));
+		Expect(previewPipelineSelected, "Material preview scene did not expose its preview camera and material mesh");
 		auto readback =
 		    Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
 		auto command = Take(device->CreateCommandList());

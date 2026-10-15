@@ -8,6 +8,7 @@
 #include <Core/StringInterop.hpp>
 #include <Serialization/RenderResourceReferences.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
+#include <Rendering/Shader/ComputeKernel.hpp>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -18,6 +19,36 @@ namespace Ursa::Scripting
 namespace
 {
 using Json = nlohmann::json;
+
+Json CameraFrameJson(const Rendering::CameraData& camera, UInt32 width, UInt32 height)
+{
+	const auto& settings = camera.settings;
+	return {{"identity", ToStdString(camera.identity.ToString())},
+	        {"width", width},
+	        {"height", height},
+	        {"settings",
+	         {{"type", UInt32(settings.type)},
+	          {"depth", settings.depth},
+	          {"clearFlags", UInt32(settings.clearFlags)},
+	          {"cullingMask", settings.cullingMask},
+	          {"background", Json::array({settings.background.red, settings.background.green, settings.background.blue,
+	                                      settings.background.alpha})},
+	          {"viewport", Json::array({settings.viewport.x, settings.viewport.y, settings.viewport.width,
+	                                    settings.viewport.height})},
+	          {"targetWidth", width},
+	          {"targetHeight", height}}}};
+}
+
+Json BytesJson(const Vector<UInt8>& bytes)
+{
+	Json result = Json::array();
+	result.get_ref<Json::array_t&>().reserve(bytes.size());
+	for (UInt8 value : bytes)
+	{
+		result.push_back(value);
+	}
+	return result;
+}
 
 template <class T> T Take(Result<T> result)
 {
@@ -351,7 +382,33 @@ Int32 ManagedSceneApi::ResourceRequest(void* context, const UInt8* input, UInt64
 nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 {
 	const auto operation = request.at("operation").get<std::string>();
+	if ((operation.rfind("render", 0) == 0 || operation.rfind("graphicsBuffer.", 0) == 0 ||
+	     operation.rfind("computeShader.", 0) == 0) &&
+	    ownerThread != std::this_thread::get_id())
+	{
+		throw std::runtime_error("Rendering resource requests require the owner thread");
+	}
 	const auto handle = ReadHandle(request.value("handle", Json(nullptr)));
+	if (operation == "render.error")
+	{
+		return ToStdString(lastRenderError);
+	}
+	if (operation == "computeShader.findKernel" || operation == "computeShader.threadGroup")
+	{
+		if (!resources || Unsigned(request.at("localFileId")) != 0)
+		{
+			throw std::runtime_error(
+			    "ComputeShader resolution requires a ResourceSession and a root Shader asset reference");
+		}
+		const auto guid = Take(ResourceId::Parse(ToUrsaString(request.at("guid").get<std::string>())));
+		const auto shader = Take(resources->LoadShader(guid));
+		if (operation == "computeShader.findKernel")
+		{
+			return Take(Rendering::FindComputeKernel(*shader, ToUrsaString(request.at("name").get<std::string>())));
+		}
+		const auto* kernel = Take(Rendering::ComputeKernelAt(*shader, Index(request.at("kernel"))));
+		return Json::array({kernel->threadGroupSize[0], kernel->threadGroupSize[1], kernel->threadGroupSize[2]});
+	}
 	if (operation == "render.context.begin")
 	{
 		if (std::this_thread::get_id() != ownerThread || activeRenderToken)
@@ -359,30 +416,80 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 			throw std::runtime_error("Render context begin requires the owner thread and a closed frame");
 		}
 		const UInt64 frameId = Unsigned(request.at("frameId"));
-		const Float32 aspect = request.at("aspect").get<Float32>();
+		Float32 aspect = request.at("aspect").get<Float32>();
 		if (frameId == 0 || !std::isfinite(aspect) || aspect <= 0)
 		{
 			throw std::runtime_error("Render frame ID or camera aspect is invalid");
 		}
-		auto captured = renderScene.Capture(scene, aspect);
+		if (renderExecutor)
+		{
+			Done(renderExecutor->Begin(renderOutput, renderOutputFinalState, renderWindow));
+			const auto target = renderExecutor->CameraTarget();
+			if (target)
+			{
+				const auto texture = target->color ? target->color : target->depth;
+				aspect = Float32(texture->desc.width) / Float32(texture->desc.height);
+			}
+		}
+		Rendering::RenderScene::BuiltinShaderResolver resolveBuiltin;
+		if (renderExecutor)
+		{
+			resolveBuiltin = [this](ResourceId id) { return renderExecutor->ResolveBuiltinShader(id); };
+		}
+		auto captured = renderScene.Capture(renderSceneOverride ? *renderSceneOverride : scene, aspect,
+		                                    renderCameraFilter, renderCameraOverride, resolveBuiltin);
 		if (!captured)
 		{
+			if (renderExecutor && renderExecutor->IsActive())
+			{
+				renderExecutor->Abort();
+			}
 			throw std::runtime_error(ToStdString(captured.error));
 		}
 		auto begun = renderSceneContext.Begin(renderSessionId, frameId, renderScene);
 		if (!begun)
 		{
+			if (renderExecutor && renderExecutor->IsActive())
+			{
+				renderExecutor->Abort();
+			}
 			throw std::runtime_error(ToStdString(begun.error));
 		}
 		activeRenderToken = begun.value;
 		activeRenderCamera.clear();
 		return {{"context", RenderTokenJson(begun.value)}};
 	}
-	if (operation == "render.context.end")
+	if (operation == "render.context.end" || operation == "render.context.submit" ||
+	    operation == "render.context.abort")
 	{
 		if (!activeRenderToken || !SameRenderToken(ReadRenderToken(request.at("context")), *activeRenderToken))
 		{
 			throw std::runtime_error("Render context token is stale or belongs to another session");
+		}
+		if (operation == "render.context.submit")
+		{
+			if (renderExecutor)
+			{
+				Done(renderExecutor->Submit());
+			}
+			return nullptr;
+		}
+		String executionError;
+		if (renderExecutor)
+		{
+			auto execution = operation == "render.context.abort" ? renderExecutor->Abort() : renderExecutor->End();
+			if (!execution)
+			{
+				executionError = execution.error;
+				if (renderExecutor->IsActive())
+				{
+					auto aborted = renderExecutor->Abort();
+					if (!aborted)
+					{
+						executionError += "; cleanup: " + aborted.error;
+					}
+				}
+			}
 		}
 		auto ended = renderSceneContext.End();
 		if (!ended)
@@ -393,7 +500,29 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 		activeRenderCamera.clear();
 		renderBatches.clear();
 		renderBatchResources.clear();
+		if (!executionError.empty())
+		{
+			throw std::runtime_error(ToStdString(executionError));
+		}
 		return nullptr;
+	}
+	if (operation == "render.cameras")
+	{
+		Done(renderSceneContext.Validate(ReadRenderToken(request.at("context"))));
+		UInt32 width = 0, height = 0;
+		if (renderExecutor && renderExecutor->CameraTarget())
+		{
+			const auto output = renderExecutor->CameraTarget();
+			const auto texture = output->color ? output->color : output->depth;
+			width = texture->desc.width;
+			height = texture->desc.height;
+		}
+		Json cameras = Json::array();
+		for (const auto& camera : renderScene.Cameras())
+		{
+			cameras.push_back(CameraFrameJson(camera, width, height));
+		}
+		return cameras;
 	}
 	if (operation == "render.camera.setup")
 	{
@@ -414,8 +543,37 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 		{
 			throw std::runtime_error("Camera does not belong to the captured RenderScene");
 		}
+		if (renderExecutor)
+		{
+			Done(renderExecutor->ResetCamera());
+		}
 		activeRenderCamera = cameraId.value.ToString();
-		return nullptr;
+		UInt32 width = camera->settings.targetWidth;
+		UInt32 height = camera->settings.targetHeight;
+		if (renderExecutor)
+		{
+			const auto output = renderExecutor->CameraTarget();
+			if (output)
+			{
+				const auto texture = output->color ? output->color : output->depth;
+				width = texture->desc.width;
+				height = texture->desc.height;
+			}
+		}
+		const auto& settings = camera->settings;
+		return {{"width", width},
+		        {"height", height},
+		        {"settings",
+		         {{"type", UInt32(settings.type)},
+		          {"depth", settings.depth},
+		          {"clearFlags", UInt32(settings.clearFlags)},
+		          {"cullingMask", settings.cullingMask},
+		          {"background", Json::array({settings.background.red, settings.background.green,
+		                                      settings.background.blue, settings.background.alpha})},
+		          {"viewport", Json::array({settings.viewport.x, settings.viewport.y, settings.viewport.width,
+		                                    settings.viewport.height})},
+		          {"targetWidth", width},
+		          {"targetHeight", height}}}};
 	}
 	if (operation == "render.cull")
 	{
@@ -483,7 +641,7 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 			throw std::runtime_error("RendererList sorting criteria is invalid");
 		}
 		drawing.sorting.criteria = static_cast<Rendering::SortingCriteria>(criteria);
-		if (request.contains("cameraPosition"))
+		if (request.contains("cameraPosition") && !request["cameraPosition"].is_null())
 		{
 			const auto& position = request.at("cameraPosition");
 			if (!position.is_array() || position.size() != 3 || !position[0].is_number() || !position[1].is_number() ||
@@ -494,8 +652,22 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 			drawing.sorting.cameraPosition = {position[0].get<Float32>(), position[1].get<Float32>(),
 			                                  position[2].get<Float32>()};
 		}
+		else if (!activeRenderCamera.empty())
+		{
+			const auto camera =
+			    std::find_if(renderScene.Cameras().begin(), renderScene.Cameras().end(),
+			                 [&](const auto& value) { return value.identity.ToString() == activeRenderCamera; });
+			if (camera != renderScene.Cameras().end())
+			{
+				drawing.sorting.cameraPosition = camera->position;
+			}
+		}
 		drawing.activePipeline = ToUrsaString(request.value("activePipeline", std::string("UrsaForward")));
 		drawing.overrideMaterialPass = request.value("overrideMaterialPass", Int32{-1});
+		if (request.contains("overrideMaterial") && !request["overrideMaterial"].is_null())
+		{
+			drawing.overrideMaterial = Take(ResolveMaterial(ReadHandle(request["overrideMaterial"])));
+		}
 		const Int32 minimumQueue = request.value("minimumQueue", Int32{0});
 		const Int32 maximumQueue = request.value("maximumQueue", Int32{5000});
 		const UInt32 layerMask = request.value("layerMask", UInt32{0xffffffffu});
@@ -653,58 +825,13 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 		{
 			throw std::runtime_error("RenderTexture creation requires an active RHI device");
 		}
-		const UInt32 width = Index(request.at("width"));
-		const UInt32 height = Index(request.at("height"));
-		const UInt32 formatIndex = Index(request.at("format"));
-		const UInt32 depthBits = Index(request.at("depthBufferBits"));
-		const bool randomWrite = request.at("enableRandomWrite").get<bool>();
-		const UInt32 samples = Index(request.at("msaaSamples"));
-		const auto& capabilities = device->Capabilities();
-		if (!width || !height || width > capabilities.maxTextureSize || height > capabilities.maxTextureSize ||
-		    formatIndex > 2 || samples != 1 || (depthBits != 0 && depthBits != 32))
-		{
-			throw std::runtime_error("RenderTexture dimensions, format, depth or sample count exceed RHI capabilities");
-		}
-		const Rhi::Format colorFormat = formatIndex == 1 ? Rhi::Format::RgbA16Float : Rhi::Format::RgbA8Unorm;
-		auto texture = std::make_shared<ManagedRenderTexture>();
-		if (formatIndex != 2)
-		{
-			auto format = Take(device->QueryFormat(colorFormat));
-			if (!format.colorAttachment || !format.sampled || (randomWrite && !format.storage))
-			{
-				throw std::runtime_error(
-				    "RenderTexture color format does not support its requested attachment/sample/storage usages");
-			}
-			Rhi::TextureUsage usage = Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled |
-			                          Rhi::TextureUsage::TransferSource | Rhi::TextureUsage::TransferDestination;
-			if (randomWrite)
-			{
-				usage = usage | Rhi::TextureUsage::Storage;
-			}
-			texture->color = Take(device->CreateTexture({width, height, colorFormat, usage, 1}));
-		}
-		if (depthBits || formatIndex == 2)
-		{
-			auto format = Take(device->QueryFormat(Rhi::Format::D32Float));
-			if (!format.depthAttachment || (randomWrite && !format.storage))
-			{
-				throw std::runtime_error("RenderTexture depth format does not support requested usage");
-			}
-			Rhi::TextureUsage usage = Rhi::TextureUsage::DepthAttachment | Rhi::TextureUsage::Sampled |
-			                          Rhi::TextureUsage::TransferSource | Rhi::TextureUsage::TransferDestination;
-			if (randomWrite)
-			{
-				usage = usage | Rhi::TextureUsage::Storage;
-			}
-			texture->depth = Take(device->CreateTexture({width, height, Rhi::Format::D32Float, usage, 1}));
-		}
-		auto handleResult = handles->Register(texture.get(), ManagedHandleKind::RenderTexture);
-		if (!handleResult)
-		{
-			throw std::runtime_error(ToStdString(handleResult.error));
-		}
-		ownedRenderTextures[handleResult.value.index] = std::move(texture);
-		return HandleJson(handleResult.value);
+		auto texture = Take(Rendering::CreateRenderTexture(
+		    *device, {Index(request.at("width")), Index(request.at("height")), Index(request.at("format")),
+		              Index(request.at("depthBufferBits")), request.at("enableRandomWrite").get<bool>(),
+		              Index(request.at("msaaSamples"))}));
+		auto registered = Take(handles->Register(texture.get(), ManagedHandleKind::RenderTexture));
+		ownedRenderTextures[registered.index] = std::move(texture);
+		return HandleJson(registered);
 	}
 	if (operation == "renderTexture.release")
 	{
@@ -713,47 +840,29 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 		ownedRenderTextures.erase(handle.index);
 		return nullptr;
 	}
+	if (operation == "renderTexture.readback")
+	{
+		if (activeRenderToken)
+		{
+			throw std::runtime_error("RenderTexture readback requires a finished render context");
+		}
+		if (!device)
+		{
+			throw std::runtime_error("RenderTexture readback requires a device");
+		}
+		return BytesJson(Take(Rendering::ReadRenderTexture(*device, *Take(ResolveRenderTexture(handle)))));
+	}
 	if (operation == "graphicsBuffer.create")
 	{
 		if (!device)
 		{
 			throw std::runtime_error("GraphicsBuffer creation requires an active RHI device");
 		}
-		const UInt32 target = Index(request.at("target"));
-		const UInt32 count = Index(request.at("count"));
-		const UInt32 stride = Index(request.at("stride"));
-		if (!target || (target & ~31u) || !count || !stride ||
-		    Size(count) > (std::numeric_limits<Size>::max)() / stride)
-		{
-			throw std::runtime_error("GraphicsBuffer target, count or stride is invalid");
-		}
-		const Size byteSize = Size(count) * stride;
-		if ((target & (4u | 8u)) && byteSize > device->Capabilities().maxStorageBufferRange)
-		{
-			throw std::runtime_error("GraphicsBuffer exceeds the RHI storage buffer range capability");
-		}
-		Rhi::BufferUsage usage = Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::TransferDestination;
-		if (target & 1u)
-		{
-			usage = usage | Rhi::BufferUsage::Vertex;
-		}
-		if (target & 2u)
-		{
-			usage = usage | Rhi::BufferUsage::Index;
-		}
-		if (target & (4u | 8u | 16u))
-		{
-			usage = usage | Rhi::BufferUsage::Storage;
-		}
-		auto resource = std::make_shared<ManagedGraphicsBuffer>();
-		resource->buffer = Take(device->CreateBuffer({byteSize, usage, Rhi::Memory::Gpu}));
-		auto handleResult = handles->Register(resource.get(), ManagedHandleKind::GraphicsBuffer);
-		if (!handleResult)
-		{
-			throw std::runtime_error(ToStdString(handleResult.error));
-		}
-		ownedGraphicsBuffers[handleResult.value.index] = std::move(resource);
-		return HandleJson(handleResult.value);
+		auto resource = Take(Rendering::CreateGraphicsBuffer(*device, Index(request.at("target")),
+		                                                     Index(request.at("count")), Index(request.at("stride"))));
+		auto registered = Take(handles->Register(resource.get(), ManagedHandleKind::GraphicsBuffer));
+		ownedGraphicsBuffers[registered.index] = std::move(resource);
+		return HandleJson(registered);
 	}
 	if (operation == "graphicsBuffer.release")
 	{
@@ -761,6 +870,20 @@ nlohmann::json ManagedSceneApi::DispatchResourceRequest(const Json& request)
 		Done(handles->Invalidate(handle));
 		ownedGraphicsBuffers.erase(handle.index);
 		return nullptr;
+	}
+	if (operation == "graphicsBuffer.readback")
+	{
+		if (activeRenderToken)
+		{
+			throw std::runtime_error("GraphicsBuffer readback requires a finished render context");
+		}
+		if (!device)
+		{
+			throw std::runtime_error("GraphicsBuffer readback requires a device");
+		}
+		return BytesJson(Take(Rendering::ReadGraphicsBuffer(*device, *Take(ResolveGraphicsBuffer(handle)),
+		                                                    Size(Unsigned(request.at("offset"))),
+		                                                    Size(Unsigned(request.at("size"))))));
 	}
 	if (operation == "resource.reference")
 	{

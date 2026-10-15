@@ -2,6 +2,7 @@
 
 #include <Core/Result.hpp>
 #include <Core/Types.hpp>
+#include <Serialization/AssetReference.hpp>
 #include <Scripting/NativeApi.hpp>
 #include <Scripting/ManagedEditorApi.hpp>
 #include <Vfs/VirtualFileSystem.hpp>
@@ -90,6 +91,9 @@ public:
 	Result<bool> InvokeEditorExtension(UInt64 sessionId, const String& extensionId, const ManagedEditorApi& api);
 
 	Result<String> PrepareScriptReload(UInt64 sessionId, const String& snapshots);
+	Result<void> TransferScriptableAssets(UInt64 sourceSession, UInt64 candidateSession);
+	Result<void> ConfigureRenderPipeline(UInt64 session, AssetReference pipeline = {});
+	Result<void> RenderScene(UInt64 session, Float32 aspect);
 
 	Result<void> LoadEditorApi(const VirtualPath& path);
 
@@ -150,6 +154,8 @@ private:
 	using LoadContentFunction = Int32(__stdcall*)(UInt64, const UInt8*, UInt64);
 	using CreateSessionFunction = Int32(__stdcall*)(UInt32, const NativeApiV6*, Int32, UInt64*);
 	using SessionFunction = Int32(__stdcall*)(UInt64);
+	using TransferAssetsFunction = Int32(__stdcall*)(UInt64, UInt64);
+	using RenderSceneFunction = Int32(__stdcall*)(UInt64, Float32);
 	using BindSessionFunction = Int32(__stdcall*)(UInt64, const NativeApiV6*, Int32);
 #else
 	using CreateBehaviourFunction = Int32 (*)(const UInt8*, UInt64, const ManagedHandle*, UInt64*);
@@ -164,6 +170,8 @@ private:
 	using LoadContentFunction = Int32 (*)(UInt64, const UInt8*, UInt64);
 	using CreateSessionFunction = Int32 (*)(UInt32, const NativeApiV6*, Int32, UInt64*);
 	using SessionFunction = Int32 (*)(UInt64);
+	using TransferAssetsFunction = Int32 (*)(UInt64, UInt64);
+	using RenderSceneFunction = Int32 (*)(UInt64, Float32);
 	using BindSessionFunction = Int32 (*)(UInt64, const NativeApiV6*, Int32);
 #endif
 
@@ -190,6 +198,9 @@ private:
 	BindSessionFunction bindSession = nullptr;
 	SessionFunction validateSession = nullptr;
 	SessionFunction closeSession = nullptr;
+	TransferAssetsFunction transferAssets = nullptr;
+	LoadContentFunction configurePipeline = nullptr;
+	RenderSceneFunction renderScene = nullptr;
 	bool sessionFaulted = false;
 	bool initialized = false;
 };

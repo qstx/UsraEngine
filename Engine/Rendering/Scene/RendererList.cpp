@@ -1,5 +1,6 @@
 #include <Rendering/Scene/RendererList.hpp>
 #include <Core/StringInterop.hpp>
+#include <Core/Profiler.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -125,81 +126,67 @@ String PassSelectionKey(const Shader::ShaderAsset& shader, const DrawingSettings
 			}
 		}
 	}
+	Vector<const Shader::ShaderAsset*> references{&shader};
+	Set<const Shader::ShaderAsset*> visited;
+	while (!references.empty())
+	{
+		const auto* current = references.back();
+		references.pop_back();
+		if (!visited.insert(current).second)
+		{
+			continue;
+		}
+		for (const auto& reference : current->resolvedReferences)
+		{
+			key += "|reference=" + reference.reference.shaderName + "/" + reference.reference.passName;
+			if (reference.asset)
+			{
+				key += "=" + reference.asset->id.ToString() + ":" + reference.asset->sourceHash + ":" +
+				       reference.asset->compilerVersion;
+				references.push_back(reference.asset.get());
+			}
+		}
+	}
 	return key;
 }
 
-bool Pass(const std::shared_ptr<const Shader::ShaderAsset>& shaderAsset, const DrawingSettings& drawing,
-          UInt32& subShaderIndex, UInt32& passIndex, Map<String, ShaderPassSelectionCacheEntry>& cache)
+Result<bool> Pass(const std::shared_ptr<const Shader::ShaderAsset>& shaderAsset, const DrawingSettings& drawing,
+                  UInt32& subShaderIndex, UInt32& passIndex, std::optional<ResolvedGraphicsPass>& resolved,
+                  Map<String, ShaderPassSelectionCacheEntry>& cache)
 {
 	if (!shaderAsset)
 	{
-		return true;
+		return Result<bool>::Success(true);
 	}
-	const auto& shader = *shaderAsset;
-	const String key = PassSelectionKey(shader, drawing);
+	const String key = PassSelectionKey(*shaderAsset, drawing);
 	if (const auto found = cache.find(key); found != cache.end())
 	{
 		subShaderIndex = found->second.subShaderIndex;
 		passIndex = found->second.passIndex;
-		return found->second.matched;
+		resolved = found->second.resolvedPass;
+		return Result<bool>::Success(found->second.matched);
+	}
+	Vector<String> tags;
+	for (const auto& tag : drawing.shaderTags)
+	{
+		tags.push_back(tag.name);
+	}
+	auto selected = SelectGraphicsPass(shaderAsset, drawing.activePipeline, tags, drawing.overrideMaterialPass);
+#if defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
+	static std::atomic<UInt64> passResolutions{0};
+	Profiling::Plot("Rendering.PassResolutions", Float64(passResolutions.fetch_add(1, std::memory_order_relaxed) + 1));
+#endif
+	if (!selected)
+	{
+		return Result<bool>::Failure(selected.error);
 	}
 	ShaderPassSelectionCacheEntry selection;
-	for (Size sub = 0; sub < shader.subShaders.size(); ++sub)
+	selection.matched = selected.value.has_value();
+	selection.resolvedPass = selected.value;
+	if (selected.value)
 	{
-		bool compatible = true;
-		for (const auto& tag : shader.subShaders[sub].tags)
-		{
-			if (tag.name == "RenderPipeline" && tag.value != drawing.activePipeline)
-			{
-				compatible = false;
-				break;
-			}
-		}
-		if (!compatible)
-		{
-			continue;
-		}
-		const auto& passes = shader.subShaders[sub].passes;
-		if (drawing.overrideMaterialPass >= 0)
-		{
-			if (Size(drawing.overrideMaterialPass) >= passes.size())
-			{
-				continue;
-			}
-			selection = {true, UInt32(sub), UInt32(drawing.overrideMaterialPass)};
-			break;
-		}
-		if (selection.matched)
-		{
-			break;
-		}
-		for (const auto& requested : drawing.shaderTags)
-		{
-			for (Size index = 0; index < passes.size(); ++index)
-			{
-				const String* lightMode = nullptr;
-				for (const auto& tag : passes[index].tags)
-				{
-					if (tag.name == "LightMode")
-					{
-						lightMode = &tag.value;
-					}
-				}
-				if (lightMode ? *lightMode == requested.name : requested.name == "SRPDefaultUnlit")
-				{
-					selection = {true, UInt32(sub), UInt32(index)};
-					break;
-				}
-			}
-			if (selection.matched)
-			{
-				break;
-			}
-		}
-		if (selection.matched)
-		{
-			break;
-		}
+		selection.subShaderIndex = selected.value->subShaderIndex;
+		selection.passIndex = selected.value->passIndex;
 	}
 	if (cache.size() >= 256)
 	{
@@ -208,7 +195,8 @@ bool Pass(const std::shared_ptr<const Shader::ShaderAsset>& shaderAsset, const D
 	cache.emplace(key, selection);
 	subShaderIndex = selection.subShaderIndex;
 	passIndex = selection.passIndex;
-	return selection.matched;
+	resolved = selected.value;
+	return Result<bool>::Success(selection.matched);
 }
 } // namespace
 
@@ -361,8 +349,14 @@ Result<RendererList> RenderSceneContext::CreateRendererList(CullingResults resul
 		}
 		auto material = drawing.overrideMaterial ? drawing.overrideMaterial : object.material;
 		UInt32 subShaderIndex = 0, passIndex = 0;
-		if (!Pass(drawing.overrideMaterial ? drawing.overrideMaterial->Shader() : object.shader, drawing,
-		          subShaderIndex, passIndex, passSelectionCache))
+		std::optional<ResolvedGraphicsPass> resolvedPass;
+		auto matching = Pass(drawing.overrideMaterial ? drawing.overrideMaterial->Shader() : object.shader, drawing,
+		                     subShaderIndex, passIndex, resolvedPass, passSelectionCache);
+		if (!matching)
+		{
+			return Result<RendererList>::Failure(matching.error);
+		}
+		if (!matching.value)
 		{
 			continue;
 		}
@@ -372,7 +366,8 @@ Result<RendererList> RenderSceneContext::CreateRendererList(CullingResults resul
 		                                        (bounds.minimum.y + bounds.maximum.y) * 0.5f,
 		                                        (bounds.minimum.z + bounds.maximum.z) * 0.5f};
 		const Vec3 delta = center - drawing.sorting.cameraPosition;
-		output.entries.push_back({index, std::move(material), subShaderIndex, passIndex, queue, Dot(delta, delta)});
+		output.entries.push_back({index, std::move(material), subShaderIndex, passIndex, queue, Dot(delta, delta),
+		                          drawing.activePipeline, resolvedPass});
 	}
 	if (drawing.sorting.criteria != SortingCriteria::None)
 	{

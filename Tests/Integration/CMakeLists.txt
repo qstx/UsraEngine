@@ -1,4 +1,13 @@
 if(URSA_ENABLE_DOTNET AND URSA_BUILD_EDITOR)
+  if(NOT URSA_PROJECT_DIR STREQUAL "")
+    ursa_add_test_executable(UrsaEditorSrpAcceptanceTests EditorSrpAcceptanceTests.cpp)
+    target_link_libraries(UrsaEditorSrpAcceptanceTests PRIVATE Ursa::Editor)
+    ursa_attach_dotnet_host_runtime(UrsaEditorSrpAcceptanceTests)
+    add_test(NAME UrsaEditorSrpAcceptanceTests COMMAND UrsaEditorSrpAcceptanceTests
+      "${URSA_PROJECT_DIR}" "${URSA_BINARY_ROOT}/TestProjects/SrpAcceptance/$<CONFIG>")
+    set_tests_properties(UrsaEditorSrpAcceptanceTests PROPERTIES TIMEOUT 240
+      ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/SrpAcceptanceUser;TEMP=${URSA_BINARY_ROOT}/Temp;TMP=${URSA_BINARY_ROOT}/Temp")
+  endif()
 
   ursa_add_test_executable(UrsaProfilerEditorWindowTests ProfilerEditorWindowTests.cpp)
   target_link_libraries(UrsaProfilerEditorWindowTests PRIVATE Ursa::Editor glfw)
@@ -23,6 +32,7 @@ if(URSA_ENABLE_DOTNET)
     "${URSA_MANAGED_OUTPUT_DIR}"
     "${URSA_BINARY_ROOT}/temp/DotNetHostSmoke")
   ursa_attach_dotnet_host_runtime(UrsaDotNetHostTests)
+  ursa_require_test_content(UrsaDotNetHostSmoke UrsaDotNetHostTests)
 
   add_test(NAME UrsaManagedProtocolTests COMMAND "${URSA_DOTNET_EXECUTABLE}" run --project "${URSA_MANAGED_TEST_STAGE_ROOT}/Tests/Managed/Ursa.ManagedHost.ProtocolTests/Ursa.ManagedHost.ProtocolTests.csproj" --configuration "$<CONFIG>" --no-build --no-restore)
   if(NOT URSA_PROJECT_DIR STREQUAL "")
@@ -147,6 +157,16 @@ if(URSA_ENABLE_DOTNET)
 endif()
 if(TARGET UrsaAssetImport AND TARGET UrsaScriptPlayer AND NOT URSA_PROJECT_DIR STREQUAL "")
   find_program(URSA_POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
+
+  if(URSA_ENABLE_DOTNET AND TARGET UrsaEditor)
+    add_test(NAME UrsaProjectPipelineSamplesTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/ProjectPipelineSamplesTests.ps1"
+      -Importer "$<TARGET_FILE:UrsaAssetImport>" -Player "$<TARGET_FILE:UrsaScriptPlayer>"
+      -PackageTool "$<TARGET_FILE:UrsaPak>"
+      -Editor "$<TARGET_FILE:UrsaEditor>" -Source "${URSA_TEST_SAMPLE_PROJECT}"
+      -Configuration "$<CONFIG>" -OutputRoot "${URSA_BINARY_ROOT}/TestProjects/PipelineSamples/$<CONFIG>")
+    set_tests_properties(UrsaProjectPipelineSamplesTests PROPERTIES TIMEOUT 240)
+  endif()
 
   add_test(NAME UrsaAssetImportCliTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
     -File "${CMAKE_CURRENT_SOURCE_DIR}/AssetImportCliTests.ps1"

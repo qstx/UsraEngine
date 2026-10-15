@@ -6,6 +6,11 @@
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <Mesh/Primitive.hpp>
+#include <MeshFixtures.hpp>
+#include <RenderingFixtures.hpp>
+#include <Rendering/Resources/RenderResources.hpp>
+#include <Rendering/Pipeline/GraphicsSettings.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <Serialization/PrefabAsset.hpp>
 #include <Serialization/SceneResource.hpp>
@@ -20,6 +25,7 @@
 #include <Vfs/PakArchive.hpp>
 #include <Vfs/PakBuilder.hpp>
 #include <algorithm>
+#include <optional>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -59,6 +65,535 @@ void Done(Result<void> result)
 	{
 		throw std::runtime_error(ToStdString(result.error));
 	}
+}
+
+void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPath)
+{
+	Rhi::DeviceDesc description;
+#ifndef NDEBUG
+	description.validation = true;
+#endif
+	auto device = Take(Rhi::CreateDevice(description));
+	auto output = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
+	Scene scene;
+	ManagedSceneApi sceneApi(scene);
+	sceneApi.SetRenderDevice(device);
+	sceneApi.SetRenderOutput(output);
+	const UInt64 session = Take(host.CreateScriptSession(false, &sceneApi));
+	Done(host.LoadScriptContent(session, contentPath));
+	Done(host.ValidateScriptSession(session));
+	ManagedScriptRuntime runtime(scene, host, sceneApi, session);
+	auto camera = Take(scene.CreateGameObject("Classic Camera"));
+	Take(camera->AddComponent<CameraComponent>());
+	Take(runtime.CreateAndAdd(camera, "Ursa.SessionFixtures.ClassicRenderingProbe, Ursa.SessionFixtures"));
+	auto cube = Take(scene.CreateGameObject("Classic Cube"));
+	LocalTransform transform;
+	transform.position = {0, 0, -3};
+	Done(cube->SetLocalTransform(transform));
+	Take(Test::AddRenderer(cube, {0, 1, 0, 1}));
+	for (UInt64 frameIndex = 1; frameIndex <= 3; ++frameIndex)
+	{
+		FrameContext frame;
+		frame.frameIndex = frameIndex;
+		frame.deltaSeconds = 1.0f / 60.0f;
+		scene.BeginFrame();
+		Done(scene.Update(frame));
+		Expect(Take(camera->Name()) == "ClassicRendering:Submitted", "The compiled documentation example failed");
+		const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
+		const Size center = (32 * 64 + 32) * 4;
+		Expect(pixels[center] < 15 && pixels[center + 1] > 240 && pixels[center + 2] < 15 && pixels[0] < 15 &&
+		           pixels[1] < 15 && pixels[2] > 240,
+		       "The C# documentation example did not render green geometry over its blue offscreen clear");
+	}
+	Expect(sceneApi.AcceptedRenderBatchCount() == 6, "The example did not execute two logical segments per frame");
+	Done(scene.DestroyGameObject(camera));
+	Done(scene.DestroyGameObject(cube));
+	Done(scene.CommitChanges());
+	auto failureCamera = Take(scene.CreateGameObject("Failure Camera"));
+	Take(failureCamera->AddComponent<CameraComponent>());
+	Take(runtime.CreateAndAdd(failureCamera, "Ursa.SessionFixtures.RenderingFailureProbe, Ursa.SessionFixtures"));
+	for (UInt64 frameIndex = 4; frameIndex <= 5; ++frameIndex)
+	{
+		FrameContext frame;
+		frame.frameIndex = frameIndex;
+		scene.BeginFrame();
+		Done(scene.Update(frame));
+		Expect(Take(failureCamera->Name()) == "RenderingFailure:Aborted",
+		       "Render and end-event failures did not preserve both diagnostics and complete cleanup");
+		const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
+		Expect(pixels[0] < 15 && pixels[1] > 240 && pixels[2] < 15,
+		       "A render exception discarded the submitted green segment or executed the unsubmitted red segment");
+	}
+	Expect(sceneApi.AcceptedRenderBatchCount() == 10, "Failed rendering did not exercise both command segments");
+	Done(scene.DestroyGameObject(failureCamera));
+	Done(scene.CommitChanges());
+	auto lifetimeCamera = Take(scene.CreateGameObject("Lifetime Camera"));
+	Take(lifetimeCamera->AddComponent<CameraComponent>());
+	Take(runtime.CreateAndAdd(lifetimeCamera, "Ursa.SessionFixtures.PipelineLifetimeProbe, Ursa.SessionFixtures"));
+	for (UInt64 frameIndex = 6; frameIndex <= 7; ++frameIndex)
+	{
+		FrameContext frame;
+		frame.frameIndex = frameIndex;
+		scene.BeginFrame();
+		Done(scene.Update(frame));
+		Expect(Take(lifetimeCamera->Name()) == "PipelineLifetime:" + ToUrsaString(std::to_string(frameIndex - 5)),
+		       "The session-owned pipeline or context event did not remain valid across frames");
+		const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
+		Expect(pixels[0] < 15 && pixels[1] < 15 && pixels[2] > 240,
+		       "The session-owned pipeline did not draw its current output");
+	}
+	Done(scene.DestroyGameObject(lifetimeCamera));
+	Done(scene.CommitChanges());
+	Done(host.CloseScriptSession(session));
+	std::cout << "Compiled classic rendering example: 3 GPU frames passed\n";
+	std::cout << "Managed rendering exception cleanup: 2 GPU frames passed\n";
+}
+
+void TestPipelineAssetReload(DotNetHost& host, VirtualFileSystem& filesystem, const VirtualPath& content)
+{
+	const auto rootId = Take(ResourceId::Parse("a5137701-cc10-40f1-8420-8e9769daa201"));
+	const auto sharedId = Take(ResourceId::Parse("a5137701-cc10-40f1-8420-8e9769daa202"));
+	const auto failingId = Take(ResourceId::Parse("a5137701-cc10-40f1-8420-8e9769daa203"));
+	Done(filesystem.MountProvider("reloadfixture", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	const auto rootPath = Take(VirtualPath::Parse("reloadfixture:Pipeline.ursaasset"));
+	const auto sharedPath = Take(VirtualPath::Parse("reloadfixture:Shared.ursaasset"));
+	const auto failingPath = Take(VirtualPath::Parse("reloadfixture:FailingPipeline.ursaasset"));
+	const auto reference = [](ResourceId id)
+	{
+		return nlohmann::json{{"$ursaReference",
+		                       {{"Kind", "ScriptableObject"},
+		                        {"Id", ""},
+		                        {"Resource", {{"guid", ToStdString(id.ToString())}, {"localFileId", 1u}}}}}};
+	};
+	ScriptableAsset pipelineAsset;
+	Done(pipelineAsset.SetDescription(rootId, 1, "test.reload-pipeline", 1,
+	                                  {{"FormatVersion", 1u},
+	                                   {"ScriptType", "test.reload-pipeline"},
+	                                   {"Version", 1u},
+	                                   {"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+	                                   {"LocalFileId", 3u},
+	                                   {"Fields",
+	                                    {{"tint", 23},
+	                                     {"failFactory", false},
+	                                     {"shared", reference(sharedId)},
+	                                     {"future", nlohmann::json::array({1, 2, 3})}}}}));
+	ScriptableAsset sharedAsset;
+	Done(sharedAsset.SetDescription(sharedId, 1, "test.reload-dependency", 1,
+	                                {{"FormatVersion", 1u},
+	                                 {"ScriptType", "test.reload-dependency"},
+	                                 {"Version", 1u},
+	                                 {"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+	                                 {"LocalFileId", 4u},
+	                                 {"Fields", {{"value", 7}, {"self", reference(sharedId)}}}}));
+	ScriptableAsset failingAsset;
+	Done(failingAsset.SetDescription(failingId, 1, "test.reload-pipeline", 1,
+	                                 {{"FormatVersion", 1u},
+	                                  {"ScriptType", "test.reload-pipeline"},
+	                                  {"Version", 1u},
+	                                  {"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+	                                  {"LocalFileId", 3u},
+	                                  {"Fields", {{"tint", 99}, {"failFactory", true}}}}));
+	Done(filesystem.WriteAtomic(rootPath, Take(EncodeScriptableAssetArtifact(pipelineAsset))));
+	Done(filesystem.WriteAtomic(sharedPath, Take(EncodeScriptableAssetArtifact(sharedAsset))));
+	Done(filesystem.WriteAtomic(failingPath, Take(EncodeScriptableAssetArtifact(failingAsset))));
+	auto resources =
+	    Take(ResourceSession::Open(filesystem,
+	                               [&](ResourceId id, UInt64 localId)
+	                               {
+		                               return localId == 1 && (id == rootId || id == sharedId || id == failingId)
+		                                          ? Result<VirtualPath>::Success(id == rootId     ? rootPath
+		                                                                         : id == sharedId ? sharedPath
+		                                                                                          : failingPath)
+		                                          : Result<VirtualPath>::Failure("Unknown reload asset");
+	                               }));
+	auto device = Take(Rhi::CreateDevice({}));
+
+	struct Scope
+	{
+		Scene scene;
+		std::unique_ptr<ManagedSceneApi> api;
+		std::unique_ptr<ManagedScriptRuntime> runtime;
+		std::shared_ptr<Rendering::RenderTextureResource> output;
+		GameObject::Ptr camera;
+		ScriptBehaviourComponent* probe = nullptr;
+		UInt64 session = 0;
+	};
+
+	const auto open = [&]()
+	{
+		auto scope = std::make_unique<Scope>();
+		scope->api = std::make_unique<ManagedSceneApi>(scope->scene, resources.get());
+		scope->api->SetRenderDevice(device);
+		scope->output = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
+		scope->api->SetRenderOutput(scope->output);
+		scope->session = Take(host.CreateScriptSession(true, scope->api.get()));
+		Done(host.LoadScriptContent(scope->session, content));
+		scope->runtime = std::make_unique<ManagedScriptRuntime>(scope->scene, host, *scope->api, scope->session);
+		scope->camera = Take(scope->scene.CreateGameObject("Reload Camera"));
+		Take(scope->camera->AddComponent<CameraComponent>());
+		const auto component = Take(scope->runtime->CreateAndAdd(
+		    scope->camera, "Ursa.SessionFixtures.PipelineReloadProbe, Ursa.SessionFixtures"));
+		scope->probe = static_cast<ScriptBehaviourComponent*>(scope->scene.GetComponent(component));
+		return scope;
+	};
+	const auto invoke = [&](Scope& scope, Int32 action)
+	{
+		Done(host.SelectScriptSession(scope.session));
+		Done(host.DeserializeBehaviour(scope.probe->InstanceToken(),
+		                               ToUrsaString(nlohmann::json{{"FormatVersion", 1u},
+		                                                           {"ScriptType", "test.pipeline-reload-probe"},
+		                                                           {"Version", 1u},
+		                                                           {"Fields", {{"action", action}}}}
+		                                                .dump())));
+		Done(host.InvokeBehaviour(scope.probe->InstanceToken(), ManagedBehaviourEvent::Update));
+	};
+	const auto close = [&](Scope& scope)
+	{
+		scope.scene.Clear();
+		scope.runtime.reset();
+		Done(host.CloseScriptSession(scope.session));
+	};
+	auto source = open();
+	invoke(*source, 0);
+	const auto oldToken = source->probe->InstanceToken();
+	for (Int32 failure : {2, 3})
+	{
+		invoke(*source, failure);
+		auto rejected = open();
+		Expect(!host.TransferScriptableAssets(source->session, rejected->session),
+		       "A failing factory or validation replaced the active asset environment");
+		close(*rejected);
+		invoke(*source, 4);
+		Expect(Take(source->camera->Name()) == "PipelineReload:41:19", "A failed candidate damaged the source fields");
+	}
+	auto candidate = open();
+	Done(host.TransferScriptableAssets(source->session, candidate->session));
+	invoke(*candidate, 1);
+	Done(filesystem.MountProvider(projectSettingsScheme, std::make_shared<MemoryFileProvider>(),
+	                              MountAccess::ReadWrite));
+	const Rendering::GraphicsSettings graphics{{rootId, 1}};
+	Done(Rendering::SaveGraphicsSettings(filesystem, graphics,
+	                                     [&](AssetReference selected)
+	                                     {
+		                                     return selected.guid == rootId && selected.localFileId == 1
+		                                                ? Result<void>{}
+		                                                : Result<void>::Failure(
+		                                                      "Unexpected Graphics pipeline identity");
+	                                     }));
+	const auto reopenedSettings = Take(Rendering::ReadGraphicsSettings(filesystem));
+	Expect(reopenedSettings.renderPipeline.guid == rootId && reopenedSettings.renderPipeline.localFileId == 1,
+	       "Project Graphics settings did not persist the selected pipeline identity");
+	Done(host.ConfigureRenderPipeline(candidate->session, reopenedSettings.renderPipeline));
+	Done(host.RenderScene(candidate->session, 1));
+	const auto pixels = Take(Rendering::ReadRenderTexture(*device, *candidate->output));
+	Expect(pixels[0] == 41 && pixels[1] == 0 && pixels[2] == 0,
+	       "The reloaded pipeline did not render its unsaved configuration");
+	const auto renderViewport =
+	    [&](Scene& viewportScene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+	        Rendering::CameraType cameraType, std::optional<Rendering::CameraData> cameraOverride = {})
+	{
+		ManagedSceneApi viewportApi(viewportScene, resources.get());
+		viewportApi.SetRenderDevice(device);
+		viewportApi.SetRenderOutput(target);
+		viewportApi.SetRenderCameraSelection(cameraType, std::move(cameraOverride));
+		Done(host.BindScriptSession(candidate->session, viewportApi));
+		auto rendered = host.RenderScene(candidate->session,
+		                                 Float32(target->description.width) / Float32(target->description.height));
+		auto restored = host.BindScriptSession(candidate->session, *candidate->api);
+		Done(std::move(restored));
+		Done(std::move(rendered));
+	};
+	auto sceneTarget = Take(Rendering::CreateRenderTexture(*device, {32, 48, 0, 32}));
+	Rendering::CameraData sceneViewCamera;
+	sceneViewCamera.identity = ResourceId::Generate();
+	sceneViewCamera.viewProjection = Mat4::Identity();
+	sceneViewCamera.settings.type = Rendering::CameraType::SceneView;
+	sceneViewCamera.settings.targetWidth = 32;
+	sceneViewCamera.settings.targetHeight = 48;
+	renderViewport(candidate->scene, sceneTarget, Rendering::CameraType::SceneView, sceneViewCamera);
+	Scene previewScene;
+	auto previewCameraObject = Take(previewScene.CreateGameObject("Preview Camera"));
+	auto previewCamera = Take(previewCameraObject->AddComponent<CameraComponent>());
+	previewCamera->rendering.type = Rendering::CameraType::Preview;
+	previewCamera->rendering.targetWidth = 48;
+	previewCamera->rendering.targetHeight = 32;
+	Done(previewScene.SetActiveCamera(previewCamera->Id()));
+	Done(previewScene.CommitChanges());
+	auto previewTarget = Take(Rendering::CreateRenderTexture(*device, {48, 32, 0, 32}));
+	renderViewport(previewScene, previewTarget, Rendering::CameraType::Preview);
+	const auto scenePixels = Take(Rendering::ReadRenderTexture(*device, *sceneTarget));
+	const auto previewPixels = Take(Rendering::ReadRenderTexture(*device, *previewTarget));
+	Expect(scenePixels[0] == 41 && scenePixels[1] == 0 && scenePixels[2] == 0 && previewPixels[0] == 41 &&
+	           previewPixels[1] == 0 && previewPixels[2] == 0 && sceneTarget->description.width == 32 &&
+	           sceneTarget->description.height == 48 && previewTarget->description.width == 48 &&
+	           previewTarget->description.height == 32,
+	       "SceneView and Preview cameras did not use independent render targets with the active pipeline");
+	Expect(!host.ConfigureRenderPipeline(candidate->session, {failingId, 1}),
+	       "A failing Graphics pipeline candidate was applied successfully");
+	Done(host.RenderScene(candidate->session, 1));
+	const auto retainedPixels = Take(Rendering::ReadRenderTexture(*device, *candidate->output));
+	Expect(retainedPixels[0] == 41 && retainedPixels[1] == 0 && retainedPixels[2] == 0,
+	       "A failing Graphics pipeline candidate replaced the active render pipeline");
+	close(*source);
+	Done(host.SelectScriptSession(candidate->session));
+	Expect(!host.InvokeBehaviour(oldToken, ManagedBehaviourEvent::Update), "Reload retained an old source token");
+	invoke(*candidate, 1);
+	Expect(Take(candidate->camera->Name()) == "PipelineReload:41:19",
+	       "Source unload invalidated the candidate asset graph");
+	close(*candidate);
+	auto reopened = open();
+	Done(host.ConfigureRenderPipeline(reopened->session,
+	                                  Take(Rendering::ReadGraphicsSettings(filesystem)).renderPipeline));
+	Done(host.RenderScene(reopened->session, 1));
+	const auto reopenedPixels = Take(Rendering::ReadRenderTexture(*device, *reopened->output));
+	Expect(reopenedPixels[0] == 23 && reopenedPixels[1] == 0 && reopenedPixels[2] == 0,
+	       "Reopened editor session did not restore the selected Graphics pipeline");
+	close(*reopened);
+	Expect(Take(DecodeScriptableAssetArtifact(Take(filesystem.Read(rootPath)))).Payload()["Fields"]["tint"] == 23,
+	       "Runtime reload fields were written into the persistent source");
+	std::cout << "Pipeline asset reload, shared cycles, failed candidates and ALC cleanup passed\n";
+}
+
+void TestManagedForward(DotNetHost& host, const VirtualPath& content)
+{
+	auto device = Take(Rhi::CreateDevice({}));
+	auto baseline = Take(Test::SceneRenderer::Create(device));
+	for (UInt32 scenario = 0; scenario < 6; ++scenario)
+	{
+		Scene scene;
+		ManagedSceneApi api(scene);
+		api.SetRenderDevice(device);
+		auto output = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
+		api.SetRenderOutput(output);
+		const auto session = Take(host.CreateScriptSession(false, &api));
+		Done(host.LoadScriptContent(session, content));
+		ManagedScriptRuntime runtime(scene, host, api, session);
+		auto camera = Take(scene.CreateGameObject("Forward Camera"));
+		auto* cameraComponent = Take(camera->AddComponent<CameraComponent>());
+		cameraComponent->rendering.background = {0.035f, 0.055f, 0.09f, 1};
+		Done(scene.SetActiveCamera(cameraComponent->Id()));
+		Take(runtime.CreateAndAdd(camera, "Ursa.SessionFixtures.ForwardPipelineProbe, Ursa.SessionFixtures"));
+		auto object = Take(scene.CreateGameObject("Forward Geometry"));
+		LocalTransform transform;
+		transform.position = {0, 0, -4};
+		Done(object->SetLocalTransform(transform));
+		auto material = std::make_shared<MaterialInstance>(scenario == 1 ? MaterialType::PbrMetallicRoughness
+		                                                                 : MaterialType::Unlit);
+		Done(material->SetBaseColor({0.8f, 0.15f, 0.05f, 1}));
+		MeshPtr mesh = Take(Take(Test::Cube())->Clone());
+		if (scenario == 2)
+		{
+			Done(material->SetBaseColor({1, 1, 1, 1}));
+			Done(material->SetSampler({false, false}));
+			Done(material->SetTexture(
+			    MaterialTextureSlot::BaseColor,
+			    Take(MaterialTexture::Create(2, 1, TextureColorSpace::Srgb, {255, 0, 0, 255, 0, 0, 255, 255}))));
+		}
+		if (scenario == 4)
+		{
+			MeshData data;
+			data.positions = {{-1.8f, -0.8f, 0}, {-0.2f, -0.8f, 0}, {-0.2f, 0.8f, 0}, {-1.8f, 0.8f, 0},
+			                  {0.2f, -0.8f, 0},  {1.8f, -0.8f, 0},  {1.8f, 0.8f, 0},  {0.2f, 0.8f, 0}};
+			data.normals.assign(8, {0, 0, 1});
+			data.tangents.assign(8, {1, 0, 0, 1});
+			data.indices = {0, 2, 1, 0, 3, 2, 12, 14, 13, 12, 15, 14};
+			data.subMeshes = {{0, 6, 0}, {6, 6, -8}};
+			mesh = Take(Mesh::Create(std::move(data)));
+			Done(mesh->RecalculateBounds());
+		}
+		std::shared_ptr<ModelSkeleton> skeleton;
+		RendererComponent* renderer = nullptr;
+		if (scenario == 5)
+		{
+			auto data = Take(mesh->GetData());
+			for (auto& position : data.positions)
+			{
+				position.x += 100;
+			}
+			skeleton = std::make_shared<ModelSkeleton>();
+			skeleton->modelGuid = ResourceId::Generate();
+			skeleton->localFileId = 1;
+			SkeletonJoint joint;
+			joint.nodeLocalFileId = 1;
+			joint.bindLocalTransform.position = {-100, 0, -4};
+			joint.inverseBindMatrix = Mat4::Identity();
+			skeleton->joints = {joint};
+			data.skeleton = skeleton;
+			data.skeletonReference = {skeleton->modelGuid, 1};
+			data.skinInfluences.resize(data.positions.size());
+			for (auto& influence : data.skinInfluences)
+			{
+				influence.weights[0] = 1;
+			}
+			Done(mesh->SetData(std::move(data)));
+			Done(mesh->RecalculateBounds());
+			auto* skin = Take(object->AddComponent<SkinnedMeshRendererComponent>());
+			Done(skin->SetSharedMesh(mesh));
+			renderer = skin;
+		}
+		else
+		{
+			Done(Take(object->AddComponent<MeshFilterComponent>())->SetSharedMesh(mesh));
+			renderer = Take(object->AddComponent<MeshRendererComponent>());
+		}
+		Done(renderer->SetMaterial(material));
+		if (scenario == 4)
+		{
+			auto green = std::make_shared<MaterialInstance>(MaterialType::Unlit);
+			Done(green->SetBaseColor({0, 1, 0, 1}));
+			Done(renderer->SetSharedMaterials({material, green}));
+		}
+		if (scenario == 1)
+		{
+			auto light = Take(scene.CreateGameObject("Forward Light"));
+			Done(Take(light->AddComponent<DirectionalLightComponent>())->SetIntensity(4));
+		}
+		if (scenario == 3)
+		{
+			auto overlay = Take(scene.CreateGameObject("Transparent Overlay"));
+			transform.position.z = -3;
+			Done(overlay->SetLocalTransform(transform));
+			auto transparent = Take(Test::AddRenderer(overlay, {0, 0, 1, 0.5f}));
+			Done(transparent->SharedMaterial()->SetAlphaMode(AlphaMode::Blend));
+		}
+		for (UInt64 frameIndex = 1; frameIndex <= 3; ++frameIndex)
+		{
+			if (skeleton)
+			{
+				skeleton->joints[0].bindLocalTransform.position.x = -100 + Float32(frameIndex - 1) * 0.2f;
+			}
+			FrameContext frame;
+			frame.frameIndex = frameIndex;
+			scene.BeginFrame();
+			Done(scene.Update(frame));
+			Expect(Take(camera->Name()) == "Forward:Rendered", "The C# default Forward callback failed");
+			const auto current = Take(Rendering::ReadRenderTexture(*device, *output));
+			const auto legacy = Take(scene.CollectRenderData(1));
+			auto reference = Take(Rendering::CreateRenderTexture(*device, {64, 64}));
+			Done(Take(baseline->DrawOffscreen(reference->color, legacy.viewProjection, legacy.objects, legacy.lighting,
+			                                  legacy.cameraPosition))
+			         ->Wait());
+			reference->colorState = Rhi::ResourceState::TransferSource;
+			const auto expected = Take(Rendering::ReadRenderTexture(*device, *reference));
+			UInt32 differing = 0;
+			for (Size index = 0; index < current.size(); ++index)
+			{
+				if (std::abs(Int32(current[index]) - Int32(expected[index])) > 2)
+				{
+					++differing;
+				}
+			}
+			if (differing >= 16)
+			{
+				const Size center = (32 * 64 + 32) * 4;
+				throw std::runtime_error(
+				    "C# Forward differs in scenario " + std::to_string(scenario) +
+				    ", channels=" + std::to_string(differing) + ", center=" + std::to_string(current[center]) + "," +
+				    std::to_string(current[center + 1]) + ", baseline=" + std::to_string(expected[center]) + "," +
+				    std::to_string(expected[center + 1]));
+			}
+		}
+		scene.Clear();
+		Done(host.CloseScriptSession(session));
+	}
+	std::cout << "Managed Forward: Unlit/PBR/texture/transparent/submesh/moving skin baseline passed\n";
+}
+
+void TestDocumentedCustomPipeline(DotNetHost& host, const VirtualPath& content)
+{
+	auto device = Take(Rhi::CreateDevice({}));
+	Scene scene;
+	ManagedSceneApi api(scene);
+	api.SetRenderDevice(device);
+	auto output = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
+	api.SetRenderOutput(output);
+	const auto session = Take(host.CreateScriptSession(false, &api));
+	Done(host.LoadScriptContent(session, content));
+	ManagedScriptRuntime runtime(scene, host, api, session);
+	auto camera = Take(scene.CreateGameObject("Custom Pipeline Camera"));
+	Take(camera->AddComponent<CameraComponent>());
+	const auto component =
+	    Take(runtime.CreateAndAdd(camera, "Ursa.SessionFixtures.PipelineReloadProbe, Ursa.SessionFixtures"));
+	auto* probe = static_cast<ScriptBehaviourComponent*>(scene.GetComponent(component));
+	Done(host.DeserializeBehaviour(probe->InstanceToken(),
+	                               ToUrsaString(nlohmann::json{{"FormatVersion", 1u},
+	                                                           {"ScriptType", "test.pipeline-reload-probe"},
+	                                                           {"Version", 1u},
+	                                                           {"Fields", {{"action", 5}}}}
+	                                                .dump())));
+	FrameContext frame;
+	frame.frameIndex = 1;
+	scene.BeginFrame();
+	Done(scene.Update(frame));
+	Expect(Take(camera->Name()) == "PipelineReload:Presentation", "The documented custom pipeline factory did not run");
+	const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
+	Expect(std::abs(int(pixels[0]) - 26) <= 1 && std::abs(int(pixels[1]) - 77) <= 1 &&
+	           std::abs(int(pixels[2]) - 179) <= 1,
+	       "The documented public C# pipeline did not produce its declared clear color");
+	Done(scene.DestroyGameObject(camera));
+	Done(scene.CommitChanges());
+	Done(host.CloseScriptSession(session));
+	std::cout << "Documented asset factory and custom Pipeline GPU output passed\n";
+}
+
+void TestForwardCameraRegions(DotNetHost& host, const VirtualPath& content)
+{
+	auto device = Take(Rhi::CreateDevice({}));
+	Scene scene;
+	ManagedSceneApi api(scene);
+	api.SetRenderDevice(device);
+	auto output = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
+	api.SetRenderOutput(output);
+	const auto session = Take(host.CreateScriptSession(false, &api));
+	Done(host.LoadScriptContent(session, content));
+	ManagedScriptRuntime runtime(scene, host, api, session);
+	auto left = Take(scene.CreateGameObject("Left Camera"));
+	auto* leftCamera = Take(left->AddComponent<CameraComponent>());
+	leftCamera->rendering.viewport = {0, 0, 0.5f, 1};
+	leftCamera->rendering.background = {0, 1, 0, 1};
+	auto right = Take(scene.CreateGameObject("Right Camera"));
+	auto* rightCamera = Take(right->AddComponent<CameraComponent>());
+	rightCamera->rendering.viewport = {0.5f, 0, 0.5f, 1};
+	rightCamera->rendering.background = {0, 0, 1, 1};
+	rightCamera->rendering.depth = 1;
+	const auto component =
+	    Take(runtime.CreateAndAdd(left, "Ursa.SessionFixtures.ForwardPipelineProbe, Ursa.SessionFixtures"));
+	auto* probe = static_cast<ScriptBehaviourComponent*>(scene.GetComponent(component));
+	Done(host.DeserializeBehaviour(
+	    probe->InstanceToken(),
+	    ToUrsaString(nlohmann::json{
+	        {"FormatVersion", 1u},
+	        {"ScriptType", "test.forward-pipeline"},
+	        {"Version", 1u},
+	        {"Fields",
+	         {{"other",
+	           {{"$ursaReference",
+	             {{"Kind", "Component"}, {"Id", ToStdString(rightCamera->PersistentId().ToString())}}}}}}}}
+	                     .dump())));
+	for (UInt64 frameIndex = 1; frameIndex <= 3; ++frameIndex)
+	{
+		if (frameIndex == 2)
+		{
+			rightCamera->rendering.clearFlags = Rendering::CameraClearFlags::Depth;
+		}
+		if (frameIndex == 3)
+		{
+			rightCamera->rendering.clearFlags = Rendering::CameraClearFlags::Nothing;
+		}
+		FrameContext frame;
+		frame.frameIndex = frameIndex;
+		scene.BeginFrame();
+		Done(scene.Update(frame));
+		Expect(Take(left->Name()) == "Forward:Rendered", "Multi-camera Forward did not complete");
+		const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
+		const Size leftPixel = (32 * 64 + 16) * 4, rightPixel = (32 * 64 + 48) * 4;
+		Expect(pixels[leftPixel] == 0 && pixels[leftPixel + 1] == 255 && pixels[leftPixel + 2] == 0 &&
+		           pixels[rightPixel] == 0 && pixels[rightPixel + 1] == 0 && pixels[rightPixel + 2] == 255,
+		       "Camera clear regions or Depth/Nothing clear flags overwrote another viewport");
+	}
+	scene.Clear();
+	Done(host.CloseScriptSession(session));
+	std::cout << "Managed Forward camera viewport and clear isolation passed\n";
 }
 
 void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSystem& filesystem,
@@ -169,13 +704,13 @@ void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSys
 	       "Actual C# Mesh/Material fields were not restored before Awake");
 	loadedScene.scene->Clear();
 	loadedRuntime.reset();
-	loadedApi.reset();
 	Done(host.CloseScriptSession(loadedSession));
+	loadedApi.reset();
 	Done(host.SelectScriptSession(session));
 	scene.Clear();
 	runtime.reset();
-	sceneApi.reset();
 	Done(host.CloseScriptSession(session));
+	sceneApi.reset();
 }
 
 VirtualPath Path(const String& value)
@@ -347,8 +882,12 @@ int main(int argumentCount, char** arguments)
 		std::filesystem::create_directories(packageRoot);
 		std::filesystem::create_directories(userRoot);
 
-		const Vector<String> fileNames{"Ursa.ManagedHost.runtimeconfig.json", "Ursa.ManagedHost.deps.json",
-		                               "Ursa.ManagedHost.dll", "Ursa.Runtime.dll", "Ursa.Editor.dll"};
+		const Vector<String> fileNames{"Ursa.ManagedHost.runtimeconfig.json",
+		                               "Ursa.ManagedHost.deps.json",
+		                               "Ursa.ManagedHost.dll",
+		                               "Ursa.Runtime.dll",
+		                               "Ursa.Rendering.dll",
+		                               "Ursa.Editor.dll"};
 		VirtualFileSystem looseSource;
 		Done(looseSource.Mount(engineScheme, managedOutput, MountAccess::ReadOnly));
 		Vector<PakEntryData> entries;
@@ -374,12 +913,16 @@ int main(int argumentCount, char** arguments)
 		const VirtualPath sessionContentPath = Path("prj:Managed/Game.json");
 		nlohmann::json catalog{{"Version", 1u}};
 		catalog["Scripts"] = nlohmann::json::array();
+		UInt64 fixtureTypeId = 0;
 		for (const auto& type : Vector<std::pair<String, String>>{{"SessionProbe", "test.session-probe"},
-		                                                          {"LeakingProbe", "test.leaking-probe"}})
+		                                                          {"LeakingProbe", "test.leaking-probe"},
+		                                                          {"ReloadPipelineAsset", "test.reload-pipeline"},
+		                                                          {"ReloadDependency", "test.reload-dependency"}})
 		{
 			catalog["Scripts"].push_back(
 			    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
-			     {"LocalFileId", type.first == "SessionProbe" ? 1ull : 2ull},
+			     {"LocalFileId", ++fixtureTypeId},
+			     {"Kind", fixtureTypeId >= 3 ? "ScriptableObject" : "Behaviour"},
 			     {"ScriptType", ToStdString(type.second)},
 			     {"Version", 1u},
 			     {"Group", "Game"},
@@ -422,7 +965,8 @@ int main(int argumentCount, char** arguments)
 		ManagedHostFiles files;
 		files.runtimeConfig = Path("ursa:Ursa.ManagedHost.runtimeconfig.json");
 		files.entryAssembly = Path("ursa:Ursa.ManagedHost.dll");
-		files.dependencies = {Path("ursa:Ursa.ManagedHost.deps.json"), Path("ursa:Ursa.Runtime.dll")};
+		files.dependencies = {Path("ursa:Ursa.ManagedHost.deps.json"), Path("ursa:Ursa.Runtime.dll"),
+		                      Path("ursa:Ursa.Rendering.dll")};
 		files.scriptAssemblies = {scriptAssemblyPath};
 
 		auto staged = Take(MaterializeManagedHostFiles(filesystem, files));
@@ -598,6 +1142,11 @@ int main(int argumentCount, char** arguments)
 		Done(scene.DestroyGameObject(mover));
 		Expect(messages.size() >= 2, "Managed lifecycle dispatch damaged the host logging callback");
 		TestManagedRenderingComponentSerialization(*host, filesystem, sessionContentPath);
+		TestClassicRenderingExample(*host, sessionContentPath);
+		TestPipelineAssetReload(*host, filesystem, sessionContentPath);
+		TestManagedForward(*host, sessionContentPath);
+		TestDocumentedCustomPipeline(*host, sessionContentPath);
+		TestForwardCameraRegions(*host, sessionContentPath);
 
 #if defined(URSA_DOTNET_TEST_EDITOR)
 		TestEditorExtensions(*host, filesystem, root);

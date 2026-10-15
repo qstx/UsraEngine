@@ -442,7 +442,10 @@ Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>
 			    {guid.value, scriptType, item["Version"].get<Ursa::UInt32>(), localFileId,
 			     ToUrsaString(item["ClrTypeName"].get<std::string>()), sourcePath.value,
 			     group == "Editor" ? ScriptAssemblyGroup::Editor : ScriptAssemblyGroup::Game, std::move(fields),
-			     kind == "ScriptableObject" ? ScriptTypeKind::ScriptableObject : ScriptTypeKind::Behaviour});
+			     kind == "ScriptableObject" ? ScriptTypeKind::ScriptableObject : ScriptTypeKind::Behaviour,
+			     item.value("IsRenderPipeline", false), ToUrsaString(item.value("CreateAssetMenuName", std::string{})),
+			     ToUrsaString(item.value("CreateAssetFileName", std::string{})),
+			     item.value("CreateAssetMenuOrder", Int32{0})});
 		}
 		scriptTypes = std::move(records);
 		return {};

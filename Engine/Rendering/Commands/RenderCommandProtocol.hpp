@@ -5,7 +5,7 @@
 
 namespace Ursa::Rendering
 {
-inline constexpr UInt32 renderCommandProtocolVersion = 1;
+inline constexpr UInt32 renderCommandProtocolVersion = 2;
 inline constexpr UInt32 maxRenderCommandBytes = 64u * 1024u * 1024u;
 
 enum class RenderCommandOpcode : UInt32
@@ -22,7 +22,11 @@ enum class RenderCommandOpcode : UInt32
 	GetTemporaryTarget,
 	ReleaseTemporaryTarget,
 	SetScissor,
-	CopyTexture
+	CopyTexture,
+	DrawFullscreen,
+	SetRenderTargets,
+	SetComputeParameters,
+	ResetCameraState
 };
 
 struct RenderCommandBatchHeader

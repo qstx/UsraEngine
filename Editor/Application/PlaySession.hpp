@@ -64,6 +64,11 @@ public:
 		return resourceSession.get();
 	}
 
+	std::shared_ptr<void> ServiceOwner() const
+	{
+		return services;
+	}
+
 	~PlaySession()
 	{
 		Stop();

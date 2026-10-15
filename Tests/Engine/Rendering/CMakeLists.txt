@@ -7,4 +7,20 @@ add_test(NAME UrsaRenderSceneTests COMMAND UrsaRenderSceneTests)
 ursa_add_test_executable(UrsaRenderFrameTests RenderFrameTests.cpp)
 target_link_libraries(UrsaRenderFrameTests PRIVATE Ursa::Engine)
 add_test(NAME UrsaRenderFrameTests COMMAND UrsaRenderFrameTests)
+
+ursa_add_test_executable(UrsaRenderCommandExecutorTests RenderCommandExecutorTests.cpp)
+target_link_libraries(UrsaRenderCommandExecutorTests PRIVATE Ursa::Engine UrsaTestFixtures)
+target_compile_definitions(UrsaRenderCommandExecutorTests PRIVATE
+  URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
+  URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+  URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+  URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
+add_test(NAME UrsaRenderCommandExecutorTests COMMAND UrsaRenderCommandExecutorTests)
+ursa_require_test_content(UrsaRenderCommandExecutorTests UrsaRenderCommandExecutorTests)
+ursa_add_test_executable(UrsaShaderPassSelectionTests ShaderPassSelectionTests.cpp)
+target_link_libraries(UrsaShaderPassSelectionTests PRIVATE Ursa::Engine)
+add_test(NAME UrsaShaderPassSelectionTests COMMAND UrsaShaderPassSelectionTests)
+ursa_add_test_executable(UrsaGraphicsSettingsTests GraphicsSettingsTests.cpp)
+target_link_libraries(UrsaGraphicsSettingsTests PRIVATE Ursa::Engine)
+add_test(NAME UrsaGraphicsSettingsTests COMMAND UrsaGraphicsSettingsTests)
 ursa_finalize_test_directory()

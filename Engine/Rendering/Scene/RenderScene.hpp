@@ -1,31 +1,20 @@
 #pragma once
 
 #include <Rendering/Scene/CameraData.hpp>
+#include <Rendering/Scene/RenderObject.hpp>
 #include <Scene/Scene.hpp>
+#include <optional>
+#include <functional>
 
 namespace Ursa::Rendering
 {
-struct RenderObject
-{
-	ResourceId objectId;
-	ResourceId rendererId;
-	UInt32 layer = 0;
-	Mat4 world = Mat4::Identity();
-	Bounds worldBounds;
-	MeshPtr mesh;
-	std::shared_ptr<const MeshSnapshot> meshSnapshot;
-	std::shared_ptr<MaterialInstance> material;
-	std::shared_ptr<const Shader::ShaderAsset> shader;
-	UInt64 materialVersion = 0;
-	MaterialParameters parameters;
-	Vector<Mat4> jointPalette;
-	UInt32 subMesh = 0;
-};
-
 class RenderScene final
 {
 public:
-	Result<void> Capture(const Scene& scene, Float32 aspect);
+	using BuiltinShaderResolver = std::function<Result<std::shared_ptr<const Shader::ShaderAsset>>(ResourceId)>;
+	Result<void> Capture(const Scene& scene, Float32 aspect, std::optional<CameraType> cameraFilter = {},
+	                     std::optional<CameraData> cameraOverride = {},
+	                     const BuiltinShaderResolver& resolveBuiltin = {});
 
 	const Vector<RenderObject>& Objects() const
 	{
@@ -53,7 +42,8 @@ public:
 	}
 
 private:
-	Result<void> Collect(const Scene& scene, const GameObject::Ptr& object, Float32 aspect);
+	Result<void> Collect(const Scene& scene, const GameObject::Ptr& object, Float32 aspect,
+	                     const BuiltinShaderResolver& resolveBuiltin);
 
 	Vector<RenderObject> objects;
 	Vector<CameraData> cameras;

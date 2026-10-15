@@ -81,13 +81,13 @@ int main()
 		Take(scene.AddComponent<SpyComponent>(node, starts, updates));
 		Expect(!scene.CollectRenderData(1.f), "Game rendering should still require an active scene camera");
 		constexpr Ursa::UInt32 size = 64;
-		auto color = Take(device->CreateTexture(
-		    {size, size, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
+		auto target = Take(Rendering::CreateRenderTexture(*device, {size, size, UInt32(Format::RgbA8Unorm), 32}));
+		auto color = target->color;
 		auto readback =
 		    Take(device->CreateBuffer({size * size * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
+		done(preview->Render(scene, target, ResourceState::TransferSource));
 		auto command = Take(device->CreateCommandList());
 		done(command->Begin());
-		done(preview->Record(scene, command, color, ResourceState::Undefined, ResourceState::TransferSource));
 		done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
 		done(command->CopyTextureToBuffer(color, readback));
 		done(command->End());
@@ -105,20 +105,14 @@ int main()
 		const ComponentId cameraId = Take(scene.AddComponent<CameraComponent>(cameraNode));
 		done(scene.SetActiveCamera(cameraId));
 		auto gamePreview = Take(Editor::EditorScenePreview::Create(device));
-		auto gameColor = Take(device->CreateTexture(
-		    {128, 72, Format::RgbA8Unorm,
-		     TextureUsage::ColorAttachment | TextureUsage::Sampled | TextureUsage::TransferSource}));
-		auto sceneColor = Take(device->CreateTexture(
-		    {96, 96, Format::RgbA8Unorm,
-		     TextureUsage::ColorAttachment | TextureUsage::Sampled | TextureUsage::TransferSource}));
+		auto gameTarget = Take(Rendering::CreateRenderTexture(*device, {128, 72, UInt32(Format::RgbA8Unorm), 32}));
+		auto sceneTarget = Take(Rendering::CreateRenderTexture(*device, {96, 96, UInt32(Format::RgbA8Unorm), 32}));
+		auto gameColor = gameTarget->color;
+		auto sceneColor = sceneTarget->color;
 		Expect(gameColor != sceneColor && gameColor->desc.width == 128 && sceneColor->desc.width == 96,
 		       "Scene and Game preview targets are not independent");
-		command = Take(device->CreateCommandList());
-		done(command->Begin());
-		done(preview->Record(scene, command, sceneColor, ResourceState::Undefined, ResourceState::ShaderRead));
-		done(gamePreview->RecordGame(scene, command, gameColor, ResourceState::Undefined, ResourceState::ShaderRead));
-		done(command->End());
-		done(Take(device->Submit(command))->Wait());
+		done(preview->Render(scene, sceneTarget));
+		done(gamePreview->RenderGame(scene, gameTarget));
 		Expect(starts == 0 && updates == 0, "Game camera preview invoked a gameplay lifecycle callback");
 		done(device->WaitIdle());
 		std::cout << "Editor camera preview test passed\n";

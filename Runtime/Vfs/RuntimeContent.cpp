@@ -246,7 +246,7 @@ Result<RuntimeContentSnapshot> ReadRuntimeContent(const VirtualFileSystem& files
 		for (const auto& scheme : document.value("completeSourceSchemes", Json::array()))
 		{
 			const auto name = ToUrsaString(scheme.get<std::string>());
-			if (name != engineScheme && name != projectScheme)
+			if (name != engineScheme && name != projectScheme && name != projectSettingsScheme)
 			{
 				return Result<RuntimeContentSnapshot>::Failure("Invalid source inventory scheme");
 			}

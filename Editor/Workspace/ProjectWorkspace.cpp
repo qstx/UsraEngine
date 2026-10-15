@@ -56,6 +56,17 @@ Result<std::unique_ptr<ProjectWorkspace>> ProjectWorkspace::Open(const std::file
 	workspace->projectRoot = canonicalProject;
 	workspace->assetsRoot = canonicalAssets;
 	workspace->engineMounts = builtinMounts;
+	auto settingsProvider = DirectoryFileProvider::Open(canonicalProject / "ProjectSettings", true);
+	if (!settingsProvider)
+	{
+		return Result<std::unique_ptr<ProjectWorkspace>>::Failure(settingsProvider.error);
+	}
+	auto settingsMount =
+	    workspace->index.Mount({projectSettingsScheme, {}, MountAccess::ReadWrite, std::move(settingsProvider.value)});
+	if (!settingsMount)
+	{
+		return Result<std::unique_ptr<ProjectWorkspace>>::Failure(settingsMount.error);
+	}
 
 	auto added = workspace->index.Mount(ResourceMount{projectResourceScheme, canonicalAssets, MountAccess::ReadWrite});
 	if (!added)

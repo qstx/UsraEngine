@@ -92,7 +92,12 @@ internal static unsafe partial class EngineApi
 		fixed (byte* batchData = batch)
 		{
 			int status = api.submitRenderBatch(api.sceneContext, tokenData, (ulong)token.Length, batchData,
-			                                   (ulong)batch.Length);
+											   (ulong)batch.Length);
+			if (status == 8 && api.resourceRequest != null)
+			{
+				string detail = ResourceRequest<string>(new { operation = "render.error" });
+				if (!string.IsNullOrEmpty(detail)) throw new InvalidOperationException(detail);
+			}
 			Check(status, "submit render batch");
 		}
 	}
@@ -105,7 +110,7 @@ internal static unsafe partial class EngineApi
 			throw new InvalidOperationException("This host does not have an active Scene API.");
 		}
 		byte[] bytes = Encoding.UTF8.GetBytes(name);
-		fixed(byte* data = bytes)
+		fixed (byte* data = bytes)
 		{
 			NativeHandle handle;
 			int status = api.createGameObject(api.sceneContext, data, (ulong)bytes.Length, &handle);
@@ -128,7 +133,7 @@ internal static unsafe partial class EngineApi
 			throw new InvalidOperationException("Native GameObject name exceeds the managed string limit.");
 		}
 		byte[] bytes = new byte[(int)required];
-		fixed(byte* data = bytes)
+		fixed (byte* data = bytes)
 		{
 			Check(api.getGameObjectName(api.sceneContext, handle, data, required, &required), "get GameObject name");
 		}
@@ -139,7 +144,7 @@ internal static unsafe partial class EngineApi
 	{
 		RequireInitialized();
 		byte[] bytes = Encoding.UTF8.GetBytes(name);
-		fixed(byte* data = bytes)
+		fixed (byte* data = bytes)
 		{
 			Check(api.setGameObjectName(api.sceneContext, handle, data, (ulong)bytes.Length), "set GameObject name");
 		}
@@ -244,7 +249,7 @@ internal static unsafe partial class EngineApi
 		if (api.setWindowTitle == null)
 			throw new InvalidOperationException("Window title access is unavailable.");
 		byte[] bytes = Encoding.UTF8.GetBytes(title ?? throw new ArgumentNullException(nameof(title)));
-		fixed(byte* text = bytes)
+		fixed (byte* text = bytes)
 		{
 			Check(api.setWindowTitle(api.sceneContext, text, (ulong)bytes.Length), "set application window title");
 		}
@@ -280,7 +285,7 @@ internal static unsafe partial class EngineApi
 	{
 		RequireInitialized();
 		byte[] bytes = Encoding.UTF8.GetBytes(message ?? string.Empty);
-		fixed(byte* data = bytes)
+		fixed (byte* data = bytes)
 		{
 			Check(api.writeLog(api.context, level, data, (ulong)bytes.Length), "write a log message");
 		}
@@ -290,7 +295,7 @@ internal static unsafe partial class EngineApi
 	{
 		RequireInitialized();
 		byte[] pathBytes = Encoding.UTF8.GetBytes(path);
-		fixed(byte* pathData = pathBytes)
+		fixed (byte* pathData = pathBytes)
 		{
 			ulong required = 0;
 			int status = api.readFile(api.context, pathData, (ulong)pathBytes.Length, null, 0, &required);
@@ -303,10 +308,10 @@ internal static unsafe partial class EngineApi
 				throw new InvalidOperationException("VFS file exceeds the managed read limit.");
 			}
 			byte[] bytes = new byte[(int)required];
-			fixed(byte* output = bytes)
+			fixed (byte* output = bytes)
 			{
 				Check(api.readFile(api.context, pathData, (ulong)pathBytes.Length, output, required, &required),
-				      "read a VFS file");
+					  "read a VFS file");
 			}
 			return bytes;
 		}
@@ -316,10 +321,10 @@ internal static unsafe partial class EngineApi
 	{
 		RequireInitialized();
 		byte[] pathBytes = Encoding.UTF8.GetBytes(path);
-		fixed(byte* pathData = pathBytes) fixed(byte* data = bytes)
+		fixed (byte* pathData = pathBytes) fixed (byte* data = bytes)
 		{
 			Check(api.writeFile(api.context, pathData, (ulong)pathBytes.Length, data, (ulong)bytes.Length),
-			      "write a VFS file");
+				  "write a VFS file");
 		}
 	}
 
@@ -327,7 +332,7 @@ internal static unsafe partial class EngineApi
 	{
 		RequireInitialized();
 		byte[] bytes = Encoding.UTF8.GetBytes(typeId);
-		fixed(byte* data = bytes)
+		fixed (byte* data = bytes)
 		{
 			NativeHandle component;
 			Check(api.addComponent(api.sceneContext, owner, data, (ulong)bytes.Length, &component), "add a Component");
@@ -365,10 +370,10 @@ internal static unsafe partial class EngineApi
 			throw new InvalidOperationException("Native Component type ID is too long.");
 		}
 		byte[] bytes = new byte[(int)required];
-		fixed(byte* output = bytes)
+		fixed (byte* output = bytes)
 		{
 			Check(api.getComponentType(api.sceneContext, component, output, required, &required),
-			      "read a Component type");
+				  "read a Component type");
 		}
 		return Encoding.UTF8.GetString(bytes);
 	}
@@ -423,18 +428,18 @@ internal static unsafe partial class EngineApi
 	{
 		RequireInitialized();
 		byte[] bytes = Encoding.UTF8.GetBytes(typeName);
-		fixed(byte* data = bytes)
+		fixed (byte* data = bytes)
 		{
 			NativeHandle component;
 			Check(api.addBehaviour(api.sceneContext, owner, data, (ulong)bytes.Length, token, &component),
-			      "add a managed Behaviour");
+				  "add a managed Behaviour");
 			return component;
 		}
 	}
 
 	private static string
 	GetPersistentId(delegate* unmanaged[Cdecl]<nint, NativeHandle, byte*, ulong, ulong*, int> function,
-	                NativeHandle handle, string operation)
+					NativeHandle handle, string operation)
 	{
 		RequireInitialized();
 		if (function == null)
@@ -452,7 +457,7 @@ internal static unsafe partial class EngineApi
 			throw new InvalidOperationException($"Native persistent ID has invalid length {required}.");
 		}
 		byte[] bytes = new byte[(int)required];
-		fixed(byte* output = bytes)
+		fixed (byte* output = bytes)
 		{
 			Check(function(api.sceneContext, handle, output, required, &required), operation);
 		}
@@ -461,7 +466,7 @@ internal static unsafe partial class EngineApi
 
 	private static NativeHandle
 	ResolvePersistentId(delegate* unmanaged[Cdecl]<nint, byte*, ulong, NativeHandle*, int> function, string id,
-	                    string operation)
+						string operation)
 	{
 		RequireInitialized();
 		if (function == null)
@@ -473,7 +478,7 @@ internal static unsafe partial class EngineApi
 		{
 			throw new ArgumentException("Persistent ID must be a 36-character GUID.", nameof(id));
 		}
-		fixed(byte* input = bytes)
+		fixed (byte* input = bytes)
 		{
 			NativeHandle handle;
 			Check(function(api.sceneContext, input, (ulong)bytes.Length, &handle), operation);
@@ -489,14 +494,14 @@ internal static unsafe partial class EngineApi
 			throw new ArgumentException("Asset GUID is invalid.", nameof(guid));
 		}
 		byte[] bytes = Encoding.UTF8.GetBytes(guid);
-		fixed(byte* data = bytes)
+		fixed (byte* data = bytes)
 		{
 			NativeHandle asset;
 			var callback = texture ? api.loadTexture : api.loadMaterial;
 			if (callback == null || api.sceneContext == 0)
 				throw new InvalidOperationException("Asset loading requires an active Scene/resource session.");
 			Check(callback(api.sceneContext, data, (ulong)bytes.Length, localFileId, &asset),
-			      texture ? "load a Texture asset" : "load a Material asset");
+				  texture ? "load a Texture asset" : "load a Material asset");
 			return asset;
 		}
 	}

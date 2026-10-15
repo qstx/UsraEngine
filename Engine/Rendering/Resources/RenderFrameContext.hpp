@@ -6,6 +6,8 @@
 
 namespace Ursa::Rendering
 {
+class FrameCapture;
+
 struct UploadSlice
 {
 	Rhi::BufferPtr buffer;
@@ -46,6 +48,11 @@ public:
 		return slot;
 	}
 
+	Rhi::FencePtr Completion() const
+	{
+		return completion;
+	}
+
 private:
 	friend class RenderFrameQueue;
 
@@ -80,7 +87,7 @@ public:
 
 	Result<void> Retain(std::shared_ptr<void> resource);
 
-	Result<Rhi::FencePtr> Complete();
+	Result<Rhi::FencePtr> Complete(FrameCapture* capture = nullptr);
 
 	Result<void> Abort();
 

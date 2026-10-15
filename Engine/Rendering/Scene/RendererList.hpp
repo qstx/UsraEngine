@@ -3,6 +3,7 @@
 #include <Rendering/Commands/RenderCommandProtocol.hpp>
 #include <Rendering/Scene/RenderScene.hpp>
 #include <Core/Memory/MemoryFactories.hpp>
+#include <Rendering/Shader/ShaderPassSelection.hpp>
 #include <thread>
 
 namespace Ursa::Rendering
@@ -63,6 +64,8 @@ struct RendererListEntry
 	UInt32 passIndex = 0;
 	Int32 renderQueue = 2000;
 	Float32 distanceSquared = 0;
+	String activePipeline = "UrsaForward";
+	std::optional<ResolvedGraphicsPass> resolvedPass;
 };
 
 struct ShaderPassSelectionCacheEntry
@@ -70,6 +73,7 @@ struct ShaderPassSelectionCacheEntry
 	bool matched = false;
 	UInt32 subShaderIndex = 0;
 	UInt32 passIndex = 0;
+	std::optional<ResolvedGraphicsPass> resolvedPass;
 };
 
 class RenderSceneContext final

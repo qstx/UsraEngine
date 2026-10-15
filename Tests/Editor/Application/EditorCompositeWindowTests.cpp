@@ -1,7 +1,7 @@
 #include <MeshFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Ui/ImGuiBridge.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <Scene/EditorGizmo.hpp>
 #include <Application/PlaySession.hpp>
 #include <Core/StringInterop.hpp>
@@ -31,7 +31,7 @@ void done(Result<void> result)
 	}
 }
 
-void CompositeFrame(const DevicePtr& device, const SwapchainPtr& swapchain, Renderer3D& renderer,
+void CompositeFrame(const DevicePtr& device, const SwapchainPtr& swapchain, Test::SceneRenderer& renderer,
                     Editor::ImGuiBridge& gui, const std::shared_ptr<Window>& window, Scene& selection,
                     GameObject::Ptr selected, Ursa::UInt32 previewSize, const Scene* game = nullptr)
 {
@@ -69,14 +69,16 @@ void CompositeFrame(const DevicePtr& device, const SwapchainPtr& swapchain, Rend
 	if (game)
 	{
 		auto frame = Take(game->CollectRenderData(1.f));
-		done(renderer.RecordOffscreenModels(command, preview, ResourceState::Undefined, ResourceState::ShaderRead,
-		                                    frame.viewProjection, frame.boxes, frame.lighting, frame.cameraPosition));
+		done(Take(renderer.DrawOffscreen(preview, frame.viewProjection, frame.objects, frame.lighting,
+		                                 frame.cameraPosition, ResourceState::ShaderRead))
+		         ->Wait());
 	}
 	else
 	{
-		const Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {0.9f, 0.2f, 0.1f, 1.f}, {}}};
-		done(renderer.RecordOffscreenModels(command, preview, ResourceState::Undefined, ResourceState::ShaderRead,
-		                                    camera.ViewProjection(1.f), boxes, {}, camera.position));
+		const Vector<Test::MeshDraw> boxes{{Mat4::Identity(), {0.9f, 0.2f, 0.1f, 1.f}, {}}};
+		done(Take(renderer.DrawOffscreen(preview, camera.ViewProjection(1.f), boxes, {}, camera.position,
+		                                 ResourceState::ShaderRead))
+		         ->Wait());
 	}
 	done(command->Barrier(acquired.texture, acquired.initialState, ResourceState::ColorAttachment));
 	RenderTarget target;
@@ -105,7 +107,7 @@ int main()
 #endif
 		auto device = Take(CreateDevice(desc));
 		auto swapchain = Take(device->CreateSwapchain({}));
-		auto renderer = Take(Renderer3D::Create(device));
+		auto renderer = Take(Test::SceneRenderer::Create(device));
 		auto gui = Take(Editor::ImGuiBridge::Create(device, window));
 		Scene selection;
 		const auto selected = Take(selection.CreateGameObject());

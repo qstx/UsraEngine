@@ -12,6 +12,8 @@
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/PakArchive.hpp>
 #include <Vfs/RuntimeContent.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
+#include <Rendering/Pipeline/GraphicsSettings.hpp>
 #include <iostream>
 #include <stdexcept>
 
@@ -64,6 +66,7 @@ public:
 private:
 	Result<void> OnStart() override
 	{
+		URSA_LOG_INFO("RHI", "Vulkan adapter: " + device->AdapterInfo().name);
 		resources = Take(ResourceSession::Open(*files));
 		ComponentRegistry registry;
 		Done(RegisterBuiltinComponents(registry));
@@ -90,6 +93,7 @@ private:
 			                                             }
 		                                             });
 		sceneApi->SetRenderDevice(device);
+		sceneApi->SetRenderWindow(swapchain);
 		host = Take(DotNetHost::Create());
 		ManagedHostFiles bootstrap;
 		bootstrap.runtimeConfig = Path("ursa:Managed/Ursa.ManagedHost.runtimeconfig.json");
@@ -110,14 +114,26 @@ private:
 		                 }));
 		domain = Take(host->CreateScriptSession(false, sceneApi.get()));
 		Done(host->LoadScriptContent(domain, Take(VirtualPath::Parse(manifestPath))));
+		const auto graphics = Take(Rendering::ReadGraphicsSettings(*files, true));
+		Done(host->ConfigureRenderPipeline(domain, graphics.renderPipeline));
 		runtime = std::make_unique<ManagedScriptRuntime>(*scene, *host, *sceneApi, domain);
 		return runtime->AttachSerializedComponents();
+	}
+
+	Result<void> OnRender(Rendering::FrameCapture* capture) override
+	{
+		sceneApi->SetFrameCapture(capture);
+		return host->RenderScene(domain, Float32(window->FramebufferWidth()) / Float32(window->FramebufferHeight()));
+	}
+
+	Result<void> InitializeRenderPipeline() override
+	{
+		return {};
 	}
 
 	void OnStop() override
 	{
 		runtime.reset();
-		sceneApi.reset();
 		if (host && domain)
 		{
 			auto closed = host->CloseScriptSession(domain);
@@ -127,6 +143,7 @@ private:
 			}
 			domain = 0;
 		}
+		sceneApi.reset();
 		resources.reset();
 	}
 
@@ -271,6 +288,10 @@ int main(int argc, char** argv)
 				VirtualFileSystem sources;
 				Done(sources.Mount(engineScheme, Take(ResolveEngineSourceRoot(engineAssets)), MountAccess::ReadOnly));
 				Done(sources.Mount(projectScheme, project / "Assets", MountAccess::ReadOnly));
+				if (std::filesystem::is_directory(project / "ProjectSettings"))
+				{
+					Done(sources.Mount(projectSettingsScheme, project / "ProjectSettings", MountAccess::ReadOnly));
+				}
 				auto libraryMount = sources.Mount(editorLibraryScheme, project / "Library", MountAccess::ReadOnly);
 				if (!libraryMount)
 				{

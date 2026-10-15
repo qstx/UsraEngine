@@ -17,6 +17,15 @@ Vector<String> events;
 struct TestService
 {
 	int value = 0;
+	std::function<void()> onClose;
+
+	~TestService()
+	{
+		if (onClose)
+		{
+			onClose();
+		}
+	}
 };
 
 class TestComponent final : public Component
@@ -230,10 +239,14 @@ int main()
 		for (int run = 0; run < 2; ++run)
 		{
 			std::weak_ptr<TestService> runtimeService;
+			bool sceneAliveDuringCleanup = false;
 			done(play.Start(*draft, documentId, registry, documents->Session(),
-			                [&runtimeService](ComponentLoadContext& context) -> Result<std::shared_ptr<void>>
+			                [&runtimeService, &play,
+			                 &sceneAliveDuringCleanup](ComponentLoadContext& context) -> Result<std::shared_ptr<void>>
 			                {
 				                auto ownedService = std::make_shared<TestService>();
+				                ownedService->onClose = [&play, &sceneAliveDuringCleanup]
+				                { sceneAliveDuringCleanup = play.GetScene() != nullptr; };
 				                runtimeService = ownedService;
 				                context.Provide(*ownedService);
 				                return Result<std::shared_ptr<void>>::Success(std::move(ownedService));
@@ -242,7 +255,8 @@ int main()
 			done(play.Tick(1.f / 60.f, nullptr, {}));
 			Expect(runtimeService.lock()->value == 1, "Play update did not use its owned runtime service");
 			play.Stop();
-			Expect(runtimeService.expired() && !play.Active(), "Stop retained the runtime service or scene");
+			Expect(runtimeService.expired() && !play.Active() && sceneAliveDuringCleanup,
+			       "Stop retained its service/scene or destroyed the Scene before service cleanup");
 		}
 		done(documents->SaveCurrent());
 		std::filesystem::remove_all(root);

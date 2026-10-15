@@ -615,8 +615,8 @@ void TestGameObjectRenderCollection()
 	done(scene.AttachGameObject(boxObject));
 	done(scene.SetActiveCamera(camera->Id()));
 	const auto renderData = Take(scene.CollectRenderData(16.0f / 9.0f));
-	Expect(renderData.boxes.size() == 1 && renderData.boxes.front().model.At(0, 3) == 1.0f &&
-	           renderData.boxes.front().model.At(1, 3) == 2.0f,
+	Expect(renderData.objects.size() == 1 && renderData.objects.front().world.At(0, 3) == 1.0f &&
+	           renderData.objects.front().world.At(1, 3) == 2.0f,
 	       "Scene render-data collection did not traverse GameObject transforms and components");
 }
 

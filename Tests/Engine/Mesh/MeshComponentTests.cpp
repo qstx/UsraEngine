@@ -131,9 +131,9 @@ void SceneCollection()
 	auto owner = Take(scene.CreateGameObject("Mesh"));
 	auto* renderer = Take(owner->AddComponent<MeshRendererComponent>());
 	Camera camera;
-	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).boxes.empty(), "Renderer without Filter drew a cube");
+	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).objects.empty(), "Renderer without Filter drew a cube");
 	auto* filter = Take(owner->AddComponent<MeshFilterComponent>());
-	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).boxes.empty(), "Empty Filter drew a cube");
+	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).objects.empty(), "Empty Filter drew a cube");
 	MeshData data;
 	data.positions = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
 	data.indices = {0, 1, 2, 0, 2, 1};
@@ -145,21 +145,21 @@ void SceneCollection()
 	Done(red->SetBaseColor({1, 0, 0, 1}));
 	Done(green->SetBaseColor({0, 1, 0, 1}));
 	Done(renderer->SetSharedMaterials({red, nullptr, green}));
-	auto draws = Take(scene.CollectPreviewRenderData(camera, 1)).boxes;
+	auto draws = Take(scene.CollectPreviewRenderData(camera, 1)).objects;
 	Expect(draws.size() == 3 && draws[0].subMesh == 0 && draws[1].subMesh == 1 && draws[2].subMesh == 1 &&
 	           draws[0].material == red && !draws[1].material && draws[2].material == green,
 	       "Submesh or missing/extra material ordering was incorrect");
 	Done(renderer->SetEnabled(false));
-	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).boxes.empty(), "Disabled Renderer still drew");
+	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).objects.empty(), "Disabled Renderer still drew");
 	Done(renderer->SetEnabled(true));
 	Take(owner->AddComponent<ReplaceFilter>(mesh));
 	scene.BeginFrame();
 	Done(scene.Update({}));
-	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).boxes.size() == 3,
+	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).objects.size() == 3,
 	       "Filter replacement during Update found the removed component instead of its replacement");
 	filter = owner->FindComponent<MeshFilterComponent>();
 	Done(owner->RemoveComponent(filter));
-	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).boxes.empty(),
+	Expect(Take(scene.CollectPreviewRenderData(camera, 1)).objects.empty(),
 	       "Removed Filter remained in scene collection");
 	Expect(!owner->AddComponent<SkinnedMeshRendererComponent>(), "Static and skinned Renderers coexisted");
 	Done(owner->RemoveComponent(renderer));

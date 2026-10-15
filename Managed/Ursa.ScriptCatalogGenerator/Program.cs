@@ -38,6 +38,10 @@ internal sealed class ScriptRecord
 	public string Group { get; set; } = string.Empty;
 	public List<ScriptFieldRecord> Fields { get; set; } = new();
 	public string Kind { get; set; } = "Behaviour";
+	public bool IsRenderPipeline { get; set; }
+	public string CreateAssetMenuName { get; set; } = string.Empty;
+	public string CreateAssetFileName { get; set; } = string.Empty;
+	public int CreateAssetMenuOrder { get; set; }
 }
 
 internal sealed class ScriptFieldRecord
@@ -117,6 +121,7 @@ internal static class Program
 			                                ?? throw new InvalidDataException("Ursa.Runtime does not define Ursa.Behaviour.");
 			INamedTypeSymbol assetBase = compilation.GetTypeByMetadataName("Ursa.ScriptableObject")
 			                            ?? throw new InvalidDataException("Ursa.Runtime does not define Ursa.ScriptableObject.");
+			INamedTypeSymbol? pipelineBase = compilation.GetTypeByMetadataName("Ursa.Rendering.RenderPipelineAsset");
 			INamedTypeSymbol? scriptTypeAttribute = compilation.GetTypeByMetadataName("Ursa.UrsaScriptTypeAttribute");
 			INamedTypeSymbol? behaviorType = compilation.GetTypeByMetadataName("Ursa.Behaviour");
 			INamedTypeSymbol? componentType = compilation.GetTypeByMetadataName("Ursa.Component");
@@ -124,9 +129,11 @@ internal static class Program
 			INamedTypeSymbol? formerlySerializedAsAttribute =
 				compilation.GetTypeByMetadataName("Ursa.FormerlySerializedAsAttribute");
 			INamedTypeSymbol? nonSerializedAttribute = compilation.GetTypeByMetadataName("System.NonSerializedAttribute");
+			INamedTypeSymbol? createAssetMenuAttribute = compilation.GetTypeByMetadataName("Ursa.CreateAssetMenuAttribute");
 			var catalog = new Catalog();
 			var typeIds = new Dictionary<string, string>(StringComparer.Ordinal);
 			var localIds = new Dictionary<ulong, string>();
+			var assetMenuNames = new Dictionary<string, string>(StringComparer.Ordinal);
 			INamedTypeSymbol? forwardPipeline = compilation.GetTypeByMetadataName("Ursa.Rendering.ForwardRenderPipelineAsset");
 			if (forwardPipeline != null && scriptTypeAttribute != null)
 			{
@@ -150,15 +157,42 @@ internal static class Program
 				foreach (ClassDeclarationSyntax declaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
 				{
 					if (semanticModel.GetDeclaredSymbol(declaration) is not INamedTypeSymbol type ||
-					    type.DeclaredAccessibility != Accessibility.Public || type.IsAbstract || type.Arity != 0 ||
-					    (!DerivesFrom(type, behaviorBase) && !DerivesFrom(type, assetBase)) ||
 					    !declaredTypes.Add(type))
+					{
+						continue;
+					}
+
+					AttributeData? createMenu = createAssetMenuAttribute == null
+						                            ? null
+						                            : type.GetAttributes().FirstOrDefault(attribute =>
+							                              SymbolEqualityComparer.Default.Equals(attribute.AttributeClass,
+							                                                              createAssetMenuAttribute));
+					bool isAsset = DerivesFrom(type, assetBase);
+					bool isBehavior = DerivesFrom(type, behaviorBase);
+					bool supportedType = type.DeclaredAccessibility == Accessibility.Public && !type.IsAbstract &&
+					                    type.Arity == 0 && (isBehavior || isAsset);
+					if (createMenu != null && (!supportedType || !isAsset || source.Group != "Game"))
+					{
+						throw new InvalidDataException(
+							$"CreateAssetMenu requires a public, concrete, non-generic Game ScriptableObject: {type.ToDisplayString()} in {source.VirtualPath}.");
+					}
+					if (!supportedType)
 					{
 						continue;
 					}
 
 					(string scriptTypeId, uint version) = ReadScriptType(type, scriptTypeAttribute, source);
 					string origin = $"{type.ToDisplayString()} in {source.VirtualPath}";
+					(string menuName, string fileName, int menuOrder) = ReadCreateAssetMenu(createMenu, type, source);
+					if (!string.IsNullOrEmpty(menuName) && assetMenuNames.TryGetValue(menuName, out string? previousMenu))
+					{
+						throw new InvalidDataException(
+							$"Duplicate CreateAssetMenu '{menuName}': {previousMenu}; {origin}.");
+					}
+					if (!string.IsNullOrEmpty(menuName))
+					{
+						assetMenuNames.Add(menuName, origin);
+					}
 					if (typeIds.TryGetValue(scriptTypeId, out string? previousType))
 					{
 						throw new InvalidDataException($"Duplicate ScriptType '{scriptTypeId}': {previousType}; {origin}.");
@@ -170,6 +204,15 @@ internal static class Program
 						throw new InvalidDataException($"Duplicate ScriptType local file ID {localFileId}: {previousLocalId}; {origin}.");
 					}
 					localIds.Add(localFileId, origin);
+					var fields = DescribeFields(type, compilation, behaviorType, componentType, assetBase, serializeFieldAttribute,
+					                            formerlySerializedAsAttribute, nonSerializedAttribute);
+					if (createMenu != null && fields.Any(field => field.Kind == "Unsupported" ||
+					                                         ((field.Kind is "Array" or "List") &&
+					                                          field.ElementKind == "Unsupported")))
+					{
+						throw new InvalidDataException(
+							$"CreateAssetMenu type has unsupported serialized fields: {origin}.");
+					}
 					catalog.Scripts.Add(new ScriptRecord
 					{
 						SourceGuid = source.Guid,
@@ -180,9 +223,12 @@ internal static class Program
 						              (source.Group == "Editor" ? "Ursa.EditorScripts" : "Ursa.Game"),
 						VirtualPath = source.VirtualPath,
 						Group = source.Group,
-						Kind = DerivesFrom(type, assetBase) ? "ScriptableObject" : "Behaviour",
-						Fields = DescribeFields(type, compilation, behaviorType, componentType, assetBase, serializeFieldAttribute,
-						                        formerlySerializedAsAttribute, nonSerializedAttribute)
+						Kind = isAsset ? "ScriptableObject" : "Behaviour",
+						IsRenderPipeline = pipelineBase != null && DerivesFrom(type, pipelineBase),
+						CreateAssetMenuName = menuName,
+						CreateAssetFileName = fileName,
+						CreateAssetMenuOrder = menuOrder,
+						Fields = fields
 					});
 				}
 			}
@@ -248,6 +294,40 @@ internal static class Program
 		return value == 0 ? 1ul : value;
 	}
 
+	private static (string MenuName, string FileName, int Order) ReadCreateAssetMenu(AttributeData? attribute,
+		INamedTypeSymbol type, SourceEntry source)
+	{
+		if (attribute == null)
+		{
+			return (string.Empty, string.Empty, 0);
+		}
+		string menuName = type.Name;
+		string fileName = "NewAsset";
+		int order = 0;
+		foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
+		{
+			switch (argument.Key)
+			{
+				case "MenuName" when argument.Value.Value is string menuValue:
+					menuName = menuValue.Trim();
+					break;
+				case "FileName" when argument.Value.Value is string fileValue:
+					fileName = fileValue.Trim();
+					break;
+				case "Order" when argument.Value.Value is int orderValue:
+					order = orderValue;
+					break;
+			}
+		}
+		if (string.IsNullOrWhiteSpace(menuName) || string.IsNullOrWhiteSpace(fileName) ||
+		    fileName is "." or ".." || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+		    fileName.Contains('/') || fileName.Contains('\\'))
+		{
+			throw new InvalidDataException($"Invalid CreateAssetMenu declaration on {type.ToDisplayString()} in {source.VirtualPath}.");
+		}
+		return (menuName, fileName, order);
+	}
+
 	private static List<ScriptFieldRecord> DescribeFields(INamedTypeSymbol scriptType, Compilation compilation,
 		INamedTypeSymbol? behaviorBase, INamedTypeSymbol? componentBase, INamedTypeSymbol? assetBase, INamedTypeSymbol? serializeFieldAttribute,
 		INamedTypeSymbol? formerNameAttribute, INamedTypeSymbol? nonSerializedAttribute)
@@ -277,15 +357,15 @@ internal static class Program
 					Name = field.Name,
 					Kind = kind,
 					ElementKind = elementKind,
-					TypeName = field.Type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+					TypeName = FieldTypeName(field.Type),
 					DefaultValueJson = DefaultValueJson(field, compilation, kind)
 				};
 				ITypeSymbol scalarType = field.Type is IArrayTypeSymbol arrayField ? arrayField.ElementType :
 					field.Type is INamedTypeSymbol listField && kind == "List" ? listField.TypeArguments[0] : field.Type;
-				record.ElementTypeName = kind is "Array" or "List" ? scalarType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) : string.Empty;
+				record.ElementTypeName = kind is "Array" or "List" ? FieldTypeName(scalarType) : string.Empty;
 				if (scalarType.TypeKind == TypeKind.Enum)
 				{
-					record.EnumUnderlyingType = ((INamedTypeSymbol)scalarType).EnumUnderlyingType!.ToDisplayString();
+					record.EnumUnderlyingType = FieldTypeName(((INamedTypeSymbol)scalarType).EnumUnderlyingType!);
 					record.EnumNumericValues = scalarType.GetMembers().OfType<IFieldSymbol>()
 						.Where(member => member.HasConstantValue && !member.IsImplicitlyDeclared)
 						.Select(member => member.ConstantValue!).ToList();
@@ -307,6 +387,18 @@ internal static class Program
 		}
 		fields.Sort((left, right) => string.CompareOrdinal(left.Name, right.Name));
 		return fields;
+	}
+
+	private static string FieldTypeName(ITypeSymbol type)
+	{
+		if (type is IArrayTypeSymbol array) return FieldTypeName(array.ElementType) + "[]";
+		if (type is INamedTypeSymbol named && !named.IsGenericType)
+		{
+			string prefix = named.ContainingType != null ? FieldTypeName(named.ContainingType) + "+" :
+				named.ContainingNamespace.IsGlobalNamespace ? string.Empty : named.ContainingNamespace.ToDisplayString() + ".";
+			return prefix + named.MetadataName;
+		}
+		return type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 	}
 
 	private static (string Kind, string ElementKind) FieldKind(ITypeSymbol type)
@@ -339,10 +431,11 @@ internal static class Program
 		if (type.TypeKind == TypeKind.Enum) return "Enumeration";
 		for (INamedTypeSymbol? current = type as INamedTypeSymbol; current != null; current = current.BaseType)
 		{
-			if (current.ToDisplayString() == "Ursa.Component") return "ComponentReference";
-			if (current.ToDisplayString() == "Ursa.ScriptableObject") return "ScriptableObjectReference";
-			if (current.ToDisplayString() == "Ursa.Material") return "MaterialReference";
-			if (current.ToDisplayString() == "Ursa.Texture") return "TextureReference";
+			string identity = FieldTypeName(current);
+			if (identity == "Ursa.Component") return "ComponentReference";
+			if (identity == "Ursa.ScriptableObject") return "ScriptableObjectReference";
+			if (identity == "Ursa.Material") return "MaterialReference";
+			if (identity == "Ursa.Texture") return "TextureReference";
 		}
 		if (type.ContainingNamespace.ToDisplayString() != "Ursa") return "Unsupported";
 		return type.Name switch

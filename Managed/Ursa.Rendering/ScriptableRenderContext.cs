@@ -16,9 +16,10 @@ public sealed class DrawingSettings
 {
 	public string[] ShaderTags { get; set; } = Array.Empty<string>();
 	public SortingCriteria Sorting { get; set; } = SortingCriteria.CommonOpaque;
-	public float[] CameraPosition { get; set; } = new float[3];
+	public float[]? CameraPosition { get; set; }
 	public string ActivePipeline { get; set; } = "UrsaForward";
 	public int OverrideMaterialPass { get; set; } = -1;
+	public Material? OverrideMaterial { get; set; }
 }
 
 public sealed class FilteringSettings
@@ -78,7 +79,7 @@ public sealed class ScriptableRenderContext : IDisposable
 		context = payload.Context;
 	}
 
-	public CullingResults Cull(CameraComponent camera)
+	public CullingResults Cull(Camera camera)
 	{
 		ArgumentNullException.ThrowIfNull(camera);
 		RequireValid();
@@ -91,16 +92,17 @@ public sealed class ScriptableRenderContext : IDisposable
 		return new CullingResults(context, payload.Index, payload.Generation);
 	}
 
-	public void SetupCameraProperties(CameraComponent camera)
+	public void SetupCameraProperties(Camera camera)
 	{
 		ArgumentNullException.ThrowIfNull(camera);
 		RequireValid();
-		EngineApi.ResourceRequest(new
+		var frame = EngineApi.ResourceRequest<CameraFramePayload>(new
 		{
 			operation = "render.camera.setup",
 			context = TokenData(),
 			cameraPersistentId = camera.PersistentId
 		});
+		camera.Update(frame);
 	}
 
 	public RendererList CreateRendererList(CullingResults cullingResults, DrawingSettings drawing,
@@ -111,7 +113,7 @@ public sealed class ScriptableRenderContext : IDisposable
 		RequireValid();
 		if (!SameContext(cullingResults.Context, context))
 			throw new InvalidOperationException("Culling results belong to another render context.");
-		if (drawing.CameraPosition == null || drawing.CameraPosition.Length != 3)
+		if (drawing.CameraPosition != null && drawing.CameraPosition.Length != 3)
 			throw new ArgumentException("CameraPosition must contain three values.", nameof(drawing));
 		var payload = EngineApi.ResourceRequest<RenderResultPayload>(new
 		{
@@ -125,6 +127,7 @@ public sealed class ScriptableRenderContext : IDisposable
 			cameraPosition = drawing.CameraPosition,
 			activePipeline = drawing.ActivePipeline,
 			overrideMaterialPass = drawing.OverrideMaterialPass,
+			overrideMaterial = drawing.OverrideMaterial?.Handle,
 			minimumQueue = filtering.MinimumQueue,
 			maximumQueue = filtering.MaximumQueue,
 			layerMask = filtering.LayerMask
@@ -136,9 +139,54 @@ public sealed class ScriptableRenderContext : IDisposable
 	{
 		if (disposed)
 			return;
-		EngineApi.ResourceRequest(new { operation = "render.context.end", context = TokenData() });
-		retainedResources.Clear();
-		disposed = true;
+		try { EngineApi.ResourceRequest(new { operation = "render.context.end", context = TokenData() }); }
+		finally { retainedResources.Clear(); disposed = true; }
+	}
+
+	public void Submit()
+	{
+		RequireValid();
+		EngineApi.ResourceRequest(new { operation = "render.context.submit", context = TokenData() });
+	}
+
+	public void ExecuteCommandBuffer(CommandBuffer commands)
+	{
+		ArgumentNullException.ThrowIfNull(commands);
+		RequireValid();
+		commands.Execute(this);
+	}
+
+	internal void ReadCameras(Dictionary<string, Camera> wrappers, List<Camera> cameras)
+	{
+		RequireValid();
+		var descriptions = EngineApi.ResourceRequest<CameraFramePayload[]>(new
+		{
+			operation = "render.cameras", context = TokenData()
+		});
+		cameras.Clear();
+		foreach (var description in descriptions)
+		{
+			if (!wrappers.TryGetValue(description.Identity, out Camera? camera))
+			{
+				camera = new Camera(description.Identity);
+				wrappers.Add(description.Identity, camera);
+			}
+			camera.Update(description);
+			cameras.Add(camera);
+		}
+		if (wrappers.Count > cameras.Count + 32)
+		{
+			var alive = new HashSet<Camera>(cameras);
+			foreach (var entry in new List<KeyValuePair<string, Camera>>(wrappers))
+				if (!alive.Contains(entry.Value)) wrappers.Remove(entry.Key);
+		}
+	}
+
+	public void Abort()
+	{
+		if (disposed) return;
+		try { EngineApi.ResourceRequest(new { operation = "render.context.abort", context = TokenData() }); }
+		finally { retainedResources.Clear(); disposed = true; }
 	}
 
 	internal void Submit(ReadOnlySpan<byte> batch, IReadOnlyCollection<RenderResource> resources)

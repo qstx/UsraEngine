@@ -48,7 +48,7 @@ String SourceFingerprint(const VirtualFileSystem& filesystem, const ShaderSource
 		}
 	};
 	Ursa::UInt64 hash = 14695981039346656037ull;
-	constexpr char importerVersion[] = "UrsaShaderImportV2";
+	constexpr char importerVersion[] = "UrsaShaderImportV3";
 	hashBytes(hash, importerVersion, sizeof(importerVersion) - 1);
 	hashBytes(hash, &source.source.formatVersion, sizeof(source.source.formatVersion));
 	hashBytes(hash, &shaderReflectionFormatVersion, sizeof(shaderReflectionFormatVersion));

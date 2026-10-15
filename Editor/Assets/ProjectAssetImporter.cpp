@@ -16,6 +16,17 @@ namespace Ursa::Editor
 {
 namespace
 {
+String ClrFieldTypeName(const String& name)
+{
+	static const Map<String, String> aliases{
+	    {"bool", "System.Boolean"}, {"sbyte", "System.SByte"},   {"byte", "System.Byte"},
+	    {"short", "System.Int16"},  {"ushort", "System.UInt16"}, {"int", "System.Int32"},
+	    {"uint", "System.UInt32"},  {"long", "System.Int64"},    {"ulong", "System.UInt64"},
+	    {"float", "System.Single"}, {"double", "System.Double"}, {"string", "System.String"}};
+	const auto alias = aliases.find(name);
+	return alias == aliases.end() ? name : alias->second;
+}
+
 String Extension(const VirtualPath& path)
 {
 	String extension = PathToUrsaString(PathFromUrsaString(path.relative).extension());
@@ -161,18 +172,23 @@ bool ScriptFieldValueMatches(const nlohmann::json& value, const String& kind, co
 		{
 			return false;
 		}
-		const auto& resource = reference["Resource"];
-		if (resource.contains("kind") && resource["kind"] == "local")
+		const nlohmann::json* resource = &reference["Resource"];
+		if (resource->contains("kind"))
+		{
+			if ((expected != "Material" && expected != "Mesh") || resource->at("kind") != "asset" ||
+			    !resource->contains("asset") || !resource->at("asset").is_object())
+			{
+				return false;
+			}
+			resource = &resource->at("asset");
+		}
+		if (!resource->contains("guid") || !resource->at("guid").is_string() ||
+		    !ResourceId::Parse(ToUrsaString(resource->at("guid").get<std::string>())))
 		{
 			return false;
 		}
-		if (!resource.contains("guid") || !resource["guid"].is_string() ||
-		    !ResourceId::Parse(ToUrsaString(resource["guid"].get<std::string>())))
-		{
-			return false;
-		}
-		return resource.contains("localFileId") &&
-		       HasUnsignedRange(resource["localFileId"], (std::numeric_limits<UInt64>::max)());
+		return resource->contains("localFileId") &&
+		       HasUnsignedRange(resource->at("localFileId"), (std::numeric_limits<UInt64>::max)());
 	}
 	return false;
 }
@@ -239,32 +255,39 @@ Result<AssetImportResult> ImportScriptableAsset(AssetDatabase& database, const V
 		if (fieldType == payload["FieldTypes"].end() || !fieldType->is_object() ||
 		    fieldType->value("Kind", std::string{}) != ToStdString(descriptor.kind) ||
 		    fieldType->value("ElementKind", std::string{}) != ToStdString(descriptor.elementKind) ||
-		    (!reference && fieldType->value("TypeName", std::string{}) !=
-		                       ToStdString(collection ? descriptor.elementTypeName : descriptor.typeName)))
+		    (!reference && ClrFieldTypeName(ToUrsaString(
+		                       fieldType->value(collection ? "ElementTypeName" : "TypeName", std::string{}))) !=
+		                       ClrFieldTypeName(collection ? descriptor.elementTypeName : descriptor.typeName)))
 		{
 			return Result<AssetImportResult>::Failure("ScriptableAsset field schema does not match its current type: " +
 			                                          source.ToString() + "." + descriptor.name);
 		}
 		const nlohmann::json& fieldValue = payload["Fields"].at(ToStdString(fieldName));
-		const String payloadType =
-		    ToUrsaString(fieldType->value(collection ? "ElementTypeName" : "TypeName", std::string{}));
-		if (!ScriptFieldValueMatches(fieldValue, valueKind, payloadType))
+		const String payloadType = ClrFieldTypeName(
+		    ToUrsaString(fieldType->value(collection ? "ElementTypeName" : "TypeName", std::string{})));
+		const auto validValue = [&](const nlohmann::json& value)
+		{ return ScriptFieldValueMatches(value, valueKind, payloadType); };
+		const bool valuesMatch =
+		    collection ? fieldValue.is_null() ||
+		                     (fieldValue.is_array() && std::all_of(fieldValue.begin(), fieldValue.end(), validValue))
+		               : validValue(fieldValue);
+		if (!valuesMatch)
 		{
 			return Result<AssetImportResult>::Failure("ScriptableAsset field value does not match its declared type: " +
 			                                          source.ToString() + "." + descriptor.name);
 		}
 		if (valueKind == "Enumeration")
 		{
-			bool declaredValue = false;
-			for (const String& numeric : descriptor.enumNumericValuesJson)
+			const auto declared = [&](const nlohmann::json& value)
 			{
-				if (nlohmann::json::parse(ToStdString(numeric)) == fieldValue)
-				{
-					declaredValue = true;
-					break;
-				}
-			}
-			if (!declaredValue)
+				return std::any_of(descriptor.enumNumericValuesJson.begin(), descriptor.enumNumericValuesJson.end(),
+				                   [&](const String& numeric)
+				                   { return nlohmann::json::parse(ToStdString(numeric)) == value; });
+			};
+			const bool declaredValues =
+			    collection ? fieldValue.is_null() || std::all_of(fieldValue.begin(), fieldValue.end(), declared)
+			               : declared(fieldValue);
+			if (!declaredValues)
 			{
 				return Result<AssetImportResult>::Failure("ScriptableAsset enum value is not declared by its type: " +
 				                                          source.ToString() + "." + descriptor.name);

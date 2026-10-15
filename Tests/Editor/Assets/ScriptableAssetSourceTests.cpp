@@ -1,4 +1,5 @@
 #include <Assets/AssetDatabase.hpp>
+#include <Core/StringInterop.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <iostream>
@@ -61,12 +62,79 @@ int main()
 		       "Moving a ScriptableAsset changed its GUID");
 		const auto reopened = Take(LoadScriptableAssetSource(files, destination, guid));
 		Expect(reopened.Payload() == payload, "Moving a source lost unknown fields");
+		ScriptableAsset resourceBindings;
+		const auto materialGuid = ResourceId::Generate();
+		const auto meshGuid = ResourceId::Generate();
+		auto bindingPayload = payload;
+		for (const auto& entry : {std::make_pair("Material", materialGuid), std::make_pair("Mesh", meshGuid)})
+		{
+			bindingPayload["Fields"][entry.first] = {
+			    {"$ursaReference",
+			     {{"Kind", entry.first},
+			      {"Resource",
+			       {{"kind", "asset"},
+			        {"asset", {{"guid", ToStdString(entry.second.ToString())}, {"localFileId", 0u}}}}}}}};
+		}
+		Done(resourceBindings.SetDescription(guid, 1, "test.Settings", 1, bindingPayload));
+		const auto resourceDependencies = Take(ScriptableAssetDependencies(resourceBindings));
+		Expect(resourceDependencies.size() == 2 && resourceDependencies[0].guid == materialGuid &&
+		           resourceDependencies[1].guid == meshGuid,
+		       "Persistent Material/Mesh bindings did not publish their asset dependencies");
 		const auto copiedPath = Take(VirtualPath::Parse("prj:Copy.ursaasset"));
 		Done(database->Copy(destination, copiedPath));
 		const auto copiedGuid = Take(database->Metadata(copiedPath)).guid;
 		Expect(copiedGuid != guid &&
 		           Take(LoadScriptableAssetSource(files, copiedPath, copiedGuid)).SourceGuid() == copiedGuid,
 		       "Copying a ScriptableAsset duplicated its persistent identity");
+		const auto defaultsPath = Take(VirtualPath::Parse("prj:Defaults.ursaasset"));
+		Done(files.WriteAtomic(defaultsPath, {}));
+		Done(database->Refresh());
+		ScriptTypeDescriptor settingsType;
+		settingsType.sourceGuid = ResourceId::Generate();
+		settingsType.scriptType = "test.DefaultSettings";
+		settingsType.localFileId = 42;
+		settingsType.version = 3;
+		settingsType.kind = ScriptTypeKind::ScriptableObject;
+		settingsType.group = ScriptAssemblyGroup::Game;
+		settingsType.fields.push_back({"strength", "FloatingPoint", "Unsupported", "System.Single", "2.5"});
+		settingsType.fields.push_back({"tint", "Vector4", "Unsupported", "Ursa.Vector4", "[1,0.5,0.25,1]"});
+		settingsType.fields.push_back({"shared", "ScriptableObjectReference", "Unsupported", "test.Settings", "null"});
+		const auto defaultsGuid = Take(database->Metadata(defaultsPath)).guid;
+		auto created = Take(CreateScriptableAssetWithDefaults(defaultsGuid, settingsType));
+		Expect(created.Payload().at("Fields").at("strength") == 2.5 &&
+		           created.Payload().at("Fields").at("tint") == nlohmann::json::array({1.0, 0.5, 0.25, 1.0}) &&
+		           created.Payload().at("FieldTypes").at("strength").at("Kind") == "FloatingPoint",
+		       "CreateAssetMenu defaults or versioned field schema were not initialized");
+		Done(SaveScriptableAssetSource(files, defaultsPath, created));
+		auto reopenedDefaults = Take(LoadScriptableAssetSource(files, defaultsPath, defaultsGuid));
+		Expect(reopenedDefaults.Payload() == created.Payload(),
+		       "A newly created ScriptableAsset did not save and reopen its default fields");
+		nlohmann::json editedPayload = reopenedDefaults.Payload();
+		editedPayload["Fields"]["strength"] = 3.75;
+		editedPayload["Fields"]["shared"] = nlohmann::json::object(
+		    {{"$ursaReference",
+		      nlohmann::json::object({{"Kind", "ScriptableObject"},
+		                              {"Id", ""},
+		                              {"Resource", nlohmann::json::object({{"guid", ToStdString(guid.ToString())},
+		                                                                   {"localFileId", 1u}})}})}});
+		ScriptableAsset edited;
+		Done(edited.SetDescription(defaultsGuid, settingsType.localFileId, settingsType.scriptType,
+		                           settingsType.version, std::move(editedPayload)));
+		Done(SaveScriptableAssetSource(files, defaultsPath, edited));
+		auto savedEdit = Take(LoadScriptableAssetSource(files, defaultsPath, defaultsGuid));
+		Expect(savedEdit.Payload().at("Fields").at("strength") == 3.75 &&
+		           savedEdit.Payload().at("Fields").at("shared").at("$ursaReference").at("Resource").at("guid") ==
+		               ToStdString(guid.ToString()),
+		       "An edited ScriptableAsset field or selected resource reference was not saved and restored");
+		const auto invalidSourceBytes = Take(files.Read(defaultsPath));
+		nlohmann::json invalidPayload = savedEdit.Payload();
+		invalidPayload["Fields"]["shared"] = nlohmann::json::object(
+		    {{"$ursaReference", nlohmann::json::object({{"Kind", "GameObject"}, {"Id", "temporary"}})}});
+		ScriptableAsset invalid;
+		Expect(!invalid.SetDescription(defaultsGuid, settingsType.localFileId, settingsType.scriptType,
+		                               settingsType.version, std::move(invalidPayload)) &&
+		           Take(files.Read(defaultsPath)) == invalidSourceBytes,
+		       "An invalid scene reference altered the saved source instead of preserving its data");
 		std::cout << "ScriptableAsset source metadata/move/copy tests passed\n";
 		return 0;
 	}

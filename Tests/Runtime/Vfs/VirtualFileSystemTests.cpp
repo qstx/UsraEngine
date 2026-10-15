@@ -146,7 +146,11 @@ void TestReadWriteAndPermissions(const std::filesystem::path& root)
 	Expect(TextOf(vfs.Read(shader).value) == "engine-shader", "resolveToDisk returned the wrong host path");
 
 	const auto saved = Ursa::VirtualPath::Parse("prj:Snake/new.ursatex").value;
-	Expect(static_cast<bool>(vfs.Write(saved, BytesOf("saved"))), "Cannot write to a writable mount");
+	const auto write = vfs.Write(saved, BytesOf("saved"));
+	if (!write)
+	{
+		throw std::runtime_error("Cannot write to a writable mount: " + Ursa::ToStdString(write.error));
+	}
 	Expect(TextOf(vfs.Read(saved).value) == "saved", "Written bytes did not round trip");
 	Expect(TextOf(vfs.ReadRange(saved, 1, 3).value) == "ave", "Range read returned the wrong bytes");
 	Expect(!vfs.ReadRange(saved, 4, 2), "An out-of-bounds range read succeeded");
@@ -290,6 +294,11 @@ void TestRuntimeMountProfiles(const std::filesystem::path& root)
 	editorConfig.userDataDirectoryOverride = editorUserRoot;
 	auto editor = Ursa::OpenRuntimeFileSystem(editorConfig);
 	Expect(static_cast<bool>(editor), "Cannot create the Editor mount profile");
+	const auto graphics = Ursa::VirtualPath::Parse("settings:Graphics.json").value;
+	Expect(editor.value.IsMounted(Ursa::projectSettingsScheme) &&
+	           static_cast<bool>(editor.value.Write(graphics, BytesOf("settings"))) &&
+	           TextOf(editor.value.Read(graphics).value) == "settings",
+	       "Editor profile did not expose a separate writable ProjectSettings mount");
 	const auto engineAsset = Ursa::VirtualPath::Parse("ursa:engine.txt").value;
 	const auto projectAsset = Ursa::VirtualPath::Parse("prj:project.txt").value;
 	const auto editorArtifact = Ursa::VirtualPath::Parse("lib:Artifacts/test.bin").value;
@@ -312,6 +321,7 @@ void TestRuntimeMountProfiles(const std::filesystem::path& root)
 	looseConfig.userDataDirectoryOverride = looseUserRoot;
 	auto loose = Ursa::OpenRuntimeFileSystem(looseConfig);
 	Expect(loose && !loose.value.IsMounted(Ursa::editorLibraryScheme) &&
+	           !loose.value.IsMounted(Ursa::projectSettingsScheme) &&
 	           !loose.value.Write(projectAsset, BytesOf("runtime edit")) &&
 	           static_cast<bool>(loose.value.Write(Ursa::VirtualPath::Parse("user:save.dat").value, BytesOf("save"))),
 	       "Loose runtime mount profile has incorrect project or user-data access");
@@ -351,6 +361,7 @@ int main()
 		TestOverlayAndShadowing(root);
 		TestTraversalIsolation(root);
 		TestEngineAssetRootResolution(root);
+		TestRuntimeMountProfiles(root);
 		std::filesystem::remove_all(root);
 		return 0;
 	}

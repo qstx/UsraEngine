@@ -96,7 +96,11 @@ Result<void> Dependencies(const nlohmann::json& value, Vector<AssetReference>& o
 			if (kind == "ScriptableObject" || kind == "Shader" || kind == "ComputeShader" || kind == "Texture" ||
 			    kind == "Material" || kind == "Mesh")
 			{
-				auto parsed = AssetReferenceFromJson(reference.at("Resource"), "ScriptableAsset field");
+				const auto& resource = reference.at("Resource");
+				const auto& identity = resource.is_object() && resource.value("kind", std::string{}) == "asset"
+				                           ? resource.at("asset")
+				                           : resource;
+				auto parsed = AssetReferenceFromJson(identity, "ScriptableAsset field");
 				if (!parsed || !parsed.value.guid || (kind == "ScriptableObject" && !parsed.value.localFileId))
 				{
 					return Result<void>::Failure(parsed ? "ScriptableAsset dependency identity is empty"
@@ -179,6 +183,52 @@ Result<ScriptableAsset> LoadScriptableAssetSource(const VirtualFileSystem& files
 		return Result<ScriptableAsset>::Failure("Invalid ScriptableAsset source " + path.ToString() + ": " +
 		                                        error.what());
 	}
+}
+
+Result<ScriptableAsset> CreateScriptableAssetWithDefaults(ResourceId metadataGuid, const ScriptTypeDescriptor& type)
+{
+	if (!metadataGuid || !type.sourceGuid || type.localFileId == 0 || type.scriptType.empty() || type.version == 0 ||
+	    type.kind != ScriptTypeKind::ScriptableObject || type.group != ScriptAssemblyGroup::Game)
+	{
+		return Result<ScriptableAsset>::Failure("Cannot create a ScriptableAsset from an invalid catalog type");
+	}
+	nlohmann::json fields = nlohmann::json::object();
+	nlohmann::json fieldTypes = nlohmann::json::object();
+	try
+	{
+		for (const ScriptFieldTypeDescriptor& field : type.fields)
+		{
+			if (field.name.empty() || field.kind.empty() || field.kind == "Unsupported" ||
+			    ((field.kind == "Array" || field.kind == "List") && field.elementKind == "Unsupported") ||
+			    fields.contains(ToStdString(field.name)))
+			{
+				return Result<ScriptableAsset>::Failure(
+				    "ScriptableAsset type has an invalid serialized field: " + type.clrTypeName + "." + field.name);
+			}
+			fields[ToStdString(field.name)] = nlohmann::json::parse(ToStdString(field.defaultValueJson));
+			fieldTypes[ToStdString(field.name)] = {{"Kind", ToStdString(field.kind)},
+			                                       {"ElementKind", ToStdString(field.elementKind)},
+			                                       {"TypeName", ToStdString(field.typeName)},
+			                                       {"ElementTypeName", ToStdString(field.elementTypeName)}};
+		}
+	}
+	catch (const std::exception& error)
+	{
+		return Result<ScriptableAsset>::Failure("ScriptableAsset type has invalid default fields: " +
+		                                        ToUrsaString(error.what()));
+	}
+	nlohmann::json payload = {{"FormatVersion", 1},
+	                          {"ScriptType", ToStdString(type.scriptType)},
+	                          {"Version", type.version},
+	                          {"SourceGuid", ToStdString(type.sourceGuid.ToString())},
+	                          {"LocalFileId", type.localFileId},
+	                          {"Fields", std::move(fields)},
+	                          {"FieldTypes", std::move(fieldTypes)}};
+	ScriptableAsset asset;
+	auto described =
+	    asset.SetDescription(metadataGuid, type.localFileId, type.scriptType, type.version, std::move(payload));
+	return described ? Result<ScriptableAsset>::Success(std::move(asset))
+	                 : Result<ScriptableAsset>::Failure(described.error);
 }
 
 Result<Vector<UInt8>> EncodeScriptableAssetArtifact(const ScriptableAsset& asset)

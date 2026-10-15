@@ -3,7 +3,7 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Memory/Memory.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <Scene/Scene.hpp>
 #include <iostream>
 #include <stdexcept>
@@ -60,13 +60,13 @@ Ursa::Vector<Ursa::UInt8> ReadFrameWith(const Ursa::Rhi::DevicePtr& device, Draw
 	return pixels;
 }
 
-Ursa::Vector<Ursa::UInt8> ReadFrame(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer,
-                                    const Ursa::Camera& camera, const Ursa::Vector<Ursa::BoxInstance>& boxes,
+Ursa::Vector<Ursa::UInt8> ReadFrame(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer,
+                                    const Ursa::Camera& camera, const Ursa::Vector<Ursa::Test::CubeDraw>& boxes,
                                     Ursa::UInt32 width = 64, Ursa::UInt32 height = 64)
 {
 	return ReadFrameWith(
-	    device, [&](const Ursa::Rhi::TexturePtr& color) { return renderer.RenderOffscreen(color, camera, boxes); },
-	    width, height);
+	    device, [&](const Ursa::Rhi::TexturePtr& color) { return renderer.DrawCubes(color, camera, boxes); }, width,
+	    height);
 }
 
 Ursa::Array<Ursa::UInt8, 4> pixel(const Ursa::Vector<Ursa::UInt8>& image, Ursa::UInt32 width, Ursa::UInt32 x,
@@ -76,12 +76,12 @@ Ursa::Array<Ursa::UInt8, 4> pixel(const Ursa::Vector<Ursa::UInt8>& image, Ursa::
 	return {image[offset], image[offset + 1], image[offset + 2], image[offset + 3]};
 }
 
-void TestInstances(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestInstances(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	Ursa::Camera camera;
 	camera.position = {0, 0, 4};
 	camera.target = {};
-	const Ursa::Vector<Ursa::BoxInstance> boxes{
+	const Ursa::Vector<Ursa::Test::CubeDraw> boxes{
 	    {{{-0.75f, 0, 0}, {0.8f, 0.8f, 0.8f}}, {1, 0, 0, 1}},
 	    {{{0.75f, 0, 0}, {0.8f, 0.8f, 0.8f}}, {0, 0, 1, 1}},
 	};
@@ -98,12 +98,12 @@ void TestInstances(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& rendere
 	Expect(center[0] < 30 && center[2] < 40, "Changing the camera did not change the image");
 }
 
-void TestDepth(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestDepth(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	Ursa::Camera camera;
 	camera.position = {0, 0, 4};
 	camera.target = {};
-	const Ursa::Vector<Ursa::BoxInstance> boxes{
+	const Ursa::Vector<Ursa::Test::CubeDraw> boxes{
 	    {{{0, 0, 0}, {1, 1, 1}}, {1, 0, 0, 1}},
 	    {{{0, 0, -1}, {1, 1, 1}}, {0, 1, 0, 1}},
 	};
@@ -115,36 +115,33 @@ void TestDepth(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
 	Expect(wideCenter[0] > 100 && wideCenter[1] < 30, "Rendering failed after target resize");
 }
 
-void TestModelMatrices(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestModelMatrices(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	Ursa::Camera camera;
 	camera.position = {0, 0, 4};
 	camera.target = {};
-	const Ursa::Vector<Ursa::BoxInstance> legacy{{{{0, 0, 0}, {0.7f, 0.7f, 0.7f}}, {1, 0, 0, 1}}};
+	const Ursa::Vector<Ursa::Test::CubeDraw> legacy{{{{0, 0, 0}, {0.7f, 0.7f, 0.7f}}, {1, 0, 0, 1}}};
 	const auto oldImage = ReadFrame(device, renderer, camera, legacy);
 	const auto newImage =
 	    ReadFrameWith(device,
 	                  [&](const Ursa::Rhi::TexturePtr& color)
 	                  {
-		                  return renderer.RenderOffscreenModels(color, camera.ViewProjection(1.0f),
-		                                                        {{{legacy[0].transform.Matrix()}, legacy[0].color}});
+		                  return renderer.DrawOffscreen(color, camera.ViewProjection(1.0f),
+		                                                {{{legacy[0].transform.Matrix()}, legacy[0].color}});
 	                  });
 	Expect(pixel(oldImage, 64, 32, 32) == pixel(newImage, 64, 32, 32), "Model-matrix path changed the legacy result");
 
 	const auto parent =
 	    Ursa::Mat4::Translation({1, 0, 0}) * Ursa::Mat4::Rotation(Ursa::Quat::FromAxisAngle({0, 1, 0}, 3.14159265f));
 	const auto child = Ursa::Mat4::Translation({1, 0, 0}) * Ursa::Mat4::Scale({0.7f, 0.7f, 0.7f});
-	const auto rotated = ReadFrameWith(device,
-	                                   [&](const Ursa::Rhi::TexturePtr& color)
-	                                   {
-		                                   return renderer.RenderOffscreenModels(color, camera.ViewProjection(1.0f),
-		                                                                         {{parent * child, {0, 1, 0, 1}}});
-	                                   });
+	const auto rotated = ReadFrameWith(
+	    device, [&](const Ursa::Rhi::TexturePtr& color)
+	    { return renderer.DrawOffscreen(color, camera.ViewProjection(1.0f), {{parent * child, {0, 1, 0, 1}}}); });
 	const auto center = pixel(rotated, 64, 32, 32);
 	Expect(center[1] > 100 && center[0] < 30, "Rotated parent did not place its child at the center");
 }
 
-void TestSceneCollection(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestSceneCollection(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	Ursa::Scene scene;
 	const auto cameraNode = Take(scene.CreateGameObject());
@@ -167,17 +164,16 @@ void TestSceneCollection(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& r
 	       "Missing active camera did not return a diagnostic error");
 	done(scene.SetActiveCamera(camera));
 	const auto data = Take(scene.CollectRenderData(1.0f));
-	Expect(data.boxes.size() == 1, "Scene did not collect its child box");
-	const auto visible =
-	    ReadFrameWith(device, [&](const Ursa::Rhi::TexturePtr& color)
-	                  { return renderer.RenderOffscreenModels(color, data.viewProjection, data.boxes); });
+	Expect(data.objects.size() == 1, "Scene did not collect its child box");
+	const auto visible = ReadFrameWith(device, [&](const Ursa::Rhi::TexturePtr& color)
+	                                   { return renderer.DrawOffscreen(color, data.viewProjection, data.objects); });
 	Expect(pixel(visible, 64, 32, 32)[1] > 100, "Scene world transform or color was not rendered");
 	done(scene.SetActive(parent, false));
 	const auto hiddenData = Take(scene.CollectRenderData(1.0f));
-	Expect(hiddenData.boxes.empty(), "Disabled parent still produced a box");
+	Expect(hiddenData.objects.empty(), "Disabled parent still produced a box");
 	const auto hidden =
 	    ReadFrameWith(device, [&](const Ursa::Rhi::TexturePtr& color)
-	                  { return renderer.RenderOffscreenModels(color, hiddenData.viewProjection, hiddenData.boxes); });
+	                  { return renderer.DrawOffscreen(color, hiddenData.viewProjection, hiddenData.objects); });
 	Expect(pixel(hidden, 64, 32, 32)[1] < 30, "Disabled box remained visible");
 	done(scene.SetComponentEnabled(camera, false));
 	Expect(!scene.CollectRenderData(1.0f), "Disabled camera was accepted");
@@ -193,7 +189,7 @@ int main()
 		desc.validation = true;
 #endif
 		auto device = Take(Ursa::Rhi::CreateDevice(desc));
-		auto renderer = Take(Ursa::Renderer3D::Create(device));
+		auto renderer = Take(Ursa::Test::SceneRenderer::Create(device));
 		TestInstances(device, *renderer);
 		TestDepth(device, *renderer);
 		TestModelMatrices(device, *renderer);

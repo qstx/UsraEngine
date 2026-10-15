@@ -5,8 +5,14 @@ add_test(NAME UrsaManagedHandleTests COMMAND UrsaManagedHandleTests)
 
 ursa_add_test_executable(UrsaManagedSceneApiTests ManagedSceneApiTests.cpp)
 target_link_libraries(UrsaManagedSceneApiTests PRIVATE Ursa::Engine)
+target_compile_definitions(UrsaManagedSceneApiTests PRIVATE
+  URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
+  URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+  URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+  URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
 
 add_test(NAME UrsaManagedSceneApiTests COMMAND UrsaManagedSceneApiTests)
+ursa_require_test_content(UrsaManagedSceneApiTests UrsaManagedSceneApiTests)
 
 ursa_add_test_executable(UrsaManagedAssetApiTests ManagedAssetApiTests.cpp)
 target_link_libraries(UrsaManagedAssetApiTests PRIVATE Ursa::Engine)

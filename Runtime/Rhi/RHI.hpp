@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 namespace Ursa::Rhi
 {
@@ -249,6 +250,9 @@ struct Capabilities
 	UInt32 maxUniformBufferRange = 0;
 	UInt64 minUniformBufferOffsetAlignment = 0;
 	UInt64 minStorageBufferOffsetAlignment = 0;
+	Array<UInt32, 3> maxComputeWorkGroupCount{};
+	Array<UInt32, 3> maxComputeWorkGroupSize{};
+	UInt32 maxComputeWorkGroupInvocations = 0;
 };
 
 struct FormatCapabilities
@@ -475,6 +479,14 @@ struct DepthAttachment
 	UInt32 clearStencil = 0;
 };
 
+struct ScissorRect
+{
+	Ursa::Int32 x = 0;
+	Ursa::Int32 y = 0;
+	Ursa::UInt32 width = 0;
+	Ursa::UInt32 height = 0;
+};
+
 struct RenderTarget
 {
 	TexturePtr color;
@@ -487,14 +499,7 @@ struct RenderTarget
 	Ursa::UInt32 stencilValue = 0;
 	Vector<ColorAttachment> colors;
 	DepthAttachment depthAttachment;
-};
-
-struct ScissorRect
-{
-	Ursa::Int32 x = 0;
-	Ursa::Int32 y = 0;
-	Ursa::UInt32 width = 0;
-	Ursa::UInt32 height = 0;
+	std::optional<ScissorRect> renderArea;
 };
 
 struct ViewportRect
@@ -555,6 +560,11 @@ public:
 	virtual Result<void> CopyTextureToBuffer(const TexturePtr& source, const BufferPtr& destination,
 	                                         Ursa::UInt32 mipLevel = 0) = 0;
 
+	virtual Result<void> CopyTexture(const TexturePtr&, const TexturePtr&)
+	{
+		return Result<void>::Failure("Texture copies are not supported by this backend");
+	}
+
 	virtual Result<void> BeginRendering(const RenderTarget& target) = 0;
 
 	virtual Result<void> EndRendering() = 0;
@@ -583,6 +593,13 @@ public:
 	virtual Result<void> Dispatch(Ursa::UInt32 x, Ursa::UInt32 y = 1, Ursa::UInt32 z = 1) = 0;
 };
 
+struct SwapchainStatistics
+{
+	UInt64 acquisitions = 0;
+	UInt64 presentations = 0;
+	UInt64 rebuilds = 0;
+};
+
 class Swapchain
 {
 public:
@@ -594,6 +611,11 @@ public:
 	virtual Result<void> Present() = 0;
 
 	virtual Format Format() const = 0;
+
+	virtual SwapchainStatistics Statistics() const
+	{
+		return {};
+	}
 };
 
 class Device

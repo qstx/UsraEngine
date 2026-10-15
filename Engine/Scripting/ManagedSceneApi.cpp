@@ -14,11 +14,6 @@ namespace
 {
 std::atomic<UInt64> nextRenderSessionId{1};
 
-bool MatchesRenderToken(const Rendering::RenderContextToken& left, const Rendering::RenderContextToken& right)
-{
-	return left.sessionId == right.sessionId && left.frameId == right.frameId && left.index == right.index &&
-	       left.generation == right.generation;
-}
 } // namespace
 
 ManagedSceneApi::ManagedSceneApi(Scene& scene, ResourceSession* resources,
@@ -40,6 +35,67 @@ ManagedSceneApi::ManagedSceneApi(Scene& scene, ResourceSession* resources,
 	if (!registered)
 	{
 		throw std::runtime_error(ToStdString(registered.error));
+	}
+}
+
+void ManagedSceneApi::SetRenderDevice(Rhi::DevicePtr selectedDevice)
+{
+	auto executor = Rendering::RenderCommandExecutor::Create(selectedDevice);
+	if (!executor)
+	{
+		throw std::runtime_error(ToStdString(executor.error));
+	}
+	device = std::move(selectedDevice);
+	renderExecutor = std::move(executor.value);
+}
+
+void ManagedSceneApi::SetRenderOutput(std::shared_ptr<ManagedRenderTexture> output, Rhi::ResourceState finalState)
+{
+	if (activeRenderToken || ownerThread != std::this_thread::get_id())
+	{
+		throw std::runtime_error("Render output can only change between contexts on their owner thread");
+	}
+	renderOutput = std::move(output);
+	renderWindow.reset();
+	renderOutputFinalState = finalState;
+}
+
+void ManagedSceneApi::SetRenderCameraSelection(std::optional<Rendering::CameraType> filter,
+                                               std::optional<Rendering::CameraData> cameraOverride)
+{
+	if (activeRenderToken || ownerThread != std::this_thread::get_id())
+	{
+		throw std::runtime_error("Render camera selection can only change between contexts on their owner thread");
+	}
+	renderCameraFilter = filter;
+	renderCameraOverride = std::move(cameraOverride);
+}
+
+void ManagedSceneApi::SetRenderSceneOverride(Scene* source)
+{
+	if (activeRenderToken || ownerThread != std::this_thread::get_id())
+	{
+		throw std::runtime_error("Render scene can only change between contexts on its owner thread");
+	}
+	renderSceneOverride = source;
+}
+
+void ManagedSceneApi::SetRenderWindow(Rhi::SwapchainPtr output)
+{
+	if (activeRenderToken || ownerThread != std::this_thread::get_id())
+	{
+		throw std::runtime_error("Render window can only change between contexts on their owner thread");
+	}
+	renderWindow = std::move(output);
+	renderOutput.reset();
+	renderOutputFinalState = Rhi::ResourceState::Present;
+}
+
+void ManagedSceneApi::SetFrameCapture(Rendering::FrameCapture* capture)
+{
+	if (renderExecutor)
+	{
+		renderExecutor->SetFrameCapture(capture);
 	}
 }
 
@@ -130,125 +186,13 @@ Int32 ManagedSceneApi::SubmitRenderBatch(void* context, const UInt8* tokenBytes,
 		{
 			return 7;
 		}
-		Rendering::RenderCommandBatchHeader header;
-		std::memcpy(&header, batch, sizeof(header));
-		Vector<std::shared_ptr<void>> retained;
-		Size offset = sizeof(header);
-		for (UInt32 index = 0; index < header.commandCount; ++index)
+		auto accepted = api->ExecuteRenderBatch(batch, static_cast<Size>(batchByteCount));
+		if (!accepted)
 		{
-			Rendering::RenderCommandRecordHeader record;
-			std::memcpy(&record, batch + offset, sizeof(record));
-			if (record.opcode == Rendering::RenderCommandOpcode::SetRenderTarget &&
-			    record.byteSize == sizeof(record) + sizeof(ManagedHandle))
-			{
-				ManagedHandle targetHandle{};
-				std::memcpy(&targetHandle, batch + offset + sizeof(record), sizeof(targetHandle));
-				auto target = api->ResolveRenderTexture(targetHandle);
-				if (!target)
-				{
-					return 8;
-				}
-				retained.push_back(target.value);
-			}
-			else if (record.opcode == Rendering::RenderCommandOpcode::DrawRendererList)
-			{
-				Rendering::RenderContextToken listToken;
-				if (record.byteSize < sizeof(record) + sizeof(listToken))
-				{
-					return 7;
-				}
-				std::memcpy(&listToken, batch + offset + sizeof(record), sizeof(listToken));
-				if (!api->activeRenderToken || !MatchesRenderToken(listToken, *api->activeRenderToken))
-				{
-					return 6;
-				}
-			}
-			else if (record.opcode == Rendering::RenderCommandOpcode::DrawMesh)
-			{
-				constexpr Size drawMeshPayloadBytes = sizeof(ManagedHandle) * 2 + sizeof(Float32) * 16 + sizeof(UInt32);
-				if (record.byteSize < sizeof(record) + drawMeshPayloadBytes)
-				{
-					return 7;
-				}
-				ManagedHandle meshHandle{}, materialHandle{};
-				std::memcpy(&meshHandle, batch + offset + sizeof(record), sizeof(meshHandle));
-				std::memcpy(&materialHandle, batch + offset + sizeof(record) + sizeof(meshHandle),
-				            sizeof(materialHandle));
-				auto mesh = api->ResolveMesh(meshHandle);
-				auto material = api->ResolveMaterial(materialHandle);
-				if (!mesh || !material || !mesh.value || !material.value)
-				{
-					return 8;
-				}
-				retained.push_back(mesh.value);
-				retained.push_back(material.value);
-			}
-			else if (record.opcode == Rendering::RenderCommandOpcode::CopyTexture ||
-			         record.opcode == Rendering::RenderCommandOpcode::Blit)
-			{
-				ManagedHandle sourceHandle{}, destinationHandle{};
-				std::memcpy(&sourceHandle, batch + offset + sizeof(record), sizeof(sourceHandle));
-				std::memcpy(&destinationHandle, batch + offset + sizeof(record) + sizeof(sourceHandle),
-				            sizeof(destinationHandle));
-				auto source = api->ResolveRenderTexture(sourceHandle);
-				auto destination = api->ResolveRenderTexture(destinationHandle);
-				if (!source || !destination)
-				{
-					return 8;
-				}
-				retained.push_back(source.value);
-				retained.push_back(destination.value);
-				if (record.opcode == Rendering::RenderCommandOpcode::Blit)
-				{
-					ManagedHandle materialHandle{};
-					std::memcpy(&materialHandle, batch + offset + sizeof(record) + sizeof(sourceHandle) * 2,
-					            sizeof(materialHandle));
-					auto material = api->ResolveMaterial(materialHandle);
-					if (!material || !material.value)
-					{
-						return 8;
-					}
-					retained.push_back(material.value);
-				}
-			}
-			else if (record.opcode == Rendering::RenderCommandOpcode::CopyBuffer)
-			{
-				ManagedHandle sourceHandle{}, destinationHandle{};
-				std::memcpy(&sourceHandle, batch + offset + sizeof(record), sizeof(sourceHandle));
-				std::memcpy(&destinationHandle, batch + offset + sizeof(record) + sizeof(sourceHandle),
-				            sizeof(destinationHandle));
-				auto source = api->ResolveGraphicsBuffer(sourceHandle);
-				auto destination = api->ResolveGraphicsBuffer(destinationHandle);
-				if (!source || !destination)
-				{
-					return 8;
-				}
-				retained.push_back(source.value);
-				retained.push_back(destination.value);
-			}
-			else if (record.opcode == Rendering::RenderCommandOpcode::SetGlobalParameters)
-			{
-				UInt32 kind = 0, nameBytes = 0;
-				std::memcpy(&kind, batch + offset + sizeof(record), sizeof(kind));
-				std::memcpy(&nameBytes, batch + offset + sizeof(record) + sizeof(kind), sizeof(nameBytes));
-				if (kind == 3)
-				{
-					ManagedHandle textureHandle{};
-					std::memcpy(&textureHandle,
-					            batch + offset + sizeof(record) + sizeof(kind) + sizeof(nameBytes) + nameBytes,
-					            sizeof(textureHandle));
-					auto texture = api->ResolveRenderTexture(textureHandle);
-					if (!texture)
-					{
-						return 8;
-					}
-					retained.push_back(texture.value);
-				}
-			}
-			offset += record.byteSize;
+			api->lastRenderError = accepted.error;
+			return 8;
 		}
-		api->renderBatches.emplace_back(batch, batch + static_cast<Size>(batchByteCount));
-		api->renderBatchResources.push_back(std::move(retained));
+		api->lastRenderError.clear();
 		++api->acceptedRenderBatchCount;
 		return 0;
 	}

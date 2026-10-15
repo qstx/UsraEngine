@@ -43,6 +43,7 @@ struct ShaderBindingLayout
 	Vector<ShaderUniformBufferLayout> uniformBuffers;
 	Vector<ShaderVertexInput> vertexInputs;
 	Map<UInt32, String> resourceNames;
+	Map<UInt32, String> storageImageFormats;
 	Map<String, ShaderPropertyBinding> properties;
 };
 

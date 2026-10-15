@@ -3,6 +3,7 @@
 #include <ScriptableAssets/ScriptableAsset.hpp>
 #include <Serialization/AssetReference.hpp>
 #include <Serialization/ResourceSession.hpp>
+#include <Scripting/ScriptTypeDescriptor.hpp>
 
 namespace Ursa
 {
@@ -12,6 +13,8 @@ Result<void> SaveScriptableAssetSource(VirtualFileSystem& files, const VirtualPa
 
 Result<ScriptableAsset> LoadScriptableAssetSource(const VirtualFileSystem& files, const VirtualPath& path,
                                                   ResourceId metadataGuid);
+
+Result<ScriptableAsset> CreateScriptableAssetWithDefaults(ResourceId metadataGuid, const ScriptTypeDescriptor& type);
 
 Result<Vector<UInt8>> EncodeScriptableAssetArtifact(const ScriptableAsset& asset);
 

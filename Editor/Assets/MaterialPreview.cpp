@@ -1,8 +1,52 @@
 #include <Core/Types.hpp>
 #include <Assets/MaterialPreview.hpp>
+#include <Scene/RenderingComponents.hpp>
+#include <Mesh/Mesh.hpp>
+#include <Animation/AnimatorComponent.hpp>
+#include <algorithm>
+#include <array>
 
 namespace Ursa::Editor
 {
+namespace
+{
+MeshPtr PreviewCube()
+{
+	struct Face
+	{
+		Vec3 normal;
+		std::array<Vec3, 4> vertices;
+	};
+
+	const std::array<Face, 6> faces{{
+	    {{0, 0, 1}, {{{-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}}}},
+	    {{0, 0, -1}, {{{0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}}}},
+	    {{1, 0, 0}, {{{0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}}}},
+	    {{-1, 0, 0}, {{{-0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, -0.5f}}}},
+	    {{0, 1, 0}, {{{-0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}}}},
+	    {{0, -1, 0}, {{{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, 0.5f}, {-0.5f, -0.5f, 0.5f}}}},
+	}};
+	MeshData data;
+	for (const Face& face : faces)
+	{
+		const UInt32 base = static_cast<UInt32>(data.positions.size());
+		for (Vec3 vertex : face.vertices)
+		{
+			data.positions.push_back(vertex);
+			data.normals.push_back(face.normal);
+		}
+		data.indices.insert(data.indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+	}
+	data.subMeshes.push_back({0, static_cast<UInt32>(data.indices.size())});
+	auto mesh = Mesh::Create(std::move(data));
+	if (!mesh || !mesh.value->RecalculateBounds())
+	{
+		return {};
+	}
+	return std::move(mesh.value);
+}
+} // namespace
+
 Result<std::unique_ptr<MaterialPreview>> MaterialPreview::Create(Rhi::DevicePtr selectedDevice, ImGuiBridge& guiBridge,
                                                                  Ursa::UInt32 size)
 {
@@ -10,31 +54,29 @@ Result<std::unique_ptr<MaterialPreview>> MaterialPreview::Create(Rhi::DevicePtr 
 	{
 		return Result<std::unique_ptr<MaterialPreview>>::Failure("Material preview needs a device and size");
 	}
-	auto createdRenderer = Renderer3D::Create(selectedDevice);
-	if (!createdRenderer)
+	auto createdOutput =
+	    Rendering::CreateRenderTexture(*selectedDevice, {size, size, static_cast<UInt32>(Rhi::Format::RgbA8Unorm), 32});
+	if (!createdOutput)
 	{
-		return Result<std::unique_ptr<MaterialPreview>>::Failure(createdRenderer.error);
-	}
-	auto createdColor = selectedDevice->CreateTexture(
-	    {size, size, Rhi::Format::RgbA8Unorm,
-	     Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferSource});
-	if (!createdColor)
-	{
-		return Result<std::unique_ptr<MaterialPreview>>::Failure(createdColor.error);
+		return Result<std::unique_ptr<MaterialPreview>>::Failure(createdOutput.error);
 	}
 	auto createdSampler = selectedDevice->CreateSampler({true, false});
 	if (!createdSampler)
 	{
 		return Result<std::unique_ptr<MaterialPreview>>::Failure(createdSampler.error);
 	}
-	auto registeredImageId = guiBridge.RegisterTexture(createdColor.value, createdSampler.value);
+	auto registeredImageId = guiBridge.RegisterTexture(createdOutput.value->color, createdSampler.value);
 	if (!registeredImageId)
 	{
 		return Result<std::unique_ptr<MaterialPreview>>::Failure(registeredImageId.error);
 	}
-	return Result<std::unique_ptr<MaterialPreview>>::Success(std::unique_ptr<MaterialPreview>(
-	    new MaterialPreview(std::move(selectedDevice), guiBridge, std::move(createdRenderer.value),
-	                        std::move(createdColor.value), std::move(createdSampler.value), registeredImageId.value)));
+	auto preview = std::unique_ptr<MaterialPreview>(
+	    new MaterialPreview(std::move(selectedDevice), guiBridge, createdOutput.value->color,
+	                        std::move(createdSampler.value), registeredImageId.value));
+	preview->output = std::move(createdOutput.value);
+	auto initialized = preview->InitializePreviewScene(size);
+	return initialized ? Result<std::unique_ptr<MaterialPreview>>::Success(std::move(preview))
+	                   : Result<std::unique_ptr<MaterialPreview>>::Failure(initialized.error);
 }
 
 MaterialPreview::~MaterialPreview()
@@ -42,50 +84,94 @@ MaterialPreview::~MaterialPreview()
 	gui.UnregisterTexture(imageId);
 }
 
-Result<void> MaterialPreview::Render(const std::shared_ptr<MaterialInstance>& material)
+Result<void> MaterialPreview::InitializePreviewScene(UInt32 size)
 {
-	if (!material)
+	auto object = previewScene.CreateGameObject("Material Preview Object");
+	if (!object)
 	{
-		return Result<void>::Failure("Cannot preview an empty material");
+		return Result<void>::Failure(object.error);
 	}
-	auto command = device->CreateCommandList();
-	if (!command)
+	auto mesh = PreviewCube();
+	if (!mesh)
 	{
-		return Result<void>::Failure(command.error);
+		return Result<void>::Failure("Cannot create the Material Preview mesh");
 	}
-	auto result = command.value->Begin();
-	if (!result)
+	auto filter = object.value->AddComponent<MeshFilterComponent>();
+	if (!filter)
 	{
-		return result;
+		return Result<void>::Failure(filter.error);
 	}
-	Camera camera;
-	camera.position = {2.5f, 1.8f, 3.5f};
-	camera.target = {0, 0, 0};
-	const Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {}, material}};
-	SceneLighting lighting;
-	lighting.ambientIntensity = 0.5f;
-	lighting.directional.push_back({{-0.4f, -0.7f, -0.5f}, {}, 2.f});
-	result = renderer->RecordOffscreenModels(
-	    command.value, color, rendered ? Rhi::ResourceState::ShaderRead : Rhi::ResourceState::Undefined,
-	    Rhi::ResourceState::ShaderRead, camera.ViewProjection(1.f), boxes, lighting, camera.position);
-	if (result)
+	auto assigned = filter.value->SetSharedMesh(std::move(mesh));
+	if (!assigned)
 	{
-		result = command.value->End();
+		return assigned;
 	}
-	if (!result)
+	auto meshRenderer = object.value->AddComponent<MeshRendererComponent>();
+	if (!meshRenderer)
 	{
-		return result;
+		return Result<void>::Failure(meshRenderer.error);
 	}
-	auto submitted = device->Submit(command.value);
-	if (!submitted)
+	previewRenderer = meshRenderer.value;
+	auto cameraObject = previewScene.CreateGameObject("Material Preview Camera");
+	if (!cameraObject)
 	{
-		return Result<void>::Failure(submitted.error);
+		return Result<void>::Failure(cameraObject.error);
 	}
-	result = submitted.value->Wait();
-	if (result)
+	LocalTransform cameraTransform;
+	cameraTransform.position = {0, 0, 3.5f};
+	auto cameraSet = cameraObject.value->SetLocalTransform(cameraTransform);
+	if (!cameraSet)
 	{
-		rendered = true;
+		return cameraSet;
 	}
-	return result;
+	auto camera = cameraObject.value->AddComponent<CameraComponent>();
+	if (!camera)
+	{
+		return Result<void>::Failure(camera.error);
+	}
+	camera.value->rendering.type = Rendering::CameraType::Preview;
+	camera.value->rendering.targetWidth = size;
+	camera.value->rendering.targetHeight = size;
+	auto activeCamera = previewScene.SetActiveCamera(camera.value->Id());
+	if (!activeCamera)
+	{
+		return activeCamera;
+	}
+	auto lightObject = previewScene.CreateGameObject("Material Preview Light");
+	if (!lightObject)
+	{
+		return Result<void>::Failure(lightObject.error);
+	}
+	auto light = lightObject.value->AddComponent<DirectionalLightComponent>();
+	if (!light)
+	{
+		return Result<void>::Failure(light.error);
+	}
+	auto intensity = light.value->SetIntensity(2.0f);
+	if (!intensity)
+	{
+		return intensity;
+	}
+	auto ambient = previewScene.SetAmbientLight({1, 1, 1, 1}, 0.5f);
+	if (!ambient)
+	{
+		return ambient;
+	}
+	return previewScene.CommitChanges();
+}
+
+Result<void> MaterialPreview::Render(const std::shared_ptr<MaterialInstance>& material,
+                                     const EditorRenderViewport& renderViewport)
+{
+	if (!material || !renderViewport || !output || !previewRenderer)
+	{
+		return Result<void>::Failure("Material preview needs a material and active pipeline viewport");
+	}
+	auto setMaterial = previewRenderer->SetSharedMaterial(material);
+	if (!setMaterial)
+	{
+		return setMaterial;
+	}
+	return renderViewport(previewScene, output, Rendering::CameraType::Preview, {});
 }
 } // namespace Ursa::Editor

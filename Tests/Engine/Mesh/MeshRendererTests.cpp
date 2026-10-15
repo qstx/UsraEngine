@@ -1,4 +1,4 @@
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <Scene/Scene.hpp>
 #include <Scene/MeshFilterComponent.hpp>
 #include <Scene/MeshRendererComponent.hpp>
@@ -35,12 +35,11 @@ void Expect(bool value, const char* message)
 	}
 }
 
-Vector<UInt8> Render(Rhi::DevicePtr device, Renderer3D& renderer, const SceneRenderData& data)
+Vector<UInt8> Render(Rhi::DevicePtr device, Test::SceneRenderer& renderer, const SceneRenderData& data)
 {
 	auto target = Take(device->CreateTexture(
 	    {64, 64, Rhi::Format::RgbA8Unorm, Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource}));
-	Done(Take(renderer.RenderOffscreenModels(target, data.viewProjection, data.boxes, data.lighting,
-	                                         data.cameraPosition))
+	Done(Take(renderer.DrawOffscreen(target, data.viewProjection, data.objects, data.lighting, data.cameraPosition))
 	         ->Wait());
 	auto readback =
 	    Take(device->CreateBuffer({64 * 64 * 4, Rhi::BufferUsage::TransferDestination, Rhi::Memory::Readback}));
@@ -75,7 +74,7 @@ void Run()
 	description.validation = true;
 #endif
 	auto device = Take(Rhi::CreateDevice(description));
-	auto renderer = Take(Renderer3D::Create(device));
+	auto renderer = Take(Test::SceneRenderer::Create(device));
 	Scene scene;
 	auto object = Take(scene.CreateGameObject("Dynamic Mesh"));
 	auto* filter = Take(object->AddComponent<MeshFilterComponent>());
@@ -150,11 +149,11 @@ void Run()
 	}
 	Done(mesh->SetTangents(tangents));
 	const auto negativeData = collect();
-	lit.boxes = negativeData.boxes;
+	lit.objects = negativeData.objects;
 	auto negative = Pixel(Render(device, *renderer, lit), 43, 32);
 	Expect(int(positive[0]) - int(negative[0]) > 30, "Tangent handedness did not affect normal mapped lighting");
 	Done(component->SetEnabled(false));
-	Expect(collect().boxes.empty(), "Disabled Renderer was collected");
+	Expect(collect().objects.empty(), "Disabled Renderer was collected");
 	Done(component->SetEnabled(true));
 	Done(mesh->Destroy());
 	Expect(!scene.CollectPreviewRenderData(camera, 1), "Destroyed Mesh binding was silently drawn");

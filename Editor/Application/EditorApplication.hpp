@@ -214,12 +214,22 @@ private:
 
 	void DrawMainMenuBar();
 
+	void DrawGraphicsSettings();
+
 	void DrawPlayToolbar(const EditorDocument* current);
 
 	Result<void> OpenProjectBrowserAsset(const ProjectBrowserEntry& asset);
 
 	Result<void> CreateProjectAsset(ResourceKind kind, MaterialType materialType = MaterialType::Unlit,
 	                                const String& requestedPath = {});
+
+	Result<void> CreateProjectScriptableAsset(const ScriptTypeDescriptor& type, const String& requestedName);
+
+	Result<void> ApplyGraphicsSettings(AssetReference pipeline);
+
+	Result<void> RenderManagedViewport(Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+	                                   std::optional<Rendering::CameraType> cameraFilter,
+	                                   std::optional<Rendering::CameraData> cameraOverride = {});
 
 	Result<void> CreateProjectFolder(const String& requestedName = {});
 
@@ -237,6 +247,8 @@ private:
 	String activeEditorTool;
 	std::unique_ptr<ImGuiBridge> gui;
 	std::unique_ptr<MaterialPreview> materialPreview;
+	std::unique_ptr<EditorDocument> materialPreviewDocument;
+	String materialPreviewKey;
 	std::unique_ptr<ShaderImportView> shaderImportView;
 	std::unique_ptr<TextureImportView> textureImportView;
 	std::unique_ptr<ModelImportView> modelImportView;
@@ -263,6 +275,7 @@ private:
 	std::chrono::steady_clock::time_point nextScriptCheck;
 	String scriptBuildStatus;
 	UInt64 editingScriptSession = 0;
+	std::shared_ptr<void> editingScriptServices;
 	Vector<ManagedExtensionDescriptor> managedExtensions;
 	Map<String, ComponentEditor> managedEditorFallbacks;
 	Set<String> managedOpenWindows;
@@ -283,6 +296,10 @@ private:
 	bool showScenePanel = true;
 	bool showGamePanel = true;
 	bool showConsolePanel = true;
+	bool showGraphicsSettings = false;
+	String graphicsSettingsProject;
+	AssetReference graphicsSettingsCandidate;
+	String graphicsSettingsDiagnostic;
 	String savedPanelVisibility;
 };
 } // namespace Ursa::Editor

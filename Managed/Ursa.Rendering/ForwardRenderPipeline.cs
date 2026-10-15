@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Ursa;
 
@@ -13,42 +14,58 @@ public sealed class ForwardRenderPipelineAsset : RenderPipelineAsset
 public sealed class ForwardRenderPipeline : RenderPipeline
 {
 	private readonly CommandBuffer commands = new("Ursa Forward");
-
-	public override void Render(ScriptableRenderContext context, List<CameraComponent> cameras)
+	private readonly DrawingSettings opaqueDrawing = new()
 	{
-		foreach (CameraComponent camera in cameras)
+		ShaderTags = new[] { "SRPDefaultUnlit", "UniversalForward", "ForwardBase" },
+		Sorting = SortingCriteria.CommonOpaque
+	};
+	private readonly DrawingSettings transparentDrawing = new()
+	{
+		ShaderTags = new[] { "SRPDefaultUnlit", "UniversalForward", "ForwardBase" },
+		Sorting = SortingCriteria.CommonTransparent
+	};
+	private readonly FilteringSettings opaqueFiltering = new() { MaximumQueue = 2500 };
+	private readonly FilteringSettings transparentFiltering = new() { MinimumQueue = 2501 };
+
+	public override void Render(ScriptableRenderContext context, List<Ursa.Rendering.Camera> cameras)
+	{
+		foreach (Ursa.Rendering.Camera camera in cameras)
 		{
 			commands.Clear();
-			RenderPipelineManager.BeginCamera(context, camera);
+			bool cameraStarted = false;
 			try
 			{
 				context.SetupCameraProperties(camera);
+				cameraStarted = true;
+				RenderPipelineManager.BeginCamera(context, camera);
 				CullingResults culling = context.Cull(camera);
-				var opaqueDrawing = new DrawingSettings
-				{
-					ShaderTags = new[] { "SRPDefaultUnlit", "UniversalForward", "ForwardBase" },
-					Sorting = SortingCriteria.CommonOpaque
-				};
-				var transparentDrawing = new DrawingSettings
-				{
-					ShaderTags = opaqueDrawing.ShaderTags,
-					Sorting = SortingCriteria.CommonTransparent
-				};
-				var opaqueFiltering = new FilteringSettings { MinimumQueue = 0, MaximumQueue = 2500 };
-				var transparentFiltering = new FilteringSettings { MinimumQueue = 2501, MaximumQueue = 5000 };
 				RendererList opaque = context.CreateRendererList(culling, opaqueDrawing, opaqueFiltering);
 				RendererList transparent = context.CreateRendererList(culling, transparentDrawing, transparentFiltering);
 				commands.SetRenderTarget(0);
-				commands.ClearTarget(true, true, false, new Vector4(0.05f, 0.05f, 0.05f, 1));
+				Viewport viewport = camera.Viewport;
+				commands.SetViewport(viewport.X * camera.PixelWidth, viewport.Y * camera.PixelHeight,
+					viewport.Width * camera.PixelWidth, viewport.Height * camera.PixelHeight);
+				int left = (int)MathF.Floor(viewport.X * camera.PixelWidth);
+				int top = (int)MathF.Floor(viewport.Y * camera.PixelHeight);
+				uint right = (uint)MathF.Ceiling((viewport.X + viewport.Width) * camera.PixelWidth);
+				uint bottom = (uint)MathF.Ceiling((viewport.Y + viewport.Height) * camera.PixelHeight);
+				commands.SetScissor(left, top, right - (uint)left, bottom - (uint)top);
+				if (camera.ClearFlags != CameraClearFlags.Nothing)
+				{
+					Color background = camera.Background;
+					commands.ClearTarget(camera.ClearFlags == CameraClearFlags.ColorAndDepth, true, false,
+						new Vector4(background.R, background.G, background.B, background.A));
+				}
 				commands.DrawRendererList(opaque, context);
 				commands.DrawRendererList(transparent, context);
-				commands.Execute(context);
+				context.ExecuteCommandBuffer(commands);
+				context.Submit();
 				commands.Clear();
 			}
 			finally
 			{
 				commands.Clear();
-				RenderPipelineManager.EndCamera(context, camera);
+				if (cameraStarted) RenderPipelineManager.EndCamera(context, camera);
 			}
 		}
 	}

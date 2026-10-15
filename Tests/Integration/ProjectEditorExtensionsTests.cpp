@@ -84,7 +84,8 @@ int main()
 		bootstrap.runtimeConfig = Take(VirtualPath::Parse("ursa:Managed/Ursa.ManagedHost.runtimeconfig.json"));
 		bootstrap.entryAssembly = Take(VirtualPath::Parse("ursa:Managed/Ursa.ManagedHost.dll"));
 		bootstrap.dependencies = {Take(VirtualPath::Parse("ursa:Managed/Ursa.ManagedHost.deps.json")),
-		                          Take(VirtualPath::Parse("ursa:Managed/Ursa.Runtime.dll"))};
+		                          Take(VirtualPath::Parse("ursa:Managed/Ursa.Runtime.dll")),
+		                          Take(VirtualPath::Parse("ursa:Managed/Ursa.Rendering.dll"))};
 		Done(host->Start(filesystem, bootstrap,
 		                 [](UInt32 level, const String& message)
 		                 {

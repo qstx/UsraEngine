@@ -83,9 +83,10 @@ int main(int argumentCount, char** arguments)
 		            "public sealed class EditorUtility { }\n");
 		WriteSource(assets / "Scripts" / "Settings.cs",
 		            "using Ursa; namespace DemoScripts; "
-		            "[UrsaScriptType(\"demo.settings\")] public sealed class Settings : ScriptableObject { "
+		            "[UrsaScriptType(\"demo.settings\")] [CreateAssetMenu(MenuName = \"Demo/Settings\", "
+		            "FileName = \"GameSettings\", Order = 7)] public sealed class Settings : ScriptableObject { "
 		            "public Vector2 size = new(8,4); public Vector4 tint = new(1,2,3,4); "
-		            "public OtherSettings other = null!; public Shader shader = null!; "
+		            "public OtherSettings other = null!; public Shader shader = null!; public Material? material; "
 		            "public ComputeShader[] kernels = System.Array.Empty<ComputeShader>(); "
 		            "public System.Collections.Generic.List<Shader> shaders = new(); } "
 		            "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {} "
@@ -135,13 +136,39 @@ int main(int argumentCount, char** arguments)
 			}
 			throw std::runtime_error("Missing settings field");
 		};
-		Expect(settingsType.kind == ScriptTypeKind::ScriptableObject && settingsType.fields.size() == 6 &&
+		Expect(settingsType.kind == ScriptTypeKind::ScriptableObject && settingsType.fields.size() == 7 &&
+		           settingsType.createAssetMenuName == "Demo/Settings" &&
+		           settingsType.createAssetFileName == "GameSettings" && settingsType.createAssetMenuOrder == 7 &&
 		           settingsType.sourceGuid == otherSettingsType.sourceGuid &&
 		           settingsType.localFileId != otherSettingsType.localFileId &&
 		           moverType.kind == ScriptTypeKind::Behaviour && settingsField("shader").kind == "ShaderReference" &&
 		           settingsField("kernels").elementKind == "ComputeShaderReference" &&
-		           settingsField("shaders").elementKind == "ShaderReference",
+		           settingsField("shaders").elementKind == "ShaderReference" &&
+		           settingsField("material").kind == "MaterialReference" &&
+		           settingsField("material").typeName == "Ursa.Material",
 		       "ScriptableObject classification or stable subasset identity was lost");
+		WriteSource(
+		    assets / "Scripts" / "Settings.cs",
+		    "using Ursa; namespace DemoScripts; "
+		    "[UrsaScriptType(\"demo.settings\")] public sealed class Settings : ScriptableObject {} "
+		    "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {}\n");
+		Expect(static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()) &&
+		           findType("demo.settings").createAssetMenuName.empty(),
+		       "Removed CreateAssetMenu attribute remained registered in the refreshed script catalog");
+		WriteSource(assets / "Scripts" / "Settings.cs",
+		            "using Ursa; namespace DemoScripts; "
+		            "[UrsaScriptType(\"demo.settings\")] [CreateAssetMenu(MenuName = \"Demo/Settings\", "
+		            "FileName = \"GameSettings\", Order = 7)] public sealed class Settings : ScriptableObject { "
+		            "public Vector2 size = new(8,4); public Vector4 tint = new(1,2,3,4); "
+		            "public OtherSettings other = null!; public Shader shader = null!; "
+		            "public ComputeShader[] kernels = System.Array.Empty<ComputeShader>(); "
+		            "public System.Collections.Generic.List<Shader> shaders = new(); } "
+		            "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {} "
+		            "public abstract class AbstractSettings : ScriptableObject {} "
+		            "public sealed class GenericSettings<T> : ScriptableObject {}\n");
+		Expect(static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()) &&
+		           findType("demo.settings").createAssetMenuName == "Demo/Settings",
+		       "CreateAssetMenu was not restored after the type source reloaded");
 		Expect(moverType.group == ScriptAssemblyGroup::Game && moverType.version == 2 && moverType.localFileId != 0 &&
 		           followerType.group == ScriptAssemblyGroup::Game && editorType.group == ScriptAssemblyGroup::Editor &&
 		           moverType.fields.size() == 1 && moverType.fields[0].name == "step" &&
@@ -268,6 +295,32 @@ int main(int argumentCount, char** arguments)
 		       "Could not remove duplicate ScriptType fixture");
 		Expect(static_cast<bool>(service.value->GenerateProjects()),
 		       "Script catalog did not recover after duplicate removal");
+		WriteSource(assets / "Scripts" / "MenuCollision.cs", "using Ursa; namespace DemoScripts; "
+		                                                     "[CreateAssetMenu(MenuName = \"Demo/Settings\")] public "
+		                                                     "sealed class MenuCollision : ScriptableObject {}\n");
+		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase missed duplicate CreateAssetMenu fixture");
+		auto duplicateMenu = service.value->GenerateProjects();
+		Expect(!duplicateMenu && duplicateMenu.error.find("Duplicate CreateAssetMenu") != String::npos &&
+		           duplicateMenu.error.find("MenuCollision") != String::npos &&
+		           duplicateMenu.error.find("Settings") != String::npos,
+		       "Duplicate CreateAssetMenu declarations did not produce actionable diagnostics");
+		Expect(static_cast<bool>(filesystem.Remove(Path("prj:Scripts/MenuCollision.cs"))) &&
+		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/MenuCollision.cs.meta"))) &&
+		           static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()),
+		       "Script catalog did not recover after duplicate CreateAssetMenu removal");
+		WriteSource(assets / "Scripts" / "InvalidMenu.cs", "using Ursa; namespace DemoScripts; "
+		                                                   "[CreateAssetMenu(MenuName = \"Demo/Abstract\")] public "
+		                                                   "abstract class AbstractMenu : ScriptableObject {}\n");
+		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase missed abstract CreateAssetMenu fixture");
+		auto invalidMenu = service.value->GenerateProjects();
+		Expect(!invalidMenu &&
+		           invalidMenu.error.find("public, concrete, non-generic Game ScriptableObject") != String::npos &&
+		           invalidMenu.error.find("AbstractMenu") != String::npos,
+		       "Abstract CreateAssetMenu type did not produce a diagnostic");
+		Expect(static_cast<bool>(filesystem.Remove(Path("prj:Scripts/InvalidMenu.cs"))) &&
+		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/InvalidMenu.cs.meta"))) &&
+		           static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()),
+		       "Script catalog did not recover after invalid CreateAssetMenu removal");
 		WriteSource(assets / "Scripts" / "ForwardCollision.cs",
 		            "using Ursa; namespace DemoScripts; "
 		            "[UrsaScriptType(\"ursa.rendering.forward\")] public sealed class ForwardCollision : "

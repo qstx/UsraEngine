@@ -129,6 +129,23 @@ void TestSnapshotAndLists()
 	           snapshot.Objects()[0].worldBounds.minimum.x == -1 && snapshot.Lighting().directional.size() == 1 &&
 	           snapshot.Objects()[0].meshSnapshot == snapshot.Objects()[1].meshSnapshot,
 	       "Snapshot camera order, disabled object or scaled bounds incorrect");
+	CameraData sceneViewCamera;
+	sceneViewCamera.identity = ResourceId::Generate();
+	sceneViewCamera.settings.type = CameraType::SceneView;
+	sceneViewCamera.settings.targetWidth = 640;
+	sceneViewCamera.settings.targetHeight = 360;
+	RenderScene sceneViewSnapshot;
+	Done(sceneViewSnapshot.Capture(scene, 16.0f / 9.0f, CameraType::SceneView, sceneViewCamera));
+	Expect(sceneViewSnapshot.Cameras().size() == 1 &&
+	           sceneViewSnapshot.Cameras()[0].identity == sceneViewCamera.identity &&
+	           sceneViewSnapshot.Cameras()[0].settings.type == CameraType::SceneView,
+	       "SceneView capture did not isolate the editor camera from game cameras");
+	RenderScene gameViewSnapshot;
+	Done(gameViewSnapshot.Capture(scene, 16.0f / 9.0f, CameraType::Game));
+	Expect(gameViewSnapshot.Cameras().size() == 2 &&
+	           std::all_of(gameViewSnapshot.Cameras().begin(), gameViewSnapshot.Cameras().end(),
+	                       [](const CameraData& camera) { return camera.settings.type == CameraType::Game; }),
+	       "Game capture included a camera from another viewport type");
 	auto material = near->FindComponent<MeshRendererComponent>()->SharedMaterials()[0];
 	const auto capturedVersion = snapshot.Objects()[0].materialVersion;
 	Done(material->SetBaseColor({0.5f, 0.0f, 0.0f, 1}));

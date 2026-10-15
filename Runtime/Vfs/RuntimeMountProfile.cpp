@@ -149,6 +149,18 @@ Result<VirtualFileSystem> OpenRuntimeFileSystem(const RuntimeMountProfileConfig&
 		}
 		if (config.mode == RuntimeMountMode::Editor)
 		{
+			auto settingsProvider =
+			    DirectoryFileProvider::Open(config.projectAssetsDirectory.parent_path() / "ProjectSettings", true);
+			if (!settingsProvider)
+			{
+				return Result<VirtualFileSystem>::Failure(settingsProvider.error);
+			}
+			auto settingsMount = filesystem.MountProvider(projectSettingsScheme, std::move(settingsProvider.value),
+			                                              MountAccess::ReadWrite);
+			if (!settingsMount)
+			{
+				return Result<VirtualFileSystem>::Failure(settingsMount.error);
+			}
 			if (config.projectLibraryDirectory.empty())
 			{
 				return Result<VirtualFileSystem>::Failure("Editor mount profile needs a project Library directory");

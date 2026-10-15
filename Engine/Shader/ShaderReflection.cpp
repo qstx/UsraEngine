@@ -23,6 +23,7 @@ struct ReflectedResource
 	UInt32 count = 1;
 	UInt32 stages = 0;
 	Rhi::BindingType type = Rhi::BindingType::UniformBuffer;
+	String imageFormat;
 };
 
 struct ReflectedMember
@@ -104,6 +105,28 @@ UInt32 ValueSize(PropertyType type)
 			return 0;
 	}
 	return 0;
+}
+
+UInt32 ReflectedValueSize(const String& type)
+{
+	if (type == "float" || type == "half" || type == "int" || type == "uint" || type == "bool")
+	{
+		return 4;
+	}
+	if (type == "vec2" || type == "ivec2" || type == "uvec2" || type == "float2" || type == "int2" || type == "uint2")
+	{
+		return 8;
+	}
+	if (type == "vec3" || type == "ivec3" || type == "uvec3" || type == "float3" || type == "int3" || type == "uint3")
+	{
+		return 12;
+	}
+	if (type == "vec4" || type == "ivec4" || type == "uvec4" || type == "float4" || type == "half4" || type == "int4" ||
+	    type == "uint4")
+	{
+		return 16;
+	}
+	return type == "mat4" || type == "float4x4" ? 64u : 0u;
 }
 
 bool ReflectionTypeMatches(PropertyType propertyType, const String& reflectedType)
@@ -206,6 +229,15 @@ Result<void> AddResources(const Json& reflection, const char* field, Rhi::Bindin
 			return Result<void>::Failure("Shader descriptor sets above set 0 are not supported by the current RHI");
 		}
 		const String name = ToUrsaString(item["name"].get<std::string>());
+		String imageFormat;
+		if (type == Rhi::BindingType::StorageTexture && item.contains("format"))
+		{
+			if (!item["format"].is_string())
+			{
+				return Result<void>::Failure("Storage image format reflection is invalid");
+			}
+			imageFormat = ToUrsaString(item["format"].get<std::string>());
+		}
 		const String key = BindingKey(set.value, binding.value);
 		for (const auto& resource : resources)
 		{
@@ -217,11 +249,13 @@ Result<void> AddResources(const Json& reflection, const char* field, Rhi::Bindin
 		auto found = resources.find(key);
 		if (found == resources.end())
 		{
-			resources.emplace(key, ReflectedResource{name, set.value, binding.value, count.value, stageMask, type});
+			resources.emplace(
+			    key, ReflectedResource{name, set.value, binding.value, count.value, stageMask, type, imageFormat});
 		}
 		else
 		{
-			if (found->second.type != type || found->second.count != count.value)
+			if (found->second.type != type || found->second.count != count.value ||
+			    found->second.imageFormat != imageFormat)
 			{
 				return Result<void>::Failure("Shader stages declare incompatible resources at descriptor " + key);
 			}
@@ -437,6 +471,10 @@ Result<ShaderBindingLayout> BuildShaderBindingLayout(const ShaderAsset& shader, 
 		layout.descriptors.push_back(
 		    {resource.second.binding, resource.second.type, resource.second.count, resource.second.stages});
 		layout.resourceNames.emplace(resource.second.binding, resource.second.name);
+		if (resource.second.type == Rhi::BindingType::StorageTexture)
+		{
+			layout.storageImageFormats.emplace(resource.second.binding, resource.second.imageFormat);
+		}
 	}
 	for (const auto& block : blocks)
 	{
@@ -446,7 +484,13 @@ Result<ShaderBindingLayout> BuildShaderBindingLayout(const ShaderAsset& shader, 
 		uniformBuffer.stages = block.second.stages;
 		for (const ReflectedMember& member : block.second.members)
 		{
-			uniformBuffer.members.push_back({member.name, member.type, member.offset, member.size});
+			const UInt32 memberBytes = member.size ? member.size : ReflectedValueSize(member.type);
+			if (member.offset > block.second.size || memberBytes > block.second.size - member.offset)
+			{
+				return Result<ShaderBindingLayout>::Failure("Uniform member lies outside its reflected block: " +
+				                                            member.name);
+			}
+			uniformBuffer.members.push_back({member.name, member.type, member.offset, memberBytes});
 			const auto property =
 			    std::find_if(shader.properties.begin(), shader.properties.end(),
 			                 [&](const PropertyDeclaration& candidate) { return candidate.identifier == member.name; });

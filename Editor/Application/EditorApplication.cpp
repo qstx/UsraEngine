@@ -8,6 +8,8 @@
 #include <Assets/TextureDraft.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/SceneDraft.hpp>
+#include <Rendering/Pipeline/GraphicsSettings.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Inspector/SceneInspectorPanel.hpp>
 #if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/DotNet/DotNetHost.hpp>
@@ -36,6 +38,13 @@ namespace Ursa::Editor
 namespace
 {
 #if defined(URSA_ENABLE_DOTNET)
+struct ManagedEditingSessionState
+{
+	std::unique_ptr<ResourceSession> resources;
+	Scene assetScene;
+	std::unique_ptr<Scripting::ManagedSceneApi> sceneApi;
+};
+
 struct ManagedPlaySessionState
 {
 	std::shared_ptr<Scripting::DotNetHost> host;
@@ -47,7 +56,6 @@ struct ManagedPlaySessionState
 	~ManagedPlaySessionState()
 	{
 		scriptRuntime.reset();
-		sceneApi.reset();
 		if (host && sessionId)
 		{
 			auto closed = host->CloseScriptSession(sessionId);
@@ -56,6 +64,7 @@ struct ManagedPlaySessionState
 				URSA_LOG_ERROR("Script", closed.error);
 			}
 		}
+		sceneApi.reset();
 	}
 };
 #endif
@@ -169,6 +178,7 @@ EditorApplication::~EditorApplication()
 			URSA_LOG_ERROR("Script", closed.error);
 		}
 	}
+	editingScriptServices.reset();
 #endif
 }
 
@@ -244,12 +254,34 @@ Result<void> EditorApplication::ReloadEditorScripts()
 	{
 		return ready;
 	}
-	auto candidate = managedHost->CreateScriptSession(true);
+	auto candidateServices = std::make_shared<ManagedEditingSessionState>();
+	auto candidateResources = ResourceSession::Open(workspace->ContentFiles(), workspace->AssetResolver());
+	if (!candidateResources)
+	{
+		return Result<void>::Failure(candidateResources.error);
+	}
+	candidateServices->resources = std::move(candidateResources.value);
+	candidateServices->sceneApi =
+	    std::make_unique<Scripting::ManagedSceneApi>(candidateServices->assetScene, candidateServices->resources.get());
+	candidateServices->sceneApi->SetRenderDevice(device);
+	auto candidate = managedHost->CreateScriptSession(true, candidateServices->sceneApi.get());
 	if (!candidate)
 	{
 		return Result<void>::Failure(candidate.error);
 	}
-	const auto abandon = [&]() { return managedHost->CloseScriptSession(candidate.value); };
+	const auto abandon = [&]()
+	{
+		auto closed = managedHost->CloseScriptSession(candidate.value);
+		if (!closed)
+		{
+			URSA_LOG_ERROR("Script", closed.error);
+		}
+		if (editingScriptSession)
+		{
+			managedHost->SelectScriptSession(editingScriptSession);
+		}
+		return closed;
+	};
 	auto content = managedHost->LoadScriptContent(candidate.value,
 	                                              VirtualPath::Parse("lib:ScriptBuild/Manifests/Editor.json").value);
 	if (!content)
@@ -315,6 +347,44 @@ Result<void> EditorApplication::ReloadEditorScripts()
 		abandon();
 		return Result<void>::Failure(restored.error);
 	}
+	if (editingScriptSession)
+	{
+		auto migrated = managedHost->TransferScriptableAssets(editingScriptSession, candidate.value);
+		if (!migrated)
+		{
+			abandon();
+			return migrated;
+		}
+	}
+	auto graphicsSettings = Rendering::ReadGraphicsSettings(workspace->Index().Filesystem());
+	if (!graphicsSettings)
+	{
+		abandon();
+		return Result<void>::Failure(graphicsSettings.error);
+	}
+	if (graphicsSettings.value.renderPipeline.guid)
+	{
+		if (!scriptBuildService)
+		{
+			abandon();
+			return Result<void>::Failure("Project Graphics selects a pipeline but the C# type catalog is unavailable");
+		}
+		auto validPipeline =
+		    Rendering::ValidatePipelineAsset(workspace->Index().Filesystem(), workspace->AssetResolver(),
+		                                     scriptBuildService->ScriptTypes(), graphicsSettings.value.renderPipeline);
+		if (!validPipeline)
+		{
+			abandon();
+			return validPipeline;
+		}
+	}
+	auto configuredPipeline =
+	    managedHost->ConfigureRenderPipeline(candidate.value, graphicsSettings.value.renderPipeline);
+	if (!configuredPipeline)
+	{
+		abandon();
+		return Result<void>::Failure("Project Graphics pipeline could not be restored: " + configuredPipeline.error);
+	}
 
 	struct CandidateFields
 	{
@@ -373,7 +443,9 @@ Result<void> EditorApplication::ReloadEditorScripts()
 		return registered;
 	}
 	const UInt64 previous = editingScriptSession;
+	auto previousServices = std::move(editingScriptServices);
 	editingScriptSession = candidate.value;
+	editingScriptServices = std::move(candidateServices);
 	managedExtensions = std::move(candidateExtensions);
 	for (auto& fields : replacements)
 	{
@@ -388,6 +460,7 @@ Result<void> EditorApplication::ReloadEditorScripts()
 			return closed;
 		}
 	}
+	previousServices.reset();
 	return managedHost->SelectScriptSession(editingScriptSession);
 #else
 	return {};
@@ -416,7 +489,8 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 	{
 		opened = OpenMaterialDocument(path, documents->Session(), *workspace);
 	}
-	else if (kind && kind.value == ResourceKind::Mesh)
+	else if ((kind && kind.value == ResourceKind::Mesh) ||
+	         PathFromUrsaString(path.relative).extension() == ".ursaasset")
 	{
 		projectBrowser.SelectAsset(path);
 		selectionContext.SelectAsset(path);
@@ -727,6 +801,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	{
 		auto closed = managedHost->CloseScriptSession(editingScriptSession);
 		editingScriptSession = 0;
+		editingScriptServices.reset();
 		if (!closed)
 		{
 			return closed;
@@ -936,6 +1011,33 @@ void EditorApplication::DrawMainMenuBar()
 					auto created = CreateProjectAsset(ResourceKind::Texture);
 					workspaceError = created ? String{} : created.error;
 				}
+				if (scriptBuildService)
+				{
+					Vector<const ScriptTypeDescriptor*> assetTypes;
+					for (const ScriptTypeDescriptor& type : scriptBuildService->ScriptTypes())
+					{
+						if (type.group == ScriptAssemblyGroup::Game && type.kind == ScriptTypeKind::ScriptableObject &&
+						    !type.createAssetMenuName.empty())
+						{
+							assetTypes.push_back(&type);
+						}
+					}
+					std::sort(assetTypes.begin(), assetTypes.end(),
+					          [](const ScriptTypeDescriptor* left, const ScriptTypeDescriptor* right)
+					          {
+						          return left->createAssetMenuOrder != right->createAssetMenuOrder
+						                     ? left->createAssetMenuOrder < right->createAssetMenuOrder
+						                     : left->createAssetMenuName < right->createAssetMenuName;
+					          });
+					for (const ScriptTypeDescriptor* type : assetTypes)
+					{
+						if (ImGui::MenuItem(type->createAssetMenuName.c_str()))
+						{
+							auto created = CreateProjectScriptableAsset(*type, type->createAssetFileName);
+							workspaceError = created ? String{} : created.error;
+						}
+					}
+				}
 				ImGui::EndMenu();
 			}
 			ImGui::BeginDisabled(selectionContext.kind != EditorSelectionKind::Asset || play.Active());
@@ -1067,6 +1169,11 @@ void EditorApplication::DrawMainMenuBar()
 		}
 		if (ImGui::BeginMenu("Window"))
 		{
+			if (ImGui::MenuItem("Project Graphics Settings", nullptr, showGraphicsSettings))
+			{
+				showGraphicsSettings = !showGraphicsSettings;
+			}
+			ImGui::Separator();
 			if (ImGui::MenuItem("Reset Layout"))
 			{
 				auto cleared = gui->ClearSavedLayout();
@@ -1283,6 +1390,10 @@ Result<void> EditorApplication::OpenProjectBrowserAsset(const ProjectBrowserEntr
 			}
 		}
 	}
+	if (PathFromUrsaString(asset.path.relative).extension() == ".ursaasset")
+	{
+		return {};
+	}
 	if (IsTextureSource(asset.path) && workspace->Database())
 	{
 		auto settings = TextureImporter::Settings(*workspace->Database(), asset.path);
@@ -1402,6 +1513,367 @@ Result<void> EditorApplication::CreateProjectAsset(ResourceKind kind, MaterialTy
 	}
 	auto opened = documents->RequestOpen(std::move(created.value));
 	return opened ? Result<void>{} : opened;
+}
+
+Result<void> EditorApplication::CreateProjectScriptableAsset(const ScriptTypeDescriptor& type,
+                                                             const String& requestedName)
+{
+	if (!workspace || !workspace->Database() || play.Active() || type.group != ScriptAssemblyGroup::Game ||
+	    type.kind != ScriptTypeKind::ScriptableObject || type.sourceGuid == ResourceId{} || type.localFileId == 0 ||
+	    type.scriptType.empty() || type.version == 0 || type.createAssetMenuName.empty() || requestedName.empty())
+	{
+		return Result<void>::Failure("The selected CreateAssetMenu type is no longer valid");
+	}
+	if (std::any_of(type.fields.begin(), type.fields.end(),
+	                [](const ScriptFieldTypeDescriptor& field)
+	                {
+		                return field.kind == "Unsupported" ||
+		                       ((field.kind == "Array" || field.kind == "List") && field.elementKind == "Unsupported");
+	                }))
+	{
+		return Result<void>::Failure("CreateAssetMenu type contains fields that cannot be serialized: " +
+		                             type.clrTypeName);
+	}
+	String fileName = requestedName;
+	if (PathFromUrsaString(fileName).extension() != ".ursaasset")
+	{
+		fileName += ".ursaasset";
+	}
+	const String relativePath =
+	    projectBrowser.CurrentFolder().empty() ? fileName : projectBrowser.CurrentFolder() + "/" + fileName;
+	auto path = ProjectAssetPath(relativePath.c_str());
+	if (!path)
+	{
+		return Result<void>::Failure(path.error);
+	}
+	VirtualFileSystem& filesystem = workspace->Database()->Filesystem();
+	auto exists = filesystem.Exists(path.value);
+	if (!exists)
+	{
+		return Result<void>::Failure(exists.error);
+	}
+	if (exists.value)
+	{
+		return Result<void>::Failure("Project asset already exists: " + path.value.ToString());
+	}
+	if (!filesystem.CheckWritable(path.value))
+	{
+		return Result<void>::Failure("Project asset folder is read-only: " + path.value.ToString());
+	}
+	const auto removeIncompleteAsset = [&]()
+	{
+		(void)filesystem.Remove(path.value);
+		(void)filesystem.Remove(VirtualPath::Parse(path.value.ToString() + ".meta").value);
+		(void)workspace->Database()->Refresh();
+	};
+	auto placeholder = filesystem.WriteAtomic(path.value, {});
+	if (!placeholder)
+	{
+		return placeholder;
+	}
+	auto refreshed = workspace->Database()->Refresh();
+	if (!refreshed)
+	{
+		removeIncompleteAsset();
+		return refreshed;
+	}
+	auto metadata = workspace->Database()->Metadata(path.value);
+	if (!metadata)
+	{
+		removeIncompleteAsset();
+		return Result<void>::Failure(metadata.error);
+	}
+	auto asset = CreateScriptableAssetWithDefaults(metadata.value.guid, type);
+	if (!asset)
+	{
+		removeIncompleteAsset();
+		return Result<void>::Failure(asset.error);
+	}
+	auto saved = SaveScriptableAssetSource(filesystem, path.value, asset.value);
+	if (!saved)
+	{
+		removeIncompleteAsset();
+		return saved;
+	}
+	refreshed = workspace->Database()->Refresh();
+	if (!refreshed)
+	{
+		removeIncompleteAsset();
+		return refreshed;
+	}
+	RequestAssetImport(path.value, true);
+	auto browserRefresh = projectBrowser.Refresh(*workspace);
+	if (!browserRefresh)
+	{
+		return browserRefresh;
+	}
+	projectBrowser.SelectAsset(path.value);
+	selectionContext.SelectAsset(path.value);
+	return {};
+}
+
+Result<void> EditorApplication::ApplyGraphicsSettings(AssetReference pipeline)
+{
+	if (!workspace)
+	{
+		return Result<void>::Failure("Open a project before changing Graphics settings");
+	}
+	VirtualFileSystem& files = workspace->Index().Filesystem();
+	const auto settingsPath = VirtualPath::Parse(Rendering::graphicsSettingsSource);
+	if (!settingsPath)
+	{
+		return Result<void>::Failure(settingsPath.error);
+	}
+	if (!files.CheckWritable(settingsPath.value))
+	{
+		return Result<void>::Failure("Project Graphics settings are read-only");
+	}
+	auto previous = Rendering::ReadGraphicsSettings(files);
+	if (!previous)
+	{
+		return Result<void>::Failure(previous.error);
+	}
+	if (pipeline.guid)
+	{
+		if (!scriptBuildService)
+		{
+			return Result<void>::Failure("Project C# type catalog is unavailable");
+		}
+		auto valid = Rendering::ValidatePipelineAsset(files, workspace->AssetResolver(),
+		                                              scriptBuildService->ScriptTypes(), pipeline);
+		if (!valid)
+		{
+			return valid;
+		}
+	}
+#if defined(URSA_ENABLE_DOTNET)
+	if (!managedHost || !editingScriptSession || !scriptBuildService)
+	{
+		return Result<void>::Failure("Reload the project scripts before applying Graphics settings");
+	}
+	auto configured = managedHost->ConfigureRenderPipeline(editingScriptSession, pipeline);
+	if (!configured)
+	{
+		String label = "Default Forward";
+		if (pipeline.guid)
+		{
+			auto path = workspace->Database()->Resolve(pipeline.guid, 0);
+			label = path ? path.value.ToString() : pipeline.guid.ToString();
+		}
+		return Result<void>::Failure("Render pipeline candidate " + label + " failed: " + configured.error);
+	}
+#else
+	if (pipeline.guid)
+	{
+		return Result<void>::Failure("This Editor build cannot run project C# render pipelines");
+	}
+#endif
+	auto saved = Rendering::SaveGraphicsSettings(files, {pipeline},
+	                                             [&](AssetReference candidate)
+	                                             {
+		                                             return Rendering::ValidatePipelineAsset(
+		                                                 files, workspace->AssetResolver(),
+		                                                 scriptBuildService->ScriptTypes(), candidate);
+	                                             });
+	if (!saved)
+	{
+#if defined(URSA_ENABLE_DOTNET)
+		auto restored = managedHost->ConfigureRenderPipeline(editingScriptSession, previous.value.renderPipeline);
+		if (!restored)
+		{
+			return Result<void>::Failure(saved.error + "; previous pipeline could not be restored: " + restored.error);
+		}
+#endif
+		return saved;
+	}
+	graphicsSettingsCandidate = pipeline;
+	RequestAssetImport();
+	return {};
+}
+
+Result<void> EditorApplication::RenderManagedViewport(Scene& renderScene,
+                                                      const std::shared_ptr<Rendering::RenderTextureResource>& target,
+                                                      std::optional<Rendering::CameraType> cameraFilter,
+                                                      std::optional<Rendering::CameraData> cameraOverride)
+{
+#if defined(URSA_ENABLE_DOTNET)
+	if (!target || !target->description.width || !target->description.height)
+	{
+		return Result<void>::Failure("Managed viewport needs a valid output target");
+	}
+	std::shared_ptr<Scripting::DotNetHost> host;
+	Scripting::ManagedSceneApi* stableApi = nullptr;
+	UInt64 session = 0;
+	if (play.Active())
+	{
+		auto services = std::static_pointer_cast<ManagedPlaySessionState>(play.ServiceOwner());
+		if (!services || !services->host || !services->sceneApi || !play.Resources())
+		{
+			return Result<void>::Failure("Run render services are unavailable");
+		}
+		host = services->host;
+		stableApi = services->sceneApi.get();
+		session = services->sessionId;
+	}
+	else
+	{
+		if (!managedHost || !editingScriptSession || !editingScriptServices)
+		{
+			return Result<void>::Failure("Editing render services are unavailable");
+		}
+		auto services = std::static_pointer_cast<ManagedEditingSessionState>(editingScriptServices);
+		if (!services || !services->sceneApi || !services->resources)
+		{
+			return Result<void>::Failure("Editing render resources are unavailable");
+		}
+		host = managedHost;
+		stableApi = services->sceneApi.get();
+		session = editingScriptSession;
+	}
+	auto bound = host->BindScriptSession(session, *stableApi);
+	if (!bound)
+	{
+		return bound;
+	}
+	stableApi->SetRenderSceneOverride(&renderScene);
+	stableApi->SetRenderOutput(target);
+	stableApi->SetRenderCameraSelection(cameraFilter, std::move(cameraOverride));
+	auto rendered =
+	    host->RenderScene(session, Float32(target->description.width) / Float32(target->description.height));
+	stableApi->SetRenderSceneOverride(nullptr);
+	stableApi->SetRenderCameraSelection({});
+	stableApi->SetRenderOutput(nullptr);
+	return rendered;
+#else
+	(void)renderScene;
+	(void)target;
+	(void)cameraFilter;
+	(void)cameraOverride;
+	return Result<void>::Failure("Project pipeline viewports require the .NET rendering host");
+#endif
+}
+
+void EditorApplication::DrawGraphicsSettings()
+{
+	if (!showGraphicsSettings)
+	{
+		return;
+	}
+	if (!ImGui::Begin("Project Graphics Settings", &showGraphicsSettings))
+	{
+		ImGui::End();
+		return;
+	}
+	if (!workspace)
+	{
+		ImGui::TextDisabled("Open a project to configure its render pipeline.");
+		ImGui::End();
+		return;
+	}
+	const String projectKey = PathToUrsaString(workspace->ProjectRoot());
+	if (graphicsSettingsProject != projectKey)
+	{
+		graphicsSettingsProject = projectKey;
+		graphicsSettingsCandidate = {};
+		graphicsSettingsDiagnostic.clear();
+		auto settings = Rendering::ReadGraphicsSettings(workspace->Index().Filesystem());
+		if (settings)
+		{
+			graphicsSettingsCandidate = settings.value.renderPipeline;
+			if (graphicsSettingsCandidate.guid && scriptBuildService)
+			{
+				auto valid =
+				    Rendering::ValidatePipelineAsset(workspace->Index().Filesystem(), workspace->AssetResolver(),
+				                                     scriptBuildService->ScriptTypes(), graphicsSettingsCandidate);
+				if (!valid)
+				{
+					graphicsSettingsDiagnostic = valid.error;
+				}
+			}
+		}
+		else
+		{
+			graphicsSettingsDiagnostic = settings.error;
+		}
+	}
+	ImGui::TextUnformatted("Default Render Pipeline");
+	String selectedLabel = "Default Forward";
+	if (graphicsSettingsCandidate.guid)
+	{
+		selectedLabel = "Missing or invalid pipeline " + graphicsSettingsCandidate.guid.ToString() + ":" +
+		                ToUrsaString(std::to_string(graphicsSettingsCandidate.localFileId));
+		if (workspace->Database())
+		{
+			auto path = workspace->Database()->Resolve(graphicsSettingsCandidate.guid, 0);
+			if (path)
+			{
+				selectedLabel = path.value.FileName();
+			}
+		}
+	}
+	if (ImGui::BeginCombo("##DefaultRenderPipeline", selectedLabel.c_str()))
+	{
+		if (ImGui::Selectable("Default Forward", !graphicsSettingsCandidate.guid))
+		{
+			graphicsSettingsCandidate = {};
+		}
+		if (workspace->Database() && scriptBuildService)
+		{
+			for (const AssetRecord& record : workspace->Database()->Assets())
+			{
+				if (record.metadata.folder || PathFromUrsaString(record.path.relative).extension() != ".ursaasset")
+				{
+					continue;
+				}
+				auto asset =
+				    LoadScriptableAssetSource(workspace->Index().Filesystem(), record.path, record.metadata.guid);
+				if (!asset)
+				{
+					continue;
+				}
+				auto type =
+				    std::find_if(scriptBuildService->ScriptTypes().begin(), scriptBuildService->ScriptTypes().end(),
+				                 [&](const ScriptTypeDescriptor& descriptor)
+				                 { return descriptor.scriptType == asset.value.TypeId(); });
+				if (type == scriptBuildService->ScriptTypes().end() || !type->isRenderPipeline)
+				{
+					continue;
+				}
+				AssetReference reference{record.metadata.guid, asset.value.LocalFileId()};
+				auto valid =
+				    Rendering::ValidatePipelineAsset(workspace->Index().Filesystem(), workspace->AssetResolver(),
+				                                     scriptBuildService->ScriptTypes(), reference);
+				if (!valid)
+				{
+					continue;
+				}
+				const String label = record.path.ToString() + "##" + record.metadata.guid.ToString();
+				if (ImGui::Selectable(label.c_str(),
+				                      reference.guid == graphicsSettingsCandidate.guid &&
+				                          reference.localFileId == graphicsSettingsCandidate.localFileId))
+				{
+					graphicsSettingsCandidate = reference;
+				}
+			}
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::BeginDisabled(AssetWorkPending() || !workspace->Database());
+	if (ImGui::Button("Apply Graphics Settings"))
+	{
+		auto applied = ApplyGraphicsSettings(graphicsSettingsCandidate);
+		graphicsSettingsDiagnostic = applied ? String{} : applied.error;
+	}
+	ImGui::EndDisabled();
+	if (AssetWorkPending())
+	{
+		ImGui::TextDisabled("Wait for asset import to finish before applying the current selection.");
+	}
+	if (!graphicsSettingsDiagnostic.empty())
+	{
+		ImGui::TextWrapped("%s", graphicsSettingsDiagnostic.c_str());
+	}
+	ImGui::End();
 }
 
 Result<void> EditorApplication::CreateProjectFolder(const String& requestedName)
@@ -1675,9 +2147,31 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 									{
 										return Result<std::shared_ptr<void>>::Failure(validated.error);
 									}
+									auto graphicsSettings =
+									    Rendering::ReadGraphicsSettings(workspace->Index().Filesystem());
+									if (!graphicsSettings)
+									{
+										return Result<std::shared_ptr<void>>::Failure(graphicsSettings.error);
+									}
+									if (graphicsSettings.value.renderPipeline.guid)
+									{
+										if (!scriptBuildService)
+										{
+											return Result<std::shared_ptr<void>>::Failure(
+											    "Project Graphics selects a pipeline but the C# type catalog is "
+											    "unavailable");
+										}
+										auto validPipeline = Rendering::ValidatePipelineAsset(
+										    workspace->Index().Filesystem(), workspace->AssetResolver(),
+										    scriptBuildService->ScriptTypes(), graphicsSettings.value.renderPipeline);
+										if (!validPipeline)
+										{
+											return Result<std::shared_ptr<void>>::Failure(validPipeline.error);
+										}
+									}
 									context.SetSceneReadyCallback(
-									    [this, session, activeWindow](Scene& scene,
-									                                  ComponentLoadContext& loadContext) -> Result<void>
+									    [this, session, activeWindow, pipeline = graphicsSettings.value.renderPipeline](
+									        Scene& scene, ComponentLoadContext& loadContext) -> Result<void>
 									    {
 										    session->sceneApi = std::make_unique<Scripting::ManagedSceneApi>(
 										        scene, &loadContext.Resources(),
@@ -1694,6 +2188,14 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 										    if (!bound)
 										    {
 											    return bound;
+										    }
+										    auto configured =
+										        session->host->ConfigureRenderPipeline(session->sessionId, pipeline);
+										    if (!configured)
+										    {
+											    return Result<void>::Failure(
+											        "Project Graphics pipeline could not be configured for Run: " +
+											        configured.error);
 										    }
 										    session->scriptRuntime = std::make_unique<Scripting::ManagedScriptRuntime>(
 										        scene, *session->host, *session->sceneApi, session->sessionId);
@@ -1818,16 +2320,13 @@ Result<void> EditorApplication::OnGui()
 		{
 			scriptBuildStatus = checked.error;
 		}
-		else if (checked.value != observedScriptSources)
+		else if (checked.value != observedScriptSources && !play.Active() && !scriptBuildJob.valid())
 		{
 			observedScriptSources = std::move(checked.value);
-			if (!play.Active() && !scriptBuildJob.valid())
-			{
-				ScriptBuildService* service = scriptBuildService.get();
-				scriptBuildJob =
-				    std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
-				scriptBuildStatus = "检测到脚本变化，正在后台编译……";
-			}
+			ScriptBuildService* service = scriptBuildService.get();
+			scriptBuildJob =
+			    std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
+			scriptBuildStatus = "检测到脚本变化，正在后台编译……";
 		}
 	}
 	if (selectionContext.kind == EditorSelectionKind::Asset && documents && documents->Current() &&
@@ -1848,6 +2347,7 @@ Result<void> EditorApplication::OnGui()
 		nextScriptCheck = checkTime + std::chrono::seconds(2);
 	}
 	DrawMainMenuBar();
+	DrawGraphicsSettings();
 	if (!activeEditorTool.empty())
 	{
 		const auto* tool = project->tools.Find(activeEditorTool);
@@ -1994,6 +2494,9 @@ Result<void> EditorApplication::OnGui()
 		actions.createFolder = [this](const String& name) { return CreateProjectFolder(name); };
 		actions.createAsset = [this](ResourceKind kind, MaterialType materialType, const String& name)
 		{ return CreateProjectAsset(kind, materialType, name); };
+		actions.scriptableAssetTypes = scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr;
+		actions.createScriptableAsset = [this](const ScriptTypeDescriptor& type, const String& name)
+		{ return CreateProjectScriptableAsset(type, name); };
 		actions.renameAsset = [this](const VirtualPath& source, const VirtualPath& destination)
 		{ return RenameProjectAsset(source, destination); };
 		actions.openAsset = [this](const ProjectBrowserEntry& asset) { return OpenProjectBrowserAsset(asset); };
@@ -2088,31 +2591,86 @@ Result<void> EditorApplication::OnGui()
 			workspaceError = inspected.error;
 		}
 	}
-	if (selectionContext.kind != EditorSelectionKind::Asset && documents && documents->Current() &&
-	    documents->Current()->Kind() == ResourceKind::Material)
+	std::shared_ptr<MaterialInstance> materialToPreview;
+	bool previewMaterialAvailable = false;
+	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Material)
 	{
-		ImGuiInspectorUI materialInspectorUi;
-		auto inspected = DrawMaterialInspector(*documents->Current(), *documents, *workspace, inspectorError,
-		                                       &project->materialInspectors, &materialInspectorUi);
-		if (!inspected)
+		if (selectionContext.kind != EditorSelectionKind::Asset)
 		{
-			workspaceError = inspected.error;
+			ImGuiInspectorUI materialInspectorUi;
+			auto inspected = DrawMaterialInspector(*documents->Current(), *documents, *workspace, inspectorError,
+			                                       &project->materialInspectors, &materialInspectorUi);
+			if (!inspected)
+			{
+				workspaceError = inspected.error;
+			}
 		}
 		auto draft = documents->Current()->Payload<MaterialDraft>();
-		if (draft && materialPreview)
+		if (draft)
 		{
-			auto rendered = materialPreview->Render(draft->MaterialPtr());
-			if (!rendered)
-			{
-				inspectorError = rendered.error;
-			}
-			ImGui::Begin("Material Preview");
-			if (rendered)
-			{
-				ImGui::Image(materialPreview->ImageId(), ImVec2(256, 256));
-			}
-			ImGui::End();
+			materialToPreview = draft->MaterialPtr();
+			previewMaterialAvailable = true;
+			materialPreviewDocument.reset();
+			materialPreviewKey = documents->Current()->Path().ToString();
 		}
+	}
+	if (!previewMaterialAvailable && selectionContext.kind == EditorSelectionKind::Asset && documents && workspace)
+	{
+		const ProjectBrowserEntry* selectedAsset = projectBrowser.Find(selectionContext.assetPath);
+		if (selectedAsset && !selectedAsset->folder && selectedAsset->kind == ResourceKind::Material)
+		{
+			const String key =
+			    selectedAsset->path.ToString() + ":" + selectedAsset->guid.ToString() + ":" +
+			    ToUrsaString(std::to_string(workspace->Database() ? workspace->Database()->Revision() : 0));
+			if (key != materialPreviewKey)
+			{
+				materialPreviewKey = key;
+				materialPreviewDocument.reset();
+				auto opened = OpenMaterialDocument(selectedAsset->path, documents->Session(), *workspace);
+				if (opened)
+				{
+					materialPreviewDocument = std::move(opened.value);
+				}
+				else
+				{
+					inspectorError = opened.error;
+				}
+			}
+			auto draft = materialPreviewDocument ? materialPreviewDocument->Payload<MaterialDraft>() : nullptr;
+			if (draft)
+			{
+				materialToPreview = draft->MaterialPtr();
+				previewMaterialAvailable = true;
+			}
+		}
+		else
+		{
+			materialPreviewDocument.reset();
+			materialPreviewKey.clear();
+		}
+	}
+	if (previewMaterialAvailable && materialPreview)
+	{
+		auto rendered = materialPreview->Render(
+		    materialToPreview,
+		    [this](Scene& previewScene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+		           std::optional<Rendering::CameraType> cameraFilter,
+		           std::optional<Rendering::CameraData> cameraOverride)
+		    { return RenderManagedViewport(previewScene, target, cameraFilter, std::move(cameraOverride)); });
+		if (!rendered)
+		{
+			inspectorError = rendered.error;
+		}
+		ImGui::Begin("Material Preview");
+		if (rendered)
+		{
+			ImGui::Image(materialPreview->ImageId(), ImVec2(256, 256));
+		}
+		else
+		{
+			ImGui::TextWrapped("%s", rendered.error.c_str());
+		}
+		ImGui::End();
 	}
 	if (documents && documents->Current() &&
 	    (documents->Current()->Kind() == ResourceKind::Scene || documents->Current()->Kind() == ResourceKind::Prefab))
@@ -2219,13 +2777,16 @@ Result<void> EditorApplication::OnGui()
 	}
 	if (workspace)
 	{
-		assetInspectorPanel.Draw(*workspace, projectBrowser, selectionContext, showInspectorPanel,
-		                         [this](const ProjectBrowserEntry& asset)
-		                         {
-			                         auto opened = OpenProjectBrowserAsset(asset);
-			                         workspaceError = opened ? String{} : opened.error;
-			                         return opened;
-		                         });
+		assetInspectorPanel.Draw(
+		    *workspace, projectBrowser, selectionContext, showInspectorPanel,
+		    scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr,
+		    [this](const ProjectBrowserEntry& asset)
+		    {
+			    auto opened = OpenProjectBrowserAsset(asset);
+			    workspaceError = opened ? String{} : opened.error;
+			    return opened;
+		    },
+		    [this](const VirtualPath& path) { RequestAssetImport(path, true); });
 	}
 	consolePanel.Draw(showConsolePanel, inspectorError,
 	                  [this](const LogRecord& record) -> Result<void>
@@ -2849,10 +3410,20 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			auto draft = documents->Current()->Payload<SceneDraft>();
 			if (draft)
 			{
-				auto rendered = sceneViewPanel->RenderPending(*draft, play);
+				EditorRenderViewport renderViewport =
+				    [this](Scene& renderScene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+				           std::optional<Rendering::CameraType> cameraFilter,
+				           std::optional<Rendering::CameraData> cameraOverride)
+				{ return RenderManagedViewport(renderScene, target, cameraFilter, std::move(cameraOverride)); };
+				auto rendered = sceneViewPanel->RenderPending(*draft, play, renderViewport);
 				if (!rendered)
 				{
 					inspectorError = rendered.error;
+				}
+				else if (inspectorError.rfind("Scene viewport render failed:", 0) == 0 ||
+				         inspectorError.rfind("Game viewport render failed:", 0) == 0)
+				{
+					inspectorError.clear();
 				}
 			}
 		}
@@ -2904,6 +3475,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		}
 		editingScriptSession = 0;
 	}
+	editingScriptServices.reset();
 #endif
 	scriptBuildService.reset();
 	scriptAssetDatabase.reset();
@@ -3071,6 +3643,13 @@ void EditorApplication::FinishAssetJobs()
 				}
 #endif
 				ready = documents->RefreshResources();
+#if defined(URSA_ENABLE_DOTNET)
+				if (ready && editingScriptServices)
+				{
+					auto services = std::static_pointer_cast<ManagedEditingSessionState>(editingScriptServices);
+					ready = services->resources->ReloadImportedResources(workspace->ContentFiles());
+				}
+#endif
 				if (ready)
 				{
 					ready = gui->ReloadShaders();

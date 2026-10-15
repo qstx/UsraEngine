@@ -410,6 +410,13 @@ int main(int argc, char** argv)
 			return 1;
 		}
 		auto packagePath = std::filesystem::absolute(output);
+		std::error_code outputDirectoryError;
+		std::filesystem::create_directories(packagePath.parent_path(), outputDirectoryError);
+		if (outputDirectoryError)
+		{
+			std::cerr << "Cannot create package output directory: " << outputDirectoryError.message() << '\n';
+			return 1;
+		}
 		VirtualFileSystem destination;
 		auto mounted = destination.Mount("out", packagePath.parent_path(), MountAccess::ReadWrite);
 		auto path = VirtualPath::Parse("out:" + PathToUrsaString(packagePath.filename()));
@@ -762,6 +769,12 @@ int main(int argc, char** argv)
 	if (error)
 	{
 		std::cerr << "Cannot resolve package output path\n";
+		return 1;
+	}
+	std::filesystem::create_directories(output.parent_path(), error);
+	if (error)
+	{
+		std::cerr << "Cannot create package output directory: " << error.message() << '\n';
 		return 1;
 	}
 	auto provider = DirectoryFileProvider::Open(output.parent_path(), true);

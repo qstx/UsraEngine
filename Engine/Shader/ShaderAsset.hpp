@@ -11,7 +11,7 @@ class SerializationContext;
 
 namespace Ursa::Shader
 {
-constexpr UInt32 shaderReflectionFormatVersion = 1;
+constexpr UInt32 shaderReflectionFormatVersion = 2;
 
 struct ShaderStageAsset
 {

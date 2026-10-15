@@ -31,18 +31,18 @@ internal static class RenderCommandProtocolTests
 			catch (InvalidOperationException) { return; }
 			throw new Exception("Malformed render batch accepted.");
 		}
-		Header(1, 0, 16);
+		Header(RenderCommandProtocol.version, 0, 16);
 		RenderCommandProtocol.Validate(batch.AsSpan(0, 16));
-		Header(1, 1, 32);
+		Header(RenderCommandProtocol.version, 1, 32);
 		Record(1, 16);
 		RenderCommandProtocol.Validate(batch);
-		Header(2, 1, 32);
+		Header(RenderCommandProtocol.version + 1, 1, 32);
 		Reject();
-		Header(1, 2, 32);
+		Header(RenderCommandProtocol.version, 2, 32);
 		Reject();
-		Header(1, 1, 32);
+		Header(RenderCommandProtocol.version, 1, 32);
 		foreach (uint size in new uint[] {0, 7, 9, 24, 0xfffffff8}) { Record(1, size); Reject(); }
-		foreach (uint opcode in new uint[] {0, 14, 0xffffffff}) { Record(opcode, 16); Reject(); }
+		foreach (uint opcode in new uint[] {0, 17, 0xffffffff}) { Record(opcode, 16); Reject(); }
 		Record(1, 8);
 		Reject();
 	}

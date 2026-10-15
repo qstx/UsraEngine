@@ -55,8 +55,11 @@ Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, 
 			return Result<void>::Failure("Cannot clone edit scene: " + decoded.error);
 		}
 		auto sceneReady = context.NotifySceneReady(*decoded.value.scene);
+		context.SetSceneReadyCallback({});
 		if (!sceneReady)
 		{
+			decoded.value.scene->Clear();
+			preparedServices.reset();
 			return Result<void>::Failure("Cannot initialize the play scene: " + sceneReady.error);
 		}
 		resourceSession = std::move(isolated.value);
@@ -94,8 +97,8 @@ void PlaySession::Stop()
 	{
 		scene->Clear();
 	}
-	scene.reset();
 	services.reset();
+	scene.reset();
 	resourceSession.reset();
 	frameRunner.Reset();
 	paused = false;

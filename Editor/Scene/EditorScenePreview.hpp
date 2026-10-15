@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Renderer3D/Renderer3D.hpp>
+#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
+#include <Math/Camera.hpp>
 #include <Scene/Scene.hpp>
 
 namespace Ursa::Editor
@@ -20,18 +21,20 @@ public:
 		return camera;
 	}
 
-	Result<void> Record(const Scene& scene, const Rhi::CommandListPtr& command, const Rhi::TexturePtr& color,
-	                    Rhi::ResourceState initialState, Rhi::ResourceState finalState);
+	Result<void> Render(const Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+	                    Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead);
 
-	Result<void> RecordGame(const Scene& scene, const Rhi::CommandListPtr& command, const Rhi::TexturePtr& color,
-	                        Rhi::ResourceState initialState, Rhi::ResourceState finalState);
+	Result<void> RenderGame(const Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+	                        Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead);
 
 private:
-	explicit EditorScenePreview(std::unique_ptr<Renderer3D> sceneRenderer) : renderer(std::move(sceneRenderer))
+	explicit EditorScenePreview(Rhi::DevicePtr selectedDevice) : device(std::move(selectedDevice))
 	{
 	}
 
-	std::unique_ptr<Renderer3D> renderer;
+	Rhi::DevicePtr device;
+	std::unique_ptr<Rendering::NativeForwardPipeline> renderer;
+	ResourceId cameraIdentity = ResourceId::Generate();
 	Camera camera;
 };
 } // namespace Ursa::Editor

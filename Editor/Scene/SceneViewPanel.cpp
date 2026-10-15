@@ -2,6 +2,7 @@
 
 #include <Scene/EditorScenePreview.hpp>
 #include <Scene/RenderingComponents.hpp>
+#include <Rendering/Commands/RenderCommandExecutor.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
 #include <Ui/ImGuiBridge.hpp>
@@ -108,15 +109,44 @@ Result<void> SceneViewPanel::EnsureTarget(ViewportTarget& target, ViewportSize s
 	{
 		return Result<void>::Failure(validated.error);
 	}
-	auto replacement = device->CreateTexture({size.width, size.height, Rhi::Format::RgbA8Unorm,
-	                                          Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled});
+	auto replacement = Rendering::CreateRenderTexture(
+	    *device, {size.width, size.height, static_cast<UInt32>(Rhi::Format::RgbA8Unorm), 32});
 	if (!replacement)
 	{
 		return Result<void>::Failure("Cannot create " + ToUrsaString(std::to_string(size.width)) + "x" +
 		                             ToUrsaString(std::to_string(size.height)) +
 		                             " viewport target: " + replacement.error);
 	}
-	auto registered = gui->RegisterTexture(replacement.value, sampler);
+	// The GUI can present before the first successful pipeline callback (for example during reload).
+	// Give a replacement target valid contents and a sampled layout before exposing its image ID.
+	auto initializer = Rendering::RenderCommandExecutor::Create(device);
+	if (!initializer)
+	{
+		return Result<void>::Failure(initializer.error);
+	}
+	auto initialized = initializer.value->Begin(replacement.value, Rhi::ResourceState::ShaderRead);
+	if (initialized)
+	{
+		Rendering::RenderCommand clear;
+		clear.opcode = Rendering::RenderCommandOpcode::ClearTarget;
+		clear.clearFlags = 1;
+		clear.color = {0.035f, 0.055f, 0.09f, 1};
+		initialized = initializer.value->Execute({clear});
+	}
+	if (initialized)
+	{
+		initialized = initializer.value->Submit();
+	}
+	if (!initialized)
+	{
+		return initialized;
+	}
+	auto submitted = initializer.value->End();
+	if (!submitted)
+	{
+		return Result<void>::Failure(submitted.error);
+	}
+	auto registered = gui->RegisterTexture(replacement.value->color, sampler);
 	if (!registered)
 	{
 		return Result<void>::Failure("Cannot register viewport target: " + registered.error);
@@ -132,42 +162,10 @@ Result<void> SceneViewPanel::EnsureTarget(ViewportTarget& target, ViewportSize s
 		gui->UnregisterTexture(target.imageId);
 	}
 	target.imageId = registered.value;
-	target.color = std::move(replacement.value);
+	target.output = std::move(replacement.value);
+	target.color = target.output->color;
 	target.size = size;
-	target.rendered = false;
 	return {};
-}
-
-Result<void> SceneViewPanel::RenderTarget(ViewportTarget& target, const Scene& scene, bool gameCamera)
-{
-	auto command = device->CreateCommandList();
-	if (!command)
-	{
-		return Result<void>::Failure(command.error);
-	}
-	auto result = command.value->Begin();
-	if (result)
-	{
-		const auto initialState = target.rendered ? Rhi::ResourceState::ShaderRead : Rhi::ResourceState::Undefined;
-		result = gameCamera ? target.preview->RecordGame(scene, command.value, target.color, initialState,
-		                                                 Rhi::ResourceState::ShaderRead)
-		                    : target.preview->Record(scene, command.value, target.color, initialState,
-		                                             Rhi::ResourceState::ShaderRead);
-	}
-	if (result)
-	{
-		result = command.value->End();
-	}
-	if (result)
-	{
-		auto submitted = device->Submit(command.value);
-		result = submitted ? submitted.value->Wait() : Result<void>::Failure(submitted.error);
-	}
-	if (result)
-	{
-		target.rendered = true;
-	}
-	return result;
 }
 
 void SceneViewPanel::SaveCustomPresets(VirtualFileSystem& userFiles, String& diagnostic)
@@ -774,12 +772,27 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 	return {};
 }
 
-Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play)
+Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play,
+                                           const EditorRenderViewport& renderViewport)
 {
-	const Scene& scene = play.Active() ? *play.GetScene() : draft.GetScene();
+	Scene& scene = play.Active() ? *play.GetScene() : draft.GetScene();
 	if (sceneTarget.visible)
 	{
-		auto rendered = RenderTarget(sceneTarget, scene, false);
+		if (!renderViewport || !sceneTarget.output)
+		{
+			return Result<void>::Failure("Scene viewport has no active render pipeline or target");
+		}
+		const Float32 aspect = Float32(sceneTarget.size.width) / Float32(sceneTarget.size.height);
+		const Camera& editorCamera = sceneTarget.preview->GetCamera();
+		Rendering::CameraSettings settings;
+		settings.type = Rendering::CameraType::SceneView;
+		settings.background = {0.035f, 0.055f, 0.09f, 1.0f};
+		settings.targetWidth = sceneTarget.size.width;
+		settings.targetHeight = sceneTarget.size.height;
+		Rendering::CameraData camera{sceneViewCameraId, editorCamera.ViewProjection(aspect), editorCamera.position,
+		                             settings};
+		auto rendered = renderViewport(scene, sceneTarget.output, Rendering::CameraType::SceneView,
+		                               std::optional<Rendering::CameraData>{std::move(camera)});
 		if (!rendered)
 		{
 			return Result<void>::Failure("Scene viewport render failed: " + rendered.error);
@@ -787,7 +800,11 @@ Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play)
 	}
 	if (gameTarget.visible && HasEffectiveGameCamera(scene))
 	{
-		auto rendered = RenderTarget(gameTarget, scene, true);
+		if (!renderViewport || !gameTarget.output)
+		{
+			return Result<void>::Failure("Game viewport has no active render pipeline or target");
+		}
+		auto rendered = renderViewport(scene, gameTarget.output, Rendering::CameraType::Game, {});
 		if (!rendered)
 		{
 			return Result<void>::Failure("Game viewport render failed: " + rendered.error);

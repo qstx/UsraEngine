@@ -2,7 +2,7 @@
 #include <Core/Types.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <Scene/Scene.hpp>
 #include <cmath>
 #include <iostream>
@@ -37,8 +37,8 @@ void Expect(bool condition, const char* message)
 	}
 }
 
-Ursa::Vector<Ursa::UInt8> ReadFrame(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer,
-                                    const Ursa::Vector<Ursa::ModelBoxInstance>& boxes,
+Ursa::Vector<Ursa::UInt8> ReadFrame(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer,
+                                    const Ursa::Vector<Ursa::Test::MeshDraw>& boxes,
                                     const Ursa::SceneLighting& lighting = {}, Ursa::UInt32 width = 64,
                                     Ursa::UInt32 height = 64)
 {
@@ -48,8 +48,8 @@ Ursa::Vector<Ursa::UInt8> ReadFrame(const Ursa::Rhi::DevicePtr& device, Ursa::Re
 	camera.target = {};
 	auto color = Take(device->CreateTexture(
 	    {width, height, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-	done(Take(renderer.RenderOffscreenModels(color, camera.ViewProjection(Ursa::Float32(width) / height), boxes,
-	                                         lighting, camera.position))
+	done(Take(renderer.DrawOffscreen(color, camera.ViewProjection(Ursa::Float32(width) / height), boxes, lighting,
+	                                 camera.position))
 	         ->Wait());
 	auto readback = Take(device->CreateBuffer(
 	    {static_cast<Ursa::Size>(width) * height * 4, BufferUsage::TransferDestination, Memory::Readback}));
@@ -71,8 +71,8 @@ Ursa::Array<Ursa::UInt8, 4> pixel(const Ursa::Vector<Ursa::UInt8>& image, Ursa::
 	return {image[index], image[index + 1], image[index + 2], image[index + 3]};
 }
 
-Ursa::ModelBoxInstance box(Ursa::Vec3 position, Ursa::Vec3 scale, std::shared_ptr<Ursa::MaterialInstance> material = {},
-                           Ursa::Color color = {})
+Ursa::Test::MeshDraw box(Ursa::Vec3 position, Ursa::Vec3 scale, std::shared_ptr<Ursa::MaterialInstance> material = {},
+                         Ursa::Color color = {})
 {
 	return {Ursa::Mat4::Translation(position) * Ursa::Mat4::Scale(scale), color, std::move(material)};
 }
@@ -103,7 +103,7 @@ int Difference(Ursa::Array<Ursa::UInt8, 4> a, Ursa::Array<Ursa::UInt8, 4> b)
 	return std::abs(int(a[0]) - int(b[0])) + std::abs(int(a[1]) - int(b[1])) + std::abs(int(a[2]) - int(b[2]));
 }
 
-void TestUvAndColorSpace(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestUvAndColorSpace(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	auto unlit = Material(Ursa::MaterialType::Unlit);
 	done(unlit->SetSampler({false, false}));
@@ -120,7 +120,7 @@ void TestUvAndColorSpace(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& r
 	Expect(gray[0] >= 123 && gray[0] <= 133, "sRGB material texture was not decoded and encoded correctly");
 }
 
-void TestPbrMapsAndLighting(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestPbrMapsAndLighting(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	auto pbr = Material(Ursa::MaterialType::PbrMetallicRoughness, {0.8f, 0.3f, 0.15f, 1});
 	auto render = [&](const Ursa::SceneLighting& lighting)
@@ -190,7 +190,7 @@ void TestPbrMapsAndLighting(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D
 	Expect(Difference(near, twoPoints) > 5, "Second point light was ignored");
 }
 
-void TestTransformedNormals(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestTransformedNormals(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	auto pbr = Material(Ursa::MaterialType::PbrMetallicRoughness, {0.8f, 0.8f, 0.8f, 1});
 	auto cube = box({}, {1.0f, 0.7f, 1.0f}, pbr);
@@ -208,10 +208,10 @@ void TestTransformedNormals(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D
 	Expect(Difference(flat, mapped) > 10, "Rotated, nonuniformly scaled cube ignored its normal map");
 }
 
-void TestSharedAndLegacy(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestSharedAndLegacy(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	auto shared = Material(Ursa::MaterialType::Unlit, {1, 0, 0, 1});
-	Ursa::Vector<Ursa::ModelBoxInstance> boxes{
+	Ursa::Vector<Ursa::Test::MeshDraw> boxes{
 	    box({-0.8f, 0, 0}, {0.8f, 0.8f, 0.8f}, shared),
 	    box({0.8f, 0, 0}, {0.8f, 0.8f, 0.8f}, shared),
 	};
@@ -230,13 +230,13 @@ void TestSharedAndLegacy(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& r
 	       "Material replacement, clone, or legacy color path failed");
 }
 
-void TestLegacyPbrMaterialBackingReuse(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestLegacyPbrMaterialBackingReuse(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	auto ceramic = Material(Ursa::MaterialType::PbrMetallicRoughness, {0.12f, 0.45f, 0.95f, 1});
 	auto gold = Material(Ursa::MaterialType::PbrMetallicRoughness, {0.95f, 0.55f, 0.16f, 1});
 	done(gold->SetMetallic(1.0f));
 	done(gold->SetRoughness(0.25f));
-	const Ursa::Vector<Ursa::ModelBoxInstance> boxes{
+	const Ursa::Vector<Ursa::Test::MeshDraw> boxes{
 	    box({-0.8f, 0, 0}, {0.8f, 0.8f, 0.8f}, ceramic),
 	    box({0.8f, 0, 0}, {0.8f, 0.8f, 0.8f}, gold),
 	};
@@ -253,7 +253,7 @@ void TestLegacyPbrMaterialBackingReuse(const Ursa::Rhi::DevicePtr& device, Ursa:
 void TestRecordedOffscreenFramesTrackDepthState(const Ursa::Rhi::DevicePtr& device)
 {
 	using namespace Ursa::Rhi;
-	auto renderer = Take(Ursa::Renderer3D::Create(device));
+	auto renderer = Take(Ursa::Test::SceneRenderer::Create(device));
 	auto color = Take(
 	    device->CreateTexture({64, 64, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::Sampled}));
 	Ursa::Camera camera;
@@ -261,13 +261,9 @@ void TestRecordedOffscreenFramesTrackDepthState(const Ursa::Rhi::DevicePtr& devi
 	camera.target = {};
 	for (Ursa::UInt32 frame = 0; frame < 4; ++frame)
 	{
-		auto command = Take(device->CreateCommandList());
-		done(command->Begin());
-		done(renderer->RecordOffscreenModels(command, color,
-		                                     frame == 0 ? ResourceState::Undefined : ResourceState::ShaderRead,
-		                                     ResourceState::ShaderRead, camera.ViewProjection(1.0f), {}));
-		done(command->End());
-		done(Take(device->Submit(command))->Wait());
+		done(Take(renderer->DrawOffscreen(color, camera.ViewProjection(1.0f), Ursa::Vector<Ursa::Test::MeshDraw>{}, {},
+		                                  {}, ResourceState::ShaderRead))
+		         ->Wait());
 	}
 }
 
@@ -290,7 +286,7 @@ private:
 	std::shared_ptr<Ursa::MaterialInstance> next;
 };
 
-void TestSceneMaterialReplacement(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestSceneMaterialReplacement(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	Ursa::Scene scene;
 	const auto cameraNode = Take(scene.CreateGameObject());
@@ -302,19 +298,19 @@ void TestSceneMaterialReplacement(const Ursa::Rhi::DevicePtr& device, Ursa::Rend
 	Take(Ursa::Test::AddRenderer(scene, node, Ursa::Color{1, 0, 0, 1}));
 	auto* boxComponent = scene.FindComponent<Ursa::MeshRendererComponent>(node);
 	const auto legacyData = Take(scene.CollectRenderData(1.0f));
-	const auto legacy = pixel(ReadFrame(device, renderer, legacyData.boxes), 32, 32);
+	const auto legacy = pixel(ReadFrame(device, renderer, Ursa::Test::MeshDraws(legacyData.objects)), 32, 32);
 	Expect(legacy[0] > 200, "Legacy scene box lost its color");
 	auto blue = Material(Ursa::MaterialType::Unlit, {0, 0, 1, 1});
 	Take(scene.AddComponent<SwapMaterialOnUpdate>(node, boxComponent, blue));
 	scene.BeginFrame();
 	done(scene.Update({}));
 	const auto changedData = Take(scene.CollectRenderData(1.0f));
-	const auto changed = pixel(ReadFrame(device, renderer, changedData.boxes), 32, 32);
-	Expect(changed[2] > 200 && changed[0] < 20 && legacyData.boxes[0].material != blue,
+	const auto changed = pixel(ReadFrame(device, renderer, Ursa::Test::MeshDraws(changedData.objects)), 32, 32);
+	Expect(changed[2] > 200 && changed[0] < 20 && legacyData.objects[0].material != blue,
 	       "Material replacement during update missed the current render frame");
 }
 
-void TestAlphaModes(const Ursa::Rhi::DevicePtr& device, Ursa::Renderer3D& renderer)
+void TestAlphaModes(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
 {
 	auto red = Material(Ursa::MaterialType::Unlit, {1, 0, 0, 0.25f});
 	auto blue = Material(Ursa::MaterialType::Unlit, {0, 0, 1, 1});
@@ -375,7 +371,7 @@ int main()
 		desc.validation = true;
 #endif
 		auto device = Take(Ursa::Rhi::CreateDevice(desc));
-		auto renderer = Take(Ursa::Renderer3D::Create(device));
+		auto renderer = Take(Ursa::Test::SceneRenderer::Create(device));
 		TestUvAndColorSpace(device, *renderer);
 		TestPbrMapsAndLighting(device, *renderer);
 		TestTransformedNormals(device, *renderer);

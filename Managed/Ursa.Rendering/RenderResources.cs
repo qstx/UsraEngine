@@ -10,6 +10,28 @@ public enum GraphicsFormat : uint
 	D32_SFloat
 }
 
+public readonly struct RenderTargetIdentifier
+{
+	internal RenderTexture? Texture { get; }
+	internal uint Id { get; }
+
+	public RenderTargetIdentifier(RenderTexture texture)
+	{
+		Texture = texture ?? throw new ArgumentNullException(nameof(texture));
+		Id = 0;
+	}
+
+	public RenderTargetIdentifier(uint temporaryId)
+	{
+		Texture = null;
+		Id = temporaryId;
+	}
+
+	public static RenderTargetIdentifier CameraTarget => new(0u);
+	public static implicit operator RenderTargetIdentifier(RenderTexture texture) => new(texture);
+	public static implicit operator RenderTargetIdentifier(uint id) => new(id);
+}
+
 [Flags]
 public enum GraphicsBufferTarget : uint
 {
@@ -74,6 +96,9 @@ public sealed class RenderTexture : RenderResource, IDisposable
 		released = true;
 	}
 	public void Dispose() => Release();
+
+	public byte[] GetRawData() => Array.ConvertAll(EngineApi.ResourceRequest<uint[]>(
+		new { operation = "renderTexture.readback", handle = Handle }), value => checked((byte)value));
 }
 
 public sealed class GraphicsBuffer : RenderResource, IDisposable
@@ -86,8 +111,8 @@ public sealed class GraphicsBuffer : RenderResource, IDisposable
 	public static GraphicsBuffer Create(GraphicsBufferTarget target, uint count, uint stride)
 	{
 		const GraphicsBufferTarget validTargets = GraphicsBufferTarget.Vertex | GraphicsBufferTarget.Index |
-		                                         GraphicsBufferTarget.Structured | GraphicsBufferTarget.Raw |
-		                                         GraphicsBufferTarget.IndirectArguments;
+												 GraphicsBufferTarget.Structured | GraphicsBufferTarget.Raw |
+												 GraphicsBufferTarget.IndirectArguments;
 		if (target == 0 || (target & ~validTargets) != 0 || count == 0 || stride == 0)
 			throw new ArgumentOutOfRangeException(nameof(target));
 		return FromHandle(EngineApi.ResourceRequest<NativeHandle>(new
@@ -106,4 +131,7 @@ public sealed class GraphicsBuffer : RenderResource, IDisposable
 		released = true;
 	}
 	public void Dispose() => Release();
+
+	public byte[] GetRawData(ulong offset, ulong size) => Array.ConvertAll(EngineApi.ResourceRequest<uint[]>(
+		new { operation = "graphicsBuffer.readback", handle = Handle, offset, size }), value => checked((byte)value));
 }

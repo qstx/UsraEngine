@@ -12,6 +12,8 @@ struct ProjectBrowserActions
 	std::function<Result<void>()> refresh;
 	std::function<Result<void>(const String&)> createFolder;
 	std::function<Result<void>(ResourceKind, MaterialType, const String&)> createAsset;
+	const Vector<ScriptTypeDescriptor>* scriptableAssetTypes = nullptr;
+	std::function<Result<void>(const ScriptTypeDescriptor&, const String&)> createScriptableAsset;
 	std::function<Result<void>(const VirtualPath&, const VirtualPath&)> renameAsset;
 	std::function<Result<void>(const ProjectBrowserEntry&)> openAsset;
 };

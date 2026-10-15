@@ -1,4 +1,6 @@
 #include <MeshFixtures.hpp>
+#include <ComputeFixtures.hpp>
+#include <Shader/ShaderAssetResource.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/MaterialResource.hpp>
@@ -104,14 +106,26 @@ int main()
 		const VirtualPath materialPath = Take(VirtualPath::Parse("prj:managed-renderer.ursamat"));
 		MaterialInstance material(MaterialType::Unlit);
 		Done(SaveMaterialResource(resourceFiles, materialPath, materialGuid, material, {}));
-		auto resources = Take(ResourceSession::Open(
-		    resourceFiles,
-		    [materialGuid, materialPath](ResourceId guid, UInt64 localFileId) -> Result<VirtualPath>
-		    {
-			    return guid == materialGuid && localFileId == 0
-			               ? Result<VirtualPath>::Success(materialPath)
-			               : Result<VirtualPath>::Failure("Managed renderer fixture asset is missing");
-		    }));
+		const ResourceId computeGuid = ResourceId::Generate();
+		const VirtualPath computePath = Take(VirtualPath::Parse("prj:Fill.ursashaderasset"));
+		auto computeFixture =
+		    Take(Test::CreateComputeFixture({URSA_TEST_DXC_EXECUTABLE, URSA_TEST_SPIRV_VAL_EXECUTABLE,
+		                                     URSA_TEST_SPIRV_CROSS_EXECUTABLE, URSA_SHADER_STAGING_ROOT},
+		                                    computeGuid));
+		Done(Shader::SaveShaderAssetResource(resourceFiles, computePath, *computeFixture));
+		auto resources = Take(ResourceSession::Open(resourceFiles,
+		                                            [materialGuid, materialPath, computeGuid, computePath](
+		                                                ResourceId guid, UInt64 localFileId) -> Result<VirtualPath>
+		                                            {
+			                                            if (guid == computeGuid && localFileId == 0)
+			                                            {
+				                                            return Result<VirtualPath>::Success(computePath);
+			                                            }
+			                                            return guid == materialGuid && localFileId == 0
+			                                                       ? Result<VirtualPath>::Success(materialPath)
+			                                                       : Result<VirtualPath>::Failure(
+			                                                             "Managed renderer fixture asset is missing");
+		                                            }));
 		String windowTitle;
 		Scene scene;
 		ManagedSceneApi sceneApi(scene, resources.get(), [&windowTitle](const String& value) { windowTitle = value; });
@@ -512,6 +526,191 @@ int main()
 		Expect(secondList.at("generation").get<UInt32>() != 0,
 		       "Managed rendering API did not create a RendererList for the current frame");
 		ResourceRequest(api, {{"operation", "render.context.end"}, {"context", secondContext.at("context")}});
+		const auto createTarget = [&]
+		{
+			return ResourceRequest(api, {{"operation", "renderTexture.create"},
+			                             {"width", 8u},
+			                             {"height", 8u},
+			                             {"format", 0u},
+			                             {"depthBufferBits", 0u},
+			                             {"enableRandomWrite", false},
+			                             {"msaaSamples", 1u}});
+		};
+		const auto sourceTarget = createTarget();
+		const auto destinationTarget = createTarget();
+		const auto executedContext = beginRequest(3);
+		const auto& jsonToken = executedContext.at("context");
+		Rendering::RenderContextToken executionToken{
+		    jsonToken.at("sessionId").get<UInt64>(), jsonToken.at("frameId").get<UInt64>(),
+		    jsonToken.at("index").get<UInt32>(), jsonToken.at("generation").get<UInt32>()};
+		Rendering::RenderCommandBatchHeader executionHeader;
+		Vector<UInt8> executionBytes(sizeof(executionHeader));
+		const auto append = [&](Rendering::RenderCommandOpcode opcode, const void* data, UInt32 size)
+		{
+			const UInt32 bytes = (sizeof(Rendering::RenderCommandRecordHeader) + size + 7u) & ~7u;
+			const Size offset = executionBytes.size();
+			executionBytes.resize(offset + bytes, 0);
+			Rendering::RenderCommandRecordHeader record{opcode, bytes};
+			std::memcpy(executionBytes.data() + offset, &record, sizeof(record));
+			std::memcpy(executionBytes.data() + offset + sizeof(record), data, size);
+			++executionHeader.commandCount;
+		};
+		const ManagedHandle sourceTargetHandle = Handle(sourceTarget);
+
+		struct TargetPayload
+		{
+			UInt32 kind;
+			UInt32 id;
+			ManagedHandle handle;
+		};
+
+		static_assert(sizeof(TargetPayload) == 32);
+		const UInt32 attachmentCount = 2;
+		Vector<UInt8> attachmentPayload(8 + attachmentCount * sizeof(TargetPayload), 0);
+		std::memcpy(attachmentPayload.data(), &attachmentCount, sizeof(attachmentCount));
+		const TargetPayload sourceAttachment{1, 0, sourceTargetHandle};
+		const TargetPayload destinationAttachment{1, 0, Handle(destinationTarget)};
+		std::memcpy(attachmentPayload.data() + 8, &sourceAttachment, sizeof(sourceAttachment));
+		std::memcpy(attachmentPayload.data() + 8 + sizeof(sourceAttachment), &destinationAttachment,
+		            sizeof(destinationAttachment));
+		append(Rendering::RenderCommandOpcode::SetRenderTargets, attachmentPayload.data(),
+		       UInt32(attachmentPayload.size()));
+
+		struct ClearPayload
+		{
+			UInt32 flags;
+			Color color;
+			Float32 depth;
+			UInt32 stencil;
+		};
+
+		const ClearPayload clearPayload{1, {0.25f, 0.5f, 1, 1}, 1, 0};
+		static_assert(sizeof(ClearPayload) == 28);
+		append(Rendering::RenderCommandOpcode::ClearTarget, &clearPayload, sizeof(clearPayload));
+		const Array<ManagedHandle, 2> copyHandles{sourceTargetHandle, Handle(destinationTarget)};
+		append(Rendering::RenderCommandOpcode::CopyTexture, copyHandles.data(), sizeof(copyHandles));
+		executionHeader.byteSize = UInt32(executionBytes.size());
+		std::memcpy(executionBytes.data(), &executionHeader, sizeof(executionHeader));
+		Expect(submitRenderBatch(executionToken, executionBytes) == 0,
+		       "Native batch did not accept executable clear/copy commands");
+		executionBytes.clear();
+		ResourceRequest(api, {{"operation", "renderTexture.release"}, {"handle", sourceTarget}});
+		ResourceRequest(api, {{"operation", "render.context.submit"}, {"context", jsonToken}});
+		ResourceRequest(api, {{"operation", "render.context.end"}, {"context", jsonToken}});
+		const auto pixels =
+		    ResourceRequest(api, {{"operation", "renderTexture.readback"}, {"handle", destinationTarget}});
+		Expect(pixels.is_array() && pixels.size() == 8u * 8u * 4u && pixels[0].get<UInt32>() >= 62 &&
+		           pixels[0].get<UInt32>() <= 65 && pixels[1].get<UInt32>() >= 126 && pixels[1].get<UInt32>() <= 129 &&
+		           pixels[2] == 255 && pixels[3] == 255,
+		       "Managed batch snapshots did not survive resource release or produce the expected GPU pixels");
+		ResourceRequest(api, {{"operation", "renderTexture.release"}, {"handle", destinationTarget}});
+		const auto kernelIndex = ResourceRequest(api, {{"operation", "computeShader.findKernel"},
+		                                               {"guid", ToStdString(computeGuid.ToString())},
+		                                               {"localFileId", 0u},
+		                                               {"name", "Fill"}});
+		const auto threadGroup = ResourceRequest(api, {{"operation", "computeShader.threadGroup"},
+		                                               {"guid", ToStdString(computeGuid.ToString())},
+		                                               {"localFileId", 0u},
+		                                               {"kernel", kernelIndex}});
+		Expect(kernelIndex == 0 && threadGroup == nlohmann::json::array({8, 8, 1}),
+		       "Managed compute lookup lost its imported kernel metadata");
+		const auto computeTarget = ResourceRequest(api, {{"operation", "renderTexture.create"},
+		                                                 {"width", 8u},
+		                                                 {"height", 8u},
+		                                                 {"format", 0u},
+		                                                 {"depthBufferBits", 0u},
+		                                                 {"enableRandomWrite", true},
+		                                                 {"msaaSamples", 1u}});
+		const auto computeData = ResourceRequest(
+		    api, {{"operation", "graphicsBuffer.create"}, {"target", 4u}, {"count", 64u}, {"stride", 4u}});
+		const auto computeContext = beginRequest(4);
+		const auto& computeJsonToken = computeContext.at("context");
+		Rendering::RenderContextToken computeToken{
+		    computeJsonToken.at("sessionId").get<UInt64>(), computeJsonToken.at("frameId").get<UInt64>(),
+		    computeJsonToken.at("index").get<UInt32>(), computeJsonToken.at("generation").get<UInt32>()};
+		executionHeader = {};
+		executionBytes.assign(sizeof(executionHeader), 0);
+		const auto computeParameter = [&](UInt32 kind, const String& name, const void* value, UInt32 valueSize)
+		{
+			Vector<UInt8> payload(36 + name.size() + valueSize, 0);
+			std::memcpy(payload.data(), computeGuid.bytes.data(), computeGuid.bytes.size());
+			std::memcpy(payload.data() + 28, &kind, sizeof(kind));
+			const UInt32 nameSize = UInt32(name.size());
+			std::memcpy(payload.data() + 32, &nameSize, sizeof(nameSize));
+			std::memcpy(payload.data() + 36, name.data(), name.size());
+			std::memcpy(payload.data() + 36 + name.size(), value, valueSize);
+			append(Rendering::RenderCommandOpcode::SetComputeParameters, payload.data(), UInt32(payload.size()));
+		};
+		const ManagedHandle computeTextureHandle = Handle(computeTarget);
+		const ManagedHandle computeBufferHandle = Handle(computeData);
+		const Array<Float32, 4> computeColor{0.5f, 0.25f, 0.75f, 1};
+		const Int32 computeBias = 31;
+		computeParameter(3, "_Output", &computeTextureHandle, sizeof(computeTextureHandle));
+		computeParameter(7, "_Data", &computeBufferHandle, sizeof(computeBufferHandle));
+		computeParameter(2, "_Color", computeColor.data(), sizeof(computeColor));
+		computeParameter(6, "_Bias", &computeBias, sizeof(computeBias));
+		Vector<UInt8> dispatchPayload(40, 0);
+		std::memcpy(dispatchPayload.data(), computeGuid.bytes.data(), computeGuid.bytes.size());
+		const Array<UInt32, 3> groups{1, 1, 1};
+		std::memcpy(dispatchPayload.data() + 28, groups.data(), sizeof(groups));
+		append(Rendering::RenderCommandOpcode::DispatchCompute, dispatchPayload.data(), UInt32(dispatchPayload.size()));
+		executionHeader.byteSize = UInt32(executionBytes.size());
+		std::memcpy(executionBytes.data(), &executionHeader, sizeof(executionHeader));
+		Expect(submitRenderBatch(computeToken, executionBytes) == 0,
+		       "Managed compute batch was not accepted by its imported kernel");
+		ResourceRequest(api, {{"operation", "render.context.submit"}, {"context", computeJsonToken}});
+		ResourceRequest(api, {{"operation", "render.context.end"}, {"context", computeJsonToken}});
+		const auto computePixels =
+		    ResourceRequest(api, {{"operation", "renderTexture.readback"}, {"handle", computeTarget}});
+		Expect(computePixels[0].get<UInt32>() >= 126 && computePixels[0].get<UInt32>() <= 129 &&
+		           computePixels[1].get<UInt32>() >= 62 && computePixels[1].get<UInt32>() <= 65 &&
+		           computePixels[2].get<UInt32>() >= 190 && computePixels[2].get<UInt32>() <= 193,
+		       "Managed compute texture parameters did not reach the GPU");
+		const auto computeBytes = ResourceRequest(
+		    api, {{"operation", "graphicsBuffer.readback"}, {"handle", computeData}, {"offset", 0u}, {"size", 256u}});
+		for (UInt32 index = 0; index < 64; ++index)
+		{
+			const Size offset = Size(index) * 4;
+			const UInt32 word = computeBytes[offset].get<UInt32>() | (computeBytes[offset + 1].get<UInt32>() << 8) |
+			                    (computeBytes[offset + 2].get<UInt32>() << 16) |
+			                    (computeBytes[offset + 3].get<UInt32>() << 24);
+			Expect(word == index + 31, "Managed compute buffer parameters or readback did not preserve the GPU output");
+		}
+		ResourceRequest(api, {{"operation", "renderTexture.release"}, {"handle", computeTarget}});
+		ResourceRequest(api, {{"operation", "graphicsBuffer.release"}, {"handle", computeData}});
+		auto sceneOutput = Take(Rendering::CreateRenderTexture(*renderDevice, {64, 64, 0, 32}));
+		sceneApi.SetRenderOutput(sceneOutput);
+		const auto drawContext = beginRequest(5);
+		ResourceRequest(api, {{"operation", "render.camera.setup"},
+		                      {"context", drawContext.at("context")},
+		                      {"cameraPersistentId", ToStdString(renderCamera->PersistentId().ToString())}});
+		const auto drawCulling = cullRequest(drawContext);
+		const auto drawList = listRequest(drawContext, drawCulling);
+		const auto& drawJsonToken = drawContext.at("context");
+		Rendering::RenderContextToken drawToken{
+		    drawJsonToken.at("sessionId").get<UInt64>(), drawJsonToken.at("frameId").get<UInt64>(),
+		    drawJsonToken.at("index").get<UInt32>(), drawJsonToken.at("generation").get<UInt32>()};
+		executionHeader = {};
+		executionBytes.assign(sizeof(executionHeader), 0);
+		const ClearPayload sceneClear{3, {0, 0, 0, 1}, 1, 0};
+		append(Rendering::RenderCommandOpcode::ClearTarget, &sceneClear, sizeof(sceneClear));
+		const Rendering::RendererList nativeList{drawToken, drawList.at("index").get<UInt32>(),
+		                                         drawList.at("generation").get<UInt32>()};
+		append(Rendering::RenderCommandOpcode::DrawRendererList, &nativeList, sizeof(nativeList));
+		executionHeader.byteSize = UInt32(executionBytes.size());
+		std::memcpy(executionBytes.data(), &executionHeader, sizeof(executionHeader));
+		Expect(submitRenderBatch(drawToken, executionBytes) == 0,
+		       "Managed RendererList draw was not accepted for the current captured scene");
+		renderTransform.position.x = 1000;
+		Done(renderObject->SetLocalTransform(renderTransform));
+		ResourceRequest(api, {{"operation", "render.context.submit"}, {"context", drawJsonToken}});
+		ResourceRequest(api, {{"operation", "render.context.end"}, {"context", drawJsonToken}});
+		const auto scenePixels = Take(Rendering::ReadRenderTexture(*renderDevice, *sceneOutput));
+		const Size sceneCenter = (32 * 64 + 32) * 4;
+		Expect(scenePixels[sceneCenter] > 220 && scenePixels[sceneCenter + 1] > 220 &&
+		           scenePixels[sceneCenter + 2] > 220,
+		       "Managed RendererList did not draw its captured geometry or retained a mutable post-Execute transform");
+		sceneApi.SetRenderOutput({});
 		for (const auto& root : scene.RootGameObjects())
 		{
 			Done(scene.DestroyGameObject(root));

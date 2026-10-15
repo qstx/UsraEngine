@@ -5,50 +5,57 @@ namespace Ursa::Editor
 {
 Result<std::unique_ptr<EditorScenePreview>> EditorScenePreview::Create(Rhi::DevicePtr device)
 {
-	auto rendererResult = Renderer3D::Create(std::move(device));
-	if (!rendererResult)
+	if (!device)
 	{
-		return Result<std::unique_ptr<EditorScenePreview>>::Failure(rendererResult.error);
+		return Result<std::unique_ptr<EditorScenePreview>>::Failure("Editor preview requires a render device");
 	}
 	return Result<std::unique_ptr<EditorScenePreview>>::Success(
-	    std::unique_ptr<EditorScenePreview>(new EditorScenePreview(std::move(rendererResult.value))));
+	    std::unique_ptr<EditorScenePreview>(new EditorScenePreview(std::move(device))));
 }
 
-Result<void> EditorScenePreview::Record(const Scene& scene, const Rhi::CommandListPtr& command,
-                                        const Rhi::TexturePtr& color, Rhi::ResourceState initialState,
+Result<void> EditorScenePreview::Render(const Scene& scene,
+                                        const std::shared_ptr<Rendering::RenderTextureResource>& target,
                                         Rhi::ResourceState finalState)
 {
-	if (!color || !color->desc.width || !color->desc.height)
+	if (!target || !target->description.width || !target->description.height)
 	{
 		return Result<void>::Failure("Editor preview needs a nonzero color target");
 	}
-	const Ursa::Float32 aspect =
-	    static_cast<Ursa::Float32>(color->desc.width) / static_cast<Ursa::Float32>(color->desc.height);
-	auto frame = scene.CollectPreviewRenderData(camera, aspect);
-	if (!frame)
+	if (!renderer)
 	{
-		return Result<void>::Failure(frame.error);
+		auto created = Rendering::NativeForwardPipeline::Create(device);
+		if (!created)
+		{
+			return Result<void>::Failure(created.error);
+		}
+		renderer = std::move(created.value);
 	}
-	return renderer->RecordOffscreenModels(command, color, initialState, finalState, frame.value.viewProjection,
-	                                       frame.value.boxes, frame.value.lighting, frame.value.cameraPosition);
+	Rendering::CameraData data;
+	data.identity = cameraIdentity;
+	data.settings.type = Rendering::CameraType::SceneView;
+	data.position = camera.position;
+	data.viewProjection =
+	    camera.ViewProjection(Float32(target->description.width) / Float32(target->description.height));
+	return renderer->RenderOffscreen(scene, target, finalState, Rendering::CameraType::SceneView, data);
 }
 
-Result<void> EditorScenePreview::RecordGame(const Scene& scene, const Rhi::CommandListPtr& command,
-                                            const Rhi::TexturePtr& color, Rhi::ResourceState initialState,
+Result<void> EditorScenePreview::RenderGame(const Scene& scene,
+                                            const std::shared_ptr<Rendering::RenderTextureResource>& target,
                                             Rhi::ResourceState finalState)
 {
-	if (!color || !color->desc.width || !color->desc.height)
+	if (!target || !target->description.width || !target->description.height)
 	{
 		return Result<void>::Failure("Game preview needs a nonzero color target");
 	}
-	const Ursa::Float32 aspect =
-	    static_cast<Ursa::Float32>(color->desc.width) / static_cast<Ursa::Float32>(color->desc.height);
-	auto frame = scene.CollectRenderData(aspect);
-	if (!frame)
+	if (!renderer)
 	{
-		return Result<void>::Failure(frame.error);
+		auto created = Rendering::NativeForwardPipeline::Create(device);
+		if (!created)
+		{
+			return Result<void>::Failure(created.error);
+		}
+		renderer = std::move(created.value);
 	}
-	return renderer->RecordOffscreenModels(command, color, initialState, finalState, frame.value.viewProjection,
-	                                       frame.value.boxes, frame.value.lighting, frame.value.cameraPosition);
+	return renderer->RenderOffscreen(scene, target, finalState, Rendering::CameraType::Game);
 }
 } // namespace Ursa::Editor

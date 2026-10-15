@@ -11,6 +11,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -275,6 +276,9 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 	void* bindSessionEntry = nullptr;
 	void* validateSessionEntry = nullptr;
 	void* closeSessionEntry = nullptr;
+	void* transferAssetsEntry = nullptr;
+	void* configurePipelineEntry = nullptr;
+	void* renderSceneEntry = nullptr;
 	const auto loadBootstrapMethod = [&loadAssembly, &bootstrap](const wchar_t* method, void** output)
 	{
 		return loadAssembly(reinterpret_cast<const char_t*>(bootstrap.value.entryAssemblyPath.c_str()),
@@ -299,7 +303,10 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 	    loadBootstrapMethod(L"SelectScriptSession", &selectSessionEntry) < 0 || !selectSessionEntry ||
 	    loadBootstrapMethod(L"BindScriptSession", &bindSessionEntry) < 0 || !bindSessionEntry ||
 	    loadBootstrapMethod(L"ValidateScriptSession", &validateSessionEntry) < 0 || !validateSessionEntry ||
-	    loadBootstrapMethod(L"CloseScriptSession", &closeSessionEntry) < 0 || !closeSessionEntry)
+	    loadBootstrapMethod(L"CloseScriptSession", &closeSessionEntry) < 0 || !closeSessionEntry ||
+	    loadBootstrapMethod(L"TransferScriptableAssets", &transferAssetsEntry) < 0 || !transferAssetsEntry ||
+	    loadBootstrapMethod(L"ConfigureRenderPipeline", &configurePipelineEntry) < 0 || !configurePipelineEntry ||
+	    loadBootstrapMethod(L"RenderScene", &renderSceneEntry) < 0 || !renderSceneEntry)
 	{
 		FreeLibrary(library);
 		return Result<void>::Failure("Cannot load the managed Behaviour lifecycle entry points");
@@ -326,6 +333,9 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 	bindSession = reinterpret_cast<BindSessionFunction>(bindSessionEntry);
 	validateSession = reinterpret_cast<SessionFunction>(validateSessionEntry);
 	closeSession = reinterpret_cast<SessionFunction>(closeSessionEntry);
+	transferAssets = reinterpret_cast<TransferAssetsFunction>(transferAssetsEntry);
+	configurePipeline = reinterpret_cast<LoadContentFunction>(configurePipelineEntry);
+	renderScene = reinterpret_cast<RenderSceneFunction>(renderSceneEntry);
 	onLog = std::move(logCallback);
 	this->filesystem = &filesystem;
 	NativeApiV6 api = BuildNativeApi(sceneApi);
@@ -545,6 +555,40 @@ Result<String> DotNetHost::PrepareScriptReload(UInt64 sessionId, const String& s
 		return Result<String>::Failure("Cannot read candidate script snapshots");
 	}
 	return Result<String>::Success(String(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+}
+
+Result<void> DotNetHost::TransferScriptableAssets(UInt64 sourceSession, UInt64 candidateSession)
+{
+	if (!initialized || !transferAssets)
+	{
+		return Result<void>::Failure("ScriptableAsset reload bridge is unavailable");
+	}
+	return transferAssets(sourceSession, candidateSession) == 0
+	           ? Result<void>{}
+	           : Result<void>::Failure(
+	                 "Candidate pipeline assets or factory are incompatible; previous editing state was retained");
+}
+
+Result<void> DotNetHost::ConfigureRenderPipeline(UInt64 session, AssetReference pipeline)
+{
+	if (!initialized || !configurePipeline)
+	{
+		return Result<void>::Failure("Managed pipeline configuration is unavailable");
+	}
+	const auto json = pipeline.guid ? AssetReferenceToJson(pipeline).dump() : std::string("null");
+	return configurePipeline(session, reinterpret_cast<const UInt8*>(json.data()), json.size()) == 0
+	           ? Result<void>{}
+	           : Result<void>::Failure("Managed pipeline configuration or asset factory failed");
+}
+
+Result<void> DotNetHost::RenderScene(UInt64 session, Float32 aspect)
+{
+	if (!initialized || !renderScene)
+	{
+		return Result<void>::Failure("Managed pipeline rendering is unavailable");
+	}
+	return renderScene(session, aspect) == 0 ? Result<void>{}
+	                                         : Result<void>::Failure("Managed pipeline Render callback failed");
 }
 
 Result<void> DotNetHost::LoadEditorApi(const VirtualPath& path)

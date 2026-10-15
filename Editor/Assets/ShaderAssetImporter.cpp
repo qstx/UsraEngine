@@ -295,17 +295,17 @@ Result<ShaderAssetImportResult> ShaderAssetImporter::Import(AssetDatabase& datab
 		{
 			return Result<ShaderAssetImportResult>::Failure(metadata.error);
 		}
-		if (metadata.value.importer != "ursa.Shader" || metadata.value.importerVersion != 2 ||
+		if (metadata.value.importer != "ursa.Shader" || metadata.value.importerVersion != 3 ||
 		    metadata.value.importSettings != settings)
 		{
-			auto saved = database.SetImporterSettings(source, "ursa.Shader", 2, settings);
+			auto saved = database.SetImporterSettings(source, "ursa.Shader", 3, settings);
 			if (!saved)
 			{
 				return Result<ShaderAssetImportResult>::Failure(saved.error);
 			}
 		}
 	}
-	auto cached = database.CheckImport(source, "ursa.Shader", 2, "vulkan-spv", settings, dependencies);
+	auto cached = database.CheckImport(source, "ursa.Shader", 3, "vulkan-spv", settings, dependencies);
 	if (!cached)
 	{
 		return Result<ShaderAssetImportResult>::Failure(cached.error);
@@ -347,7 +347,7 @@ Result<ShaderAssetImportResult> ShaderAssetImporter::Import(AssetDatabase& datab
 	{
 		return Result<ShaderAssetImportResult>::Failure(bytes.error);
 	}
-	auto published = database.PublishImport(source, "ursa.Shader", 2, "vulkan-spv", settings, result.value.dependencies,
+	auto published = database.PublishImport(source, "ursa.Shader", 3, "vulkan-spv", settings, result.value.dependencies,
 	                                        {{0, "Shader", std::move(bytes.value)}});
 	if (!published)
 	{

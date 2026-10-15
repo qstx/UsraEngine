@@ -1,10 +1,11 @@
 #pragma once
+#include <Rendering/Diagnostics/FrameCapture.hpp>
 #include <Core/Types.hpp>
 #include <Core/Containers.hpp>
 #include <Rhi/RHI.hpp>
 #include <Application/SceneFrameRunner.hpp>
 #include <Scene/Scene.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
 
 namespace Ursa
 {
@@ -36,6 +37,9 @@ protected:
 	{
 	}
 
+	virtual Result<void> OnRender(Rendering::FrameCapture* capture);
+	virtual Result<void> InitializeRenderPipeline();
+
 	std::shared_ptr<Window> window;
 	Rhi::DevicePtr device;
 	Rhi::SwapchainPtr swapchain;
@@ -44,6 +48,6 @@ protected:
 private:
 	Rendering::FrameCapture frameCapture;
 	SceneFrameRunner sceneFrameRunner;
-	std::unique_ptr<Renderer3D> sceneRenderer;
+	std::unique_ptr<Rendering::NativeForwardPipeline> sceneRenderer;
 };
 } // namespace Ursa

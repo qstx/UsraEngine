@@ -43,5 +43,9 @@ struct ScriptTypeDescriptor
 	ScriptAssemblyGroup group = ScriptAssemblyGroup::Game;
 	Vector<ScriptFieldTypeDescriptor> fields;
 	ScriptTypeKind kind = ScriptTypeKind::Behaviour;
+	bool isRenderPipeline = false;
+	String createAssetMenuName;
+	String createAssetFileName;
+	Int32 createAssetMenuOrder = 0;
 };
 } // namespace Ursa

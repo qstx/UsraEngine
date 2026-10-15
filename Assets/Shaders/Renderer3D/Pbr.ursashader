@@ -71,7 +71,7 @@ ENDHLSL
 		Pass
 		{
 			Name "Forward"
-			Tags { "LightMode" = "Forward" }
+			Tags { "LightMode" = "UniversalForward" }
 			Cull Back
 			ZWrite On
 			ZTest LEqual

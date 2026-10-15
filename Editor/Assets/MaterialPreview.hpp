@@ -1,7 +1,8 @@
 #pragma once
 
 #include <Core/Types.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <Scene/EditorRenderViewport.hpp>
+#include <Scene/RenderingComponents.hpp>
 #include <Ui/ImGuiBridge.hpp>
 
 namespace Ursa::Editor
@@ -14,7 +15,7 @@ public:
 
 	~MaterialPreview();
 
-	Result<void> Render(const std::shared_ptr<MaterialInstance>& material);
+	Result<void> Render(const std::shared_ptr<MaterialInstance>& material, const EditorRenderViewport& renderViewport);
 
 	ImTextureID ImageId() const
 	{
@@ -27,19 +28,22 @@ public:
 	}
 
 private:
-	MaterialPreview(Rhi::DevicePtr selectedDevice, ImGuiBridge& guiBridge, std::unique_ptr<Renderer3D> selectedRenderer,
-	                Rhi::TexturePtr colorTexture, Rhi::SamplerPtr textureSampler, ImTextureID registeredImageId)
-	    : device(std::move(selectedDevice)), gui(guiBridge), renderer(std::move(selectedRenderer)),
-	      color(std::move(colorTexture)), sampler(std::move(textureSampler)), imageId(registeredImageId)
+	MaterialPreview(Rhi::DevicePtr selectedDevice, ImGuiBridge& guiBridge, Rhi::TexturePtr colorTexture,
+	                Rhi::SamplerPtr textureSampler, ImTextureID registeredImageId)
+	    : device(std::move(selectedDevice)), gui(guiBridge), color(std::move(colorTexture)),
+	      sampler(std::move(textureSampler)), imageId(registeredImageId)
 	{
 	}
 
+	Result<void> InitializePreviewScene(UInt32 size);
+
 	Rhi::DevicePtr device;
 	ImGuiBridge& gui;
-	std::unique_ptr<Renderer3D> renderer;
 	Rhi::TexturePtr color;
+	std::shared_ptr<Rendering::RenderTextureResource> output;
 	Rhi::SamplerPtr sampler;
 	ImTextureID imageId = ImTextureID_Invalid;
-	bool rendered = false;
+	Scene previewScene;
+	MeshRendererComponent* previewRenderer = nullptr;
 };
 } // namespace Ursa::Editor

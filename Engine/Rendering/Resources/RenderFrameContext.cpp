@@ -1,4 +1,5 @@
 #include <Rendering/Resources/RenderFrameContext.hpp>
+#include <Rendering/Diagnostics/FrameCapture.hpp>
 #include <Core/Memory/MemoryFactories.hpp>
 #include <Core/Profiler.hpp>
 #include <algorithm>
@@ -179,7 +180,7 @@ Result<void> RenderFrameQueue::Retain(std::shared_ptr<void> resource)
 	return {};
 }
 
-Result<Rhi::FencePtr> RenderFrameQueue::Complete()
+Result<Rhi::FencePtr> RenderFrameQueue::Complete(FrameCapture* capture)
 {
 	auto valid = RequireThread();
 	if (!valid || !active)
@@ -197,16 +198,26 @@ Result<Rhi::FencePtr> RenderFrameQueue::Complete()
 		return Result<Rhi::FencePtr>::Failure(submitted.error);
 	}
 	active->completion = submitted.value;
+	const auto capturedImage = active->image.texture;
 	const auto swapchain = active->image.texture ? active->swapchain : Rhi::SwapchainPtr{};
 	active = nullptr;
 	nextSlot = (nextSlot + 1) % UInt32(slots.size());
 	if (swapchain)
 	{
+		Result<void> captured;
+		if (capture)
+		{
+			captured = capture->Capture(device, capturedImage, Rhi::ResourceState::Present);
+		}
 		URSA_PROFILE_SCOPE("Rendering.SwapchainPresent");
 		valid = swapchain->Present();
 		if (!valid)
 		{
 			return Result<Rhi::FencePtr>::Failure(valid.error);
+		}
+		if (!captured)
+		{
+			return Result<Rhi::FencePtr>::Failure(captured.error);
 		}
 	}
 	return submitted;

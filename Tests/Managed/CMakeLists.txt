@@ -3,6 +3,7 @@ list(FILTER testSources EXCLUDE REGEX "/(bin|obj)/")
 file(GLOB_RECURSE frameworkSources CONFIGURE_DEPENDS "${URSA_SOURCE_ROOT}/Managed/*.cs" "${URSA_SOURCE_ROOT}/Managed/*.csproj")
 list(FILTER frameworkSources EXCLUDE REGEX "/(bin|obj)/")
 set(testOutputs)
+file(GLOB exampleSources CONFIGURE_DEPENDS "${URSA_SOURCE_ROOT}/Docs/Examples/*.cs")
 set(testCommands)
 foreach(project IN ITEMS Ursa.ManagedHost.ProtocolTests Ursa.SessionFixtures Ursa.EditorFixtures)
   list(APPEND testOutputs "${URSA_MANAGED_OUTPUT_DIR}/TestScripts/${project}.dll")
@@ -19,6 +20,8 @@ add_custom_command(OUTPUT "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>/Built.sta
   "-DOUTPUT_ROOT=${URSA_MANAGED_TEST_STAGE_ROOT}/Managed" -P "${URSA_SOURCE_ROOT}/Tools/StageManaged.cmake"
   COMMAND "${CMAKE_COMMAND}" "-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
   "-DOUTPUT_ROOT=${URSA_MANAGED_TEST_STAGE_ROOT}/Tests/Managed" -P "${URSA_SOURCE_ROOT}/Tools/StageManaged.cmake"
+  COMMAND "${CMAKE_COMMAND}" "-DSOURCE_ROOT=${URSA_SOURCE_ROOT}/Docs/Examples"
+  "-DOUTPUT_ROOT=${URSA_MANAGED_TEST_STAGE_ROOT}/Docs/Examples" -P "${URSA_SOURCE_ROOT}/Tools/StageManaged.cmake"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${URSA_MANAGED_OUTPUT_DIR}/TestScripts"
   ${testCommands}
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -26,7 +29,7 @@ add_custom_command(OUTPUT "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>/Built.sta
   "${URSA_MANAGED_OUTPUT_DIR}/TestScripts/Ursa.SessionDependency.dll"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>"
   COMMAND "${CMAKE_COMMAND}" -E touch "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>/Built.stamp"
-  DEPENDS UrsaManagedHostAssemblies ${testSources} ${frameworkSources} "${URSA_SOURCE_ROOT}/Tools/StageManaged.cmake"
+  DEPENDS UrsaManagedHostAssemblies ${testSources} ${frameworkSources} ${exampleSources} "${URSA_SOURCE_ROOT}/Tools/StageManaged.cmake"
   VERBATIM)
 add_custom_target(UrsaManagedTestAssemblies DEPENDS "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>/Built.stamp" ${testOutputs}
   SOURCES ${testSources})

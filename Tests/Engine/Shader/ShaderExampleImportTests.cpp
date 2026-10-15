@@ -5,7 +5,7 @@
 #include <Shader/ShaderImporter.hpp>
 #include <Shader/ShaderSourceLibrary.hpp>
 #include <Core/StringInterop.hpp>
-#include <Renderer3D/Renderer3D.hpp>
+#include <RenderingFixtures.hpp>
 #include <Rhi/RHI.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -397,16 +397,16 @@ void TestMaterialBackingReuse(const DxcShaderCompiler& compiler)
 	Done(right->SetShaderAsset(shader));
 	Done(left->SetPropertyValue("_Tint", *shader, MaterialPropertyValue::ColorValue({1, 0, 0, 1})));
 	Done(right->SetPropertyValue("_Tint", *shader, MaterialPropertyValue::ColorValue({0, 0, 1, 1})));
-	Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {}, left}};
-	auto renderer = Take(Renderer3D::Create(device));
+	Vector<Test::MeshDraw> boxes{{Mat4::Identity(), {}, left}};
+	auto renderer = Take(Test::SceneRenderer::Create(device));
 	const auto render = [&]()
 	{
 		constexpr UInt32 size = 64;
 		auto color = Take(device->CreateTexture(
 		    {size, size, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-		Done(Take(renderer->RenderOffscreenModels(color, Mat4::Identity(), boxes))->Wait());
+		Done(Take(renderer->DrawOffscreen(color, Mat4::Identity(), boxes))->Wait());
 		auto readback =
-		    Take(device->CreateBuffer({size * size * 4, BufferUsage::TransferDestination, Memory::Readback}));
+		    Take(device->CreateBuffer({size * size * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
 		auto command = Take(device->CreateCommandList());
 		Done(command->Begin());
 		Done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
@@ -462,9 +462,9 @@ void TestBonePaletteReuse(const DxcShaderCompiler& compiler)
 	shader->sourcePath = "prj:Tests/BonePalette.ursashader";
 	shader->sourceHash = "bone-palette-v1";
 	shader->compilerVersion = Take(compiler.Version());
-	const String vertex = "StructuredBuffer<float4x4> Bones : register(t0); "
+	const String vertex = "StructuredBuffer<float4x4> _UrsaBones : register(t0); "
 	                      "float4 VSMain(float3 position : POSITION) : SV_Position "
-	                      "{ return mul(Bones[0], float4(position, 1.0)); }";
+	                      "{ return mul(_UrsaBones[0], float4(position, 1.0)); }";
 	const String fragment = "float4 PSMain() : SV_Target0 { return float4(0.4, 0.7, 0.2, 1.0); }";
 	ShaderSubShaderAsset subShader;
 	subShader.tags.push_back({"RenderPipeline", "UrsaForward"});
@@ -483,13 +483,13 @@ void TestBonePaletteReuse(const DxcShaderCompiler& compiler)
 	auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 	Done(material->SetShader(shader->id));
 	Done(material->SetShaderAsset(shader));
-	ModelBoxInstance box{Mat4::Identity(), {}, material};
+	Test::MeshDraw box{Mat4::Identity(), {}, material};
 	box.jointPalette.push_back(Mat4::Identity());
-	Vector<ModelBoxInstance> boxes{box};
-	auto renderer = Take(Renderer3D::Create(device));
+	Vector<Test::MeshDraw> boxes{box};
+	auto renderer = Take(Test::SceneRenderer::Create(device));
 	auto color = Take(device->CreateTexture(
 	    {32, 32, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-	Done(Take(renderer->RenderOffscreenModels(color, Mat4::Identity(), boxes))->Wait());
+	Done(Take(renderer->DrawOffscreen(color, Mat4::Identity(), boxes))->Wait());
 	Expect(device->storageBufferCreates == 1,
 	       "Repeated passes uploaded the same skinned-object palette more than once");
 	Done(device->WaitIdle());
@@ -619,14 +619,15 @@ void RenderShaderPasses(const DxcShaderCompiler& compiler)
 	auto shader = std::make_shared<ShaderAsset>(BuildPassOrderShader(compiler));
 	auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 	Done(material->SetShaderAsset(shader));
-	auto renderer = Take(Renderer3D::Create(device));
-	Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {}, material}};
+	auto renderer = Take(Test::SceneRenderer::Create(device));
+	Vector<Test::MeshDraw> boxes{{Mat4::Identity(), {}, material}};
 	const auto renderCenterPixel = [&]()
 	{
 		auto color = Take(device->CreateTexture(
 		    {64, 64, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-		Done(Take(renderer->RenderOffscreenModels(color, Mat4::Identity(), boxes))->Wait());
-		auto readback = Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Memory::Readback}));
+		Done(Take(renderer->DrawOffscreen(color, Mat4::Identity(), boxes))->Wait());
+		auto readback =
+		    Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
 		auto command = Take(device->CreateCommandList());
 		Done(command->Begin());
 		Done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
@@ -655,7 +656,7 @@ void RenderShaderPasses(const DxcShaderCompiler& compiler)
 	Done(material->SetKeywordEnabled("URSA_MISSING_VARIANT", true));
 	auto missingColor = Take(device->CreateTexture(
 	    {64, 64, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-	auto missingVariant = renderer->RenderOffscreenModels(missingColor, Mat4::Identity(), boxes);
+	auto missingVariant = renderer->DrawOffscreen(missingColor, Mat4::Identity(), boxes);
 	Expect(!missingVariant &&
 	           ToStdString(missingVariant.error).find("No compiled keyword variant") != std::string::npos,
 	       "Missing compiled Shader keyword variant did not return a clear runtime diagnostic");
@@ -739,11 +740,11 @@ void TestUnsupportedComputeStage(const DxcShaderCompiler& compiler)
 	shader->subShaders.push_back(std::move(subShader));
 	auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 	Done(material->SetShaderAsset(shader));
-	auto renderer = Take(Renderer3D::Create(device));
+	auto renderer = Take(Test::SceneRenderer::Create(device));
 	auto color = Take(device->CreateTexture(
 	    {16, 16, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-	Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {}, material}};
-	auto rendered = renderer->RenderOffscreenModels(color, Mat4::Identity(), boxes);
+	Vector<Test::MeshDraw> boxes{{Mat4::Identity(), {}, material}};
+	auto rendered = renderer->DrawOffscreen(color, Mat4::Identity(), boxes);
 	Expect(!rendered && ToStdString(rendered.error).find("Compute stage cannot execute") != std::string::npos,
 	       "Unsupported compute-in-graphics Pass did not return a clear diagnostic");
 	Done(device->WaitIdle());
@@ -759,12 +760,12 @@ Array<UInt8, 4> RenderImportedShader(const std::shared_ptr<const ShaderAsset>& s
 	description.validation = true;
 #endif
 	auto device = Take(CreateDevice(description));
-	auto renderer = Take(Renderer3D::Create(device));
+	auto renderer = Take(Test::SceneRenderer::Create(device));
 	auto color = Take(device->CreateTexture(
 	    {64, 64, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-	Vector<ModelBoxInstance> boxes{{Mat4::Identity(), {}, material}};
-	Done(Take(renderer->RenderOffscreenModels(color, Mat4::Identity(), boxes))->Wait());
-	auto readback = Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Memory::Readback}));
+	Vector<Test::MeshDraw> boxes{{Mat4::Identity(), {}, material}};
+	Done(Take(renderer->DrawOffscreen(color, Mat4::Identity(), boxes))->Wait());
+	auto readback = Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
 	auto command = Take(device->CreateCommandList());
 	Done(command->Begin());
 	Done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));

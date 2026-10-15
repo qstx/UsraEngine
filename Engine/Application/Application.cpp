@@ -11,6 +11,22 @@ Result<void> Application::ConfigureFixedStep(Ursa::Float32 seconds, Ursa::UInt32
 	return sceneFrameRunner.ConfigureFixedStep(seconds, maxSteps);
 }
 
+Result<void> Application::InitializeRenderPipeline()
+{
+	auto created = Rendering::NativeForwardPipeline::Create(device);
+	if (!created)
+	{
+		return Result<void>::Failure(created.error);
+	}
+	sceneRenderer = std::move(created.value);
+	return {};
+}
+
+Result<void> Application::OnRender(Rendering::FrameCapture* capture)
+{
+	return sceneRenderer->Render(*scene, swapchain, capture);
+}
+
 Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const String& title, bool visible,
                               Ursa::UInt32 frameLimit)
 {
@@ -39,6 +55,10 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 	}
 	swapchain = std::move(swapchainResult.value);
 	auto started = OnStart();
+	if (started && scene)
+	{
+		started = InitializeRenderPipeline();
+	}
 	if (!started)
 	{
 		if (scene)
@@ -50,20 +70,6 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		device.reset();
 		window.reset();
 		return started;
-	}
-	if (scene)
-	{
-		auto rendererResult = Renderer3D::Create(device);
-		if (!rendererResult)
-		{
-			scene->Clear();
-			OnStop();
-			swapchain.reset();
-			device.reset();
-			window.reset();
-			return Result<void>::Failure("Cannot initialize scene renderer: " + rendererResult.error);
-		}
-		sceneRenderer = std::move(rendererResult.value);
 	}
 	auto previous = std::chrono::steady_clock::now();
 	Result<void> result;
@@ -98,18 +104,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 			if (result)
 			{
 				URSA_PROFILE_SCOPE("Engine.RenderPreparation");
-				const Ursa::Float32 aspect = static_cast<Ursa::Float32>(window->FramebufferWidth()) /
-				                             static_cast<Ursa::Float32>(window->FramebufferHeight());
-				auto data = scene->CollectRenderData(aspect);
-				if (!data)
-				{
-					result = Result<void>::Failure(data.error);
-				}
-				else
-				{
-					result = sceneRenderer->RenderModels(swapchain, data.value.viewProjection, data.value.boxes,
-					                                     data.value.lighting, data.value.cameraPosition, &frameCapture);
-				}
+				result = OnRender(&frameCapture);
 			}
 		}
 		if (!result)

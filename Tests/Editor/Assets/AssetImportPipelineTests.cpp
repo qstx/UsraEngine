@@ -3,6 +3,8 @@
 #include <Serialization/MaterialResource.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
+#include <Rendering/Pipeline/GraphicsSettings.hpp>
+#include <Rendering/Shader/ComputeKernel.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/PakBuilder.hpp>
 #include <Vfs/PakArchive.hpp>
@@ -176,15 +178,22 @@ int main()
 		                          [scriptTextureGuid](MaterialTexturePtr)
 		                          { return Result<ResourceId>::Success(scriptTextureGuid); }));
 		Text(scriptableFiles, Path("prj:Scripts/Settings.cs"),
-		     "using Ursa; namespace Demo; [UrsaScriptType(\"demo.render-settings\")] "
-		     "public sealed class RenderSettings : ScriptableObject { public Shader shader = null!; "
-		     "public Material material = null!; }\n");
+		     "using Ursa; using Ursa.Rendering; namespace Demo; [UrsaScriptType(\"demo.render-settings\")] "
+		     "public sealed class RenderSettings : RenderPipelineAsset { public Shader shader = null!; "
+		     "public Material material = null!; public int quality = 3; public int[] weights = new[] { 1, 2 }; "
+		     "protected override RenderPipeline CreatePipeline() => new "
+		     "ForwardRenderPipeline(); } "
+		     "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {}\n");
 		const auto shaderPath = Path("prj:Shaders/Dependency.ursashader");
 		const String shaderSource = "Shader \"Tests/Dependency\" { SubShader { Pass { HLSLPROGRAM\n"
 		                            "#pragma vertex VSMain\n#pragma fragment PSMain\n"
 		                            "float4 VSMain(float3 p: POSITION): SV_Position { return float4(p,1); }\n"
 		                            "float4 PSMain(): SV_Target0 { return float4(1,1,1,1); }\nENDHLSL } } }";
 		Text(scriptableFiles, shaderPath, shaderSource);
+		const auto computePath = Path("prj:Shaders/Pattern.compute");
+		Text(scriptableFiles, computePath,
+		     "#pragma kernel Fill\n[[vk::image_format(\"rgba8\")]] RWTexture2D<float4> _Output;\n"
+		     "[numthreads(8, 8, 1)] void Fill(uint3 id: SV_DispatchThreadID) { _Output[id.xy] = float4(1,0,0,1); }\n");
 		Done(scriptableWorkspace->Refresh());
 		options.buildScripts = true;
 		auto scriptBuild = Take(AssetImportPipeline::Prepare(*scriptableWorkspace, options));
@@ -194,16 +203,20 @@ int main()
 		    std::find_if(typeCatalog.at("Scripts").begin(), typeCatalog.at("Scripts").end(),
 		                 [](const auto& record) { return record.at("ScriptType") == "demo.render-settings"; });
 		Expect(type != typeCatalog.at("Scripts").end(), "Script build omitted the ScriptableObject type");
+		Expect(type->at("IsRenderPipeline").get<bool>(), "Catalog did not identify the derived pipeline asset");
 		const auto settingsPath = Path("prj:Settings.ursaasset");
 		Text(scriptableFiles, settingsPath, "{}");
 		Done(scriptableWorkspace->Refresh());
 		const auto settingsMetadata = Take(scriptableWorkspace->Database()->Metadata(settingsPath));
 		const auto typeMetadata = Take(scriptableWorkspace->Database()->Metadata(Path("prj:Scripts/Settings.cs")));
 		const auto shaderMetadata = Take(scriptableWorkspace->Database()->Metadata(shaderPath));
+		const auto computeMetadata = Take(scriptableWorkspace->Database()->Metadata(computePath));
 		const auto materialReference =
 		    nlohmann::json{{"$ursaReference",
 		                    {{"Kind", "Material"},
-		                     {"Resource", {{"guid", scriptMaterialGuid.ToString().c_str()}, {"localFileId", 0}}}}}};
+		                     {"Resource",
+		                      {{"kind", "asset"},
+		                       {"asset", {{"guid", scriptMaterialGuid.ToString().c_str()}, {"localFileId", 0}}}}}}}};
 		const auto shaderReference =
 		    nlohmann::json{{"$ursaReference",
 		                    {{"Kind", "Shader"},
@@ -223,13 +236,80 @@ int main()
 		                           {"TypeName", "Ursa.Material"},
 		                           {"ElementTypeName", ""}}}}}};
 		ScriptableAsset settings;
+		payload["Fields"]["quality"] = 3;
+		payload["Fields"]["weights"] = nlohmann::json::array({1, 2});
+		payload["FieldTypes"]["quality"] = {
+		    {"Kind", "SignedInteger"}, {"ElementKind", "Unsupported"}, {"TypeName", "int"}, {"ElementTypeName", ""}};
+		payload["FieldTypes"]["weights"] = {{"Kind", "Array"},
+		                                    {"ElementKind", "SignedInteger"},
+		                                    {"TypeName", "System.Int32[]"},
+		                                    {"ElementTypeName", "System.Int32"}};
 		Done(settings.SetDescription(settingsMetadata.guid, 1, "demo.render-settings", 1, std::move(payload)));
 		Done(SaveScriptableAssetSource(scriptableFiles, settingsPath, settings));
 		Done(scriptableWorkspace->Refresh());
+		ScriptTypeDescriptor pipelineType;
+		pipelineType.sourceGuid = typeMetadata.guid;
+		pipelineType.localFileId = type->at("LocalFileId").get<UInt64>();
+		pipelineType.scriptType = "demo.render-settings";
+		pipelineType.kind = ScriptTypeKind::ScriptableObject;
+		pipelineType.isRenderPipeline = true;
+		const auto validatePipeline = [&](AssetReference reference)
+		{
+			return Rendering::ValidatePipelineAsset(scriptableFiles, scriptableWorkspace->AssetResolver(),
+			                                        {pipelineType}, reference);
+		};
+		Rendering::GraphicsSettings graphics{{settingsMetadata.guid, 1}};
+		Done(Rendering::SaveGraphicsSettings(scriptableFiles, graphics, validatePipeline));
+		const auto settingsSourcePath = Path(Rendering::graphicsSettingsSource);
+		const auto selectedSettingsBytes = Take(scriptableFiles.Read(settingsSourcePath));
+		Expect(!Rendering::SaveGraphicsSettings(scriptableFiles, {{scriptMaterialGuid, 1}}, validatePipeline) &&
+		           Take(scriptableFiles.Read(settingsSourcePath)) == selectedSettingsBytes,
+		       "Selecting a material replaced the valid Graphics configuration");
+		Expect(!Rendering::EncodeGraphicsSettings({{settingsMetadata.guid, 0}}) &&
+		           !Rendering::EncodeGraphicsSettings({{{}, 1}}),
+		       "Graphics settings accepted an incomplete stable asset identity");
+		const auto otherType =
+		    std::find_if(typeCatalog.at("Scripts").begin(), typeCatalog.at("Scripts").end(),
+		                 [](const auto& record) { return record.at("ScriptType") == "demo.other-settings"; });
+		Expect(otherType != typeCatalog.at("Scripts").end() && !otherType->at("IsRenderPipeline").get<bool>(),
+		       "Catalog accepted an ordinary ScriptableObject as a pipeline");
+		const auto otherPath = Path("prj:OtherSettings.ursaasset");
+		Text(scriptableFiles, otherPath, "{}");
+		Done(scriptableWorkspace->Refresh());
+		const auto otherMetadata = Take(scriptableWorkspace->Database()->Metadata(otherPath));
+		ScriptableAsset otherSettings;
+		Done(otherSettings.SetDescription(otherMetadata.guid, 1, "demo.other-settings", 1,
+		                                  {{"SourceGuid", typeMetadata.guid.ToString().c_str()},
+		                                   {"LocalFileId", otherType->at("LocalFileId").get<UInt64>()},
+		                                   {"Fields", nlohmann::json::object()},
+		                                   {"FieldTypes", nlohmann::json::object()}}));
+		Done(SaveScriptableAssetSource(scriptableFiles, otherPath, otherSettings));
+		Expect(!Rendering::SaveGraphicsSettings(scriptableFiles, {{otherMetadata.guid, 1}}, validatePipeline) &&
+		           Take(scriptableFiles.Read(settingsSourcePath)) == selectedSettingsBytes,
+		       "Selecting a non-pipeline ScriptableObject replaced the valid configuration");
 		auto scriptableImport = Take(AssetImportPipeline::Prepare(*scriptableWorkspace, options));
+		Expect(Take(Rendering::ReadGraphicsSettings(scriptableImport.runtimeFiles, true)).renderPipeline.guid ==
+		           settingsMetadata.guid,
+		       "Loose publication omitted the selected pipeline GUID");
+		auto reopened = Take(ProjectWorkspace::Open(scriptableRoot));
+		Expect(Take(Rendering::ReadGraphicsSettings(reopened->Index().Filesystem())).renderPipeline.guid ==
+		           settingsMetadata.guid,
+		       "Reopening the project lost its Graphics selection");
+		Done(scriptableWorkspace->Database()->Move(settingsPath, Path("prj:MovedPipeline.ursaasset")));
+		Done(scriptableWorkspace->Refresh());
+		Done(validatePipeline(graphics.renderPipeline));
+		scriptableImport = Take(AssetImportPipeline::Prepare(*scriptableWorkspace, options));
+		Expect(Take(Rendering::ReadGraphicsSettings(scriptableImport.runtimeFiles, true)).renderPipeline.guid ==
+		           settingsMetadata.guid,
+		       "Moving the pipeline source changed its published selection");
 		Expect(scriptableImport.importedAssets > 0 && scriptBuild.importedAssets > 0,
 		       "ScriptableAsset import did not rebuild and publish project content");
 		auto scriptableResources = Take(ResourceSession::Open(scriptableImport.runtimeFiles));
+		const auto compute = Take(scriptableResources->LoadShader(computeMetadata.guid));
+		const auto kernelIndex = Take(Rendering::FindComputeKernel(*compute, "Fill"));
+		const auto* kernel = Take(Rendering::ComputeKernelAt(*compute, kernelIndex));
+		Expect(kernel->threadGroupSize == Array<UInt32, 3>{8, 8, 1},
+		       "Project .compute source or kernel reflection was omitted from runtime publication");
 		Expect(Take(scriptableResources->LoadMaterial(scriptMaterialGuid))->Texture(MaterialTextureSlot::BaseColor) !=
 		               nullptr &&
 		           Take(scriptableResources->LoadShader(shaderMetadata.guid))->id == shaderMetadata.guid,
@@ -254,7 +334,14 @@ int main()
 		auto scriptableArchive = Take(PakArchive::Open(scriptablePackagePath));
 		VirtualFileSystem packedScriptableFiles;
 		Done(scriptableArchive->Mount(packedScriptableFiles));
+		const auto packedGraphics = Take(Rendering::ReadGraphicsSettings(packedScriptableFiles, true));
+		Expect(packedGraphics.renderPipeline.guid == graphics.renderPipeline.guid &&
+		           packedGraphics.renderPipeline.localFileId == 1,
+		       "Pak and loose content disagreed about the selected Graphics pipeline");
 		auto packedScriptableResources = Take(ResourceSession::Open(packedScriptableFiles));
+		Expect(Take(Rendering::FindComputeKernel(*Take(packedScriptableResources->LoadShader(computeMetadata.guid)),
+		                                         "Fill")) == kernelIndex,
+		       "Pak publication omitted the project .compute kernel");
 		Expect(
 		    Take(packedScriptableResources->LoadMaterial(scriptMaterialGuid))
 		                ->Texture(MaterialTextureSlot::BaseColor) != nullptr &&
@@ -262,6 +349,20 @@ int main()
 		        Take(LoadScriptableAssetGraph(*packedScriptableResources, {settingsMetadata.guid, 1})).assets.size() ==
 		            1,
 		    "Pak runtime could not load ScriptableAsset, Shader and Material dependencies");
+		const auto publishedManifest = Take(RuntimeContentManifestPath(options.configuration, options.profile));
+		const auto goodPublication = Take(scriptableFiles.Read(publishedManifest));
+		Done(scriptableFiles.WriteAtomic(settingsSourcePath,
+		                                 Take(Rendering::EncodeGraphicsSettings({{otherMetadata.guid, 1}}))));
+		Expect(!AssetImportPipeline::Prepare(*scriptableWorkspace, options) &&
+		           Take(scriptableFiles.Read(publishedManifest)) == goodPublication,
+		       "Invalid pipeline type was published over the last valid content");
+		Done(Rendering::SaveGraphicsSettings(scriptableFiles, {}));
+		Expect(!ReadRuntimeContent(scriptableFiles, options.configuration, options.profile, options.target,
+		                           &scriptableFiles),
+		       "Changing Graphics settings did not invalidate runtime readiness");
+		const auto clearedImport = Take(AssetImportPipeline::Prepare(*scriptableWorkspace, options));
+		Expect(!Take(Rendering::ReadGraphicsSettings(clearedImport.runtimeFiles, true)).renderPipeline.guid,
+		       "Clearing the selection did not publish the default pipeline choice");
 		std::cout << "Shared pipeline isolation, scope, concurrent writer, source generation, live references and "
 		             "package tests passed\n";
 		return 0;
