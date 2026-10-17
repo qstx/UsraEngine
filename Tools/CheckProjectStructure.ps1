@@ -67,9 +67,10 @@ foreach ($directory in @('Runtime', 'Engine', 'Editor', 'Tools', 'Tests')) {
         # Bundled tool runtimes carry dependency headers, not engine translation units.
         if ($relative.StartsWith('Tools/Python/') -or $relative.StartsWith('Tools/TracyMcp/Release/')) { continue }
         if (-not $dotnetEnabled -and $relative -match '^Engine/Scripting/DotNet/') { continue }
-        if (-not $editorEnabled -and $relative -match '^Tools/(AssetImport|AssetMigrate|ScriptCompile|ScriptPlayer)/') { continue }
+        if (-not $editorEnabled -and $relative -match '^Tools/(AssetImport|AssetMigrate|MeshMigrate|ScriptCompile|ScriptPlayer)/') { continue }
         if (-not $dotnetEnabled -and $relative -match '^Tools/(ScriptCompile|ScriptPlayer)/') { continue }
         if ($relative.StartsWith('Tests/')) {
+			if (-not $dotnetEnabled -and $relative.StartsWith('Tests/Bindings/')) { continue }
             if (-not $editorEnabled -and $relative.StartsWith('Tests/Editor/')) { continue }
             if (-not $dotnetEnabled -and $relative -match '^Tests/Editor/Scripting/') { continue }
             if ($relative.StartsWith('Tests/Integration/')) {

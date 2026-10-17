@@ -1,0 +1,10 @@
+[
+  "Bindings.manifest.json",
+  "Native/BindingManifest.generated.hpp",
+  "Native/BindingTypes.generated.hpp",
+  "Native/Editor.generated.hpp",
+  "Native/ManagedHost.generated.hpp",
+  "Native/Rendering.Commands.generated.hpp",
+  "Native/Rendering.generated.hpp",
+  "Native/Runtime.generated.hpp"
+]

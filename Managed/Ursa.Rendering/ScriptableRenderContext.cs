@@ -5,6 +5,7 @@ using Ursa;
 
 namespace Ursa.Rendering;
 
+[Ursa.Bindings.WireValue]
 public enum SortingCriteria : uint
 {
 	None,
@@ -16,12 +17,13 @@ public sealed class DrawingSettings
 {
 	public string[] ShaderTags { get; set; } = Array.Empty<string>();
 	public SortingCriteria Sorting { get; set; } = SortingCriteria.CommonOpaque;
-	public float[]? CameraPosition { get; set; }
+	public Vector3? CameraPosition { get; set; }
 	public string ActivePipeline { get; set; } = "UrsaForward";
 	public int OverrideMaterialPass { get; set; } = -1;
 	public Material? OverrideMaterial { get; set; }
 }
 
+[Ursa.Bindings.WireValue]
 public sealed class FilteringSettings
 {
 	public int MinimumQueue { get; set; }
@@ -69,26 +71,14 @@ public sealed class ScriptableRenderContext : IDisposable
 		if (!float.IsFinite(aspect) || aspect <= 0)
 			throw new ArgumentOutOfRangeException(nameof(aspect));
 		ulong frameId = checked((ulong)Interlocked.Increment(ref nextFrameId));
-		var payload = EngineApi.ResourceRequest<RenderContextPayload>(new
-		{
-			operation = "render.context.begin",
-			context = TokenData(),
-			frameId,
-			aspect
-		});
-		context = payload.Context;
+		context = NativeRenderingBindings.Begin(frameId, aspect);
 	}
 
 	public CullingResults Cull(Camera camera)
 	{
 		ArgumentNullException.ThrowIfNull(camera);
 		RequireValid();
-		var payload = EngineApi.ResourceRequest<RenderResultPayload>(new
-		{
-			operation = "render.cull",
-			context = TokenData(),
-			cameraPersistentId = camera.PersistentId
-		});
+		var payload = NativeRenderingBindings.Cull(context, camera.PersistentId);
 		return new CullingResults(context, payload.Index, payload.Generation);
 	}
 
@@ -96,12 +86,7 @@ public sealed class ScriptableRenderContext : IDisposable
 	{
 		ArgumentNullException.ThrowIfNull(camera);
 		RequireValid();
-		var frame = EngineApi.ResourceRequest<CameraFramePayload>(new
-		{
-			operation = "render.camera.setup",
-			context = TokenData(),
-			cameraPersistentId = camera.PersistentId
-		});
+		var frame = NativeRenderingBindings.SetupCamera(context, camera.PersistentId);
 		camera.Update(frame);
 	}
 
@@ -113,25 +98,15 @@ public sealed class ScriptableRenderContext : IDisposable
 		RequireValid();
 		if (!SameContext(cullingResults.Context, context))
 			throw new InvalidOperationException("Culling results belong to another render context.");
-		if (drawing.CameraPosition != null && drawing.CameraPosition.Length != 3)
-			throw new ArgumentException("CameraPosition must contain three values.", nameof(drawing));
-		var payload = EngineApi.ResourceRequest<RenderResultPayload>(new
+		var payload = NativeRenderingBindings.CreateRendererList(context, new RenderResultValue
 		{
-			operation = "render.rendererList.create",
-			context = TokenData(),
-			cullingContext = TokenData(cullingResults.Context),
-			cullingIndex = cullingResults.Index,
-			cullingGeneration = cullingResults.Generation,
-			shaderTags = drawing.ShaderTags,
-			sortingCriteria = (uint)drawing.Sorting,
-			cameraPosition = drawing.CameraPosition,
-			activePipeline = drawing.ActivePipeline,
-			overrideMaterialPass = drawing.OverrideMaterialPass,
-			overrideMaterial = drawing.OverrideMaterial?.Handle,
-			minimumQueue = filtering.MinimumQueue,
-			maximumQueue = filtering.MaximumQueue,
-			layerMask = filtering.LayerMask
-		});
+			Context = cullingResults.Context, Index = cullingResults.Index, Generation = cullingResults.Generation
+		}, new DrawingSettingsValue
+		{
+			ShaderTags = drawing.ShaderTags, Sorting = drawing.Sorting, CameraPosition = drawing.CameraPosition,
+			ActivePipeline = drawing.ActivePipeline, OverrideMaterialPass = drawing.OverrideMaterialPass,
+			OverrideMaterial = drawing.OverrideMaterial?.Handle
+		}, filtering);
 		return new RendererList(context, payload.Index, payload.Generation);
 	}
 
@@ -139,14 +114,14 @@ public sealed class ScriptableRenderContext : IDisposable
 	{
 		if (disposed)
 			return;
-		try { EngineApi.ResourceRequest(new { operation = "render.context.end", context = TokenData() }); }
+		try { NativeRenderingBindings.End(context); }
 		finally { retainedResources.Clear(); disposed = true; }
 	}
 
 	public void Submit()
 	{
 		RequireValid();
-		EngineApi.ResourceRequest(new { operation = "render.context.submit", context = TokenData() });
+		NativeRenderingBindings.Submit(context);
 	}
 
 	public void ExecuteCommandBuffer(CommandBuffer commands)
@@ -159,10 +134,7 @@ public sealed class ScriptableRenderContext : IDisposable
 	internal void ReadCameras(Dictionary<string, Camera> wrappers, List<Camera> cameras)
 	{
 		RequireValid();
-		var descriptions = EngineApi.ResourceRequest<CameraFramePayload[]>(new
-		{
-			operation = "render.cameras", context = TokenData()
-		});
+		var descriptions = NativeRenderingBindings.Cameras(context);
 		cameras.Clear();
 		foreach (var description in descriptions)
 		{
@@ -185,7 +157,7 @@ public sealed class ScriptableRenderContext : IDisposable
 	public void Abort()
 	{
 		if (disposed) return;
-		try { EngineApi.ResourceRequest(new { operation = "render.context.abort", context = TokenData() }); }
+		try { NativeRenderingBindings.Abort(context); }
 		finally { retainedResources.Clear(); disposed = true; }
 	}
 
@@ -209,35 +181,8 @@ public sealed class ScriptableRenderContext : IDisposable
 			throw new ObjectDisposedException(nameof(ScriptableRenderContext));
 	}
 
-	private object TokenData() => new
-	{
-		sessionId = context.sessionId,
-		frameId = context.frameId,
-		index = context.index,
-		generation = context.generation
-	};
-
-	private static object TokenData(RenderContextToken token) => new
-	{
-		sessionId = token.sessionId,
-		frameId = token.frameId,
-		index = token.index,
-		generation = token.generation
-	};
-
 	private static bool SameContext(RenderContextToken left, RenderContextToken right) =>
 		left.sessionId == right.sessionId && left.frameId == right.frameId && left.index == right.index &&
 		left.generation == right.generation;
 
-	private struct RenderContextPayload
-	{
-		public RenderContextToken Context { get; set; }
-	}
-
-	private struct RenderResultPayload
-	{
-		public RenderContextToken Context { get; set; }
-		public uint Index { get; set; }
-		public uint Generation { get; set; }
-	}
 }

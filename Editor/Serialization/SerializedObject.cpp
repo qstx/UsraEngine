@@ -2,6 +2,8 @@
 
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceId.hpp>
+#include <Serialization/RenderResourceReferences.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -11,6 +13,26 @@ namespace Ursa::Editor
 namespace
 {
 using Json = nlohmann::json;
+
+Json DescribeNativePayload(const Json& data)
+{
+	Json payload{{"Fields", data}, {"FieldTypes", Json::object()}};
+	for (const auto& field : data.items())
+	{
+		const Json& value = field.value();
+		const String kind = value.is_boolean()                                                 ? "Boolean"
+		                    : value.is_string()                                                ? "String"
+		                    : value.is_number_unsigned()                                       ? "UnsignedInteger"
+		                    : value.is_number_integer()                                        ? "SignedInteger"
+		                    : value.is_number_float()                                          ? "FloatingPoint"
+		                    : value.is_array()                                                 ? "Array"
+		                    : value.is_null() || (value.is_object() && value.contains("guid")) ? "AssetReference"
+		                                                                                       : "Unsupported";
+		payload["FieldTypes"][field.key()] = {{"Kind", ToStdString(kind)},
+		                                      {"ElementKind", value.is_array() ? "FloatingPoint" : "Unsupported"}};
+	}
+	return payload;
+}
 
 Result<Json::json_pointer> ParsePropertyPath(const String& path)
 {
@@ -217,20 +239,40 @@ Result<void> ValidateValue(const Json& value, const String& kind, const String& 
 	{
 		return ValidateReference(value, "GameObject");
 	}
-	if (type == "MeshReference" || type == "MaterialReference")
+	if (type == "MeshReference" || type == "MaterialReference" || type == "TextureReference" ||
+	    type == "ScriptableObjectReference" || type == "ShaderReference" || type == "ComputeShaderReference")
 	{
 		if (value.is_null())
 		{
 			return {};
 		}
-		const auto expectedReferenceKind = type == "MeshReference" ? "Mesh" : "Material";
+		const std::string expectedReferenceKind = type.substr(0, type.size() - std::string("Reference").size());
 		if (!value.is_object() || !value.contains("$ursaReference") || !value["$ursaReference"].is_object() ||
 		    value["$ursaReference"].value("Kind", std::string{}) != expectedReferenceKind ||
 		    !value["$ursaReference"].contains("Resource"))
 		{
-			return Result<void>::Failure("Malformed Mesh/Material script reference");
+			return Result<void>::Failure("Malformed serialized resource reference");
 		}
-		return {};
+		const auto& binding = value["$ursaReference"]["Resource"];
+		if (type != "MeshReference" && type != "MaterialReference")
+		{
+			return ValidateAssetReference(binding);
+		}
+		if (!binding.is_object() || !binding.contains("kind") || !binding["kind"].is_string())
+		{
+			return Result<void>::Failure("Resource binding kind is missing");
+		}
+		if (binding["kind"] == "asset")
+		{
+			return binding.contains("asset") ? ValidateAssetReference(binding["asset"])
+			                                 : Result<void>::Failure("Asset binding has no identity");
+		}
+		if (binding["kind"] != "local" || !binding.contains("id") || !binding["id"].is_string())
+		{
+			return Result<void>::Failure("Malformed document-local resource binding");
+		}
+		const auto id = ResourceId::Parse(ToUrsaString(binding["id"].get<std::string>()));
+		return id ? Result<void>{} : Result<void>::Failure(id.error);
 	}
 	if (type == "ComponentReference")
 	{
@@ -258,7 +300,7 @@ Result<void> ValidateValue(const Json& value, const String& kind, const String& 
 }
 
 Result<void> ValidateLiveReferences(const Json& value, const Json& descriptor, const Component& target,
-                                    ResourceSession* resources)
+                                    ResourceSession* resources, ComponentLoadContext* referenceContext)
 {
 	const std::string kind = descriptor.value("Kind", std::string{});
 	if (value.is_null())
@@ -272,7 +314,7 @@ Result<void> ValidateLiveReferences(const Json& value, const Json& descriptor, c
 		element["TypeName"] = descriptor.value("ElementTypeName", std::string{});
 		for (const auto& item : value)
 		{
-			auto valid = ValidateLiveReferences(item, element, target, resources);
+			auto valid = ValidateLiveReferences(item, element, target, resources, referenceContext);
 			if (!valid)
 			{
 				return valid;
@@ -280,11 +322,93 @@ Result<void> ValidateLiveReferences(const Json& value, const Json& descriptor, c
 		}
 		return {};
 	}
-	if (kind == "AssetReference" && resources)
+	if (kind == "AssetReference")
 	{
+		if (!resources)
+		{
+			return Result<void>::Failure("Asset reference validation requires a ResourceSession");
+		}
 		auto id = ResourceId::Parse(ToUrsaString(value.at("guid").get<std::string>()));
 		auto resolved = resources->ResolveAsset(id.value, value.at("localFileId").get<UInt64>());
 		return resolved ? Result<void>{} : Result<void>::Failure(resolved.error);
+	}
+	if (kind == "MeshReference" || kind == "MaterialReference")
+	{
+		const auto& binding = value.at("$ursaReference").at("Resource");
+		if (referenceContext)
+		{
+			auto reader = ArchiveFromJson(Json{{"value", binding}});
+			if (!reader)
+			{
+				return Result<void>::Failure(reader.error);
+			}
+			if (kind == "MeshReference")
+			{
+				auto loaded = ReadMeshBinding(reader.value, "value", *referenceContext);
+				return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
+			}
+			auto loaded = ReadMaterialBinding(reader.value, "value", *referenceContext);
+			return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
+		}
+		if (!resources || binding.at("kind") != "asset")
+		{
+			return Result<void>::Failure("Resource reference requires the owning document's serialization services");
+		}
+		const auto reference = AssetReferenceFromJson(binding.at("asset"), "SerializedProperty");
+		if (!reference)
+		{
+			return Result<void>::Failure(reference.error);
+		}
+		if (kind == "MeshReference")
+		{
+			auto loaded = resources->LoadMesh(reference.value.guid, reference.value.localFileId);
+			return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
+		}
+		auto loaded = resources->LoadMaterial(reference.value.guid, reference.value.localFileId);
+		return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
+	}
+	if (kind == "TextureReference" || kind == "ScriptableObjectReference" || kind == "ShaderReference" ||
+	    kind == "ComputeShaderReference")
+	{
+		if (!resources)
+		{
+			return Result<void>::Failure("Resource reference validation requires a ResourceSession");
+		}
+		const auto reference = AssetReferenceFromJson(value.at("$ursaReference").at("Resource"), "SerializedProperty");
+		if (!reference)
+		{
+			return Result<void>::Failure(reference.error);
+		}
+		if (kind == "TextureReference")
+		{
+			auto loaded = resources->LoadTexture(reference.value.guid, reference.value.localFileId);
+			return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
+		}
+		if (kind == "ScriptableObjectReference")
+		{
+			auto loaded = LoadScriptableAssetGraph(*resources, reference.value);
+			return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
+		}
+		if (reference.value.localFileId)
+		{
+			return Result<void>::Failure("Shader references require a root asset identity");
+		}
+		const auto shader = resources->LoadShader(reference.value.guid);
+		if (!shader)
+		{
+			return Result<void>::Failure(shader.error);
+		}
+		for (const auto& subShader : shader.value->subShaders)
+		{
+			for (const auto& pass : subShader.passes)
+			{
+				if (pass.computeKernel == (kind == "ComputeShaderReference"))
+				{
+					return {};
+				}
+			}
+		}
+		return Result<void>::Failure("Shader asset does not match its declared graphics/compute kind");
 	}
 	if (kind != "GameObjectReference" && kind != "ComponentReference")
 	{
@@ -380,6 +504,17 @@ Result<std::unique_ptr<SerializedObject>> SerializedObject::Create(Scripting::Sc
 		}
 		auto object = std::unique_ptr<SerializedObject>(new SerializedObject(target, std::move(payload)));
 		object->resources = resources;
+		object->captureCurrent = [&target]() -> Result<Json>
+		{
+			try
+			{
+				return Result<Json>::Success(Json::parse(ToStdString(target.SerializedPayload())));
+			}
+			catch (const std::exception& error)
+			{
+				return Result<Json>::Failure(ToUrsaString(error.what()));
+			}
+		};
 		return Result<std::unique_ptr<SerializedObject>>::Success(std::move(object));
 	}
 	catch (const std::exception& error)
@@ -395,7 +530,12 @@ Result<std::unique_ptr<SerializedObject>> SerializedObject::Create(Component& ta
 {
 	if (auto* script = dynamic_cast<Scripting::ScriptBehaviourComponent*>(&target))
 	{
-		return Create(*script, &context.Resources());
+		auto created = Create(*script, &context.Resources());
+		if (created)
+		{
+			created.value->referenceContext = &context;
+		}
+		return created;
 	}
 	auto codec = registry.FindFor(target);
 	if (!codec || !codec.value->createDetached)
@@ -408,50 +548,54 @@ Result<std::unique_ptr<SerializedObject>> SerializedObject::Create(Component& ta
 	{
 		return Result<std::unique_ptr<SerializedObject>>::Failure(data.error);
 	}
-	Json payload{{"Fields", data.value}, {"FieldTypes", Json::object()}};
-	for (const auto& field : data.value.items())
-	{
-		const Json& value = field.value();
-		const String kind = value.is_boolean()                                                 ? "Boolean"
-		                    : value.is_string()                                                ? "String"
-		                    : value.is_number()                                                ? "FloatingPoint"
-		                    : value.is_array()                                                 ? "Array"
-		                    : value.is_null() || (value.is_object() && value.contains("guid")) ? "AssetReference"
-		                                                                                       : "Unsupported";
-		payload["FieldTypes"][field.key()] = {{"Kind", ToStdString(kind)},
-		                                      {"ElementKind", value.is_array() ? "FloatingPoint" : "Unsupported"}};
-	}
+	Json payload = DescribeNativePayload(data.value);
 	auto object = std::unique_ptr<SerializedObject>(new SerializedObject(target, std::move(payload)));
+	object->resources = &context.Resources();
+	object->referenceContext = &context;
 	const ComponentCodec copiedCodec = *codec.value;
-	object->nativeApply = [&target, &context, copiedCodec, saveContext](const Json& candidate) -> Result<void>
+	object->captureCurrent = [&target, copiedCodec, saveContext]() -> Result<Json>
+	{
+		auto saved = copiedCodec.save(target, saveContext);
+		return saved ? Result<Json>::Success(DescribeNativePayload(saved.value)) : Result<Json>::Failure(saved.error);
+	};
+	object->nativeApply = [&target, &context, copiedCodec, saveContext](const Json& candidate) -> Result<Json>
 	{
 		auto previous = copiedCodec.save(target, saveContext);
 		if (!previous)
 		{
-			return Result<void>::Failure(previous.error);
+			return Result<Json>::Failure(previous.error);
 		}
 		ComponentLoadContext candidateContext = context;
 		auto candidateOwner = GameObject::Create("Serialized property validation");
 		auto candidateComponent = copiedCodec.createDetached(candidateOwner, candidate, candidateContext);
 		if (!candidateComponent)
 		{
-			return Result<void>::Failure(candidateComponent.error);
+			return Result<Json>::Failure(candidateComponent.error);
 		}
 		auto bound = candidateContext.ResolveReferences();
 		if (!bound)
 		{
-			return bound;
+			return Result<Json>::Failure(bound.error);
 		}
 		auto reader = ArchiveFromJson(candidate);
 		if (!reader)
 		{
-			return Result<void>::Failure(reader.error);
+			return Result<Json>::Failure(reader.error);
 		}
 		ComponentLoadContext applyContext = context;
 		auto applied = target.Deserialize(reader.value, applyContext);
 		if (applied)
 		{
 			applied = applyContext.ResolveReferences();
+		}
+		if (applied)
+		{
+			auto committed = copiedCodec.save(target, saveContext);
+			if (committed)
+			{
+				return committed;
+			}
+			applied = Result<void>::Failure(committed.error);
 		}
 		if (!applied)
 		{
@@ -463,7 +607,7 @@ Result<std::unique_ptr<SerializedObject>> SerializedObject::Create(Component& ta
 				rollbackContext.ResolveReferences();
 			}
 		}
-		return applied;
+		return Result<Json>::Failure(applied.error);
 	};
 	return Result<std::unique_ptr<SerializedObject>>::Success(std::move(object));
 }
@@ -473,6 +617,67 @@ Result<SerializedProperty> SerializedObject::FindProperty(const String& path)
 	auto value = PropertyValue(path);
 	return value ? Result<SerializedProperty>::Success(SerializedProperty(*this, path))
 	             : Result<SerializedProperty>::Failure(value.error);
+}
+
+Result<void> SerializedObject::Update()
+{
+	if (!captureCurrent)
+	{
+		return Result<void>::Failure("The serialized target has no refresh service");
+	}
+	auto snapshot = captureCurrent();
+	if (!snapshot || !snapshot.value.is_object() || !snapshot.value.contains("Fields") ||
+	    !snapshot.value["Fields"].is_object())
+	{
+		return Result<void>::Failure(snapshot ? "The refreshed target has no Fields object" : snapshot.error);
+	}
+	originalPayload = snapshot.value;
+	pendingPayload = std::move(snapshot.value);
+	modifiedProperties.clear();
+	return {};
+}
+
+Result<Json> SerializedObject::DescribeProperty(const String& path) const
+{
+	const auto value = PropertyValue(path);
+	if (!value)
+	{
+		return Result<Json>::Failure(value.error);
+	}
+	const String field = FieldName(path);
+	if (!pendingPayload.contains("FieldTypes") || !pendingPayload["FieldTypes"].contains(ToStdString(field)))
+	{
+		return Result<Json>::Success({{"Kind", "Unsupported"}, {"ElementKind", "Unsupported"}});
+	}
+	Json descriptor = pendingPayload["FieldTypes"].at(ToStdString(field));
+	const Size separator = path.find('/', String("/Fields/").size());
+	if (separator != String::npos)
+	{
+		const auto kind = descriptor.value("Kind", std::string{});
+		if ((kind != "Array" && kind != "List") || path.find('/', separator + 1) != String::npos)
+		{
+			return Result<Json>::Failure("Only declared array/list elements can be accessed as child properties");
+		}
+		descriptor["Kind"] = descriptor.value("ElementKind", std::string("Unsupported"));
+		descriptor["TypeName"] = descriptor.value("ElementTypeName", std::string{});
+		descriptor["ElementKind"] = "Unsupported";
+	}
+	return Result<Json>::Success(std::move(descriptor));
+}
+
+Vector<String> SerializedObject::PropertyPaths() const
+{
+	Vector<String> paths;
+	for (const auto& field : pendingPayload.at("Fields").items())
+	{
+		String escaped;
+		for (const char value : field.key())
+		{
+			escaped += value == '~' ? String("~0") : value == '/' ? String("~1") : String(1, value);
+		}
+		paths.push_back("/Fields/" + escaped);
+	}
+	return paths;
 }
 
 Result<Json> SerializedObject::PropertyValue(const String& path) const
@@ -540,7 +745,7 @@ Result<void> SerializedObject::ValidateCandidate(const Json& candidate) const
 		{
 			return Result<void>::Failure("Invalid value for script field " + field + ": " + valid.error);
 		}
-		auto referenced = ValidateLiveReferences(fieldValue, descriptor, target, resources);
+		auto referenced = ValidateLiveReferences(fieldValue, descriptor, target, resources, referenceContext);
 		if (!referenced)
 		{
 			return Result<void>::Failure("Invalid reference for field " + field + ": " + referenced.error);
@@ -555,6 +760,15 @@ Result<void> SerializedObject::Apply()
 	{
 		return {};
 	}
+	if (captureCurrent)
+	{
+		const auto current = captureCurrent();
+		if (!current || current.value != originalPayload)
+		{
+			return Result<void>::Failure(current ? "Serialized target changed since Update; refresh before applying"
+			                                     : current.error);
+		}
+	}
 	auto valid = ValidateCandidate(pendingPayload);
 	if (!valid)
 	{
@@ -565,8 +779,9 @@ Result<void> SerializedObject::Apply()
 		auto applied = nativeApply(pendingPayload["Fields"]);
 		if (!applied)
 		{
-			return applied;
+			return Result<void>::Failure(applied.error);
 		}
+		pendingPayload = DescribeNativePayload(applied.value);
 	}
 	else
 	{

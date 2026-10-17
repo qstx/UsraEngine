@@ -143,6 +143,36 @@ int main()
 		auto inconsistent = BuildShaderBindingLayout(shader, divergentBinding);
 		Expect(!inconsistent && inconsistent.error.find("different bindings") != String::npos,
 		       "The same resource silently used different bindings in different stages");
+		auto matrixVariant = variant;
+		for (auto& stage : matrixVariant.stages)
+		{
+			stage.reflectionJson =
+			    R"json({"entryPoints":[{"name":"VSMain","mode":"vert"},{"name":"PSMain","mode":"frag"}],"ubos":[{"name":"Matrices","set":0,"binding":1,"block_size":128,"members":[
+{"name":"_Row","type":"mat4","offset":0,"matrix_stride":16},
+{"name":"_Column","type":"mat4","offset":64,"matrix_stride":16,"row_major":true}]}]})json";
+		}
+		const auto matrices = BuildShaderBindingLayout(shader, matrixVariant);
+		Expect(bool(matrices) && matrices.value.uniformBuffers.size() == 1, "Matrix uniform layout was rejected");
+		const auto& members = matrices.value.uniformBuffers[0].members;
+		Expect(members.size() == 2 && !members[0].spirvRowMajor && members[1].spirvRowMajor,
+		       "SPIR-V matrix major order was lost during layout construction");
+		const Array<Float32, 16> columnMajor{1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15, 4, 8, 12, 16};
+		Vector<UInt8> packed(128, 0);
+		Expect(bool(WriteShaderUniformValue(packed, members[0], columnMajor.data(), sizeof(columnMajor))) &&
+		           bool(WriteShaderUniformValue(packed, members[1], columnMajor.data(), sizeof(columnMajor))),
+		       "Column-major matrix input could not be packed for both HLSL declarations");
+		Array<Float32, 32> actual;
+		std::memcpy(actual.data(), packed.data(), packed.size());
+		Expect(actual[1] == 2 && actual[4] == 5 && actual[17] == 5 && actual[20] == 2,
+		       "Matrix packing did not convert the non-symmetric row-major destination");
+		const auto saved = packed;
+		Expect(!WriteShaderUniformValue(packed, members[0], columnMajor.data(), 4) && packed == saved,
+		       "Wrong matrix size partially changed its uniform backing");
+		const String majorOrder("\"row_major\":true");
+		matrixVariant.stages[1].reflectionJson.replace(matrixVariant.stages[1].reflectionJson.find(majorOrder),
+		                                               majorOrder.size(), "\"row_major\":false");
+		Expect(!BuildShaderBindingLayout(shader, matrixVariant),
+		       "Conflicting matrix major orders merged across stages");
 		std::cout << "Shader reflection tests passed\n";
 		return 0;
 	}

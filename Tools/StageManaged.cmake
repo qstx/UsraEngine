@@ -5,10 +5,10 @@ if(NOT DEFINED SOURCE_ROOT OR NOT DEFINED OUTPUT_ROOT)
 endif()
 
 file(GLOB_RECURSE inputs RELATIVE "${SOURCE_ROOT}"
-  "${SOURCE_ROOT}/*.cs" "${SOURCE_ROOT}/*.csproj")
+  "${SOURCE_ROOT}/*.cs" "${SOURCE_ROOT}/*.csproj" "${SOURCE_ROOT}/*.props" "${SOURCE_ROOT}/*.targets")
 list(FILTER inputs EXCLUDE REGEX "(^|/)(bin|obj)/")
 file(GLOB_RECURSE staged RELATIVE "${OUTPUT_ROOT}"
-  "${OUTPUT_ROOT}/*.cs" "${OUTPUT_ROOT}/*.csproj")
+  "${OUTPUT_ROOT}/*.cs" "${OUTPUT_ROOT}/*.csproj" "${OUTPUT_ROOT}/*.props" "${OUTPUT_ROOT}/*.targets")
 list(FILTER staged EXCLUDE REGEX "(^|/)(bin|obj)/")
 foreach(relative IN LISTS staged)
   if(NOT relative IN_LIST inputs)

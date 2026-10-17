@@ -48,10 +48,10 @@ public sealed class Camera
 		return wrappers.GetValue(component, value => new Camera(value));
 	}
 	public static implicit operator Camera(CameraComponent component) => FromComponent(component);
-	internal void Update(CameraFramePayload frame)
+	internal void Update(CameraFrameValue frame)
 	{
 		RequireValid();
-		settings = CameraRenderingSettings.FromPayload(frame.Settings);
+		settings = frame.Settings;
 		pixelWidth = frame.Width;
 		pixelHeight = frame.Height;
 	}
@@ -64,10 +64,11 @@ public sealed class Camera
 	}
 }
 
-internal sealed class CameraFramePayload
+[Ursa.Bindings.WireValue]
+internal sealed class CameraFrameValue
 {
 	public string Identity { get; set; } = string.Empty;
 	public uint Width { get; set; }
 	public uint Height { get; set; }
-	public CameraSettingsPayload Settings { get; set; } = new();
+	public CameraRenderingSettings Settings { get; set; } = new();
 }

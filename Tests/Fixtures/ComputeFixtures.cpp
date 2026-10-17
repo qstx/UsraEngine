@@ -27,7 +27,7 @@ void Done(Result<void> result)
 } // namespace
 
 Result<std::shared_ptr<Shader::ShaderAsset>> CreateComputeFixture(const Shader::ShaderCompilerTools& tools,
-                                                                  ResourceId identity)
+                                                                  ResourceId identity, bool matrixProbe)
 {
 	try
 	{
@@ -35,7 +35,7 @@ Result<std::shared_ptr<Shader::ShaderAsset>> CreateComputeFixture(const Shader::
 		Done(files.MountProvider("prj", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
 		Done(files.MountProvider("lib", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
 		const auto sourcePath = Take(VirtualPath::Parse("prj:ComputeFixture/Fill.compute"));
-		const String source = R"(
+		String source = R"(
 #pragma kernel Fill
 [[vk::image_format("rgba8")]] RWTexture2D<float4> _Output : register(u0);
 RWStructuredBuffer<uint> _Data : register(u1);
@@ -47,6 +47,19 @@ void Fill(uint3 id : SV_DispatchThreadID) {
     _Data[id.y * 8 + id.x] = id.y * 8 + id.x + _Bias;
 }
 )";
+		if (matrixProbe)
+		{
+			source = R"(
+#pragma kernel Fill
+RWStructuredBuffer<float4> _Data : register(u0);
+cbuffer Parameters : register(b0) { row_major float4x4 _Row; column_major float4x4 _Column; };
+[numthreads(1, 1, 1)]
+void Fill(uint3 id : SV_DispatchThreadID) {
+    _Data[0] = mul(_Row, float4(2, 3, 5, 1));
+    _Data[1] = mul(_Column, float4(2, 3, 5, 1));
+}
+)";
+		}
 		Done(files.WriteAtomic(sourcePath, Vector<UInt8>(source.begin(), source.end())));
 		const String metadata = "{\"version\":1,\"folder\":false,\"guid\":\"" + identity.ToString() + "\"}";
 		Done(files.WriteAtomic(Take(VirtualPath::Parse(sourcePath.ToString() + ".meta")),

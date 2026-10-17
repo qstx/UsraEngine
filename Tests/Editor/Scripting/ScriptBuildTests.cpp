@@ -2,6 +2,7 @@
 #include <Assets/ScriptBuildService.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceId.hpp>
+#include <Scripting/Bindings/BindingRequirements.hpp>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -68,6 +69,13 @@ int main(int argumentCount, char** arguments)
 		const auto assets = root / "Assets";
 		const auto library = root / "Library";
 		std::filesystem::create_directories(library);
+		const auto framework = root / "Framework";
+		std::filesystem::create_directories(framework);
+		const auto originalFramework = std::filesystem::u8path(arguments[2]).parent_path();
+		for (const char* assembly : {"Ursa.Runtime.dll", "Ursa.Rendering.dll", "Ursa.Bindings.dll", "Ursa.Editor.dll"})
+		{
+			std::filesystem::copy_file(originalFramework / assembly, framework / assembly);
+		}
 		WriteSource(assets / "Scripts" / "GameMover.cs",
 		            "using Ursa; namespace DemoScripts; "
 		            "[UrsaScriptType(\"demo.mover\", Version = 2)] public sealed class GameMover : Behaviour { "
@@ -102,7 +110,7 @@ int main(int argumentCount, char** arguments)
 		Expect(static_cast<bool>(database), "Could not open ScriptBuild AssetDatabase");
 		auto service =
 		    ScriptBuildService::Open(filesystem, *database.value, std::filesystem::u8path(arguments[1]),
-		                             std::filesystem::u8path(arguments[2]), std::filesystem::u8path(arguments[3]),
+		                             framework / "Ursa.Runtime.dll", framework / "Ursa.Editor.dll",
 		                             std::filesystem::u8path(arguments[4]), std::filesystem::u8path(arguments[5]));
 		Expect(static_cast<bool>(service), "Could not create ScriptBuild service");
 		auto projects = service.value->GenerateProjects();
@@ -201,6 +209,42 @@ int main(int argumentCount, char** arguments)
 		Expect(cachedBuild && cachedBuild.value.succeeded &&
 		           cachedBuild.value.diagnostics.find("up to date") != String::npos,
 		       "ScriptBuild did not reuse a valid fingerprinted output");
+		const auto beforeSupportChange = service.value->SourceFingerprint();
+		const auto beforeManifest =
+		    nlohmann::json::parse(ToStdString(ReadText(filesystem, Path("lib:ScriptBuild/Manifests/Game.json"))));
+		{
+			// A PE overlay changes the support assembly input without changing project source or its metadata API.
+			std::ofstream support(framework / "Ursa.Bindings.dll", std::ios::binary | std::ios::app);
+			support.put('\0');
+		}
+		const auto afterSupportChange = service.value->SourceFingerprint();
+		auto supportCurrent = service.value->IsBuildCurrent(ScriptAssemblyGroup::Game);
+		Expect(beforeSupportChange && afterSupportChange && beforeSupportChange.value != afterSupportChange.value &&
+		           supportCurrent && !supportCurrent.value,
+		       "Binding support assembly change did not invalidate unchanged project source");
+		auto supportRebuild = service.value->Build(ScriptAssemblyGroup::Editor);
+		Expect(supportRebuild && supportRebuild.value.succeeded &&
+		           supportRebuild.value.diagnostics.find("up to date") == String::npos,
+		       "Binding input change did not rebuild project scripts");
+		const auto afterManifest =
+		    nlohmann::json::parse(ToStdString(ReadText(filesystem, Path("lib:ScriptBuild/Manifests/Game.json"))));
+		Expect(afterManifest.at("BuildFingerprint") != beforeManifest.at("BuildFingerprint") &&
+		           afterManifest.at("RequiredBindings") == Scripting::Bindings::ScriptBindingRequirements(false),
+		       "Rebuilt content did not publish its new fingerprint and current binding requirements");
+		auto incompatibleManifest = afterManifest;
+		incompatibleManifest["RequiredBindings"][0]["Hash"] = std::string(64, '0');
+		const auto incompatibleText = incompatibleManifest.dump();
+		Expect(static_cast<bool>(filesystem.WriteAtomic(
+		           Path("lib:ScriptBuild/Manifests/Game.json"),
+		           Vector<UInt8>(incompatibleText.data(), incompatibleText.data() + incompatibleText.size()))),
+		       "Manifest mismatch setup failed");
+		auto incompatibleCurrent = service.value->IsBuildCurrent(ScriptAssemblyGroup::Game);
+		Expect(incompatibleCurrent && !incompatibleCurrent.value, "Run accepted content with a stale binding identity");
+		auto repairedBindings = service.value->Build(ScriptAssemblyGroup::Game);
+		Expect(repairedBindings && repairedBindings.value.succeeded &&
+		           nlohmann::json::parse(ToStdString(ReadText(filesystem, Path("lib:ScriptBuild/Manifests/Game.json"))))
+		                   .at("RequiredBindings") == Scripting::Bindings::ScriptBindingRequirements(false),
+		       "Content cache did not recover from binding identity mismatch");
 		const VirtualPath editorState = Path("lib:ScriptBuild/State/Editor-Debug.json");
 		Expect(static_cast<bool>(filesystem.Remove(editorState)), "Could not invalidate the Library build cache");
 		auto rebuiltEditor = service.value->Build(ScriptAssemblyGroup::Editor);
@@ -368,7 +412,8 @@ int main(int argumentCount, char** arguments)
 		auto manifestText = filesystem.ReadText(Path("lib:ScriptBuild/Manifests/Game.json"));
 		Expect(static_cast<bool>(manifestText), "Successful script compilation published no VFS content manifest");
 		auto content = nlohmann::json::parse(ToStdString(manifestText.value));
-		Expect(content["Version"] == 1 && content["Group"] == "Game" && content["Assemblies"].size() == 1,
+		Expect(content["Version"] == 2 && content["Group"] == "Game" && content["Assemblies"].size() == 1 &&
+		           content["RequiredBindings"].size() == 3,
 		       "Game content manifest included an unexpected assembly group");
 		const auto catalogPath = VirtualPath::Parse(ToUrsaString(content["TypeCatalog"].get<std::string>())).value;
 		auto publishedCatalog = filesystem.ReadText(catalogPath);

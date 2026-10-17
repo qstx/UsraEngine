@@ -1,0 +1,4018 @@
+{
+  "Version": 1,
+  "Abi": "win-x64-cdecl-le",
+  "Generator": "Ursa.Bindings.v1",
+  "Modules": [
+    {
+      "Id": 381452714797066899,
+      "Name": "Editor",
+      "Hash": "ad4100b7d8c7ec6109e96f312b40c80ef839ba5fda51494c05e140a8b32e5c09",
+      "CommandHash": "",
+      "Required": false,
+      "CallScoped": true,
+      "Dependencies": [
+        "Rendering",
+        "Runtime"
+      ],
+      "Methods": [
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ApplyProperties",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "revision",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.AssetField",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorReferenceValue?",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Editor.EditorReferenceValue?",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kind",
+              "Type": "global::Ursa.Editor.EditorReferenceKind",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.BeginGroup",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Button",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ColorField",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Color",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Color",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.DrawDefaultInspector",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "revision",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.EndGroup",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.FloatField",
+          "Direction": "NativeMethod",
+          "Return": "double",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetAssets",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorAssetValue[]",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetDocument",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorDocumentValue?",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetProperty",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.SerializedPropertyState",
+          "Parameters": [
+            {
+              "Name": "revision",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetPropertyPaths",
+          "Direction": "NativeMethod",
+          "Return": "string[]",
+          "Parameters": [
+            {
+              "Name": "revision",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetScope",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorScopeValue",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetSelection",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorSelectionValue[]",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetTarget",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorReferenceValue?",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.HasModifiedProperties",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "revision",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.IntField",
+          "Direction": "NativeMethod",
+          "Return": "long",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "long",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.MarkDirty",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ObjectField",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorReferenceValue?",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Editor.EditorReferenceValue?",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kind",
+              "Type": "global::Ursa.Editor.EditorReferenceKind",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.OpenAsset",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Popup",
+          "Direction": "NativeMethod",
+          "Return": "int",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "selected",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "options",
+              "Type": "string[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.PropertyField",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "revision",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.QuaternionField",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Quaternion",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Quaternion",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ResizeArray",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "revision",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "size",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ResolveReference",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorReferenceValue",
+          "Parameters": [
+            {
+              "Name": "kind",
+              "Type": "global::Ursa.Editor.EditorReferenceKind",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "id",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "asset",
+              "Type": "global::Ursa.NativeAssetReference?",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SameLine",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Save",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Separator",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SetProperty",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "revision",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Editor.SerializedValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Text",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "text",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.TextField",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Toggle",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.UpdateProperties",
+          "Direction": "NativeMethod",
+          "Return": "ulong",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Vector2Field",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Vector2",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Vector2",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Vector3Field",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Vector3",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Vector3",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.Vector4Field",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Vector4",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Vector4",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        }
+      ]
+    },
+    {
+      "Id": 14281836054586644981,
+      "Name": "ManagedHost",
+      "Hash": "1f0babce59e54db9d556a635d3941ea93f877dac8cf2bf67ff623c8f73b6c46b",
+      "CommandHash": "",
+      "Required": true,
+      "CallScoped": false,
+      "Dependencies": [
+        "Rendering",
+        "Runtime"
+      ],
+      "Methods": [
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.BindBehaviour",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.BindScriptSession",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.CloseScriptSession",
+          "Direction": "ManagedCallback",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.ConfigureRenderPipeline",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "asset",
+              "Type": "global::Ursa.ManagedHost.PipelineAssetReference?",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.CreateBehaviour",
+          "Direction": "ManagedCallback",
+          "Return": "ulong",
+          "Parameters": [
+            {
+              "Name": "typeName",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "owner",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.CreateScriptSession",
+          "Direction": "ManagedCallback",
+          "Return": "ulong",
+          "Parameters": [
+            {
+              "Name": "editor",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.DeserializeBehaviour",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "archive",
+              "Type": "global::Ursa.ManagedHost.BehaviourFieldArchive",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.DestroyBehaviour",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.InitializeFramework",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.InvokeBehaviour",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "eventId",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.InvokeEditorExtension",
+          "Direction": "ManagedCallback",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "extension",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "capability",
+              "Type": "global::Ursa.EditorBindingCapability",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.LoadEditorApi",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "image",
+              "Type": "byte[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.LoadScriptAssembly",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "image",
+              "Type": "byte[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.LoadScriptContent",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "archive",
+              "Type": "global::Ursa.ManagedHost.ScriptContentArchive",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.PrepareEditorExtensions",
+          "Direction": "ManagedCallback",
+          "Return": "global::Ursa.EditorExtensionInfo[]",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.PrepareScriptReload",
+          "Direction": "ManagedCallback",
+          "Return": "global::Ursa.ManagedHost.ScriptReloadArchive",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "archive",
+              "Type": "global::Ursa.ManagedHost.ScriptReloadArchive",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.RenderScene",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "aspect",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.SelectScriptSession",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.SerializeBehaviour",
+          "Direction": "ManagedCallback",
+          "Return": "global::Ursa.ManagedHost.BehaviourFieldArchive",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.TransferScriptableAssets",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "source",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "candidate",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.ValidateScriptSession",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        }
+      ]
+    },
+    {
+      "Id": 1878535983750053602,
+      "Name": "Rendering",
+      "Hash": "ad7401be90c580978342b09182377926f49a1e0d62d5165e2c4714438d89ed68",
+      "CommandHash": "1bc9342e4ca29733054a536d7de07070a59c5eae0d325e0f9eb37cbd40713e9a",
+      "Required": true,
+      "CallScoped": false,
+      "Dependencies": [
+        "Runtime"
+      ],
+      "Methods": [
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.Abort",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.Begin",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.RenderContextToken",
+          "Parameters": [
+            {
+              "Name": "frameId",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "aspect",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.Cameras",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.CameraFrameValue[]",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.CreateGraphicsBuffer",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "target",
+              "Type": "global::Ursa.Rendering.GraphicsBufferTarget",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "count",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "stride",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.CreateRenderTexture",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "descriptor",
+              "Type": "global::Ursa.Rendering.RenderTextureValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.CreateRendererList",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.RenderResultValue",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "culling",
+              "Type": "global::Ursa.Rendering.RenderResultValue",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "drawing",
+              "Type": "global::Ursa.Rendering.DrawingSettingsValue",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "filtering",
+              "Type": "global::Ursa.Rendering.FilteringSettings",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.Cull",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.RenderResultValue",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "identity",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.End",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.EnqueueBatch",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "batch",
+              "Type": "global::System.ReadOnlySpan\u003Cbyte\u003E",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.ReadGraphicsBuffer",
+          "Direction": "NativeMethod",
+          "Return": "byte[]",
+          "Parameters": [
+            {
+              "Name": "buffer",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 7,
+              "Session": false
+            },
+            {
+              "Name": "offset",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "size",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.ReadRenderTexture",
+          "Direction": "NativeMethod",
+          "Return": "byte[]",
+          "Parameters": [
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 6,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.ReleaseGraphicsBuffer",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "buffer",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 7,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.ReleaseRenderTexture",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 6,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.SetupCamera",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.CameraFrameValue",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "identity",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.Submit",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.Blit",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "source",
+              "Type": "global::Ursa.Rendering.RenderTargetValue",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "destination",
+              "Type": "global::Ursa.Rendering.RenderTargetValue",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "pass",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.ClearTarget",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "flags",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "color",
+              "Type": "global::Ursa.Color",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "depth",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "stencil",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.CopyBuffer",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "source",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 7,
+              "Session": false
+            },
+            {
+              "Name": "destination",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 7,
+              "Session": false
+            },
+            {
+              "Name": "size",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "sourceOffset",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "destinationOffset",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.CopyTexture",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "source",
+              "Type": "global::Ursa.Rendering.RenderTargetValue",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "destination",
+              "Type": "global::Ursa.Rendering.RenderTargetValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.DispatchCompute",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "shader",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kernel",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "groupsX",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "groupsY",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "groupsZ",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.DrawFullscreen",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "pass",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.DrawMesh",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "localToWorld",
+              "Type": "global::Ursa.Matrix4x4",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "subMesh",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "pass",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.DrawRendererList",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "list",
+              "Type": "global::Ursa.Rendering.RenderResultValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.GetTemporaryTarget",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "descriptor",
+              "Type": "global::Ursa.Rendering.RenderTextureValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.ReleaseTemporaryTarget",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.ResetCameraState",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": true
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetComputeBuffer",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "shader",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kernel",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 7,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetComputeFloat",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "shader",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kernel",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetComputeInt",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "shader",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kernel",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetComputeMatrix",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "shader",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kernel",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Matrix4x4",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetComputeTexture",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "shader",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kernel",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Rendering.RenderTargetValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetComputeVector",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "shader",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kernel",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Vector4",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetGlobalBuffer",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 7,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetGlobalFloat",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetGlobalInt",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetGlobalMatrix",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Matrix4x4",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetGlobalTexture",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Rendering.RenderTargetValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetGlobalVector",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Vector4",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetRenderTarget",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "target",
+              "Type": "global::Ursa.Rendering.RenderTargetValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetRenderTargets",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "colors",
+              "Type": "global::Ursa.Rendering.RenderTargetValue[]",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "depth",
+              "Type": "global::Ursa.Rendering.RenderTargetValue?",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetScissor",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "x",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "y",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "width",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "height",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetViewport",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "x",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "y",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "width",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "height",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "minimumDepth",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "maximumDepth",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        }
+      ]
+    },
+    {
+      "Id": 11788884058683052816,
+      "Name": "Runtime",
+      "Hash": "11ec22bbe3eae583578c8c39b49806660a2def42af2f4e0bac75c7cfb4229a8a",
+      "CommandHash": "",
+      "Required": true,
+      "CallScoped": false,
+      "Dependencies": [],
+      "Methods": [
+        {
+          "Identity": "Ursa.NativeMaterialBindings.Clone",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.Create",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "type",
+              "Type": "global::Ursa.MaterialType",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.Destroy",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetColor",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Color",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetFloat",
+          "Direction": "NativeMethod",
+          "Return": "float",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetInt",
+          "Direction": "NativeMethod",
+          "Return": "int",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetKeywords",
+          "Direction": "NativeMethod",
+          "Return": "string[]",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetParameters",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.MaterialParametersValue",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetSampler",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.MaterialSampler",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetShader",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeAssetReference?",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetTexture",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeAssetReference?",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "slot",
+              "Type": "global::Ursa.MaterialTextureSlot",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetTextureProperty",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeAssetReference?",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetVector",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Vector4",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.Load",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "reference",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.RemovePropertyOverride",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetAlphaCutoff",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetAlphaMode",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.AlphaMode",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetBaseColor",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Color",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetColor",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Color",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetEmissive",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Color",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetFloat",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetInt",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetKeyword",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "enabled",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetMetallic",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetNormalScale",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetOcclusionStrength",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetRoughness",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetSampler",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.MaterialSampler",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetShader",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetTexture",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "slot",
+              "Type": "global::Ursa.MaterialTextureSlot",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.NativeAssetReference?",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetTextureProperty",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.NativeAssetReference?",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.SetVector",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Vector4",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.Clear",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.Clone",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.Create",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.Destroy",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.GetData",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.MeshData",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.GetTriangles",
+          "Direction": "NativeMethod",
+          "Return": "uint[]",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "index",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.GetVersion",
+          "Direction": "NativeMethod",
+          "Return": "ulong",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.Load",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "guid",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "localFileId",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.RecalculateBounds",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.RecalculateNormals",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetColors",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "global::Ursa.Color[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetData",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "data",
+              "Type": "global::Ursa.MeshData",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetIndices",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "uint[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetNormals",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "global::Ursa.Vector3[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetSubMesh",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "index",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.SubMesh",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetSubMeshCount",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "count",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetTangents",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "global::Ursa.Vector4[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetTriangles",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "index",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "uint[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetUv0",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "global::Ursa.Vector2[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMeshBindings.SetVertices",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "global::Ursa.Vector3[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.FindComputeKernel",
+          "Direction": "NativeMethod",
+          "Return": "int",
+          "Parameters": [
+            {
+              "Name": "reference",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.GetComputeThreadGroupSize",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.ComputeThreadGroupSize",
+          "Parameters": [
+            {
+              "Name": "reference",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "kernel",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.GetMaterialBindings",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle?[]",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "instance",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "first",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.GetMeshBinding",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle?",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "instance",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.IsValid",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "resource",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.LoadTexture",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "reference",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.SetMaterialBindings",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "materials",
+              "Type": "global::Ursa.NativeHandle?[]",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "shared",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "first",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.SetMeshBinding",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle?",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "instance",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.AddBehaviour",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "owner",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            },
+            {
+              "Name": "typeName",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.AddComponent",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "owner",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            },
+            {
+              "Name": "typeId",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.CreateGameObject",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.CreatePrimitive",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "type",
+              "Type": "global::Ursa.PrimitiveType",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.DestroyGameObject",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetActive",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetCameraProjection",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.CameraProjection",
+          "Parameters": [
+            {
+              "Name": "camera",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetCameraRenderingSettings",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.CameraRenderingSettings",
+          "Parameters": [
+            {
+              "Name": "camera",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetComponentEnabled",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetComponentOwner",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetComponentPersistentId",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetComponentType",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetComponents",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle[]",
+          "Parameters": [
+            {
+              "Name": "owner",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetGameObjectPersistentId",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetKey",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "key",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "phase",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetLayer",
+          "Direction": "NativeMethod",
+          "Return": "int",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetLocalTransform",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.LocalTransformValue",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetName",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetParent",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetTime",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.TimeState",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetWorldPosition",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Vector3",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.IsComponentActive",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.ReadFile",
+          "Direction": "NativeMethod",
+          "Return": "byte[]",
+          "Parameters": [
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.RemoveComponent",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.ReportHostMessage",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "level",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "message",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.ResolveComponentPersistentId",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.ResolveGameObjectPersistentId",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetActive",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            },
+            {
+              "Name": "active",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetCameraProjection",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "camera",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.CameraProjection",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetCameraRenderingSettings",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "camera",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.CameraRenderingSettings",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetComponentEnabled",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "enabled",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetLayer",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            },
+            {
+              "Name": "layer",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetLocalTransform",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.LocalTransformValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetName",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetParent",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            },
+            {
+              "Name": "parent",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetWindowTitle",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "title",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetWorldPosition",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.Vector3",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.WriteFile",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "bytes",
+              "Type": "global::System.ReadOnlySpan\u003Cbyte\u003E",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.WriteLog",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "level",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "message",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeSerializationBindings.LoadScriptableAssetGraph",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.ScriptableAssetGraphArchive",
+          "Parameters": [
+            {
+              "Name": "root",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeSerializationBindings.RestoreMaterial",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "archive",
+              "Type": "global::Ursa.ResourceReferenceArchive",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeSerializationBindings.RestoreMesh",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "archive",
+              "Type": "global::Ursa.ResourceReferenceArchive",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeSerializationBindings.SnapshotMaterial",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.ResourceReferenceArchive",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeSerializationBindings.SnapshotMesh",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.ResourceReferenceArchive",
+          "Parameters": [
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        }
+      ]
+    }
+  ]
+}

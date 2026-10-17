@@ -20,6 +20,8 @@ struct ShaderUniformMember
 	String type;
 	UInt32 byteOffset = 0;
 	UInt32 byteSize = 0;
+	UInt32 matrixStride = 0;
+	bool spirvRowMajor = false;
 };
 
 struct ShaderUniformBufferLayout
@@ -59,6 +61,10 @@ Result<ShaderBindingLayout> BuildShaderBindingLayout(const ShaderAsset& shader, 
 
 Result<Vector<UInt8>> PackMaterialUniformBuffer(const ShaderAsset& shader, const ShaderBindingLayout& layout,
                                                 const MaterialInstance& material, UInt32 binding);
+
+// Matrix inputs use the engine's column-major convention; DXC transposes HLSL matrix types in SPIR-V.
+Result<void> WriteShaderUniformValue(Vector<UInt8>& destination, const ShaderUniformMember& member, const void* source,
+                                     Size byteSize);
 
 Result<Vector<MaterialTextureBinding>> BuildMaterialTextureBindings(const ShaderAsset& shader,
                                                                     const ShaderBindingLayout& layout,

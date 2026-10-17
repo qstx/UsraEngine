@@ -32,7 +32,7 @@ if ($LASTEXITCODE -ne 0 -or $version -notmatch 'clang-format version 19\.') {
 
 $files = foreach ($module in @('Runtime', 'Engine', 'Editor', 'Tests')) {
     Get-ChildItem -LiteralPath (Join-Path $repository $module) -Recurse -File |
-        Where-Object { $_.Extension -in @('.cpp', '.hpp', '.h', '.c') }
+        Where-Object { $_.Extension -in @('.cpp', '.hpp', '.h', '.c') -and $_.FullName -notmatch '[\\/]Scripting[\\/]Bindings[\\/]Generated[\\/]' }
 }
 
 $failed = 0

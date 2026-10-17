@@ -7,15 +7,18 @@ using System.Text;
 using System.Text.Json;
 using Ursa.ManagedHost;
 using Ursa;
+using Ursa.Bindings;
+using CommandCodec = Ursa.Bindings.Generated.RenderingCommands;
 
-internal static unsafe class Program
+internal static unsafe partial class Program
 {
 	private sealed class FakeObject
 	{
 		internal string name = string.Empty;
 		internal string persistentId = string.Empty;
 		internal bool active = true;
-		internal Bootstrap.NativeHandle parent;
+		internal int layer;
+		internal NativeHandle parent;
 		internal float[] transform = { 0, 0, 0, 0, 0, 0, 1, 1, 1, 1 };
 		internal readonly System.Collections.Generic.List<uint> components = new();
 	}
@@ -27,6 +30,7 @@ internal static unsafe class Program
 		internal string persistentId = string.Empty;
 		internal bool enabled = true;
 		internal float[] values = Array.Empty<float>();
+		internal CameraRenderingSettings rendering = new();
 	}
 
 	private sealed class PipelineProbeAsset : Ursa.Rendering.RenderPipelineAsset
@@ -104,496 +108,6 @@ internal static unsafe class Program
 		}
 	}
 
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static void Log(nint context, uint level, byte* message, ulong length)
-	{
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-	private static int SubmitRenderBatch(nint context, byte* token, ulong tokenSize, byte* batch, ulong batchSize)
-	{
-		if (token == null || tokenSize != 24 || batch == null || batchSize < 16 || batchSize > 64 * 1024 * 1024)
-			return 1;
-		var bytes = new ReadOnlySpan<byte>(batch, checked((int)batchSize));
-		if (BinaryPrimitives.ReadUInt32LittleEndian(bytes) != Ursa.Rendering.RenderCommandProtocol.version ||
-		    BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]) != 16 ||
-		    BinaryPrimitives.ReadUInt32LittleEndian(bytes[12..]) != batchSize)
-			return 1;
-		submittedRenderBatches.Add(bytes.ToArray());
-		++renderBatchSubmissions;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int CreateGameObject(nint context, byte* name, ulong length, Bootstrap.NativeHandle* output)
-	{
-		uint index = nextFakeObject++;
-		fakeObjects[index] = new FakeObject { name = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(name, (int)length)),
-			                                  persistentId = $"00000000-0000-4000-8000-{index:D12}" };
-		*output = new Bootstrap.NativeHandle { sessionId = 1, index = index, generation = 1, kind = 1 };
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetName(nint context, Bootstrap.NativeHandle handle, byte* output, ulong capacity,
-	                           ulong* required)
-	{
-		byte[] name = Encoding.UTF8.GetBytes(fakeObjects[handle.index].name);
-		*required = (ulong)name.Length;
-		if (capacity < (ulong)name.Length)
-		{
-			return 4;
-		}
-		name.AsSpan().CopyTo(new Span<byte>(output, name.Length));
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int SetName(nint context, Bootstrap.NativeHandle handle, byte* value, ulong length)
-	{
-		fakeObjects[handle.index].name = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(value, (int)length));
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetActive(nint context, Bootstrap.NativeHandle handle, uint* active)
-	{
-		*active = fakeObjects[handle.index].active ? 1u : 0u;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int SetActive(nint context, Bootstrap.NativeHandle handle, uint active)
-	{
-		fakeObjects[handle.index].active = active != 0;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetParent(nint context, Bootstrap.NativeHandle handle, Bootstrap.NativeHandle* parent)
-	{
-		*parent = fakeObjects[handle.index].parent;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int SetParent(nint context, Bootstrap.NativeHandle handle, Bootstrap.NativeHandle parent)
-	{
-		fakeObjects[handle.index].parent = parent;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetTransform(nint context, Bootstrap.NativeHandle handle, float* values, ulong count)
-	{
-		fakeObjects[handle.index].transform.AsSpan().CopyTo(new Span<float>(values, (int)count));
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int SetTransform(nint context, Bootstrap.NativeHandle handle, float* values, ulong count)
-	{
-		new ReadOnlySpan<float>(values, (int)count).CopyTo(fakeObjects[handle.index].transform);
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetCameraProjection(nint context, Bootstrap.NativeHandle handle, float* values, ulong count)
-	{
-		if (context != 123 || count != 3 || !fakeComponents.TryGetValue(handle.index, out FakeComponent? component) ||
-			component.typeId != "ursa.Camera")
-			return 1;
-		component.values.AsSpan().CopyTo(new Span<float>(values, 3));
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int SetCameraProjection(nint context, Bootstrap.NativeHandle handle, float* values, ulong count)
-	{
-		if (context != 123 || count != 3 || !fakeComponents.TryGetValue(handle.index, out FakeComponent? component) ||
-			component.typeId != "ursa.Camera" || !float.IsFinite(values[0]) || values[0] <= 0 || values[0] >= MathF.PI ||
-			!float.IsFinite(values[1]) || !float.IsFinite(values[2]) || values[1] <= 0 || values[2] <= values[1])
-			return 1;
-		new ReadOnlySpan<float>(values, 3).CopyTo(component.values);
-		return 0;
-	}
-
-
-
-
-
-
-
-
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int SetWindowTitle(nint context, byte* title, ulong length)
-	{
-		if (context != 123 || length > 1024 || (title == null && length != 0))
-			return 1;
-		string value = length == 0 ? string.Empty : Encoding.UTF8.GetString(new ReadOnlySpan<byte>(title, (int)length));
-		if (value.Contains('\0'))
-			return 1;
-		fakeWindowTitle = value;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetInputState(nint context, uint key, uint phase, uint* state)
-	{
-		*state = phase switch {
-			0 => fakeInputDown,
-			1 => fakeInputPressed,
-			2 => fakeInputReleased,
-			_ => 0
-		};
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetTimeState(nint context, float* delta, float* fixedDelta, double* time, double* fixedTime,
-	                                ulong* frame)
-	{
-		*delta = 0.016f;
-		*fixedDelta = 0.02f;
-		*time = 10.5;
-		*fixedTime = 10.4;
-		*frame = 99;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int WriteLog(nint context, uint level, byte* message, ulong length)
-	{
-		fakeLogLevel = level;
-		fakeLog = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(message, (int)length));
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int ReadFile(nint context, byte* path, ulong pathLength, byte* output, ulong capacity,
-	                            ulong* required)
-	{
-		string key = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(path, (int)pathLength));
-		byte[] bytes = fakeFiles[key];
-		*required = (ulong)bytes.Length;
-		if (capacity < (ulong)bytes.Length)
-		{
-			return 4;
-		}
-		bytes.AsSpan().CopyTo(new Span<byte>(output, bytes.Length));
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int WriteFile(nint context, byte* path, ulong pathLength, byte* data, ulong length)
-	{
-		string key = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(path, (int)pathLength));
-		fakeFiles[key] = new ReadOnlySpan<byte>(data, (int)length).ToArray();
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int AddComponent(nint context, Bootstrap.NativeHandle owner, byte* type, ulong length,
-	                                Bootstrap.NativeHandle* output)
-	{
-		if (!fakeObjects.TryGetValue(owner.index, out FakeObject? gameObject))
-		{
-			return 1;
-		}
-		uint index = nextFakeComponent++;
-		fakeComponents[index] = new FakeComponent {
-			owner = owner.index, typeId = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(type, (int)length)),
-			persistentId = $"00000000-0000-4000-8001-{index:D12}",
-			values = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(type, (int)length)) == "ursa.Camera"
-			             ? new[] { 0.78539816f, 0.1f, 100.0f }
-			             : new[] { 1.0f, 1.0f, 1.0f, 1.0f }
-		};
-		gameObject.components.Add(index);
-		*output = new Bootstrap.NativeHandle { sessionId = 1, index = index, generation = 1, kind = 2 };
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetComponentCount(nint context, Bootstrap.NativeHandle owner, uint* count)
-	{
-		if (!fakeObjects.TryGetValue(owner.index, out FakeObject? gameObject))
-		{
-			return 1;
-		}
-		*count = (uint)gameObject.components.Count;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetComponentAt(nint context, Bootstrap.NativeHandle owner, uint index,
-	                                  Bootstrap.NativeHandle* output)
-	{
-		if (!fakeObjects.TryGetValue(owner.index, out FakeObject? gameObject) || index >= gameObject.components.Count)
-		{
-			return 1;
-		}
-		uint componentIndex = gameObject.components[(int)index];
-		*output = new Bootstrap.NativeHandle { sessionId = 1, index = componentIndex, generation = 1, kind = 2 };
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetComponentType(nint context, Bootstrap.NativeHandle handle, byte* output, ulong capacity,
-	                                    ulong* required)
-	{
-		if (!fakeComponents.TryGetValue(handle.index, out FakeComponent? component))
-		{
-			return 1;
-		}
-		byte[] type = Encoding.UTF8.GetBytes(component.typeId);
-		*required = (ulong)type.Length;
-		if (capacity < (ulong)type.Length)
-		{
-			return 4;
-		}
-		type.AsSpan().CopyTo(new Span<byte>(output, type.Length));
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetComponentOwner(nint context, Bootstrap.NativeHandle handle, Bootstrap.NativeHandle* output)
-	{
-		if (!fakeComponents.TryGetValue(handle.index, out FakeComponent? component))
-		{
-			return 1;
-		}
-		*output = new Bootstrap.NativeHandle { sessionId = 1, index = component.owner, generation = 1, kind = 1 };
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetComponentEnabled(nint context, Bootstrap.NativeHandle handle, uint* enabled)
-	{
-		if (!fakeComponents.TryGetValue(handle.index, out FakeComponent? component))
-		{
-			return 1;
-		}
-		*enabled = component.enabled ? 1u : 0u;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int SetComponentEnabled(nint context, Bootstrap.NativeHandle handle, uint enabled)
-	{
-		if (enabled > 1 || !fakeComponents.TryGetValue(handle.index, out FakeComponent? component))
-		{
-			return 1;
-		}
-		component.enabled = enabled != 0;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int IsComponentActive(nint context, Bootstrap.NativeHandle handle, uint* active)
-	{
-		if (!fakeComponents.TryGetValue(handle.index, out FakeComponent? component) ||
-			!fakeObjects.TryGetValue(component.owner, out FakeObject? owner))
-		{
-			return 1;
-		}
-		*active = component.enabled && owner.active ? 1u : 0u;
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int RemoveComponent(nint context, Bootstrap.NativeHandle handle)
-	{
-		if (!fakeComponents.Remove(handle.index, out FakeComponent? component) ||
-			!fakeObjects.TryGetValue(component.owner, out FakeObject? owner))
-		{
-			return 1;
-		}
-		owner.components.Remove(handle.index);
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int LoadTexture(nint context, byte* guid, ulong length, ulong localFileId,
-	                               Bootstrap.NativeHandle* output)
-	{
-		string value = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(guid, (int)length));
-		if (context != 123 || value != fakeTextureGuid || localFileId != 0)
-		{
-			return 1;
-		}
-		*output = new Bootstrap.NativeHandle { sessionId = 1, index = 201, generation = 1, kind = 3 };
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int LoadMaterial(nint context, byte* guid, ulong length, ulong localFileId,
-	                                Bootstrap.NativeHandle* output)
-	{
-		string value = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(guid, (int)length));
-		if (context != 123 || value != fakeMaterialGuid || localFileId != 0)
-		{
-			return 1;
-		}
-		*output = new Bootstrap.NativeHandle { sessionId = 1, index = 202, generation = 1, kind = 3 };
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int AddBehaviour(nint context, Bootstrap.NativeHandle owner, byte* typeName, ulong typeNameLength,
-	                                ulong instanceToken, Bootstrap.NativeHandle* output)
-	{
-		if (!fakeObjects.TryGetValue(owner.index, out FakeObject? gameObject) || instanceToken == 0 || typeNameLength == 0)
-		{
-			return 1;
-		}
-		uint index = nextFakeScriptComponent++;
-		fakeComponents[index] =
-		    new FakeComponent { owner = owner.index,
-			                    typeId = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(typeName, (int)typeNameLength)),
-			                    persistentId = $"00000000-0000-4000-8001-{index:D12}" };
-		gameObject.components.Add(index);
-		*output = new Bootstrap.NativeHandle { sessionId = owner.sessionId, index = index, generation = 1, kind = 2 };
-		return 0;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetGameObjectPersistentId(nint context, Bootstrap.NativeHandle handle, byte* output,
-	                                             ulong capacity, ulong* required)
-	{
-		return CopyPersistentId(fakeObjects[handle.index].persistentId, output, capacity, required);
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int ResolveGameObjectPersistentId(nint context, byte* id, ulong length,
-	                                                 Bootstrap.NativeHandle* output)
-	{
-		string value = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(id, (int)length));
-		foreach (var entry in fakeObjects)
-		{
-			if (entry.Value.persistentId == value)
-			{
-				*output = new Bootstrap.NativeHandle { sessionId = 1, index = entry.Key, generation = 1, kind = 1 };
-				return 0;
-			}
-		}
-		return 3;
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int GetComponentPersistentId(nint context, Bootstrap.NativeHandle handle, byte* output,
-	                                            ulong capacity, ulong* required)
-	{
-		return CopyPersistentId(fakeComponents[handle.index].persistentId, output, capacity, required);
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-
-	private static int ResolveComponentPersistentId(nint context, byte* id, ulong length,
-	                                                Bootstrap.NativeHandle* output)
-	{
-		string value = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(id, (int)length));
-		foreach (var entry in fakeComponents)
-		{
-			if (entry.Value.persistentId == value)
-			{
-				*output = new Bootstrap.NativeHandle { sessionId = 1, index = entry.Key, generation = 1, kind = 2 };
-				return 0;
-			}
-		}
-		return 3;
-	}
-
-	private static int CopyPersistentId(string id, byte* output, ulong capacity, ulong* required)
-	{
-		byte[] bytes = Encoding.UTF8.GetBytes(id);
-		*required = (ulong)bytes.Length;
-		if (capacity < (ulong)bytes.Length)
-		{
-			return 4;
-		}
-		bytes.AsSpan().CopyTo(new Span<byte>(output, bytes.Length));
-		return 0;
-	}
-
-	private static string resourceResponse = string.Empty;
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-	private static int ResourceRequest(nint context, byte* input, ulong length, byte* output, ulong capacity, ulong* required)
-	{
-		if (context != 123 || required == null) return 1;
-		if (input != null)
-		{
-			using var document = System.Text.Json.JsonDocument.Parse(Encoding.UTF8.GetString(new ReadOnlySpan<byte>(input, checked((int)length))));
-			var request = document.RootElement;
-			object response = request.GetProperty("operation").GetString() switch
-			{
-				"render.context.begin" => new { value = (object)new { context = new { sessionId = ++renderSessionIdentity, frameId = request.GetProperty("frameId").GetUInt64(), index = 1U, generation = 1U } } },
-				"render.camera.setup" => new { value = (object)new { width = 64u, height = 64u,
-					settings = new { type = 0u, depth = 0f, clearFlags = 0u, cullingMask = uint.MaxValue,
-						background = new float[] { 0.05f, 0.05f, 0.05f, 1 }, viewport = new float[] { 0, 0, 1, 1 } } } },
-				"render.cull" => new { value = (object)new { context = request.GetProperty("context"), index = 0U, generation = 1U } },
-				"render.rendererList.create" => new { value = (object)new { context = request.GetProperty("context"), index = 0U, generation = 1U } },
-				"render.context.end" => new { value = (object?)null },
-				"render.context.submit" => new { value = (object?)null },
-				"render.context.abort" => new { value = (object?)null },
-				"computeShader.findKernel" when request.GetProperty("name").GetString() == "Fill" => new { value = (object)0 },
-				"computeShader.threadGroup" => new { value = (object)new uint[] {8, 8, 1} },
-				"material.load" when request.GetProperty("guid").GetString() == fakeMaterialGuid => new { value = (object)new { sessionId = 1UL, index = 202U, generation = 1U, kind = 5U, reserved = 0U } },
-				"resource.valid" => new { value = (object)(request.GetProperty("handle").GetProperty("index").GetUInt32() is 201U or 202U) },
-				_ => (object)new { error = "Unsupported protocol fixture resource request" }
-			};
-			resourceResponse = System.Text.Json.JsonSerializer.Serialize(response);
-		}
-		var bytes = Encoding.UTF8.GetBytes(resourceResponse);
-		*required = (ulong)bytes.Length;
-		if (capacity < *required) return 4;
-		bytes.CopyTo(new Span<byte>(output, bytes.Length));
-		resourceResponse = string.Empty;
-		return 0;
-	}
-
-	private static int Validate(uint version, uint size, bool hasCallback, int argumentSize)
-	{
-		Bootstrap.NativeApiV6 api = new() { version = version, size = size, context = 0, sceneContext = 123,
-			                                logUtf8 = hasCallback ? &Log : null,
-			                                submitRenderBatch = hasCallback ? &SubmitRenderBatch : null };
-		return Bootstrap.Validate((nint)(&api), argumentSize);
-	}
-
 	private static void ManagedRenderContextApiTests()
 	{
 		GameObject owner = GameObject.Create("Render Camera");
@@ -654,14 +168,15 @@ internal static unsafe class Program
 		commands.ClearTarget(true, true, false, new Ursa.Vector4(0.1f, 0.2f, 0.3f, 1));
 		commands.SetViewport(0, 0, 640, 480);
 		commands.SetScissor(0, 0, 640, 480);
-		commands.DrawMesh(mesh!, material!, new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 });
+		commands.DrawMesh(mesh!, material!, Matrix4x4.Identity);
 		commands.Execute(context);
 		Expect(submittedRenderBatches.Count > 0, "CommandBuffer did not submit a batch");
 		byte[] executedBatch = submittedRenderBatches[^1];
 		Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(8)) == 5,
 		       "CommandBuffer did not preserve command count");
-		uint[] expectedOpcodes = { 1, 2, 3, 12, 5 };
-		int offset = 16;
+		uint[] expectedOpcodes = { CommandCodec.Opcode_RenderCommands_SetRenderTarget, CommandCodec.Opcode_RenderCommands_ClearTarget,
+			CommandCodec.Opcode_RenderCommands_SetViewport, CommandCodec.Opcode_RenderCommands_SetScissor, CommandCodec.Opcode_RenderCommands_DrawMesh };
+		int offset = BindingCommandWriter.HeaderSize;
 		foreach (uint opcode in expectedOpcodes)
 		{
 			Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(offset)) == opcode,
@@ -679,8 +194,8 @@ internal static unsafe class Program
 		commands.Execute(context);
 		byte[] nextBatch = submittedRenderBatches[^1];
 		Expect(BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(8)) == 1 &&
-		       BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(16)) == 1 &&
-		       BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(24)) == 13,
+		       BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(BindingCommandWriter.HeaderSize)) == CommandCodec.Opcode_RenderCommands_SetRenderTarget &&
+		       BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(BindingCommandWriter.HeaderSize + 12)) == 13,
 		       "Cleared CommandBuffer did not execute only its newly recorded commands");
 		Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(8)) == 5,
 		       "Clearing a CommandBuffer mutated a previously submitted batch");
@@ -715,10 +230,14 @@ internal static unsafe class Program
 		commands.CopyBuffer(sourceBuffer, destinationBuffer, 128);
 		commands.Execute(context);
 		byte[] resourceBatch = submittedRenderBatches[^1];
-		uint[] resourceOpcodes = { 9, 9, 9, 10, 1, 11, 1, 13, 6, 7 };
+		uint[] resourceOpcodes = { CommandCodec.Opcode_RenderCommands_SetGlobalFloat, CommandCodec.Opcode_RenderCommands_SetGlobalVector,
+			CommandCodec.Opcode_RenderCommands_SetGlobalTexture, CommandCodec.Opcode_RenderCommands_GetTemporaryTarget,
+			CommandCodec.Opcode_RenderCommands_SetRenderTarget, CommandCodec.Opcode_RenderCommands_ReleaseTemporaryTarget,
+			CommandCodec.Opcode_RenderCommands_SetRenderTarget, CommandCodec.Opcode_RenderCommands_CopyTexture,
+			CommandCodec.Opcode_RenderCommands_Blit, CommandCodec.Opcode_RenderCommands_CopyBuffer };
 		Expect(BinaryPrimitives.ReadUInt32LittleEndian(resourceBatch.AsSpan(8)) == resourceOpcodes.Length,
 		       "Resource and compositing commands were not recorded");
-		offset = 16;
+		offset = BindingCommandWriter.HeaderSize;
 		foreach (uint opcode in resourceOpcodes)
 		{
 			Expect(BinaryPrimitives.ReadUInt32LittleEndian(resourceBatch.AsSpan(offset)) == opcode,
@@ -733,7 +252,7 @@ internal static unsafe class Program
 		commands.Clear();
 		commands.SetGlobalTexture("_Source", (Ursa.Rendering.RenderTargetIdentifier)88u);
 		commands.SetGlobalInt("_Mode", 3);
-		commands.SetGlobalMatrix("_Transform", new float[] {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+		commands.SetGlobalMatrix("_Transform", Matrix4x4.Identity);
 		commands.SetGlobalBuffer("_Data", sourceBuffer);
 		commands.Blit(88u, Ursa.Rendering.RenderTargetIdentifier.CameraTarget, blitMaterial!);
 		commands.SetRenderTarget(Ursa.Rendering.RenderTargetIdentifier.CameraTarget);
@@ -753,16 +272,16 @@ internal static unsafe class Program
 		commands.SetComputeFloat(compute, kernel, "_Intensity", 0.75f);
 		commands.SetComputeInt(compute, kernel, "_Bias", 7);
 		commands.SetComputeVector(compute, kernel, "_Color", new Vector4(0.5f, 0.25f, 0.75f, 1));
-		commands.SetComputeMatrix(compute, kernel, "_Matrix", new float[] {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+		commands.SetComputeMatrix(compute, kernel, "_Matrix", Matrix4x4.Identity);
 		commands.SetComputeTexture(compute, kernel, "_Output", sourceTexture);
 		commands.SetComputeBuffer(compute, kernel, "_Data", sourceBuffer);
 		commands.DispatchCompute(compute, kernel, 1);
 		commands.Execute(context);
 		byte[] computeBatch = submittedRenderBatches[^1];
 		Expect(BinaryPrimitives.ReadUInt32LittleEndian(computeBatch.AsSpan(8)) == 7 &&
-		           BinaryPrimitives.ReadUInt32LittleEndian(computeBatch.AsSpan(16)) == 16 &&
-		           computeBatch[24] == 0x12 && computeBatch[25] == 0x34 && computeBatch[26] == 0x56 && computeBatch[27] == 0x78,
-		       "Compute commands lost their persistent identity, parameter framing or GUID byte order");
+		           BinaryPrimitives.ReadUInt32LittleEndian(computeBatch.AsSpan(BindingCommandWriter.HeaderSize)) == CommandCodec.Opcode_RenderCommands_SetComputeFloat &&
+		           Encoding.UTF8.GetString(computeBatch.AsSpan(BindingCommandWriter.HeaderSize + 20, 36)) == compute.Reference.Guid,
+		       "Compute commands lost their typed persistent identity or parameter framing");
 		bool invalidComputeRejected = false;
 		try { commands.DispatchCompute(compute, -1, 1); }
 		catch (ArgumentOutOfRangeException) { invalidComputeRejected = true; }
@@ -946,29 +465,20 @@ internal static unsafe class Program
 
 	private static int Main()
 	{
+		using var runtimeBindings = InstallRuntimeBindings();
+		using var renderingBindings = InstallRenderingBindings();
 		ScriptableObjectTests.Run();
 		RenderCommandProtocolTests.Run();
-		Bootstrap.NativeApiV6 fieldApi = new() { version = 6, size = (uint)sizeof(Bootstrap.NativeApiV6),
-		                                         logUtf8 = &Log, sceneContext = 123,
-		                                         submitRenderBatch = &SubmitRenderBatch,
-		                                         loadTexture = &LoadTexture, loadMaterial = &LoadMaterial,
-		                                         resourceRequest = &ResourceRequest };
-		EngineApi.Initialize((nint)(&fieldApi));
 		ScriptableAssetFieldTests.Run();
 		ShaderFieldTests.Run();
 		ScriptableAssetGraphTests.Run();
 		ScriptableAssetRecoveryTests.Run();
 		ScriptableAssetSnapshotTests.Run();
-		int tableSize = sizeof(Bootstrap.NativeApiV6);
-		Expect(tableSize == 336, "Native API struct size differs from the x64 C ABI contract");
-		Expect(Marshal.OffsetOf<Bootstrap.NativeApiV6>(nameof(Bootstrap.NativeApiV6.submitRenderBatch)).ToInt32() == 328,
-		       "Native API render-batch callback offset differs from the x64 C ABI contract");
-		Expect(Bootstrap.Validate(0, tableSize) == 1, "Null native API pointer was accepted");
-		Expect(Validate(1, (uint)tableSize, true, tableSize - 1) == 1, "Truncated native API arguments were accepted");
-		Expect(Validate(5, (uint)tableSize, true, tableSize) == 2, "Legacy native API version was accepted");
-		Expect(Validate(6, (uint)(tableSize - 1), true, tableSize) == 2, "Truncated native API table was accepted");
-		Expect(Validate(6, (uint)tableSize, false, tableSize) == 3, "Missing required callback was accepted");
-		Expect(Validate(6, (uint)tableSize, true, tableSize) == 0, "Valid native API table was rejected");
+		delegate* unmanaged[Stdcall]<nint, int, int> bootstrap = &Bootstrap.InitializeBindings;
+		Expect(bootstrap(0, sizeof(BindingBootstrap)) != 0, "Null binding bootstrap pointer was accepted");
+		BindingBootstrap invalidBootstrap = default;
+		Expect(bootstrap((nint)(&invalidBootstrap), sizeof(BindingBootstrap) - 1) != 0, "Truncated binding bootstrap was accepted");
+		Expect(bootstrap((nint)(&invalidBootstrap), sizeof(BindingBootstrap)) != 0, "Unsupported binding bootstrap version was accepted");
 		var serializedFields = ScriptFieldSchema.Describe(typeof(SchemaProbeBehaviour));
 		Expect(
 		    serializedFields.Count == 3 &&
@@ -1073,60 +583,18 @@ internal static unsafe class Program
 		}
 		Expect(migrationVersionRejected, "Managed script fields accepted an incompatible type version");
 
-		Bootstrap.NativeApiV6 api = new() { version = 6,
-			                                size = (uint)sizeof(Bootstrap.NativeApiV6),
-			                                sceneContext = 123,
-			                                logUtf8 = &Log,
-			                                submitRenderBatch = &SubmitRenderBatch,
-			                                createGameObject = &CreateGameObject,
-			                                getGameObjectName = &GetName,
-			                                setGameObjectName = &SetName,
-			                                getGameObjectActive = &GetActive,
-			                                setGameObjectActive = &SetActive,
-			                                getGameObjectParent = &GetParent,
-			                                setGameObjectParent = &SetParent,
-			                                getLocalTransform = &GetTransform,
-			                                setLocalTransform = &SetTransform,
-			                                getInputState = &GetInputState,
-			                                getTimeState = &GetTimeState,
-			                                writeLog = &WriteLog,
-			                                readFile = &ReadFile,
-			                                writeFile = &WriteFile,
-			                                addComponent = &AddComponent,
-			                                getComponentCount = &GetComponentCount,
-			                                getComponentAt = &GetComponentAt,
-			                                getComponentType = &GetComponentType,
-			                                getComponentOwner = &GetComponentOwner,
-			                                getComponentEnabled = &GetComponentEnabled,
-			                                setComponentEnabled = &SetComponentEnabled,
-			                                isComponentActive = &IsComponentActive,
-			                                removeComponent = &RemoveComponent,
-			                                loadTexture = &LoadTexture,
-			                                loadMaterial = &LoadMaterial,
-			                                addBehaviour = &AddBehaviour,
-			                                getGameObjectPersistentId = &GetGameObjectPersistentId,
-			                                resolveGameObjectPersistentId = &ResolveGameObjectPersistentId,
-			                                getComponentPersistentId = &GetComponentPersistentId,
-			                                resolveComponentPersistentId = &ResolveComponentPersistentId,
-			                                getCameraProjection = &GetCameraProjection,
-			                                setCameraProjection = &SetCameraProjection,
-			                                setWindowTitle = &SetWindowTitle,
-			                                resourceRequest = &ResourceRequest };
-		EngineApi.Initialize((nint)(&api));
 		ManagedRenderContextApiTests();
 		ManagedCommandBufferApiTests();
 		ManagedRenderPipelineLifecycleTests();
 		ManagedRenderPipelineSessionTests();
-		byte[] renderBatch = new byte[16];
-		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch, Ursa.Rendering.RenderCommandProtocol.version);
-		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(4), 16);
-		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(8), 0);
-		System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(renderBatch.AsSpan(12), 16);
-		Ursa.Rendering.RenderContextToken renderToken = new() { sessionId = 7, frameId = 9, index = 2, generation = 3 };
+		using var emptyCommandWriter = new BindingCommandWriter(CommandCodec.Hash);
+		byte[] renderBatch = emptyCommandWriter.ToArray();
+		Ursa.Rendering.RenderContextToken renderToken = Ursa.Rendering.NativeRenderingBindings.Begin(9, 1);
 		int submissionsBeforeProtocol = renderBatchSubmissions;
 		Ursa.Rendering.RenderCommandProtocol.Submit(renderToken, renderBatch);
 		Expect(renderBatchSubmissions == submissionsBeforeProtocol + 1,
 		       "Managed RenderCommandProtocol did not submit its fixed-layout batch");
+		Ursa.Rendering.NativeRenderingBindings.End(renderToken);
 		GameObject parent = GameObject.Create("父对象");
 		GameObject child = GameObject.Create("子对象");
 		child.Parent = parent;
@@ -1216,19 +684,12 @@ internal static unsafe class Program
 		referenceBehaviour.targetCamera = null;
 		referenceBehaviour.targetBehaviour = null;
 		referencePeer.targetBehaviour = null;
-		byte[] lifecyclePayloadBytes = Encoding.UTF8.GetBytes(lifecyclePayload);
-		byte[] peerLifecyclePayloadBytes = Encoding.UTF8.GetBytes(peerLifecyclePayload);
-		fixed(byte* payload = lifecyclePayloadBytes) fixed(byte* peerPayload = peerLifecyclePayloadBytes)
-		{
-			ulong token = BehaviourRegistry.TokenFor(referenceBehaviour);
-			ulong peerToken = BehaviourRegistry.TokenFor(referencePeer);
-			delegate* unmanaged[Stdcall]<ulong, byte*, ulong, int> deserialize = &Bootstrap.DeserializeBehaviour;
-			delegate* unmanaged[Stdcall]<ulong, uint, int> invokeReference = &Bootstrap.InvokeBehaviour;
-			Expect(deserialize(token, payload, (ulong)lifecyclePayloadBytes.Length) == 0 &&
-			           deserialize(peerToken, peerPayload, (ulong)peerLifecyclePayloadBytes.Length) == 0 &&
-			           invokeReference(token, 0) == 0 && invokeReference(peerToken, 0) == 0,
-			       "Managed script references were not restored before Awake");
-		}
+		ulong referenceToken = BehaviourRegistry.TokenFor(referenceBehaviour);
+		ulong peerReferenceToken = BehaviourRegistry.TokenFor(referencePeer);
+		ManagedHostBindings.DeserializeBehaviour(referenceToken, new() { Version = 1, Json = lifecyclePayload });
+		ManagedHostBindings.DeserializeBehaviour(peerReferenceToken, new() { Version = 1, Json = peerLifecyclePayload });
+		ManagedHostBindings.InvokeBehaviour(referenceToken, 0);
+		ManagedHostBindings.InvokeBehaviour(peerReferenceToken, 0);
 		Expect(referenceOwner.Name == "ReferenceTarget:父对象:ReferencePeer" &&
 		           referencePeerOwner.Name == "::ReferenceTarget:父对象:ReferencePeer",
 		       "Managed Awake did not observe bidirectional script, GameObject, and native Component references");
@@ -1238,15 +699,12 @@ internal static unsafe class Program
 		byte[] missingReferencePayload = Encoding.UTF8.GetBytes(
 		    "{\"FormatVersion\":1,\"ScriptType\":\"test.reference\",\"Version\":1,\"Fields\":{\"targetObject\":{\"$" +
 		    "ursaReference\":{\"Kind\":\"GameObject\",\"Id\":\"99999999-9999-4999-8999-999999999999\"}}}}");
-		fixed(byte* payload = missingReferencePayload)
-		{
-			ulong token = BehaviourRegistry.TokenFor(missingReferenceBehaviour);
-			delegate* unmanaged[Stdcall]<ulong, byte*, ulong, int> deserialize = &Bootstrap.DeserializeBehaviour;
-			delegate* unmanaged[Stdcall]<ulong, uint, int> invokeReference = &Bootstrap.InvokeBehaviour;
-			Expect(deserialize(token, payload, (ulong)missingReferencePayload.Length) == 0 &&
-			           invokeReference(token, 0) != 0,
-			       "Managed Awake accepted a non-null missing GameObject reference");
-		}
+		ulong missingToken = BehaviourRegistry.TokenFor(missingReferenceBehaviour);
+		ManagedHostBindings.DeserializeBehaviour(missingToken, new() { Version = 1, Json = Encoding.UTF8.GetString(missingReferencePayload) });
+		bool missingGraphRejected = false;
+		try { ManagedHostBindings.InvokeBehaviour(missingToken, 0); }
+		catch (InvalidOperationException) { missingGraphRejected = true; }
+		Expect(missingGraphRejected, "Managed Awake accepted a non-null missing GameObject reference");
 		Expect(missingReferenceOwner.Name == "MissingReferenceOwner",
 		       "Missing managed reference allowed Awake to run with an incomplete object graph");
 		camera.Remove();
@@ -1281,38 +739,23 @@ internal static unsafe class Program
 			wrongAssetTypeRejected = true;
 		}
 		Expect(wrongAssetTypeRejected, "Managed Texture wrapper accepted a Material reference");
-		Bootstrap.NativeHandle behaviorOwnerA = ToBootstrapHandle(parent.Handle);
-		Bootstrap.NativeHandle behaviorOwnerB = ToBootstrapHandle(child.Handle);
-		byte[] behaviorName = Encoding.UTF8.GetBytes(typeof(ProtocolBehaviour).AssemblyQualifiedName!);
-		ulong firstToken = 0;
-		ulong secondToken = 0;
-		fixed(byte* typeName = behaviorName)
-		{
-			delegate* unmanaged[Stdcall]<byte*, ulong, Bootstrap.NativeHandle*, ulong*, int> create =
-			    &Bootstrap.CreateBehaviour;
-			Expect(create(typeName, (ulong)behaviorName.Length, &behaviorOwnerA, &firstToken) == 0 && firstToken != 0 &&
-			           create(typeName, (ulong)behaviorName.Length, &behaviorOwnerB, &secondToken) == 0 &&
-			           secondToken != 0 && firstToken != secondToken,
-			       "Managed Behaviour factory did not create independent instances");
-		}
-		Bootstrap.NativeHandle nativeScriptHandleA =
-		    new() { sessionId = parent.Handle.sessionId, index = 900, generation = 1, kind = 2 };
-		Bootstrap.NativeHandle nativeScriptHandleB =
-		    new() { sessionId = child.Handle.sessionId, index = 901, generation = 1, kind = 2 };
-		delegate* unmanaged[Stdcall]<ulong, Bootstrap.NativeHandle*, int> bind = &Bootstrap.BindBehaviour;
-		delegate* unmanaged[Stdcall]<ulong, uint, int> invoke = &Bootstrap.InvokeBehaviour;
-		delegate* unmanaged[Stdcall]<ulong, int> destroy = &Bootstrap.DestroyBehaviour;
-		Expect(bind(firstToken, &nativeScriptHandleA) == 0 && bind(secondToken, &nativeScriptHandleB) == 0,
-		       "Managed Behaviour did not bind its native Component handle");
+		ulong firstToken = ManagedHostBindings.CreateBehaviour(typeof(ProtocolBehaviour).AssemblyQualifiedName!, parent.Handle);
+		ulong secondToken = ManagedHostBindings.CreateBehaviour(typeof(ProtocolBehaviour).AssemblyQualifiedName!, child.Handle);
+		Expect(firstToken != 0 && secondToken != 0 && firstToken != secondToken, "Managed Behaviour factory did not create independent instances");
+		ManagedHostBindings.BindBehaviour(firstToken, new NativeHandle { sessionId = parent.Handle.sessionId, index = 900, generation = 1, kind = 2 });
+		ManagedHostBindings.BindBehaviour(secondToken, new NativeHandle { sessionId = child.Handle.sessionId, index = 901, generation = 1, kind = 2 });
 		for (uint eventId = 0; eventId < 8; ++eventId)
 		{
-			Expect(invoke(firstToken, eventId) == 0 && invoke(secondToken, eventId) == 0,
-			       "Managed Behaviour lifecycle dispatch failed");
+			ManagedHostBindings.InvokeBehaviour(firstToken, eventId);
+			ManagedHostBindings.InvokeBehaviour(secondToken, eventId);
 		}
-		Expect(parent.Name.EndsWith(":OnDestroy", StringComparison.Ordinal) &&
-		           child.Name.EndsWith(":OnDestroy", StringComparison.Ordinal) && destroy(firstToken) == 0 &&
-		           destroy(secondToken) == 0 && invoke(firstToken, 4) != 0,
-		       "Managed Behaviour lifecycle state was shared or retained after removal");
+		Expect(parent.Name.EndsWith(":OnDestroy", StringComparison.Ordinal) && child.Name.EndsWith(":OnDestroy", StringComparison.Ordinal), "Managed Behaviour lifecycle state was shared");
+		ManagedHostBindings.DestroyBehaviour(firstToken);
+		ManagedHostBindings.DestroyBehaviour(secondToken);
+		bool removedBehaviourRejected = false;
+		try { ManagedHostBindings.InvokeBehaviour(firstToken, 4); }
+		catch (InvalidOperationException) { removedBehaviourRejected = true; }
+		Expect(removedBehaviourRejected, "Managed Behaviour token remained callable after removal");
 		Expect(Encoding.UTF8.GetString(AssetFileSystem.ReadAllBytes("user:ManagedBehaviourOnDestroy.txt")) ==
 		           child.Name,
 		       "Managed OnDestroy did not retain access to its owning GameObject");
@@ -1332,9 +775,9 @@ internal static unsafe class Program
 		return 0;
 	}
 
-	private static Bootstrap.NativeHandle ToBootstrapHandle(NativeHandle handle)
+	private static NativeHandle ToMockHandle(NativeHandle handle)
 	{
-		return new Bootstrap.NativeHandle { sessionId = handle.sessionId, index = handle.index,
+		return new NativeHandle { sessionId = handle.sessionId, index = handle.index,
 			                                generation = handle.generation, kind = handle.kind,
 			                                reserved = handle.reserved };
 	}

@@ -1,0 +1,1 @@
+#include <Fixture.generated.hpp>

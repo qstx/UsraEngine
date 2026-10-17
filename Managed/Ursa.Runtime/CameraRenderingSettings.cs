@@ -2,19 +2,23 @@ using System;
 
 namespace Ursa;
 
+[Ursa.Bindings.WireValue]
 public enum CameraType : uint { Game, SceneView, Preview }
 
+[Ursa.Bindings.WireValue]
 public enum CameraClearFlags : uint { ColorAndDepth, Depth, Nothing }
 
-public readonly struct Viewport
+[Ursa.Bindings.WireValue]
+public struct Viewport
 {
 	public Viewport(float x, float y, float width, float height) { X = x; Y = y; Width = width; Height = height; }
-	public float X { get; }
-	public float Y { get; }
-	public float Width { get; }
-	public float Height { get; }
+	public float X { get; set; }
+	public float Y { get; set; }
+	public float Width { get; set; }
+	public float Height { get; set; }
 }
 
+[Ursa.Bindings.WireValue]
 public sealed class CameraRenderingSettings
 {
 	public CameraType Type { get; set; } = CameraType.Game;

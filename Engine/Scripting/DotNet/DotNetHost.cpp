@@ -3,6 +3,11 @@
 #include <Core/StringInterop.hpp>
 #include <Scripting/DotNet/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
+#include <Scripting/Bindings/BindingCollections.hpp>
+#include <Scripting/Bindings/BindingRequirements.hpp>
+#include <Runtime.generated.hpp>
+#include <Rendering.generated.hpp>
+#include <ManagedHost.generated.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -24,13 +29,12 @@
 
 namespace Ursa::Scripting
 {
-namespace
+namespace HostBindings = Bindings::ManagedHost;
+
+struct DotNetHost::BindingState
 {
-Int32 RejectRenderBatchWithoutScene(void*, const UInt8*, UInt64, const UInt8*, UInt64)
-{
-	return 1;
-}
-} // namespace
+	Bindings::CallbackModule<HostBindings::Table> host;
+};
 
 #if defined(_WIN32)
 namespace
@@ -171,7 +175,10 @@ Result<std::unique_ptr<DotNetHost>> DotNetHost::Create()
 #endif
 }
 
-DotNetHost::~DotNetHost() = default;
+DotNetHost::~DotNetHost()
+{
+	Deactivate();
+}
 
 Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostFiles& files, LogCallback logCallback,
                                ManagedSceneApi* sceneApi)
@@ -183,7 +190,7 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 	(void)sceneApi;
 	return Result<void>::Failure("The .NET host currently supports Windows x64 only");
 #else
-	if (initialized || hostFxrLibrary || managedEntryPoint || runtimeStarted.load())
+	if (initialized || hostFxrLibrary || bindingsEntryPoint || runtimeStarted.load())
 	{
 		return Result<void>::Failure("A .NET runtime can be initialized only once in this process");
 	}
@@ -247,105 +254,33 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 	}
 
 	auto loadAssembly = reinterpret_cast<load_assembly_and_get_function_pointer_fn>(loadAssemblyDelegate);
-	void* entryPoint = nullptr;
-	const int loadResult =
-	    loadAssembly(reinterpret_cast<const char_t*>(bootstrap.value.entryAssemblyPath.c_str()),
-	                 reinterpret_cast<const char_t*>(L"Ursa.ManagedHost.Bootstrap, Ursa.ManagedHost"),
-	                 reinterpret_cast<const char_t*>(L"Initialize"), UNMANAGEDCALLERSONLY_METHOD, nullptr, &entryPoint);
-	if (loadResult < 0 || !entryPoint)
-	{
-		FreeLibrary(library);
-		return Result<void>::Failure("Cannot load Ursa.ManagedHost.Bootstrap.Initialize");
-	}
-	void* createBehaviourEntry = nullptr;
-	void* bindBehaviourEntry = nullptr;
-	void* invokeBehaviourEntry = nullptr;
-	void* destroyBehaviourEntry = nullptr;
-	void* serializeBehaviourEntry = nullptr;
-	void* deserializeBehaviourEntry = nullptr;
-	void* loadScriptAssemblyEntry = nullptr;
-	void* prepareExtensionsEntry = nullptr;
-	void* describeExtensionsEntry = nullptr;
-	void* invokeExtensionEntry = nullptr;
-	void* prepareReloadEntry = nullptr;
-	void* readReloadEntry = nullptr;
-	void* loadEditorEntry = nullptr;
-	void* loadContentEntry = nullptr;
-	void* createSessionEntry = nullptr;
-	void* selectSessionEntry = nullptr;
-	void* bindSessionEntry = nullptr;
-	void* validateSessionEntry = nullptr;
-	void* closeSessionEntry = nullptr;
-	void* transferAssetsEntry = nullptr;
-	void* configurePipelineEntry = nullptr;
-	void* renderSceneEntry = nullptr;
 	const auto loadBootstrapMethod = [&loadAssembly, &bootstrap](const wchar_t* method, void** output)
 	{
 		return loadAssembly(reinterpret_cast<const char_t*>(bootstrap.value.entryAssemblyPath.c_str()),
 		                    reinterpret_cast<const char_t*>(L"Ursa.ManagedHost.Bootstrap, Ursa.ManagedHost"),
 		                    reinterpret_cast<const char_t*>(method), UNMANAGEDCALLERSONLY_METHOD, nullptr, output);
 	};
-	if (loadBootstrapMethod(L"CreateBehaviour", &createBehaviourEntry) < 0 || !createBehaviourEntry ||
-	    loadBootstrapMethod(L"BindBehaviour", &bindBehaviourEntry) < 0 || !bindBehaviourEntry ||
-	    loadBootstrapMethod(L"InvokeBehaviour", &invokeBehaviourEntry) < 0 || !invokeBehaviourEntry ||
-	    loadBootstrapMethod(L"DestroyBehaviour", &destroyBehaviourEntry) < 0 || !destroyBehaviourEntry ||
-	    loadBootstrapMethod(L"SerializeBehaviour", &serializeBehaviourEntry) < 0 || !serializeBehaviourEntry ||
-	    loadBootstrapMethod(L"DeserializeBehaviour", &deserializeBehaviourEntry) < 0 || !deserializeBehaviourEntry ||
-	    loadBootstrapMethod(L"LoadScriptAssembly", &loadScriptAssemblyEntry) < 0 || !loadScriptAssemblyEntry ||
-	    loadBootstrapMethod(L"PrepareEditorExtensions", &prepareExtensionsEntry) < 0 || !prepareExtensionsEntry ||
-	    loadBootstrapMethod(L"DescribeEditorExtensions", &describeExtensionsEntry) < 0 || !describeExtensionsEntry ||
-	    loadBootstrapMethod(L"InvokeEditorExtension", &invokeExtensionEntry) < 0 || !invokeExtensionEntry ||
-	    loadBootstrapMethod(L"PrepareScriptReload", &prepareReloadEntry) < 0 || !prepareReloadEntry ||
-	    loadBootstrapMethod(L"ReadPreparedScriptReload", &readReloadEntry) < 0 || !readReloadEntry ||
-	    loadBootstrapMethod(L"LoadEditorApi", &loadEditorEntry) < 0 || !loadEditorEntry ||
-	    loadBootstrapMethod(L"LoadScriptContent", &loadContentEntry) < 0 || !loadContentEntry ||
-	    loadBootstrapMethod(L"CreateScriptSession", &createSessionEntry) < 0 || !createSessionEntry ||
-	    loadBootstrapMethod(L"SelectScriptSession", &selectSessionEntry) < 0 || !selectSessionEntry ||
-	    loadBootstrapMethod(L"BindScriptSession", &bindSessionEntry) < 0 || !bindSessionEntry ||
-	    loadBootstrapMethod(L"ValidateScriptSession", &validateSessionEntry) < 0 || !validateSessionEntry ||
-	    loadBootstrapMethod(L"CloseScriptSession", &closeSessionEntry) < 0 || !closeSessionEntry ||
-	    loadBootstrapMethod(L"TransferScriptableAssets", &transferAssetsEntry) < 0 || !transferAssetsEntry ||
-	    loadBootstrapMethod(L"ConfigureRenderPipeline", &configurePipelineEntry) < 0 || !configurePipelineEntry ||
-	    loadBootstrapMethod(L"RenderScene", &renderSceneEntry) < 0 || !renderSceneEntry)
+	void* bindingsEntry = nullptr;
+	if (loadBootstrapMethod(L"InitializeBindings", &bindingsEntry) < 0 || !bindingsEntry)
 	{
 		FreeLibrary(library);
-		return Result<void>::Failure("Cannot load the managed Behaviour lifecycle entry points");
+		return Result<void>::Failure("Cannot load the binding bootstrap entry");
 	}
 
 	hostFxrLibrary = library;
-	managedEntryPoint = entryPoint;
-	createBehaviour = reinterpret_cast<CreateBehaviourFunction>(createBehaviourEntry);
-	bindBehaviour = reinterpret_cast<BindBehaviourFunction>(bindBehaviourEntry);
-	invokeBehaviour = reinterpret_cast<InvokeBehaviourFunction>(invokeBehaviourEntry);
-	destroyBehaviour = reinterpret_cast<DestroyBehaviourFunction>(destroyBehaviourEntry);
-	serializeBehaviour = reinterpret_cast<SerializeBehaviourFunction>(serializeBehaviourEntry);
-	deserializeBehaviour = reinterpret_cast<DeserializeBehaviourFunction>(deserializeBehaviourEntry);
-	this->loadAssembly = reinterpret_cast<LoadAssemblyFunction>(loadScriptAssemblyEntry);
-	prepareExtensions = reinterpret_cast<SessionFunction>(prepareExtensionsEntry);
-	describeExtensions = reinterpret_cast<ReadSessionTextFunction>(describeExtensionsEntry);
-	invokeExtension = reinterpret_cast<InvokeEditorFunction>(invokeExtensionEntry);
-	prepareReload = reinterpret_cast<LoadContentFunction>(prepareReloadEntry);
-	readReload = reinterpret_cast<ReadSessionTextFunction>(readReloadEntry);
-	loadEditor = reinterpret_cast<LoadAssemblyFunction>(loadEditorEntry);
-	loadContent = reinterpret_cast<LoadContentFunction>(loadContentEntry);
-	createSession = reinterpret_cast<CreateSessionFunction>(createSessionEntry);
-	selectSession = reinterpret_cast<SessionFunction>(selectSessionEntry);
-	bindSession = reinterpret_cast<BindSessionFunction>(bindSessionEntry);
-	validateSession = reinterpret_cast<SessionFunction>(validateSessionEntry);
-	closeSession = reinterpret_cast<SessionFunction>(closeSessionEntry);
-	transferAssets = reinterpret_cast<TransferAssetsFunction>(transferAssetsEntry);
-	configurePipeline = reinterpret_cast<LoadContentFunction>(configurePipelineEntry);
-	renderScene = reinterpret_cast<RenderSceneFunction>(renderSceneEntry);
+	bindingsEntryPoint = bindingsEntry;
 	onLog = std::move(logCallback);
 	this->filesystem = &filesystem;
-	NativeApiV6 api = BuildNativeApi(sceneApi);
-	const auto invoke = reinterpret_cast<component_entry_point_fn>(managedEntryPoint);
-	const int managedResult = invoke(&api, static_cast<int32_t>(sizeof(NativeApiV6)));
-	if (managedResult != 0)
+	auto modules = BindModules(sceneApi);
+	if (!modules)
+	{
+		return modules;
+	}
+	auto framework = HostBindings::Call_ManagedHostBindings_InitializeFramework(bindingState->host);
+	if (!framework)
 	{
 		initialized = true;
-		return Result<void>::Failure(String("Managed host initialization returned status ") +
-		                             ToUrsaString(std::to_string(managedResult)));
+		return Result<void>::Failure(framework.Error());
 	}
 	initialized = true;
 	for (const VirtualPath& assemblyPath : files.scriptAssemblies)
@@ -367,233 +302,285 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 #endif
 }
 
-NativeApiV6 DotNetHost::BuildNativeApi(ManagedSceneApi* sceneApi)
+Result<void> DotNetHost::BindModules(ManagedSceneApi* sceneApi)
 {
-	NativeApiV6 api;
-	api.size = static_cast<UInt32>(sizeof(NativeApiV6));
-	api.context = this;
-	api.logUtf8 = &DotNetHost::LogFromManaged;
-	api.writeLog = &DotNetHost::WriteLogFromManaged;
-	api.readFile = &DotNetHost::ReadFileFromManaged;
-	api.writeFile = &DotNetHost::WriteFileFromManaged;
-	api.submitRenderBatch = &RejectRenderBatchWithoutScene;
+	if (!bindingsEntryPoint)
+	{
+		return Result<void>::Failure("Binding bootstrap is unavailable");
+	}
 	if (sceneApi)
 	{
-		api = sceneApi->Bind(api);
+		auto services = sceneApi->BindHostServices(Token());
+		if (!services)
+		{
+			return services;
+		}
 	}
-	return api;
+	void* sceneContext = sceneApi ? sceneApi->Token() : Token();
+	Bindings::BindingModuleReference modules[]{
+	    {Bindings::Runtime::moduleId, &Bindings::Runtime::NativeDescriptor(), sceneContext},
+	    {Bindings::Rendering::moduleId, &Bindings::Rendering::NativeDescriptor(), sceneContext},
+	    {Bindings::ManagedHost::moduleId, &Bindings::ManagedHost::NativeDescriptor(), Token()}};
+	Bindings::BindingModuleReference callbacks[4]{};
+	Bindings::BindingBootstrap request;
+	request.modules = modules;
+	request.moduleCount = std::size(modules);
+	request.callbacks = callbacks;
+	request.callbackCapacity = std::size(callbacks);
+	const auto invoke = reinterpret_cast<component_entry_point_fn>(bindingsEntryPoint);
+	const Int32 status = invoke(&request, sizeof(request));
+	String error;
+	if (status != 0)
+	{
+		error = Bindings::ReadString(request.outcome.error, true);
+	}
+	Bindings::Release(request.outcome);
+	if (status != 0)
+	{
+		return Result<void>::Failure("Binding module installation failed: " + error);
+	}
+	if (request.callbackCount != 1 || callbacks[0].id != HostBindings::moduleId)
+	{
+		return Result<void>::Failure("ManagedHost callback module was not supplied");
+	}
+	auto connected = HostBindings::ConnectCallbacks(callbacks[0].descriptor, callbacks[0].context);
+	if (!connected)
+	{
+		return Result<void>::Failure(connected.error);
+	}
+	auto candidate = std::make_unique<BindingState>();
+	candidate->host = std::move(connected.value);
+	bindingState = std::move(candidate);
+	return {};
 }
 
 Result<void> DotNetHost::BindSceneApi(ManagedSceneApi& sceneApi)
 {
-	if (!initialized || !managedEntryPoint)
+	if (!initialized || !bindingsEntryPoint)
 	{
 		return Result<void>::Failure("Managed host is not initialized");
 	}
-	NativeApiV6 api = BuildNativeApi(&sceneApi);
-	const auto invoke = reinterpret_cast<component_entry_point_fn>(managedEntryPoint);
-	const Int32 status = invoke(&api, static_cast<Int32>(sizeof(NativeApiV6)));
-	return status == 0 ? Result<void>{}
-	                   : Result<void>::Failure("Managed host rejected the active Scene API with status " +
-	                                           ToUrsaString(std::to_string(status)));
+	return BindModules(&sceneApi);
 }
 
 Result<UInt64> DotNetHost::CreateBehaviour(const String& typeName, const ManagedHandle& gameObject)
 {
-	if (!initialized || !createBehaviour || typeName.empty())
+	if (!initialized || !bindingState || typeName.empty())
 	{
 		return Result<UInt64>::Failure("The managed Behaviour runtime is not initialized or the type name is empty");
 	}
-	UInt64 instanceToken = 0;
-	const Int32 status =
-	    createBehaviour(reinterpret_cast<const UInt8*>(typeName.data()), typeName.size(), &gameObject, &instanceToken);
-	if (status != 0 || instanceToken == 0)
+	Bindings::Utf8View name{reinterpret_cast<const UInt8*>(typeName.data()), typeName.size(), 1, 0};
+	Bindings::Wire::Value_Ursa_NativeHandle owner{gameObject.sessionId, gameObject.index, gameObject.generation,
+	                                              static_cast<UInt32>(gameObject.kind), gameObject.reserved};
+	auto result = HostBindings::Call_ManagedHostBindings_CreateBehaviour(bindingState->host, name, owner);
+	if (!result || result.value == 0)
 	{
-		return Result<UInt64>::Failure("Cannot create managed Behaviour '" + typeName + "' (status " +
-		                               ToUrsaString(std::to_string(status)) + ")");
+		return Result<UInt64>::Failure(result.Error());
 	}
-	return Result<UInt64>::Success(instanceToken);
+	return Result<UInt64>::Success(result.value);
 }
 
 Result<void> DotNetHost::InvokeBehaviour(UInt64 instanceToken, ManagedBehaviourEvent event)
 {
-	if (!initialized || !invokeBehaviour || instanceToken == 0)
+	if (!initialized || !bindingState || instanceToken == 0)
 	{
 		return Result<void>::Failure("Cannot invoke an invalid managed Behaviour instance");
 	}
-	const Int32 status = invokeBehaviour(instanceToken, static_cast<UInt32>(event));
-	return status == 0 ? Result<void>{}
-	                   : Result<void>::Failure("Managed Behaviour callback failed with status " +
-	                                           ToUrsaString(std::to_string(status)));
+	auto result = HostBindings::Call_ManagedHostBindings_InvokeBehaviour(bindingState->host, instanceToken,
+	                                                                     static_cast<UInt32>(event));
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::BindBehaviour(UInt64 instanceToken, const ManagedHandle& component)
 {
-	if (!initialized || !bindBehaviour || instanceToken == 0 || component.kind != ManagedHandleKind::Component)
+	if (!initialized || !bindingState || instanceToken == 0 || component.kind != ManagedHandleKind::Component)
 	{
 		return Result<void>::Failure("Cannot bind an invalid managed Behaviour Component handle");
 	}
-	const Int32 status = bindBehaviour(instanceToken, &component);
-	return status == 0 ? Result<void>{}
-	                   : Result<void>::Failure("Managed Behaviour Component binding failed with status " +
-	                                           ToUrsaString(std::to_string(status)));
+	Bindings::Wire::Value_Ursa_NativeHandle handle{component.sessionId, component.index, component.generation,
+	                                               static_cast<UInt32>(component.kind), component.reserved};
+	auto result = HostBindings::Call_ManagedHostBindings_BindBehaviour(bindingState->host, instanceToken, handle);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::DestroyBehaviour(UInt64 instanceToken)
 {
-	if (!initialized || !destroyBehaviour || instanceToken == 0)
+	if (!initialized || !bindingState || instanceToken == 0)
 	{
 		return Result<void>::Failure("Cannot destroy an invalid managed Behaviour instance");
 	}
-	const Int32 status = destroyBehaviour(instanceToken);
-	return status == 0 ? Result<void>{}
-	                   : Result<void>::Failure("Managed Behaviour destruction failed with status " +
-	                                           ToUrsaString(std::to_string(status)));
+	auto result = HostBindings::Call_ManagedHostBindings_DestroyBehaviour(bindingState->host, instanceToken);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<String> DotNetHost::SerializeBehaviour(UInt64 instanceToken)
 {
-	if (!initialized || !serializeBehaviour || instanceToken == 0)
+	if (!initialized || !bindingState || instanceToken == 0)
 	{
 		return Result<String>::Failure("Cannot serialize an invalid managed Behaviour instance");
 	}
-	UInt64 required = 0;
-	Int32 status = serializeBehaviour(instanceToken, nullptr, 0, &required);
-	if (status != 4 || required == 0 || required > 64ull * 1024ull * 1024ull)
+	auto result = HostBindings::Call_ManagedHostBindings_SerializeBehaviour(bindingState->host, instanceToken);
+	if (!result)
 	{
-		return Result<String>::Failure("Managed Behaviour field serialization failed with status " +
-		                               ToUrsaString(std::to_string(status)));
+		return Result<String>::Failure(result.Error());
 	}
-	Vector<UInt8> bytes(static_cast<Size>(required));
-	status = serializeBehaviour(instanceToken, bytes.data(), required, &required);
-	if (status != 0)
+	if (result.value.F_Version != 1)
 	{
-		return Result<String>::Failure("Managed Behaviour field serialization failed with status " +
-		                               ToUrsaString(std::to_string(status)));
+		return Result<String>::Failure("Unsupported managed Behaviour field archive version");
 	}
-	return Result<String>::Success(ToUrsaString(std::string(bytes.begin(), bytes.end())));
+	return Result<String>::Success(Bindings::ReadString(result.value.F_Json));
 }
 
 Result<void> DotNetHost::DeserializeBehaviour(UInt64 instanceToken, const String& payload)
 {
-	if (!initialized || !deserializeBehaviour || instanceToken == 0 || payload.empty() ||
+	if (!initialized || !bindingState || instanceToken == 0 || payload.empty() ||
 	    payload.size() > 64ull * 1024ull * 1024ull)
 	{
 		return Result<void>::Failure("Cannot deserialize an invalid managed Behaviour payload");
 	}
-	const Int32 status =
-	    deserializeBehaviour(instanceToken, reinterpret_cast<const UInt8*>(payload.data()), payload.size());
-	return status == 0 ? Result<void>{}
-	                   : Result<void>::Failure("Managed Behaviour field deserialization failed with status " +
-	                                           ToUrsaString(std::to_string(status)));
+	Bindings::Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive archive;
+	archive.F_Version = 1;
+	archive.F_Json = {reinterpret_cast<const UInt8*>(payload.data()), payload.size(), 1, 0};
+	auto result =
+	    HostBindings::Call_ManagedHostBindings_DeserializeBehaviour(bindingState->host, instanceToken, archive);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::LoadScriptAssembly(const Vector<UInt8>& assemblyBytes)
 {
-	if (!initialized || !loadAssembly || assemblyBytes.empty())
+	if (!initialized || !bindingState || assemblyBytes.empty())
 	{
 		return Result<void>::Failure("Cannot load an empty script assembly or the managed host is not initialized");
 	}
-	const Int32 status = loadAssembly(assemblyBytes.data(), assemblyBytes.size());
-	return status == 0 ? Result<void>{}
-	                   : Result<void>::Failure("Managed assembly load failed with status " +
-	                                           ToUrsaString(std::to_string(status)));
+	Bindings::DataView image{assemblyBytes.data(), assemblyBytes.size(), 1, 0};
+	auto result = HostBindings::Call_ManagedHostBindings_LoadScriptAssembly(bindingState->host, image);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
-Result<String> DotNetHost::PrepareEditorExtensions(UInt64 sessionId)
+Result<Vector<ManagedEditorExtension>> DotNetHost::PrepareEditorExtensions(UInt64 sessionId)
 {
-	if (!prepareExtensions || !describeExtensions || prepareExtensions(sessionId) != 0)
+	if (sessionFaulted || !bindingState)
 	{
-		return Result<String>::Failure("Candidate managed editor registrations failed validation");
+		return Result<Vector<ManagedEditorExtension>>::Failure("Managed editing environment is unavailable");
 	}
-	UInt64 required = 0;
-	if (describeExtensions(sessionId, nullptr, 0, &required) != 4 || required == 0 || required > 16ull * 1024 * 1024)
+	auto result = HostBindings::Call_ManagedHostBindings_PrepareEditorExtensions(bindingState->host, sessionId);
+	if (!result)
 	{
-		return Result<String>::Failure("Managed editor registration directory is invalid");
+		return Result<Vector<ManagedEditorExtension>>::Failure(result.Error());
 	}
-	Vector<UInt8> bytes(static_cast<Size>(required));
-	if (describeExtensions(sessionId, bytes.data(), bytes.size(), &required) != 0)
+	try
 	{
-		return Result<String>::Failure("Cannot read the managed editor registration directory");
+		return Result<Vector<ManagedEditorExtension>>::Success(
+		    Bindings::ReadArray<Bindings::Wire::Value_Ursa_EditorExtensionInfo, ManagedEditorExtension>(
+		        result.value,
+		        [](const auto& value)
+		        {
+			        using K = Bindings::Wire::Enum_Ursa_EditorExtensionKind;
+			        ManagedEditorExtensionKind kind;
+			        switch (value.F_Kind)
+			        {
+				        case K::V_Menu:
+					        kind = ManagedEditorExtensionKind::Menu;
+					        break;
+				        case K::V_Window:
+					        kind = ManagedEditorExtensionKind::Window;
+					        break;
+				        case K::V_Inspector:
+					        kind = ManagedEditorExtensionKind::Inspector;
+					        break;
+				        default:
+					        throw std::runtime_error("Unknown managed Editor extension kind");
+			        }
+			        return ManagedEditorExtension{
+			            Bindings::ReadString(value.F_Id), kind, Bindings::ReadString(value.F_Path),
+			            Bindings::ReadString(value.F_Target), Bindings::ReadString(value.F_Title)};
+		        }));
 	}
-	return Result<String>::Success(String(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+	catch (const std::exception& error)
+	{
+		return Result<Vector<ManagedEditorExtension>>::Failure(ToUrsaString(error.what()));
+	}
 }
 
-Result<bool> DotNetHost::InvokeEditorExtension(UInt64 sessionId, const String& extensionId, const ManagedEditorApi& api)
+Result<bool> DotNetHost::InvokeEditorExtension(UInt64 sessionId, const String& extensionId,
+                                               const Bindings::BindingModuleReference& capability)
 {
-	if (sessionFaulted || !invokeExtension || api.version != 1 || api.size != sizeof(ManagedEditorApi) ||
-	    !api.context || !api.exchange)
+	if (sessionFaulted || !bindingState || !capability.descriptor || !capability.context)
 	{
-		return Result<bool>::Failure("Managed editor environment or callback scope is invalid");
+		return Result<bool>::Failure("Managed editing environment or callback scope is unavailable");
 	}
-	const Int32 status = invokeExtension(sessionId, reinterpret_cast<const UInt8*>(extensionId.data()),
-	                                     extensionId.size(), &api, sizeof(api));
-	return status == 0   ? Result<bool>::Success(true)
-	       : status == 2 ? Result<bool>::Success(false)
-	                     : Result<bool>::Failure("Managed editor protocol rejected this extension call");
+	const Bindings::Wire::Value_Ursa_EditorBindingCapability transfer{
+	    capability.id, static_cast<UInt64>(reinterpret_cast<UIntPtr>(capability.descriptor)),
+	    static_cast<UInt64>(reinterpret_cast<UIntPtr>(capability.context))};
+	const Bindings::Utf8View id{reinterpret_cast<const UInt8*>(extensionId.data()), extensionId.size(), 1, 0};
+	auto result =
+	    HostBindings::Call_ManagedHostBindings_InvokeEditorExtension(bindingState->host, sessionId, id, transfer);
+	return result ? Result<bool>::Success(result.value != 0) : Result<bool>::Failure(result.Error());
 }
 
 Result<String> DotNetHost::PrepareScriptReload(UInt64 sessionId, const String& snapshots)
 {
-	if (!prepareReload || !readReload || snapshots.empty())
+	if (!bindingState || snapshots.empty())
 	{
 		return Result<String>::Failure("Candidate reload bridge is unavailable");
 	}
-	if (prepareReload(sessionId, reinterpret_cast<const UInt8*>(snapshots.data()), snapshots.size()) != 0)
+	Bindings::Wire::Value_Ursa_ManagedHost_ScriptReloadArchive archive;
+	archive.F_Version = 1;
+	archive.F_Json = {reinterpret_cast<const UInt8*>(snapshots.data()), snapshots.size(), 1, 0};
+	auto result = HostBindings::Call_ManagedHostBindings_PrepareScriptReload(bindingState->host, sessionId, archive);
+	if (!result)
 	{
-		return Result<String>::Failure(
-		    "Candidate script fields are missing or incompatible; existing editing state was retained");
+		return Result<String>::Failure(result.Error());
 	}
-	UInt64 required = 0;
-	if (readReload(sessionId, nullptr, 0, &required) != 4 || required == 0 || required > 64ull * 1024 * 1024)
+	if (result.value.F_Version != 1)
 	{
-		return Result<String>::Failure("Candidate script snapshot output is invalid");
+		return Result<String>::Failure("Unsupported script reload archive version");
 	}
-	Vector<UInt8> bytes(static_cast<Size>(required));
-	if (readReload(sessionId, bytes.data(), bytes.size(), &required) != 0)
-	{
-		return Result<String>::Failure("Cannot read candidate script snapshots");
-	}
-	return Result<String>::Success(String(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+	return Result<String>::Success(Bindings::ReadString(result.value.F_Json));
 }
 
 Result<void> DotNetHost::TransferScriptableAssets(UInt64 sourceSession, UInt64 candidateSession)
 {
-	if (!initialized || !transferAssets)
+	if (!initialized || !bindingState)
 	{
 		return Result<void>::Failure("ScriptableAsset reload bridge is unavailable");
 	}
-	return transferAssets(sourceSession, candidateSession) == 0
-	           ? Result<void>{}
-	           : Result<void>::Failure(
-	                 "Candidate pipeline assets or factory are incompatible; previous editing state was retained");
+	auto result = HostBindings::Call_ManagedHostBindings_TransferScriptableAssets(bindingState->host, sourceSession,
+	                                                                              candidateSession);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::ConfigureRenderPipeline(UInt64 session, AssetReference pipeline)
 {
-	if (!initialized || !configurePipeline)
+	if (!initialized || !bindingState)
 	{
 		return Result<void>::Failure("Managed pipeline configuration is unavailable");
 	}
-	const auto json = pipeline.guid ? AssetReferenceToJson(pipeline).dump() : std::string("null");
-	return configurePipeline(session, reinterpret_cast<const UInt8*>(json.data()), json.size()) == 0
-	           ? Result<void>{}
-	           : Result<void>::Failure("Managed pipeline configuration or asset factory failed");
+	Bindings::Wire::Value_Ursa_ManagedHost_PipelineAssetReference_ asset;
+	const String guid = pipeline.guid ? pipeline.guid.ToString() : String{};
+	if (pipeline.guid)
+	{
+		asset.present = 1;
+		asset.F_value.F_Guid = {reinterpret_cast<const UInt8*>(guid.data()), guid.size(), 1, 0};
+		asset.F_value.F_LocalFileId = pipeline.localFileId;
+	}
+	auto result = HostBindings::Call_ManagedHostBindings_ConfigureRenderPipeline(bindingState->host, session, asset);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::RenderScene(UInt64 session, Float32 aspect)
 {
-	if (!initialized || !renderScene)
+	if (!initialized || !bindingState)
 	{
 		return Result<void>::Failure("Managed pipeline rendering is unavailable");
 	}
-	return renderScene(session, aspect) == 0 ? Result<void>{}
-	                                         : Result<void>::Failure("Managed pipeline Render callback failed");
+	auto result = HostBindings::Call_ManagedHostBindings_RenderScene(bindingState->host, session, aspect);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::LoadEditorApi(const VirtualPath& path)
 {
-	if (!filesystem || !loadEditor)
+	if (!filesystem || !bindingState)
 	{
 		return Result<void>::Failure("Shared editor API loader is unavailable");
 	}
@@ -602,160 +589,160 @@ Result<void> DotNetHost::LoadEditorApi(const VirtualPath& path)
 	{
 		return Result<void>::Failure(bytes.error);
 	}
-	return loadEditor(bytes.value.data(), bytes.value.size()) == 0
-	           ? Result<void>{}
-	           : Result<void>::Failure("Cannot load the shared Ursa.Editor API from VFS");
+	Bindings::DataView image{bytes.value.data(), bytes.value.size(), 1, 0};
+	auto result = HostBindings::Call_ManagedHostBindings_LoadEditorApi(bindingState->host, image);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::LoadScriptContent(UInt64 sessionId, const VirtualPath& manifest)
 {
-	if (!filesystem || !loadContent)
+	if (!filesystem || !bindingState)
 	{
 		return Result<void>::Failure("Managed content loader is unavailable");
-	}
-	auto selected = SelectScriptSession(sessionId);
-	if (!selected)
-	{
-		return selected;
 	}
 	auto bytes = filesystem->Read(manifest);
 	if (!bytes)
 	{
 		return Result<void>::Failure(bytes.error);
 	}
-	return loadContent(sessionId, bytes.value.data(), bytes.value.size()) == 0
-	           ? Result<void>{}
-	           : Result<void>::Failure("Managed script content manifest or dependency validation failed: " +
-	                                   manifest.ToString());
+	try
+	{
+		const auto content = nlohmann::json::parse(bytes.value.begin(), bytes.value.end());
+		const auto group = content.at("Group").get<std::string>();
+		if (content.at("Version").get<UInt32>() != 2 || (group != "Game" && group != "Editor"))
+		{
+			return Result<void>::Failure("Unsupported script content version/group; rebuild the project content");
+		}
+		auto requirements =
+		    Bindings::ValidateScriptBindingRequirements(content.at("RequiredBindings"), group == "Editor");
+		if (!requirements)
+		{
+			return requirements;
+		}
+	}
+	catch (const std::exception& error)
+	{
+		return Result<void>::Failure("Invalid script content manifest: " + ToUrsaString(error.what()));
+	}
+	auto selected = SelectScriptSession(sessionId);
+	if (!selected)
+	{
+		return selected;
+	}
+	Bindings::Wire::Value_Ursa_ManagedHost_ScriptContentArchive archive;
+	archive.F_Version = 1;
+	archive.F_Json = {bytes.value.data(), bytes.value.size(), 1, 0};
+	auto result = HostBindings::Call_ManagedHostBindings_LoadScriptContent(bindingState->host, sessionId, archive);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<UInt64> DotNetHost::CreateScriptSession(bool editor, ManagedSceneApi* sceneApi)
 {
-	if (!initialized || !createSession || sessionFaulted)
+	if (!initialized || !bindingState || sessionFaulted)
 	{
 		return Result<UInt64>::Failure("Managed host is unavailable or faulted after an unload failure");
 	}
-	NativeApiV6 api = BuildNativeApi(sceneApi);
-	UInt64 sessionId = 0;
-	const Int32 status = createSession(editor ? 1 : 0, &api, static_cast<Int32>(sizeof(api)), &sessionId);
-	return status == 0 && sessionId != 0 ? Result<UInt64>::Success(sessionId)
-	                                     : Result<UInt64>::Failure("Managed script session creation failed");
+	auto modules = BindModules(sceneApi);
+	if (!modules)
+	{
+		return Result<UInt64>::Failure(modules.error);
+	}
+	auto result = HostBindings::Call_ManagedHostBindings_CreateScriptSession(bindingState->host, editor ? 1u : 0u);
+	return result && result.value != 0 ? Result<UInt64>::Success(result.value)
+	                                   : Result<UInt64>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::SelectScriptSession(UInt64 sessionId)
 {
-	return initialized && selectSession && selectSession(sessionId) == 0
-	           ? Result<void>{}
-	           : Result<void>::Failure("Managed script session is closed, unknown or on the wrong thread");
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed host is unavailable");
+	}
+	auto result = HostBindings::Call_ManagedHostBindings_SelectScriptSession(bindingState->host, sessionId);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::BindScriptSession(UInt64 sessionId, ManagedSceneApi& sceneApi)
 {
-	NativeApiV6 api = BuildNativeApi(&sceneApi);
-	return initialized && bindSession && bindSession(sessionId, &api, static_cast<Int32>(sizeof(api))) == 0
-	           ? Result<void>{}
-	           : Result<void>::Failure("Cannot bind the Scene API to this managed script session");
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed host is unavailable");
+	}
+	auto modules = BindModules(&sceneApi);
+	if (!modules)
+	{
+		return modules;
+	}
+	auto result = HostBindings::Call_ManagedHostBindings_BindScriptSession(bindingState->host, sessionId);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::ValidateScriptSession(UInt64 sessionId)
 {
-	return initialized && validateSession && validateSession(sessionId) == 0
-	           ? Result<void>{}
-	           : Result<void>::Failure("Managed script session type or dependency validation failed");
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed host is unavailable");
+	}
+	auto result = HostBindings::Call_ManagedHostBindings_ValidateScriptSession(bindingState->host, sessionId);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
 Result<void> DotNetHost::CloseScriptSession(UInt64 sessionId)
 {
-	if (!initialized || !closeSession)
+	if (!initialized || !bindingState)
 	{
 		return Result<void>::Failure("Managed host is unavailable");
 	}
-	const Int32 status = closeSession(sessionId);
-	if (status == 3)
+	auto result = HostBindings::Call_ManagedHostBindings_CloseScriptSession(bindingState->host, sessionId);
+	if (result && result.value == 0)
 	{
 		sessionFaulted = true;
 		return Result<void>::Failure(
 		    "Managed context still has strong references after bounded unload checks; restart the application");
 	}
-	return status == 0 ? Result<void>{} : Result<void>::Failure("Managed script session cleanup failed");
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
-void DotNetHost::LogFromManaged(void* context, UInt32 level, const UInt8* message, UInt64 length)
+Result<void> DotNetHost::WriteScriptLog(UInt32 level, const String& message)
 {
-	auto* host = static_cast<DotNetHost*>(context);
-	if (!host || !host->onLog || (!message && length != 0) || length > std::numeric_limits<Size>::max())
+	if (level > 5)
 	{
-		return;
-	}
-	const String text =
-	    length == 0 ? String{} : String(reinterpret_cast<const char*>(message), static_cast<Size>(length));
-	host->onLog(level, text);
-}
-
-Int32 DotNetHost::WriteLogFromManaged(void*, UInt32 level, const UInt8* message, UInt64 length)
-{
-	if ((!message && length != 0) || length > std::numeric_limits<Size>::max() || level > 5)
-	{
-		return 1;
+		return Result<void>::Failure("Unknown Script log level");
 	}
 	static const LogLevel levels[] = {LogLevel::Trace, LogLevel::Debug, LogLevel::Info,
 	                                  LogLevel::Warn,  LogLevel::Error, LogLevel::Critical};
-	const String text =
-	    length == 0 ? String{} : String(reinterpret_cast<const char*>(message), static_cast<Size>(length));
-	Log::Write(levels[level], "Script", text);
-	return 0;
+	Log::Write(levels[level], "Script", message);
+	return {};
 }
 
-Int32 DotNetHost::ReadFileFromManaged(void* context, const UInt8* path, UInt64 pathLength, UInt8* output,
-                                      UInt64 capacity, UInt64* required)
+Result<void> DotNetHost::ReportHostMessage(UInt32 level, const String& message)
 {
-	auto* host = static_cast<DotNetHost*>(context);
-	if (!host || !host->filesystem || !path || pathLength == 0 || pathLength > 4096 || (!output && capacity != 0) ||
-	    !required)
+	if (!onLog)
 	{
-		return 1;
+		return Result<void>::Failure("Host log callback is unavailable");
 	}
-	const auto parsed = VirtualPath::Parse(String(reinterpret_cast<const char*>(path), static_cast<Size>(pathLength)));
-	if (!parsed)
-	{
-		return 2;
-	}
-	auto bytes = host->filesystem->Read(parsed.value);
-	if (!bytes || bytes.value.size() > 256ull * 1024ull * 1024ull)
-	{
-		return 3;
-	}
-	*required = bytes.value.size();
-	if (capacity < bytes.value.size())
-	{
-		return 4;
-	}
-	if (!bytes.value.empty())
-	{
-		std::memcpy(output, bytes.value.data(), bytes.value.size());
-	}
-	return 0;
+	onLog(level, message);
+	return {};
 }
 
-Int32 DotNetHost::WriteFileFromManaged(void* context, const UInt8* path, UInt64 pathLength, const UInt8* bytes,
-                                       UInt64 length)
+Result<Vector<UInt8>> DotNetHost::ReadScriptFile(const String& path)
 {
-	auto* host = static_cast<DotNetHost*>(context);
-	if (!host || !host->filesystem || !path || pathLength == 0 || pathLength > 4096 || (!bytes && length != 0) ||
-	    length > 256ull * 1024ull * 1024ull)
+	if (!filesystem)
 	{
-		return 1;
+		return Result<Vector<UInt8>>::Failure("Host VFS is unavailable");
 	}
-	const auto parsed = VirtualPath::Parse(String(reinterpret_cast<const char*>(path), static_cast<Size>(pathLength)));
-	if (!parsed)
-	{
-		return 2;
-	}
-	Vector<UInt8> content;
-	if (length != 0)
-	{
-		content.assign(bytes, bytes + static_cast<Size>(length));
-	}
-	return host->filesystem->WriteAtomic(parsed.value, content) ? 0 : 3;
+	const auto parsed = VirtualPath::Parse(path);
+	return parsed ? filesystem->Read(parsed.value) : Result<Vector<UInt8>>::Failure(parsed.error);
 }
+
+Result<void> DotNetHost::WriteScriptFile(const String& path, const Vector<UInt8>& bytes)
+{
+	if (!filesystem)
+	{
+		return Result<void>::Failure("Host VFS is unavailable");
+	}
+	const auto parsed = VirtualPath::Parse(path);
+	return parsed ? filesystem->WriteAtomic(parsed.value, bytes) : Result<void>::Failure(parsed.error);
+}
+
 } // namespace Ursa::Scripting

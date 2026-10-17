@@ -608,7 +608,7 @@ public static class ScriptFieldSchema
 		}
 		if (value is RenderResource resource)
 		{
-			var binding = EngineApi.ResourceRequest(new { operation = "resource.reference", handle = resource.Handle });
+			var binding = EngineApi.SnapshotResourceReference(resource);
 			return JsonSerializer.SerializeToElement(new Dictionary<string, ReferencePayload>
 			{
 				["$ursaReference"] = new() { Kind = kind == ScriptSerializedFieldKind.MeshReference ? "Mesh" : "Material", Resource = binding }
@@ -692,9 +692,9 @@ public static class ScriptFieldSchema
 				if (reference.Kind is "Mesh" or "Material")
 				{
 					if (reference.Resource == null) throw new InvalidOperationException("Resource reference is missing its binding.");
-					var handle = EngineApi.ResourceRequest<NativeHandle>(new { operation = "resource.restore", type = reference.Kind, data = reference.Resource });
-					if (reference.Kind == "Mesh") return Mesh.FromHandle(handle);
-					return elementType == typeof(MaterialAsset) ? MaterialAsset.FromBinding(reference.Resource.Value, handle) : Material.FromHandle(handle);
+					if (reference.Kind == "Mesh") return Mesh.FromHandle(EngineApi.RestoreMeshReference(reference.Resource.Value));
+					var handle = EngineApi.RestoreMaterialReference(reference.Resource.Value);
+					return elementType == typeof(MaterialAsset) ? MaterialAsset.FromArchive(reference.Resource.Value, handle) : Material.FromHandle(handle);
 				}
 				if (reference.Kind == "ScriptableObject")
 				{
@@ -784,7 +784,7 @@ public static class ScriptFieldSchema
 			}
 			else if (item is RenderResource resource)
 			{
-				JsonElement binding = EngineApi.ResourceRequest(new { operation = "resource.reference", handle = resource.Handle });
+				JsonElement binding = EngineApi.SnapshotResourceReference(resource);
 				if (binding.GetProperty("kind").GetString() == "local")
 					throw new InvalidOperationException($"Persistent asset field '{descriptor.Name}' references a document-local resource.");
 			}

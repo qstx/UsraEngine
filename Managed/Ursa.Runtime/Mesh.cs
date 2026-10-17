@@ -1,24 +1,7 @@
 using System;
 namespace Ursa;
 
-public struct Vector2
-{
-	public float X;
-	public float Y;
-
-	public Vector2(float x, float y) { X = x; Y = y; }
-}
-
-public struct Vector4
-{
-	public float X;
-	public float Y;
-	public float Z;
-	public float W;
-
-	public Vector4(float x, float y, float z, float w) { X = x; Y = y; Z = z; W = w; }
-}
-
+[Ursa.Bindings.WireValue]
 public struct SubMesh
 {
 	public uint FirstIndex;
@@ -31,6 +14,7 @@ public struct SubMesh
 	}
 }
 
+[Ursa.Bindings.WireValue]
 public struct Bounds
 {
 	public Vector3 Minimum;
@@ -38,6 +22,7 @@ public struct Bounds
 	public bool Empty;
 }
 
+[Ursa.Bindings.WireValue]
 public sealed class MeshData
 {
 	public Vector3[] Positions { get; set; } = Array.Empty<Vector3>();
@@ -56,55 +41,41 @@ public sealed class Mesh : RenderResource
 
 	internal static Mesh? FromHandle(NativeHandle handle) => Wrap(handle, value => new Mesh(value));
 
-	public static Mesh Create() => FromHandle(EngineApi.ResourceRequest<NativeHandle>(new { operation = "mesh.create" }))!;
+	public static Mesh Create() => FromHandle(NativeMeshBindings.Create())!;
 
-	public static Mesh Load(AssetReference reference) => FromHandle(EngineApi.ResourceRequest<NativeHandle>(new
-	{
-		operation = "mesh.load", guid = reference.Guid, localFileId = reference.LocalFileId
-	}))!;
+	public static Mesh Load(AssetReference reference) => FromHandle(NativeMeshBindings.Load(reference.Guid, reference.LocalFileId))!;
 
-	public Mesh Clone() => FromHandle(EngineApi.ResourceRequest<NativeHandle>(new { operation = "mesh.clone", handle = Handle }))!;
+	public Mesh Clone() => FromHandle(NativeMeshBindings.Clone(Handle))!;
 
-	public void Destroy() => EngineApi.ResourceRequest(new { operation = "mesh.destroy", handle = Handle });
+	public void Destroy() => NativeMeshBindings.Destroy(Handle);
 
-	public ulong Version => EngineApi.ResourceRequest<ulong>(new { operation = "mesh.version", handle = Handle });
+	public ulong Version => NativeMeshBindings.GetVersion(Handle);
 
-	public MeshData GetData() => EngineApi.ResourceRequest<MeshData>(new { operation = "mesh.get", handle = Handle });
+	public MeshData GetData() => NativeMeshBindings.GetData(Handle);
 
-	public void SetData(MeshData data) => Set("mesh.set", data ?? throw new ArgumentNullException(nameof(data)));
+	public void SetData(MeshData data) => NativeMeshBindings.SetData(Handle, data ?? throw new ArgumentNullException(nameof(data)));
 
-	public Vector3[] Vertices { get => GetData().Positions; set => Set("mesh.vertices", value); }
-	public Vector3[] Normals { get => GetData().Normals; set => Set("mesh.normals", value); }
-	public Vector2[] Uv0 { get => GetData().Uv0; set => Set("mesh.uv0", value); }
-	public Color[] Colors { get => GetData().Colors; set => Set("mesh.colors", value); }
-	public Vector4[] Tangents { get => GetData().Tangents; set => Set("mesh.tangents", value); }
-	public uint[] Indices { get => GetData().Indices; set => Set("mesh.indices", value); }
+	public Vector3[] Vertices { get => GetData().Positions; set => NativeMeshBindings.SetVertices(Handle, value); }
+	public Vector3[] Normals { get => GetData().Normals; set => NativeMeshBindings.SetNormals(Handle, value); }
+	public Vector2[] Uv0 { get => GetData().Uv0; set => NativeMeshBindings.SetUv0(Handle, value); }
+	public Color[] Colors { get => GetData().Colors; set => NativeMeshBindings.SetColors(Handle, value); }
+	public Vector4[] Tangents { get => GetData().Tangents; set => NativeMeshBindings.SetTangents(Handle, value); }
+	public uint[] Indices { get => GetData().Indices; set => NativeMeshBindings.SetIndices(Handle, value); }
 	public Bounds Bounds => GetData().Bounds;
 
-	public int SubMeshCount { get => GetData().SubMeshes.Length; set => Set("mesh.subMeshCount", value); }
+	public int SubMeshCount { get => GetData().SubMeshes.Length; set => NativeMeshBindings.SetSubMeshCount(Handle, value); }
 
 	public SubMesh GetSubMesh(int index) => GetData().SubMeshes[index];
 
-	public void SetSubMesh(int index, SubMesh data) => EngineApi.ResourceRequest(new
-	{
-		operation = "mesh.subMesh", handle = Handle, index, data
-	});
+	public void SetSubMesh(int index, SubMesh data) => NativeMeshBindings.SetSubMesh(Handle, index, data);
 
-	public uint[] GetTriangles(int subMesh) => EngineApi.ResourceRequest<uint[]>(new
-	{
-		operation = "mesh.triangles.get", handle = Handle, index = subMesh
-	});
+	public uint[] GetTriangles(int subMesh) => NativeMeshBindings.GetTriangles(Handle, subMesh);
 
-	public void SetTriangles(uint[] triangles, int subMesh = 0) => EngineApi.ResourceRequest(new
-	{
-		operation = "mesh.triangles.set", handle = Handle, index = subMesh, data = triangles
-	});
+	public void SetTriangles(uint[] triangles, int subMesh = 0) => NativeMeshBindings.SetTriangles(Handle, subMesh, triangles);
 
-	public void Clear() => Set("mesh.clear", null);
+	public void Clear() => NativeMeshBindings.Clear(Handle);
 
-	public void RecalculateNormals() => Set("mesh.recalculateNormals", null);
+	public void RecalculateNormals() => NativeMeshBindings.RecalculateNormals(Handle);
 
-	public void RecalculateBounds() => Set("mesh.recalculateBounds", null);
-
-	private void Set(string operation, object? data) => EngineApi.ResourceRequest(new { operation, handle = Handle, data });
+	public void RecalculateBounds() => NativeMeshBindings.RecalculateBounds(Handle);
 }

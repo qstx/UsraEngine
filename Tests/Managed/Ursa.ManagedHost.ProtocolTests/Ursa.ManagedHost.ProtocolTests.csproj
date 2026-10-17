@@ -7,8 +7,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../../Managed/Ursa.ManagedHost/Bootstrap.cs" Link="Bootstrap.cs" />
-    <Compile Include="../../../Managed/Ursa.ManagedHost/ScriptSessions.cs" Link="ScriptSessions.cs" />
+    <ProjectReference Include="../../../Managed/Ursa.ManagedHost/Ursa.ManagedHost.csproj" />
     <ProjectReference Include="../../../Managed/Ursa.Runtime/Ursa.Runtime.csproj" />
     <ProjectReference Include="../../../Managed/Ursa.Rendering/Ursa.Rendering.csproj" />
   </ItemGroup>

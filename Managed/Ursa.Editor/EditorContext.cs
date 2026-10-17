@@ -1,18 +1,24 @@
-using System.Text.Json;
+using System.Linq;
 
 namespace Ursa.Editor;
 
 public static class EditorContext
 {
-	public static JsonElement Selection => EditorApi.Call("Context").GetProperty("Selection");
-
-	public static JsonElement Document => EditorApi.Call("Context").GetProperty("Document");
-
-	public static JsonElement Assets => EditorApi.Call("Assets");
-
-	public static void Save() => EditorApi.Call("Save");
-
-	public static void MarkDirty() => EditorApi.Call("MarkDirty");
-
-	public static void OpenAsset(string virtualPath) => EditorApi.Call("OpenAsset", new { Path = virtualPath });
+	public static EditorSelection[] Selection { get { _ = EditorApi.Generation; return NativeEditorBindings.GetSelection().Select(value => new EditorSelection(value)).ToArray(); } }
+	public static EditorReference? Target { get { _ = EditorApi.Generation; return NativeEditorBindings.GetTarget() is { } value ? new(value) : null; } }
+	public static EditorDocument? Document { get { _ = EditorApi.Generation; return NativeEditorBindings.GetDocument() is { } value ? new(value) : null; } }
+	public static EditorAsset[] Assets { get { _ = EditorApi.Generation; return NativeEditorBindings.GetAssets().Select(value => new EditorAsset(value)).ToArray(); } }
+	public static EditorReference ResolveObject(EditorReferenceKind kind, string persistentId)
+	{
+		_ = EditorApi.Generation;
+		return new(NativeEditorBindings.ResolveReference(kind, persistentId, null));
+	}
+	public static EditorReference ResolveAsset(AssetReference asset, EditorReferenceKind kind = EditorReferenceKind.Asset)
+	{
+		_ = EditorApi.Generation;
+		return new(NativeEditorBindings.ResolveReference(kind, string.Empty, NativeAssetReference.From(asset)));
+	}
+	public static void Save() { _ = EditorApi.Generation; NativeEditorBindings.Save(); }
+	public static void MarkDirty() { _ = EditorApi.Generation; NativeEditorBindings.MarkDirty(); }
+	public static void OpenAsset(string virtualPath) { _ = EditorApi.Generation; NativeEditorBindings.OpenAsset(virtualPath); }
 }

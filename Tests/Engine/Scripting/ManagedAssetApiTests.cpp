@@ -1,6 +1,8 @@
 #include <Core/StringInterop.hpp>
 #include <Material/Material.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
+#include <Runtime.generated.hpp>
+#include <BindingCalls.hpp>
 #include <Serialization/MaterialResource.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Serialization/TextureResource.hpp>
@@ -53,10 +55,11 @@ void WriteMeta(VirtualFileSystem& filesystem, const VirtualPath& path, ResourceI
 	}
 }
 
-bool SameHandle(const ManagedHandle& left, const ManagedHandle& right)
+bool SameHandle(const Bindings::Wire::Value_Ursa_NativeHandle& left,
+                const Bindings::Wire::Value_Ursa_NativeHandle& right)
 {
-	return left.sessionId == right.sessionId && left.index == right.index && left.generation == right.generation &&
-	       left.kind == right.kind;
+	return left.F_sessionId == right.F_sessionId && left.F_index == right.F_index &&
+	       left.F_generation == right.F_generation && left.F_kind == right.F_kind;
 }
 } // namespace
 
@@ -94,37 +97,31 @@ int main()
 		Expect(static_cast<bool>(resources), "Could not open managed asset ResourceSession");
 		Scene scene;
 		ManagedSceneApi sceneApi(scene, resources.value.get());
-		NativeApiV5 api = sceneApi.Bind({});
-		ManagedHandle textureHandle{};
+		using namespace Ursa::Test::BindingCalls;
+		namespace R = Bindings::Runtime;
+		using Handle = Bindings::Wire::Value_Ursa_NativeHandle;
+		using Asset = Bindings::Wire::Value_Ursa_NativeAssetReference;
+		void* context = sceneApi.Token();
 		const String textureGuid = textureId.ToString();
-		Expect(api.loadTexture(api.sceneContext, reinterpret_cast<const UInt8*>(textureGuid.data()), textureGuid.size(),
-		                       0, &textureHandle) == 0 &&
-		           textureHandle.kind == ManagedHandleKind::Asset,
-		       "Managed API failed to load a Texture asset by stable identity");
-		ManagedHandle cachedTextureHandle{};
-		Expect(api.loadTexture(api.sceneContext, reinterpret_cast<const UInt8*>(textureGuid.data()), textureGuid.size(),
-		                       0, &cachedTextureHandle) == 0 &&
-		           SameHandle(textureHandle, cachedTextureHandle),
-		       "Managed API did not reuse the Texture handle within its ResourceSession");
-
-		ManagedHandle wrongTexture{};
 		const String materialGuid = materialId.ToString();
-		Expect(api.loadTexture(api.sceneContext, reinterpret_cast<const UInt8*>(materialGuid.data()),
-		                       materialGuid.size(), 0, &wrongTexture) != 0,
-		       "Managed API accepted a Material as a Texture");
-		ManagedHandle wrongMaterial{};
-		Expect(api.loadMaterial(api.sceneContext, reinterpret_cast<const UInt8*>(textureGuid.data()),
-		                        textureGuid.size(), 0, &wrongMaterial) != 0,
-		       "Managed API accepted a Texture as a Material");
-		const ResourceId missingId = ResourceId::Generate();
-		const String missingGuid = missingId.ToString();
-		ManagedHandle missing{};
-		Expect(api.loadTexture(api.sceneContext, reinterpret_cast<const UInt8*>(missingGuid.data()), missingGuid.size(),
-		                       0, &missing) != 0,
-		       "Managed API accepted a missing asset GUID");
-		Expect(api.loadTexture(api.sceneContext, reinterpret_cast<const UInt8*>(textureGuid.data()), textureGuid.size(),
-		                       99, &missing) != 0,
-		       "Managed API accepted an invalid texture local file ID");
+		const String missingGuid = ResourceId::Generate().ToString();
+		Asset textureAsset{StringView(textureGuid), 0};
+		Asset materialAsset{StringView(materialGuid), 0};
+		Asset missingAsset{StringView(missingGuid), 0};
+		auto textureHandle = Value(Invoke<Handle>(R::NativeResourceBindings_LoadTexture, context, &textureAsset));
+		Expect(textureHandle.F_kind == UInt32(ManagedHandleKind::Asset),
+		       "Generated binding failed to load Texture by stable identity");
+		auto cached = Value(Invoke<Handle>(R::NativeResourceBindings_LoadTexture, context, &textureAsset));
+		Expect(SameHandle(textureHandle, cached), "Generated Texture binding did not reuse the session handle");
+		Expect(!Invoke<Handle>(R::NativeResourceBindings_LoadTexture, context, &materialAsset),
+		       "Texture loader accepted a Material");
+		Expect(!Invoke<Handle>(R::NativeMaterialBindings_Load, context, &textureAsset),
+		       "Material loader accepted a Texture");
+		Expect(!Invoke<Handle>(R::NativeResourceBindings_LoadTexture, context, &missingAsset),
+		       "Texture loader accepted a missing GUID");
+		textureAsset.F_LocalFileId = 99;
+		Expect(!Invoke<Handle>(R::NativeResourceBindings_LoadTexture, context, &textureAsset),
+		       "Texture loader accepted a missing local file ID");
 
 		std::filesystem::remove_all(root);
 		return 0;

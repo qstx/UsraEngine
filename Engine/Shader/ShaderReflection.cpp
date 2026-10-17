@@ -32,6 +32,8 @@ struct ReflectedMember
 	String type;
 	UInt32 offset = 0;
 	UInt32 size = 0;
+	UInt32 matrixStride = 0;
+	bool spirvRowMajor = false;
 };
 
 struct ReflectedUniformBlock
@@ -334,8 +336,14 @@ Result<void> AddUniformBlocks(const Json& reflection, UInt32 stageMask, Map<Stri
 				}
 				memberSize = parsedSize.value;
 			}
+			auto matrixStride = ReadUInt(member, "matrix_stride");
+			if (!matrixStride || (member.contains("row_major") && !member["row_major"].is_boolean()))
+			{
+				return Result<void>::Failure("Invalid reflected matrix stride or major order");
+			}
 			block.members.push_back({ToUrsaString(member["name"].get<std::string>()),
-			                         ToUrsaString(member["type"].get<std::string>()), offset.value, memberSize});
+			                         ToUrsaString(member["type"].get<std::string>()), offset.value, memberSize,
+			                         matrixStride.value, member.value("row_major", false)});
 		}
 		const String key = BindingKey(set.value, binding.value);
 		auto found = blocks.find(key);
@@ -354,7 +362,8 @@ Result<void> AddUniformBlocks(const Json& reflection, UInt32 stageMask, Map<Stri
 				const auto& existing = found->second.members[index];
 				const auto& candidate = block.members[index];
 				if (existing.name != candidate.name || existing.type != candidate.type ||
-				    existing.offset != candidate.offset ||
+				    existing.offset != candidate.offset || existing.matrixStride != candidate.matrixStride ||
+				    existing.spirvRowMajor != candidate.spirvRowMajor ||
 				    (existing.size && candidate.size && existing.size != candidate.size))
 				{
 					return Result<void>::Failure("Shader stages declare incompatible uniform member layouts at " + key);
@@ -490,7 +499,13 @@ Result<ShaderBindingLayout> BuildShaderBindingLayout(const ShaderAsset& shader, 
 				return Result<ShaderBindingLayout>::Failure("Uniform member lies outside its reflected block: " +
 				                                            member.name);
 			}
-			uniformBuffer.members.push_back({member.name, member.type, member.offset, memberBytes});
+			if ((member.type == "mat4" || member.type == "float4x4") && member.matrixStride != 0 &&
+			    member.matrixStride != 16)
+			{
+				return Result<ShaderBindingLayout>::Failure("Unsupported reflected Matrix4x4 stride: " + member.name);
+			}
+			uniformBuffer.members.push_back(
+			    {member.name, member.type, member.offset, memberBytes, member.matrixStride, member.spirvRowMajor});
 			const auto property =
 			    std::find_if(shader.properties.begin(), shader.properties.end(),
 			                 [&](const PropertyDeclaration& candidate) { return candidate.identifier == member.name; });
@@ -603,6 +618,43 @@ Result<Vector<UInt8>> PackMaterialUniformBuffer(const ShaderAsset& shader, const
 		std::memcpy(bytes.data() + bindingInfo.byteOffset, source, size);
 	}
 	return Result<Vector<UInt8>>::Success(std::move(bytes));
+}
+
+Result<void> WriteShaderUniformValue(Vector<UInt8>& destination, const ShaderUniformMember& member, const void* source,
+                                     Size byteSize)
+{
+	if ((!source && byteSize) || byteSize != member.byteSize || member.byteOffset > destination.size() ||
+	    byteSize > destination.size() - member.byteOffset)
+	{
+		return Result<void>::Failure("Uniform value size or reflected offset is invalid: " + member.name);
+	}
+	if (member.type == "mat4" || member.type == "float4x4")
+	{
+		if (byteSize != 64 || (member.matrixStride != 0 && member.matrixStride != 16))
+		{
+			return Result<void>::Failure("Unsupported Matrix4x4 uniform layout: " + member.name);
+		}
+		if (!member.spirvRowMajor)
+		{
+			Array<Float32, 16> columnMajor;
+			Array<Float32, 16> rowMajor;
+			std::memcpy(columnMajor.data(), source, sizeof(columnMajor));
+			for (Size row = 0; row < 4; ++row)
+			{
+				for (Size column = 0; column < 4; ++column)
+				{
+					rowMajor[row * 4 + column] = columnMajor[column * 4 + row];
+				}
+			}
+			std::memcpy(destination.data() + member.byteOffset, rowMajor.data(), sizeof(rowMajor));
+			return {};
+		}
+	}
+	if (byteSize)
+	{
+		std::memcpy(destination.data() + member.byteOffset, source, byteSize);
+	}
+	return {};
 }
 
 Result<Vector<MaterialTextureBinding>> BuildMaterialTextureBindings(const ShaderAsset& shader,

@@ -5,6 +5,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+	<Compile Include="../../../Docs/Examples/Editor/TypedInspector.cs" Link="TypedInspector.cs" />
     <ProjectReference Include="../../../Managed/Ursa.Editor/Ursa.Editor.csproj" />
   </ItemGroup>
 </Project>

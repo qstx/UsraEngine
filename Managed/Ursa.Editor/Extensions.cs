@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Text.Json;
 using Ursa;
 
 namespace Ursa.Editor;
@@ -37,7 +36,7 @@ public abstract class Inspector
 
 	public abstract void OnInspectorGUI();
 
-	protected void DrawDefaultInspector() => EditorApi.Call("DrawDefaultInspector");
+	protected bool DrawDefaultInspector() => SerializedObject.DrawDefaultInspector();
 }
 
 public abstract class EditorWindow
@@ -49,8 +48,7 @@ public abstract class EditorWindow
 
 internal sealed class ExtensionRegistry : IEditorExtensionSession
 {
-	private sealed record Descriptor(string Id, string Kind, string Path, string Target, string Title);
-	private readonly List<Descriptor> descriptors = new();
+	private readonly List<EditorExtensionInfo> descriptors = new();
 	private readonly Dictionary<string, Action> callbacks = new(StringComparer.Ordinal);
 	private readonly HashSet<string> disabled = new(StringComparer.Ordinal);
 	private readonly List<Inspector> inspectors = new();
@@ -70,7 +68,7 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 					if (menu == null) continue;
 					if (method.ReturnType != typeof(void) || method.GetParameters().Length != 0 || method.ContainsGenericParameters)
 						throw new InvalidOperationException($"Menu method '{type.FullName}.{method.Name}' must be a static void method without parameters.");
-					registry.Add(new Descriptor("menu:" + menu.Path, "Menu", menu.Path, "", ""),
+					registry.Add(new() { Id = "menu:" + menu.Path, Kind = EditorExtensionKind.Menu, Path = menu.Path, Target = "", Title = "" },
 						(Action)method.CreateDelegate(typeof(Action)));
 				}
 				if (type.IsAbstract || type.ContainsGenericParameters) continue;
@@ -79,7 +77,7 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 					EditorWindowMenuAttribute? menu = type.GetCustomAttribute<EditorWindowMenuAttribute>();
 					if (menu == null) continue;
 					var window = (EditorWindow)Activator.CreateInstance(type)!;
-					registry.Add(new Descriptor("window:" + type.FullName, "Window", menu.Path, "", window.Title), window.OnGUI);
+					registry.Add(new() { Id = "window:" + type.FullName, Kind = EditorExtensionKind.Window, Path = menu.Path, Target = "", Title = window.Title }, window.OnGUI);
 				}
 				if (typeof(Inspector).IsAssignableFrom(type))
 				{
@@ -87,7 +85,7 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 					{
 						var inspector = (Inspector)Activator.CreateInstance(type)!;
 						registry.inspectors.Add(inspector);
-						registry.Add(new Descriptor("inspector:" + attribute.StableType, "Inspector", "", attribute.StableType, ""),
+						registry.Add(new() { Id = "inspector:" + attribute.StableType, Kind = EditorExtensionKind.Inspector, Path = "", Target = attribute.StableType, Title = "" },
 							() => { inspector.SerializedObject = new SerializedObject(); inspector.OnInspectorGUI(); });
 					}
 				}
@@ -97,25 +95,25 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 		catch { registry.Dispose(); throw; }
 	}
 
-	private void Add(Descriptor descriptor, Action callback)
+	private void Add(EditorExtensionInfo descriptor, Action callback)
 	{
-		if (descriptor.Kind != "Inspector" && (string.IsNullOrWhiteSpace(descriptor.Path) ||
+		if (descriptor.Kind != EditorExtensionKind.Inspector && (string.IsNullOrWhiteSpace(descriptor.Path) ||
 		    descriptor.Path.Split('/').Any(segment => string.IsNullOrWhiteSpace(segment))))
 			throw new InvalidOperationException("Editor menu path contains an empty segment.");
-		if (descriptor.Kind == "Inspector" && string.IsNullOrWhiteSpace(descriptor.Target))
+		if (descriptor.Kind == EditorExtensionKind.Inspector && string.IsNullOrWhiteSpace(descriptor.Target))
 			throw new InvalidOperationException("Inspector target identity is empty.");
 		if (!callbacks.TryAdd(descriptor.Id, callback)) throw new InvalidOperationException($"Duplicate editor extension '{descriptor.Id}'.");
 		descriptors.Add(descriptor);
 	}
 
-	public string Describe() => JsonSerializer.Serialize(descriptors.Where(descriptor => !disabled.Contains(descriptor.Id)));
+	public EditorExtensionInfo[] Describe() => descriptors.Where(descriptor => !disabled.Contains(descriptor.Id)).ToArray();
 
-	public bool Invoke(string id, nint api, int size)
+	public bool Invoke(string id)
 	{
 		if (disabled.Contains(id) || !callbacks.TryGetValue(id, out Action? callback)) return false;
 		try
 		{
-			EditorApi.Begin(api, size);
+			EditorApi.Begin();
 			callback();
 			return true;
 		}

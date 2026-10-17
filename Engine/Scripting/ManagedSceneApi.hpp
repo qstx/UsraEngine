@@ -5,8 +5,8 @@
 #include <Rendering/Commands/RenderCommandExecutor.hpp>
 #include <Rhi/RHI.hpp>
 #include <Scripting/ManagedHandleRegistry.hpp>
+#include <Scripting/Bindings/BindingRuntime.hpp>
 #include <Scripting/ManagedBehaviourRuntime.hpp>
-#include <Scripting/NativeApi.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <functional>
 #include <optional>
@@ -14,7 +14,17 @@
 
 namespace Ursa::Scripting
 {
-class ManagedSceneApi final
+namespace Bindings
+{
+struct RuntimeServices;
+struct MeshServices;
+struct MaterialServices;
+struct ResourceServices;
+struct SerializationServices;
+struct RenderingServices;
+} // namespace Bindings
+
+class ManagedSceneApi final : public Bindings::BindingContext
 {
 public:
 	using ManagedRenderTexture = Rendering::RenderTextureResource;
@@ -22,6 +32,20 @@ public:
 
 	explicit ManagedSceneApi(Scene& scene, ResourceSession* resources = nullptr,
 	                         std::function<void(const String&)> setWindowTitle = {});
+
+	~ManagedSceneApi() override;
+	UInt64 SessionIdentity() const override;
+	void CheckHandle(const void* value, Size size, UInt32 kind) const override;
+
+	Result<void> BindHostServices(void* token)
+	{
+		if (ownerThread != std::this_thread::get_id())
+		{
+			return Result<void>::Failure("Host services must bind on the Scene owner thread");
+		}
+		bindingHostToken = token;
+		return {};
+	}
 
 	Result<ManagedHandle> Register(const GameObject::Ptr& object);
 
@@ -39,18 +63,6 @@ public:
 		behaviourRuntime = runtime;
 	}
 
-	NativeApiV6 Bind(NativeApiV6 api);
-
-	void SetRenderContextToken(Rendering::RenderContextToken token)
-	{
-		activeRenderToken = token;
-	}
-
-	void ClearRenderContextToken()
-	{
-		activeRenderToken.reset();
-	}
-
 	void SetRenderDevice(Rhi::DevicePtr selectedDevice);
 	void SetRenderOutput(std::shared_ptr<ManagedRenderTexture> output,
 	                     Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead);
@@ -66,96 +78,18 @@ public:
 	}
 
 private:
-	static ManagedSceneApi* FromContext(void* context);
-
-	static Int32 CreateGameObject(void* context, const UInt8* name, UInt64 length, ManagedHandle* output);
-
-	static Int32 GetGameObjectName(void* context, ManagedHandle object, UInt8* output, UInt64 capacity,
-	                               UInt64* required);
-
-	static Int32 SetGameObjectName(void* context, ManagedHandle object, const UInt8* name, UInt64 length);
-
-	static Int32 GetGameObjectActive(void* context, ManagedHandle object, UInt32* output);
-
-	static Int32 SetGameObjectActive(void* context, ManagedHandle object, UInt32 active);
-
-	static Int32 GetGameObjectParent(void* context, ManagedHandle object, ManagedHandle* output);
-
-	static Int32 SetGameObjectParent(void* context, ManagedHandle object, ManagedHandle parent);
-
-	static Int32 DestroyGameObject(void* context, ManagedHandle object);
-
-	static Int32 GetWorldPosition(void* context, ManagedHandle object, Float32* output, UInt64 count);
-
-	static Int32 SetWorldPosition(void* context, ManagedHandle object, const Float32* values, UInt64 count);
-
-	static Int32 GetCameraProjection(void* context, ManagedHandle component, Float32* output, UInt64 count);
-
-	static Int32 SetCameraProjection(void* context, ManagedHandle component, const Float32* values, UInt64 count);
-
-	static Int32 SetWindowTitle(void* context, const UInt8* title, UInt64 length);
-
-	static Int32 GetLocalTransform(void* context, ManagedHandle object, Float32* output, UInt64 count);
-
-	static Int32 SetLocalTransform(void* context, ManagedHandle object, const Float32* values, UInt64 count);
-
-	static Int32 GetInputState(void* context, UInt32 key, UInt32 phase, UInt32* output);
-
-	static Int32 GetTimeState(void* context, Float32* delta, Float32* fixedDelta, Float64* time, Float64* fixedTime,
-	                          UInt64* frame);
-
-	static Int32 AddComponent(void* context, ManagedHandle object, const UInt8* type, UInt64 length,
-	                          ManagedHandle* output);
-
-	static Int32 GetComponentCount(void* context, ManagedHandle object, UInt32* output);
-
-	static Int32 GetComponentAt(void* context, ManagedHandle object, UInt32 index, ManagedHandle* output);
-
-	static Int32 GetComponentType(void* context, ManagedHandle component, UInt8* output, UInt64 capacity,
-	                              UInt64* required);
-
-	static Int32 GetComponentOwner(void* context, ManagedHandle component, ManagedHandle* output);
-
-	static Int32 GetComponentEnabled(void* context, ManagedHandle component, UInt32* output);
-
-	static Int32 SetComponentEnabled(void* context, ManagedHandle component, UInt32 enabled);
-
-	static Int32 IsComponentActive(void* context, ManagedHandle component, UInt32* output);
-
-	static Int32 RemoveComponent(void* context, ManagedHandle component);
-
-	static Int32 LoadTexture(void* context, const UInt8* guid, UInt64 guidLength, UInt64 localFileId,
-	                         ManagedHandle* output);
-
-	static Int32 LoadMaterial(void* context, const UInt8* guid, UInt64 guidLength, UInt64 localFileId,
-	                          ManagedHandle* output);
-
-	static Int32 AddBehaviour(void* context, ManagedHandle object, const UInt8* typeName, UInt64 typeNameLength,
-	                          UInt64 instanceToken, ManagedHandle* output);
-
-	static Int32 GetGameObjectPersistentId(void* context, ManagedHandle object, UInt8* output, UInt64 capacity,
-	                                       UInt64* required);
-
-	static Int32 ResolveGameObjectPersistentId(void* context, const UInt8* id, UInt64 length, ManagedHandle* output);
-
-	static Int32 GetComponentPersistentId(void* context, ManagedHandle component, UInt8* output, UInt64 capacity,
-	                                      UInt64* required);
-
-	static Int32 ResolveComponentPersistentId(void* context, const UInt8* id, UInt64 length, ManagedHandle* output);
-
+	friend struct Bindings::RuntimeServices;
+	friend struct Bindings::MeshServices;
+	friend struct Bindings::MaterialServices;
+	friend struct Bindings::ResourceServices;
+	friend struct Bindings::SerializationServices;
+	friend struct Bindings::RenderingServices;
+	void* bindingHostToken = nullptr;
 	Result<GameObject::Ptr> Resolve(const ManagedHandle& handle) const;
 
 	Result<ManagedHandle> RegisterComponent(Component* component, const GameObject::Ptr& owner);
 
 	Result<Component*> ResolveComponent(const ManagedHandle& handle) const;
-
-	static Int32 ResourceRequest(void* context, const UInt8* input, UInt64 length, UInt8* output, UInt64 capacity,
-	                             UInt64* required);
-
-	static Int32 SubmitRenderBatch(void* context, const UInt8* tokenBytes, UInt64 tokenByteCount, const UInt8* batch,
-	                               UInt64 batchByteCount);
-
-	nlohmann::json DispatchResourceRequest(const nlohmann::json& request);
 
 	Result<ManagedHandle> RegisterMesh(const MeshPtr& mesh);
 
@@ -171,7 +105,6 @@ private:
 
 	Result<void> ExecuteRenderBatch(const UInt8* bytes, Size byteCount);
 
-	String resourceResponse;
 	UnorderedMap<UInt32, MeshPtr> ownedMeshes;
 	UnorderedMap<UInt32, std::shared_ptr<MaterialInstance>> ownedMaterials;
 	UnorderedMap<UInt32, MaterialTexturePtr> ownedTextures;
@@ -182,6 +115,7 @@ private:
 	std::unique_ptr<ManagedHandleRegistry> handles;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> objects;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> componentOwners;
+	UnorderedMap<UInt32, ComponentId> componentIdentities;
 	ComponentRegistry componentTypes;
 	const FrameContext* frameContext = nullptr;
 	ResourceSession* resources = nullptr;
@@ -192,7 +126,6 @@ private:
 	Rhi::ResourceState renderOutputFinalState = Rhi::ResourceState::ShaderRead;
 	std::optional<Rendering::CameraType> renderCameraFilter;
 	std::optional<Rendering::CameraData> renderCameraOverride;
-	String lastRenderError;
 	ManagedBehaviourRuntime* behaviourRuntime = nullptr;
 	std::function<void(const String&)> setWindowTitle;
 	std::thread::id ownerThread = std::this_thread::get_id();

@@ -1,49 +1,53 @@
 using System;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
+using Ursa.Bindings;
 using Ursa.Rendering;
+using CommandCodec = Ursa.Bindings.Generated.RenderingCommands;
 
 internal static class RenderCommandProtocolTests
 {
 	internal static void Run()
 	{
-		if (Marshal.SizeOf<RenderContextToken>() != 24) throw new Exception("Render context ABI changed.");
-		if (Marshal.OffsetOf<RenderContextToken>("frameId").ToInt32() != 8 ||
-		    Marshal.OffsetOf<RenderContextToken>("index").ToInt32() != 16 ||
-		    Marshal.OffsetOf<RenderContextToken>("generation").ToInt32() != 20)
-			throw new Exception("Render context field offsets changed.");
-		byte[] batch = new byte[32];
-		void Header(uint version, uint count, uint size)
+		if (Marshal.SizeOf<RenderContextToken>() != 24 || Marshal.OffsetOf<RenderContextToken>("frameId").ToInt32() != 8 ||
+			Marshal.OffsetOf<RenderContextToken>("index").ToInt32() != 16 || Marshal.OffsetOf<RenderContextToken>("generation").ToInt32() != 20)
+			throw new Exception("Render context field layout changed.");
+		using var writer = new BindingCommandWriter(CommandCodec.Hash);
+		RenderCommandProtocol.Validate(writer.ToArray());
+		RenderCommands.SetRenderTarget(writer, new RenderTargetValue { Id = 5 });
+		byte[] valid = writer.ToArray();
+		RenderCommandProtocol.Validate(valid);
+		void Reject(byte[] bytes)
 		{
-			BinaryPrimitives.WriteUInt32LittleEndian(batch, version);
-			BinaryPrimitives.WriteUInt32LittleEndian(batch.AsSpan(4), 16);
-			BinaryPrimitives.WriteUInt32LittleEndian(batch.AsSpan(8), count);
-			BinaryPrimitives.WriteUInt32LittleEndian(batch.AsSpan(12), size);
-		}
-		void Record(uint opcode, uint size)
-		{
-			BinaryPrimitives.WriteUInt32LittleEndian(batch.AsSpan(16), opcode);
-			BinaryPrimitives.WriteUInt32LittleEndian(batch.AsSpan(20), size);
-		}
-		void Reject()
-		{
-			try { RenderCommandProtocol.Validate(batch); }
+			try { RenderCommandProtocol.Validate(bytes); }
 			catch (InvalidOperationException) { return; }
-			throw new Exception("Malformed render batch accepted.");
+			throw new Exception("Malformed generated render batch accepted.");
 		}
-		Header(RenderCommandProtocol.version, 0, 16);
-		RenderCommandProtocol.Validate(batch.AsSpan(0, 16));
-		Header(RenderCommandProtocol.version, 1, 32);
-		Record(1, 16);
-		RenderCommandProtocol.Validate(batch);
-		Header(RenderCommandProtocol.version + 1, 1, 32);
-		Reject();
-		Header(RenderCommandProtocol.version, 2, 32);
-		Reject();
-		Header(RenderCommandProtocol.version, 1, 32);
-		foreach (uint size in new uint[] {0, 7, 9, 24, 0xfffffff8}) { Record(1, size); Reject(); }
-		foreach (uint opcode in new uint[] {0, 17, 0xffffffff}) { Record(opcode, 16); Reject(); }
-		Record(1, 8);
-		Reject();
+		foreach (int cut in new[] { 0, 47, 48, valid.Length - 1 }) Reject(valid[..cut]);
+		foreach (int offset in new[] { 0, 8, 12, 16 })
+		{
+			byte[] bytes = (byte[])valid.Clone();
+			bytes[offset] ^= 0xff;
+			Reject(bytes);
+		}
+		foreach (uint size in new uint[] { 0, 7, 9, 8, 0xfffffff8 })
+		{
+			byte[] bytes = (byte[])valid.Clone();
+			BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(BindingCommandWriter.HeaderSize + 4), size);
+			Reject(bytes);
+		}
+		foreach (uint opcode in new uint[] { 0, uint.MaxValue })
+		{
+			byte[] bytes = (byte[])valid.Clone();
+			BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(BindingCommandWriter.HeaderSize), opcode);
+			Reject(bytes);
+		}
+		byte[] padding = (byte[])valid.Clone();
+		padding[^1] = 1;
+		Reject(padding);
+		bool nativeOnlyRejected = false;
+		try { RenderCommands.ResetCameraState(writer); }
+		catch (NotSupportedException) { nativeOnlyRejected = true; }
+		if (!nativeOnlyRejected) throw new Exception("Managed code recorded a native-only command.");
 	}
 }

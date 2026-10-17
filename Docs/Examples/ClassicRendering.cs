@@ -5,6 +5,12 @@ namespace Ursa.Examples;
 
 public static class ClassicRendering
 {
+	// Call after SetupCameraProperties; Matrix4x4 uses column vectors and explicit [row, column] indexing.
+	public static void DrawMeshAt(CommandBuffer commands, Mesh mesh, Material material, Vector3 position)
+	{
+		commands.DrawMesh(mesh, material, Matrix4x4.Translation(position));
+	}
+
 	// width/height must match the host camera output for CopyTexture.
 	public static void DrawCamera(ScriptableRenderContext context, CameraComponent camera, uint width, uint height)
 	{

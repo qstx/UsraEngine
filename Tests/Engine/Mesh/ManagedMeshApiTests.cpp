@@ -1,15 +1,20 @@
 #include <Scripting/ManagedSceneApi.hpp>
+#include <Scripting/Bindings/BindingHandles.hpp>
+#include <Runtime.generated.hpp>
+#include <BindingCalls.hpp>
 #include <Scene/MeshFilterComponent.hpp>
 #include <Scene/MeshRendererComponent.hpp>
-#include <Core/StringInterop.hpp>
 #include <iostream>
-#include <stdexcept>
+#include <cstring>
 
 namespace
 {
 using namespace Ursa;
 using namespace Ursa::Scripting;
-using Json = nlohmann::json;
+using namespace Ursa::Test::BindingCalls;
+namespace R = Bindings::Runtime;
+namespace W = Bindings::Wire;
+using Handle = W::Value_Ursa_NativeHandle;
 
 void Expect(bool value, const char* message)
 {
@@ -19,89 +24,81 @@ void Expect(bool value, const char* message)
 	}
 }
 
-Json Response(NativeApiV5& api, const Json& request, bool succeeds = true)
+bool Same(const Handle& left, const Handle& right)
 {
-	const std::string text = request.dump();
-	UInt64 size = 0;
-	Expect(api.resourceRequest(api.sceneContext, reinterpret_cast<const UInt8*>(text.data()), text.size(), nullptr, 0,
-	                           &size) == 4,
-	       "Resource sizing did not return a response");
-	Vector<UInt8> bytes(Size(size), 0);
-	Expect(api.resourceRequest(api.sceneContext, nullptr, 0, bytes.data(), size, &size) == 0,
-	       "Response retrieval failed");
-	auto response = Json::parse(bytes.begin(), bytes.end());
-	Expect(response.contains("value") == succeeds, "Unexpected resource request result");
-	return response.contains("value") ? response["value"] : response["error"];
+	return std::memcmp(&left, &right, sizeof(Handle)) == 0;
 }
 
 void Run()
 {
 	Scene scene;
 	ManagedSceneApi bridge(scene);
-	NativeApiV5 table;
-	table.size = sizeof(table);
-	table = bridge.Bind(table);
-	auto mesh = Response(table, {{"operation", "mesh.create"}});
-	Json geometry{
-	    {"positions", {{{"x", 0}, {"y", 0}, {"z", 0}}, {{"x", 1}, {"y", 0}, {"z", 0}}, {{"x", 0}, {"y", 1}, {"z", 0}}}},
-	    {"normals", Json::array()},
-	    {"uv0", Json::array()},
-	    {"colors", Json::array()},
-	    {"tangents", Json::array()},
-	    {"indices", {0, 1, 2}},
-	    {"subMeshes", Json::array()}};
-	Response(table, {{"operation", "mesh.set"}, {"handle", mesh}, {"data", geometry}});
-	const auto version = Response(table, {{"operation", "mesh.version"}, {"handle", mesh}});
-	geometry["indices"][2] = 1234;
-	Response(table, {{"operation", "mesh.set"}, {"handle", mesh}, {"data", geometry}}, false);
-	Expect(Response(table, {{"operation", "mesh.version"}, {"handle", mesh}}) == version,
-	       "Invalid managed Mesh data changed version");
-	auto clone = Response(table, {{"operation", "mesh.clone"}, {"handle", mesh}});
-	Expect(mesh != clone && Response(table, {{"operation", "mesh.get"}, {"handle", mesh}})["positions"].size() == 3,
-	       "Mesh clone lost geometry or identity");
-	Response(table, {{"operation", "mesh.destroy"}, {"handle", mesh}});
-	Expect(Response(table, {{"operation", "resource.valid"}, {"handle", mesh}}) == false,
+	void* context = bridge.Token();
+	auto mesh = Value(Invoke<Handle>(R::NativeMeshBindings_Create, context));
+	Array<W::Value_Ursa_Vector3, 3> positions{{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}};
+	Array<UInt32, 3> indices{0, 1, 2};
+	W::Value_Ursa_MeshData geometry;
+	geometry.present = 1;
+	geometry.F_Positions = {positions.data(), positions.size(), 1, 0};
+	geometry.F_Indices = {indices.data(), indices.size(), 1, 0};
+	geometry.F_Normals = geometry.F_Uv0 = geometry.F_Colors = geometry.F_Tangents =
+	    geometry.F_SubMeshes = {nullptr, 0, 1, 0};
+	geometry.F_Bounds.F_Empty = 1;
+	Complete(InvokeVoid(R::NativeMeshBindings_SetData, context, &mesh, &geometry));
+	const auto version = Value(Invoke<UInt64>(R::NativeMeshBindings_GetVersion, context, &mesh));
+	indices[2] = 1234;
+	Expect(!InvokeVoid(R::NativeMeshBindings_SetData, context, &mesh, &geometry) &&
+	           Value(Invoke<UInt64>(R::NativeMeshBindings_GetVersion, context, &mesh)) == version,
+	       "Invalid managed Mesh data changed its version");
+	auto clone = Value(Invoke<Handle>(R::NativeMeshBindings_Clone, context, &mesh));
+	auto data = Invoke<W::Value_Ursa_MeshData>(R::NativeMeshBindings_GetData, context, &mesh);
+	Expect(data && !Same(mesh, clone) && data.value.F_Positions.length == 3, "Mesh clone lost geometry or identity");
+	Complete(InvokeVoid(R::NativeMeshBindings_Destroy, context, &mesh));
+	Expect(Value(Invoke<UInt32>(R::NativeResourceBindings_IsValid, context, &mesh)) == 0,
 	       "Destroyed Mesh handle remained valid");
-	auto reused = Response(table, {{"operation", "mesh.create"}});
-	Expect(reused != mesh && reused["generation"] != mesh["generation"], "Freed slot did not advance generation");
-	Response(table, {{"operation", "mesh.get"}, {"handle", mesh}}, false);
+	auto reused = Value(Invoke<Handle>(R::NativeMeshBindings_Create, context));
+	Expect(!Same(reused, mesh) && reused.F_generation != mesh.F_generation &&
+	           !Invoke<W::Value_Ursa_MeshData>(R::NativeMeshBindings_GetData, context, &mesh),
+	       "Freed Mesh slot did not advance generation or reject stale access");
 	Scene anotherScene;
 	ManagedSceneApi anotherBridge(anotherScene);
-	auto anotherTable = anotherBridge.Bind(NativeApiV5{});
-	Response(anotherTable, {{"operation", "mesh.get"}, {"handle", clone}}, false);
-	auto material = Response(table, {{"operation", "material.create"}});
-	Response(table, {{"operation", "mesh.get"}, {"handle", material}}, false);
-	Response(table, {{"operation", "material.color"},
-	                 {"handle", material},
-	                 {"data", {{"r", 0.3}, {"g", 0.8}, {"b", 0.1}, {"a", 1}}}});
-	const auto previous = Response(table, {{"operation", "material.get"}, {"handle", material}});
-	Response(table, {{"operation", "material.roughness"}, {"handle", material}, {"data", -1}}, false);
-	Expect(Response(table, {{"operation", "material.get"}, {"handle", material}}) == previous,
-	       "Invalid material mutation changed values");
-	Response(table, {{"operation", "material.destroy"}, {"handle", material}});
-	Response(table, {{"operation", "material.get"}, {"handle", material}}, false);
+	Expect(!Invoke<W::Value_Ursa_MeshData>(R::NativeMeshBindings_GetData, anotherBridge.Token(), &clone),
+	       "Foreign-session Mesh was accepted");
+	auto material = Value(Invoke<Handle>(R::NativeMaterialBindings_Create, context, Int32(MaterialType::Unlit)));
+	Expect(!Invoke<W::Value_Ursa_MeshData>(R::NativeMeshBindings_GetData, context, &material),
+	       "Mesh getter accepted a Material handle");
+	const W::Value_Ursa_Color color{0.3f, 0.8f, 0.1f, 1};
+	Complete(InvokeVoid(R::NativeMaterialBindings_SetBaseColor, context, &material, &color));
+	const auto previous = Value(
+	    Invoke<W::Value_Ursa_MaterialParametersValue>(R::NativeMaterialBindings_GetParameters, context, &material));
+	Expect(!InvokeVoid(R::NativeMaterialBindings_SetRoughness, context, &material, -1.f),
+	       "Invalid material mutation was accepted");
+	const auto retained = Value(
+	    Invoke<W::Value_Ursa_MaterialParametersValue>(R::NativeMaterialBindings_GetParameters, context, &material));
+	Expect(std::memcmp(&previous, &retained, sizeof(previous)) == 0, "Invalid material mutation changed values");
+	Complete(InvokeVoid(R::NativeMaterialBindings_Destroy, context, &material));
+	Expect(!Invoke<W::Value_Ursa_MaterialParametersValue>(R::NativeMaterialBindings_GetParameters, context, &material),
+	       "Destroyed Material was readable");
 	const auto object = GameObject::Create("Object");
 	Expect(bool(scene.AttachGameObject(object)), "Object attach failed");
-	auto filter = object->AddComponent<MeshFilterComponent>().value;
-	auto renderer = object->AddComponent<MeshRendererComponent>().value;
-	const auto filterHandle = bridge.RegisterComponent(filter).value;
-	const Json filterJson{{"sessionId", filterHandle.sessionId},
-	                      {"index", filterHandle.index},
-	                      {"generation", filterHandle.generation},
-	                      {"kind", UInt32(filterHandle.kind)},
-	                      {"reserved", 0}};
-	Response(table, {{"operation", "binding.mesh.set"}, {"handle", filterJson}, {"data", clone}});
-	auto instance = Response(table, {{"operation", "binding.mesh.get"}, {"handle", filterJson}, {"instance", true}});
-	Expect(instance != clone &&
-	           Response(table, {{"operation", "binding.mesh.get"}, {"handle", filterJson}, {"instance", true}}) ==
-	               instance,
-	       "Managed getter cloned Mesh more than once");
-	Expect(Response(table, {{"operation", "binding.mesh.get"}, {"handle", filterJson}}) == instance,
-	       "Shared binding did not follow independent Mesh");
+	auto* filter = object->AddComponent<MeshFilterComponent>().value;
+	auto* renderer = object->AddComponent<MeshRendererComponent>().value;
+	const auto filterHandle = Bindings::WriteManagedHandle<Handle>(bridge.RegisterComponent(filter).value);
+	const W::Value_Ursa_NativeHandle_ shared{1, clone};
+	Complete(InvokeVoid(R::NativeResourceBindings_SetMeshBinding, context, &filterHandle, &shared, UInt32{0}));
+	auto instance = Value(Invoke<W::Value_Ursa_NativeHandle_>(R::NativeResourceBindings_GetMeshBinding, context,
+	                                                          &filterHandle, UInt32{1}));
+	auto repeated = Value(Invoke<W::Value_Ursa_NativeHandle_>(R::NativeResourceBindings_GetMeshBinding, context,
+	                                                          &filterHandle, UInt32{1}));
+	auto currentShared = Value(Invoke<W::Value_Ursa_NativeHandle_>(R::NativeResourceBindings_GetMeshBinding, context,
+	                                                               &filterHandle, UInt32{0}));
+	Expect(instance.present && !Same(instance.F_value, clone) && Same(instance.F_value, repeated.F_value) &&
+	           Same(instance.F_value, currentShared.F_value),
+	       "Instance Mesh cloning or shared binding rules changed");
 	Expect(!object->AddComponent<MeshFilterComponent>() && !object->AddComponent<MeshRendererComponent>(),
-	       "Duplicate component accepted");
-	Expect(bool(renderer->SetEnabled(false)), "Renderer enabled setter failed");
-	Expect(!filter->SetEnabled(false), "MeshFilter enabled setter succeeded");
+	       "Duplicate render component was accepted");
+	Expect(bool(renderer->SetEnabled(false)) && !filter->SetEnabled(false),
+	       "Renderer/MeshFilter enabled rules changed");
 }
 } // namespace
 

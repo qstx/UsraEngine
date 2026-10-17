@@ -1,0 +1,37 @@
+<Project>
+  <PropertyGroup>
+    <UrsaUsesBindings Condition="'$(MSBuildProjectName)' == 'Ursa.Runtime' Or '$(MSBuildProjectName)' == 'Ursa.Rendering' Or '$(MSBuildProjectName)' == 'Ursa.Editor' Or '$(MSBuildProjectName)' == 'Ursa.ManagedHost'">true</UrsaUsesBindings>
+    <UrsaBindingsSourceDir Condition="'$(UrsaBindingsSourceDir)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory).'))</UrsaBindingsSourceDir>
+    <UrsaBindingsGeneratedDir Condition="'$(UrsaBindingsGeneratedDir)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../Build/Bindings/$(Configuration)'))</UrsaBindingsGeneratedDir>
+    <UrsaBindingModule Condition="'$(MSBuildProjectName)' == 'Ursa.Runtime'">Runtime</UrsaBindingModule>
+    <UrsaBindingModule Condition="'$(MSBuildProjectName)' == 'Ursa.Rendering'">Rendering</UrsaBindingModule>
+    <UrsaBindingModule Condition="'$(MSBuildProjectName)' == 'Ursa.Editor'">Editor</UrsaBindingModule>
+    <UrsaBindingModule Condition="'$(MSBuildProjectName)' == 'Ursa.ManagedHost'">ManagedHost</UrsaBindingModule>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(UrsaUsesBindings)' == 'true'">
+    <UrsaBindingInputs Include="$(UrsaBindingsSourceDir)/**/*.cs;$(UrsaBindingsSourceDir)/**/*.csproj;$(MSBuildThisFileFullPath)"
+      Exclude="$(UrsaBindingsSourceDir)/**/bin/**;$(UrsaBindingsSourceDir)/**/obj/**;$(UrsaBindingsSourceDir)/**/Generated/**" />
+    <Compile Include="$(UrsaBindingsGeneratedDir)/Managed/$(UrsaBindingModule).g.cs" Link="Generated/$(UrsaBindingModule).g.cs" />
+  </ItemGroup>
+  <Target Name="UrsaGenerateBindings" BeforeTargets="CoreCompile" Condition="'$(UrsaUsesBindings)' == 'true'"
+    Inputs="@(UrsaBindingInputs)" Outputs="$(UrsaBindingsGeneratedDir)/Generated.stamp">
+    <PropertyGroup>
+      <UrsaBindingsTool Condition="'$(UrsaBindingsGenerator)' != ''">$(UrsaBindingsGenerator)</UrsaBindingsTool>
+      <UrsaBindingsTool Condition="'$(UrsaBindingsTool)' == ''">$(UrsaBindingsGeneratedDir)/Tool/Ursa.BindingsGenerator.dll</UrsaBindingsTool>
+      <UrsaBindingDotnet Condition="'$(DotNetHostPath)' != ''">$(DotNetHostPath)</UrsaBindingDotnet>
+      <UrsaBindingDotnet Condition="'$(UrsaBindingDotnet)' == ''">dotnet</UrsaBindingDotnet>
+    </PropertyGroup>
+    <Exec Condition="'$(UrsaBindingsGenerator)' == ''"
+      Command="&quot;$(UrsaBindingDotnet)&quot; build &quot;$(UrsaBindingsSourceDir)/Ursa.BindingsGenerator/Ursa.BindingsGenerator.csproj&quot; --configuration &quot;$(Configuration)&quot; --nologo -m:1 --artifacts-path &quot;$(UrsaBindingsGeneratedDir)/ToolArtifacts&quot; --output &quot;$(UrsaBindingsGeneratedDir)/Tool&quot;" />
+    <Exec Command="&quot;$(UrsaBindingDotnet)&quot; &quot;$(UrsaBindingsTool)&quot; --input &quot;$(UrsaBindingsSourceDir)&quot; --output &quot;$(UrsaBindingsGeneratedDir)&quot;" />
+    <Touch Files="$(UrsaBindingsGeneratedDir)/Generated.stamp" AlwaysCreate="true" />
+  </Target>
+  <Target Name="UrsaCollectGeneratedCommands" BeforeTargets="CoreCompile" DependsOnTargets="UrsaGenerateBindings"
+    Condition="'$(UrsaUsesBindings)' == 'true'">
+    <ItemGroup>
+      <Compile Include="$(UrsaBindingsGeneratedDir)/Managed/$(UrsaBindingModule).Commands.g.cs"
+        Condition="Exists('$(UrsaBindingsGeneratedDir)/Managed/$(UrsaBindingModule).Commands.g.cs')"
+        Link="Generated/$(UrsaBindingModule).Commands.g.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

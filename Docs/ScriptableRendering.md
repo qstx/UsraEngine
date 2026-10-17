@@ -82,9 +82,11 @@ Vulkan RenderPass 缓存键包含附件格式及 Load/Store 操作；Framebuffer
 
 当前 Shader 资源封套为 v3、反射契约为 v2，编译/绑定策略为 `UrsaBindingMapV5UniformLayout`。uniform 尺寸规范化会改变布局身份，因此导入记录与编译缓存必须一起失效；旧 Library 产物会由项目导入重新生成，源 GUID 和材质引用保持原样。
 
-资源命令的批次协议现为 v2，与 NativeApi V6 的函数布局版本独立。v2 增加目标标识、全局矩阵/整数/缓冲、全屏三角形和多附件目标记录；不兼容的批次在解析资源前拒绝。
+普通 Rendering 调用由 `NativeRendering.bindings.cs` 生成，包含帧上下文、相机快照、Cull/RendererList、逻辑 Submit、资源创建/释放和原始字节读回。入口验证所属线程、会话、帧与代数；EnqueueBatch 的错误随调用返回，不再查询跨调用错误字符串。
 
-`RenderTargetIdentifier.CameraTarget` 表示宿主交付的当前相机输出，非零整数表示当前上下文的临时 ID，`RenderTexture` 表示持久 GPU 资源。`SetRenderTargets` 支持最多八个颜色目标及独立深度目标，实际数量、格式和尺寸仍按设备能力校验。全屏材质的顶点程序使用 `SV_VertexID` 生成三角形；`Blit` 把来源绑定到 `_Source`、`_MainTex` 或 `_BlitTexture`，`DrawFullscreen` 使用命令录制的全局纹理。数值全局参数按反射偏移覆盖 uniform；16 个矩阵值按传入顺序保存，HLSL 可用 `row_major float4x4` 声明对应布局。
+`RenderCommands.bindings.cs` 是录制协议的唯一声明，17 个原命令族展开为 27 个具体命令，其中 ResetCameraState 为 native-only。生成器产出稳定 opcode、两侧编码/解码、参数布局及独立批次指纹；旧 v2 手写协议已删除，旧批次会被拒绝。基础批次框架为 v1，48 字节头携带 SHA-256 契约身份，记录按 8 字节对齐且填充必须为零，总量上限 64 MiB。managed 和 native codec 共同验证长度、类型、UTF-8 与预算；native 完整解码并解析所有资源后，执行器才统一预检和交付，末尾错误不会让前面的清屏或绘制生效。
+
+`RenderTargetIdentifier.CameraTarget` 表示宿主交付的当前相机输出，非零整数表示当前上下文的临时 ID，`RenderTexture` 表示持久 GPU 资源。`SetRenderTargets` 支持最多八个颜色目标及独立深度目标，实际数量、格式和尺寸仍按设备能力校验。全屏材质的顶点程序使用 `SV_VertexID` 生成三角形；`Blit` 把来源绑定到 `_Source`、`_MainTex` 或 `_BlitTexture`，`DrawFullscreen` 使用命令录制的全局纹理。矩阵接口接受 `Matrix4x4`，按 `[row,column]` 索引、列序存储并乘列向量；上传 uniform 时根据反射转换，HLSL `row_major`/`column_major` 得到同一数学值。`DrawingSettings.CameraPosition` 为可选 `Vector3`，null 使用当前相机位置。
 
 `Execute` 交付资源与参数快照，`context.Submit()` 关闭逻辑段，GPU 工作在上下文收尾时按顺序编码；清空命令缓冲或释放已交付资源的包装不会破坏这些快照。临时 ID 可以跨同一上下文的多个命令缓冲使用，结束前必须 Release；下一上下文不能沿用旧 ID。池最多保留 32 个目标、512 MiB，总量有界，完成 fence 前不复用 backing。每个持久目标/缓冲的创建预算为 256 MiB。`GetRawData` 是显式同步读回，会等待相应 GPU 工作，不用于逐绘制热路径。
 

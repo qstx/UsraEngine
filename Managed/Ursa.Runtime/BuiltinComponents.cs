@@ -1,61 +1,45 @@
 namespace Ursa;
 
 [NativeComponentType("ursa.Camera")]
-public sealed unsafe class CameraComponent : Component
+public sealed class CameraComponent : Component
 {
 	public CameraRenderingSettings RenderingSettings
 	{
-		get => CameraRenderingSettings.FromPayload(EngineApi.ResourceRequest<CameraSettingsPayload>(
-			new { operation = "camera.settings.get", handle = NativeHandle }));
+		get => NativeRuntimeBindings.GetCameraRenderingSettings(NativeHandle);
 		set
 		{
 			System.ArgumentNullException.ThrowIfNull(value);
-			EngineApi.ResourceRequest(new { operation = "camera.settings.set", handle = NativeHandle, data = value.ToPayload() });
+			NativeRuntimeBindings.SetCameraRenderingSettings(NativeHandle, value);
 		}
 	}
 
 	public float VerticalFovRadians
 	{
-		get {
-			float* values = stackalloc float[3];
-			EngineApi.GetCameraProjection(NativeHandle, values);
-			return values[0];
-		}
+		get => NativeRuntimeBindings.GetCameraProjection(NativeHandle).VerticalFovRadians;
 		set {
-			float* values = stackalloc float[3];
-			EngineApi.GetCameraProjection(NativeHandle, values);
-			values[0] = value;
-			EngineApi.SetCameraProjection(NativeHandle, values);
+			CameraProjection current = NativeRuntimeBindings.GetCameraProjection(NativeHandle);
+			current.VerticalFovRadians = value;
+			NativeRuntimeBindings.SetCameraProjection(NativeHandle, current);
 		}
 	}
 
 	public float NearPlane
 	{
-		get {
-			float* values = stackalloc float[3];
-			EngineApi.GetCameraProjection(NativeHandle, values);
-			return values[1];
-		}
+		get => NativeRuntimeBindings.GetCameraProjection(NativeHandle).NearPlane;
 		set {
-			float* values = stackalloc float[3];
-			EngineApi.GetCameraProjection(NativeHandle, values);
-			values[1] = value;
-			EngineApi.SetCameraProjection(NativeHandle, values);
+			CameraProjection current = NativeRuntimeBindings.GetCameraProjection(NativeHandle);
+			current.NearPlane = value;
+			NativeRuntimeBindings.SetCameraProjection(NativeHandle, current);
 		}
 	}
 
 	public float FarPlane
 	{
-		get {
-			float* values = stackalloc float[3];
-			EngineApi.GetCameraProjection(NativeHandle, values);
-			return values[2];
-		}
+		get => NativeRuntimeBindings.GetCameraProjection(NativeHandle).FarPlane;
 		set {
-			float* values = stackalloc float[3];
-			EngineApi.GetCameraProjection(NativeHandle, values);
-			values[2] = value;
-			EngineApi.SetCameraProjection(NativeHandle, values);
+			CameraProjection current = NativeRuntimeBindings.GetCameraProjection(NativeHandle);
+			current.FarPlane = value;
+			NativeRuntimeBindings.SetCameraProjection(NativeHandle, current);
 		}
 	}
 }

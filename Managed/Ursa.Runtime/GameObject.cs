@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace Ursa;
 
+[Ursa.Bindings.WireValue]
 public enum PrimitiveType { Cube }
 
 public sealed class GameObject
@@ -33,11 +34,11 @@ public sealed class GameObject
 
 	public int Layer
 	{
-		get => EngineApi.ResourceRequest<int>(new { operation = "gameObject.layer.get", handle });
+		get => NativeRuntimeBindings.GetLayer(handle);
 		set
 		{
 			if (value < 0 || value > 31) throw new ArgumentOutOfRangeException(nameof(value));
-			EngineApi.ResourceRequest(new { operation = "gameObject.layer.set", handle, value });
+			NativeRuntimeBindings.SetLayer(handle, value);
 		}
 	}
 
@@ -98,10 +99,9 @@ public sealed class GameObject
 
 	public T? GetComponent<T>() where T : Component
 	{
-		uint count = EngineApi.GetComponentCount(handle);
-		for (uint index = 0; index < count; ++index)
+		foreach (NativeHandle componentHandle in NativeRuntimeBindings.GetComponents(handle))
 		{
-			Component? component = Component.FromNativeHandle(EngineApi.GetComponentAt(handle, index), typeof(T));
+			Component? component = Component.FromNativeHandle(componentHandle, typeof(T));
 			if (component is T found) return found;
 		}
 		return null;
@@ -109,11 +109,10 @@ public sealed class GameObject
 
 	public T[] GetComponents<T>() where T : Component
 	{
-		uint count = EngineApi.GetComponentCount(handle);
 		var found = new List<T>();
-		for (uint index = 0; index < count; ++index)
+		foreach (NativeHandle componentHandle in NativeRuntimeBindings.GetComponents(handle))
 		{
-			Component? component = Component.FromNativeHandle(EngineApi.GetComponentAt(handle, index), typeof(T));
+			Component? component = Component.FromNativeHandle(componentHandle, typeof(T));
 			if (component is T matching) found.Add(matching);
 		}
 		return found.ToArray();
@@ -121,7 +120,7 @@ public sealed class GameObject
 
 	public static GameObject CreatePrimitive(PrimitiveType type = PrimitiveType.Cube)
 	{
-		return FromHandle(EngineApi.ResourceRequest<NativeHandle>(new { operation = "gameObject.primitive", type = type.ToString() }));
+		return FromHandle(NativeRuntimeBindings.CreatePrimitive(type));
 	}
 
 	public static GameObject Create(string name = "GameObject")

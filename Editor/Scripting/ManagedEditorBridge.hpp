@@ -3,17 +3,12 @@
 #include <Scene/ComponentEditors.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Scripting/DotNet/DotNetHost.hpp>
+#include <optional>
 
 namespace Ursa::Editor
 {
-struct ManagedExtensionDescriptor
-{
-	String id;
-	String kind;
-	String path;
-	String target;
-	String title;
-};
+using ManagedExtensionDescriptor = Scripting::ManagedEditorExtension;
+using ManagedExtensionKind = Scripting::ManagedEditorExtensionKind;
 
 struct ManagedEditorContext
 {
@@ -25,6 +20,8 @@ struct ManagedEditorContext
 	ComponentInspectorContext selection;
 	ComponentSaveContext saveContext;
 	std::function<Result<void>(const VirtualPath&)> openAsset;
+	std::optional<AssetReference> assetSelection;
+	String assetSelectionName;
 };
 
 #if defined(URSA_ENABLE_DOTNET)

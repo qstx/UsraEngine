@@ -1,6 +1,7 @@
 #include <Serialization/SerializedObject.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <Core/StringInterop.hpp>
+#include <Vfs/MemoryFileProvider.hpp>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -73,6 +74,25 @@ int main()
 		       "SerializedObject did not atomically apply valid script field changes");
 
 		const String committedPayload = component.SerializedPayload();
+		Done(speed.SetValue(99.0));
+		Done(serializedObject->Update());
+		Expect(!serializedObject->HasModifiedProperties() && Take(speed.Value()).get<double>() == 2.75 &&
+		           component.SerializedPayload() == committedPayload,
+		       "Update did not discard pending edits without changing the target");
+		Expect(Take(serializedObject->DescribeProperty("/Fields/step")).at("Kind") == "FloatingPoint" &&
+		           serializedObject->PropertyPaths().size() == 4,
+		       "Serialized property descriptors or field paths differ");
+		Done(speed.SetValue(7.0));
+		auto external = saved;
+		external["Fields"]["enabled"] = true;
+		component.SetSerializedPayload(ToUrsaString(external.dump()));
+		Expect(!serializedObject->Apply() &&
+		           nlohmann::json::parse(ToStdString(component.SerializedPayload())) == external,
+		       "An old property snapshot overwrote an external edit");
+		Done(serializedObject->Update());
+		Expect(Take(enabled.Value()).get<bool>() && !serializedObject->HasModifiedProperties(),
+		       "Update did not capture the new target state");
+		component.SetSerializedPayload(committedPayload);
 		auto invalidObject = Take(SerializedObject::Create(component));
 		auto invalidSpeed = Take(invalidObject->FindProperty("/Fields/step"));
 		Done(invalidSpeed.SetValue("not a number"));
@@ -100,6 +120,10 @@ int main()
 		    {"Kind", "Array"}, {"ElementKind", "UnsignedInteger"}, {"ElementTypeName", "System.Byte"}};
 		component.SetSerializedPayload(ToUrsaString(payload.dump()));
 		const String beforeRangeChecks = component.SerializedPayload();
+		const auto arrayView = Take(SerializedObject::Create(component));
+		const auto elementDescriptor = Take(arrayView->DescribeProperty("/Fields/bytes/1"));
+		Expect(elementDescriptor.at("Kind") == "UnsignedInteger" && elementDescriptor.at("TypeName") == "System.Byte",
+		       "Array element property lost its declared scalar type");
 		for (const auto& candidate : Vector<std::pair<String, nlohmann::json>>{
 		         {"/Fields/small", 128}, {"/Fields/mode", 256}, {"/Fields/bytes/1", 256}, {"/Fields/bytes/0", nullptr}})
 		{
@@ -137,6 +161,23 @@ int main()
 			Expect(!live->Apply() && script->SerializedPayload() == beforeMissingTarget,
 			       "A missing graph reference modified the editing payload");
 		}
+		VirtualFileSystem files;
+		Done(files.MountProvider(projectScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+		auto resources = Take(ResourceSession::Open(files));
+		ComponentRegistry registry;
+		Done(RegisterBuiltinComponents(registry));
+		ComponentLoadContext nativeContext(*resources);
+		CameraComponent camera;
+		auto nativeProperties = Take(SerializedObject::Create(camera, registry, nativeContext));
+		auto nearPlane = Take(nativeProperties->FindProperty("/Fields/nearPlane"));
+		Done(nearPlane.SetValue(0.123456789));
+		Done(nativeProperties->Apply());
+		Expect(Take(nearPlane.Value()).get<Float64>() == static_cast<Float64>(camera.nearPlane),
+		       "Applied snapshot did not reflect the native component's canonical float value");
+		Done(Take(nativeProperties->FindProperty("/Fields/farPlane")).SetValue(250.0));
+		Done(nativeProperties->Apply());
+		Expect(camera.farPlane == 250.f && !nativeProperties->HasModifiedProperties(),
+		       "A valid second Apply conflicted with the first Apply's native normalization");
 		return 0;
 	}
 	catch (const std::exception& error)

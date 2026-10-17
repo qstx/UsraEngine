@@ -16,6 +16,7 @@ internal sealed class Manifest
 	public string EditorAssembly { get; set; } = string.Empty;
 	public string ReferenceDirectory { get; set; } = string.Empty;
 	public string OutputPath { get; set; } = string.Empty;
+	public string BindingsAssembly { get; set; } = string.Empty;
 	public List<SourceEntry> Sources { get; set; } = new();
 }
 
@@ -93,6 +94,8 @@ internal static class Program
 			if (!string.IsNullOrEmpty(manifest.RenderingAssembly))
 				references.Add(MetadataReference.CreateFromFile(manifest.RenderingAssembly));
 			references.Add(MetadataReference.CreateFromFile(manifest.EditorAssembly));
+			if (!string.IsNullOrEmpty(manifest.BindingsAssembly))
+				references.Add(MetadataReference.CreateFromFile(manifest.BindingsAssembly));
 			var compilation = CSharpCompilation.Create("Ursa.ScriptCatalog", trees, references,
 				new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 			var errors = compilation.GetDiagnostics().Where(diagnostic =>

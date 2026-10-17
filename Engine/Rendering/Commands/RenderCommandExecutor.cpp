@@ -1106,8 +1106,8 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 										            member.byteOffset <= bytes.size() &&
 										            member.byteSize <= bytes.size() - member.byteOffset,
 										        "Compute uniform value kind, size or reflected offset is invalid");
-										std::memcpy(bytes.data() + member.byteOffset, parameter->second.bytes.data(),
-										            member.byteSize);
+										Done(Shader::WriteShaderUniformValue(
+										    bytes, member, parameter->second.bytes.data(), member.byteSize));
 									}
 								}
 								auto upload =
@@ -1258,8 +1258,8 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 										            member.byteOffset <= bytes.size() &&
 										            member.byteSize <= bytes.size() - member.byteOffset,
 										        "Global uniform size does not match Shader reflection");
-										std::memcpy(bytes.data() + member.byteOffset, parameter->second.bytes.data(),
-										            member.byteSize);
+										Done(Shader::WriteShaderUniformValue(
+										    bytes, member, parameter->second.bytes.data(), member.byteSize));
 									}
 								}
 								auto upload =

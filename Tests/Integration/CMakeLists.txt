@@ -21,6 +21,11 @@ if(URSA_ENABLE_DOTNET)
 
   ursa_add_test_executable(UrsaDotNetHostTests DotNetHostTests.cpp)
   target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::DotNetHost)
+  target_compile_definitions(UrsaDotNetHostTests PRIVATE
+    URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
+    URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+    URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+    URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
   if(TARGET Ursa::Editor)
     target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::Editor)
     target_compile_definitions(UrsaDotNetHostTests PRIVATE URSA_DOTNET_TEST_EDITOR=1)

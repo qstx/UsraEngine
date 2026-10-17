@@ -49,6 +49,12 @@ public:
 
 	Result<SerializedProperty> FindProperty(const String& path);
 
+	Result<void> Update();
+
+	Result<nlohmann::json> DescribeProperty(const String& path) const;
+
+	Vector<String> PropertyPaths() const;
+
 	Result<void> Apply();
 
 	bool HasModifiedProperties() const
@@ -71,8 +77,10 @@ private:
 	Result<void> ValidateCandidate(const nlohmann::json& candidate) const;
 
 	Component& target;
-	std::function<Result<void>(const nlohmann::json&)> nativeApply;
+	std::function<Result<nlohmann::json>(const nlohmann::json&)> nativeApply;
+	std::function<Result<nlohmann::json>()> captureCurrent;
 	ResourceSession* resources = nullptr;
+	ComponentLoadContext* referenceContext = nullptr;
 	nlohmann::json originalPayload;
 	nlohmann::json pendingPayload;
 	Map<String, nlohmann::json> modifiedProperties;

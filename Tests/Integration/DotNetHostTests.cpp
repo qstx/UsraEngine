@@ -2,12 +2,15 @@
 #include <Scene/Scene.hpp>
 #include <Scripting/DotNet/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
+#include <Scripting/Bindings/BindingRequirements.hpp>
 #include <Scripting/DotNet/ManagedScriptRuntime.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <Mesh/Primitive.hpp>
 #include <MeshFixtures.hpp>
 #include <RenderingFixtures.hpp>
+#include <ComputeFixtures.hpp>
+#include <Shader/ShaderAssetResource.hpp>
 #include <Rendering/Resources/RenderResources.hpp>
 #include <Rendering/Pipeline/GraphicsSettings.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
@@ -67,7 +70,7 @@ void Done(Result<void> result)
 	}
 }
 
-void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPath)
+void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPath, UInt32 objectCount = 1)
 {
 	Rhi::DeviceDesc description;
 #ifndef NDEBUG
@@ -86,11 +89,16 @@ void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPat
 	auto camera = Take(scene.CreateGameObject("Classic Camera"));
 	Take(camera->AddComponent<CameraComponent>());
 	Take(runtime.CreateAndAdd(camera, "Ursa.SessionFixtures.ClassicRenderingProbe, Ursa.SessionFixtures"));
-	auto cube = Take(scene.CreateGameObject("Classic Cube"));
-	LocalTransform transform;
-	transform.position = {0, 0, -3};
-	Done(cube->SetLocalTransform(transform));
-	Take(Test::AddRenderer(cube, {0, 1, 0, 1}));
+	Vector<GameObject::Ptr> cubes;
+	for (UInt32 index = 0; index < objectCount; ++index)
+	{
+		auto cube = Take(scene.CreateGameObject("Classic Cube"));
+		LocalTransform transform;
+		transform.position = {0, 0, -3};
+		Done(cube->SetLocalTransform(transform));
+		Take(Test::AddRenderer(cube, {0, 1, 0, 1}));
+		cubes.push_back(cube);
+	}
 	for (UInt64 frameIndex = 1; frameIndex <= 3; ++frameIndex)
 	{
 		FrameContext frame;
@@ -107,7 +115,10 @@ void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPat
 	}
 	Expect(sceneApi.AcceptedRenderBatchCount() == 6, "The example did not execute two logical segments per frame");
 	Done(scene.DestroyGameObject(camera));
-	Done(scene.DestroyGameObject(cube));
+	for (const auto& cube : cubes)
+	{
+		Done(scene.DestroyGameObject(cube));
+	}
 	Done(scene.CommitChanges());
 	auto failureCamera = Take(scene.CreateGameObject("Failure Camera"));
 	Take(failureCamera->AddComponent<CameraComponent>());
@@ -146,7 +157,48 @@ void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPat
 	Done(scene.CommitChanges());
 	Done(host.CloseScriptSession(session));
 	std::cout << "Compiled classic rendering example: 3 GPU frames passed\n";
+	std::cout << "RendererList batch calls: " << objectCount << " objects, 6 submissions in 3 frames\n";
 	std::cout << "Managed rendering exception cleanup: 2 GPU frames passed\n";
+}
+
+void TestManagedMatrixBindings(DotNetHost& host, VirtualFileSystem& filesystem, const VirtualPath& content)
+{
+	const ResourceId identity = ResourceId::Generate();
+	Done(filesystem.MountProvider("matrixfixture", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	const auto shader = Take(Test::CreateComputeFixture({URSA_TEST_DXC_EXECUTABLE, URSA_TEST_SPIRV_VAL_EXECUTABLE,
+	                                                     URSA_TEST_SPIRV_CROSS_EXECUTABLE, URSA_SHADER_STAGING_ROOT},
+	                                                    identity, true));
+	const auto path = Take(VirtualPath::Parse("matrixfixture:MatrixBindings.ursashaderasset"));
+	Done(Shader::SaveShaderAssetResource(filesystem, path, *shader));
+	const auto resources =
+	    Take(ResourceSession::Open(filesystem,
+	                               [&](ResourceId guid, UInt64 localId)
+	                               {
+		                               return guid == identity && localId == 0
+		                                          ? Result<VirtualPath>::Success(path)
+		                                          : Result<VirtualPath>::Failure("Unknown matrix test shader");
+	                               }));
+	Scene scene;
+	ManagedSceneApi api(scene, resources.get());
+	api.SetRenderDevice(Take(Rhi::CreateDevice({})));
+	const UInt64 session = Take(host.CreateScriptSession(false, &api));
+	Done(host.LoadScriptContent(session, content));
+	Done(host.ValidateScriptSession(session));
+	ManagedScriptRuntime runtime(scene, host, api, session);
+	auto object = Take(scene.CreateGameObject("Matrix bindings"));
+	const auto component =
+	    Take(runtime.CreateAndAdd(object, "Ursa.SessionFixtures.RenderingBindingsProbe, Ursa.SessionFixtures"));
+	const auto* behaviour = static_cast<ScriptBehaviourComponent*>(scene.GetComponent(component));
+	const auto fields = nlohmann::json{{"FormatVersion", 1},
+	                                   {"ScriptType", "test.rendering-bindings-probe"},
+	                                   {"Version", 1},
+	                                   {"Fields", {{"shaderGuid", ToStdString(identity.ToString())}}}};
+	Done(host.DeserializeBehaviour(behaviour->InstanceToken(), ToUrsaString(fields.dump())));
+	Done(host.InvokeBehaviour(behaviour->InstanceToken(), ManagedBehaviourEvent::Update));
+	Expect(Take(object->Name()) == "MatrixBindingsPassed",
+	       "C# non-symmetric Matrix4x4 did not match both HLSL major orders");
+	scene.Clear();
+	Done(host.CloseScriptSession(session));
 }
 
 void TestPipelineAssetReload(DotNetHost& host, VirtualFileSystem& filesystem, const VirtualPath& content)
@@ -769,7 +821,7 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	    owner, "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures"));
 	auto* script = static_cast<ScriptBehaviourComponent*>(draft->GetScene().GetComponent(scriptId));
 	script->SetSerializedPayload(
-	    R"({"FormatVersion":1,"ScriptType":"test.session-probe","Version":1,"Fields":{"value":7},"FieldTypes":{"value":{"Kind":"SignedInteger","ElementKind":"Unsupported","TypeName":"System.Int32"}}})");
+	    R"({"FormatVersion":1,"ScriptType":"test.session-probe","Version":1,"Fields":{"value":7,"future":{"preserved":"unknown data"}},"FieldTypes":{"value":{"Kind":"SignedInteger","ElementKind":"Unsupported","TypeName":"System.Int32"}}})");
 	const ComponentId cameraId = Take(draft->GetScene().AddComponent<CameraComponent>(owner));
 	auto* camera = static_cast<CameraComponent*>(draft->GetScene().GetComponent(cameraId));
 	Done(documents->RequestOpen(std::move(document)));
@@ -779,7 +831,7 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	Done(host.LoadScriptContent(domain, Path("prj:Managed/Game.json")));
 	Done(host.LoadScriptAssembly(Take(source.Read(Path("ursa:TestScripts/Ursa.EditorFixtures.dll")))));
 	Done(host.ValidateScriptSession(domain));
-	auto descriptors = nlohmann::json::parse(ToStdString(Take(host.PrepareEditorExtensions(domain))));
+	auto descriptors = Take(host.PrepareEditorExtensions(domain));
 	Expect(descriptors.size() == 8,
 	       "Managed editor descriptors did not contain the expected menus, window and Inspectors");
 	Expect(!host.PrepareEditorExtensions(domain), "The same session registered editor callbacks twice");
@@ -832,6 +884,18 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	context.target = camera;
 	Expect(Take(draw("inspector:ursa.Camera")) && camera->nearPlane == 0.25f,
 	       "Managed Inspector could not edit an exposed native component");
+	Done(documents->SaveCurrent());
+	auto reopenedScene = Take(
+	    OpenSceneDocument(Path("prj:EditorFixture.ursascene"), ResourceKind::Scene, registry, documents->Session()));
+	auto reopenedDraft = reopenedScene->Payload<SceneDraft>();
+	auto reopenedOwner = Take(reopenedDraft->GetScene().GameObjectById(owner->Id()));
+	auto* reopenedScript = reopenedOwner->FindComponent<ScriptBehaviourComponent>();
+	Expect(reopenedScript && reopenedScript->PersistentId() == script->PersistentId() &&
+	           nlohmann::json::parse(ToStdString(reopenedScript->SerializedPayload()))["Fields"]["value"] == 8 &&
+	           nlohmann::json::parse(ToStdString(
+	               reopenedScript->SerializedPayload()))["Fields"]["future"]["preserved"] == "unknown data" &&
+	           reopenedOwner->FindComponent<CameraComponent>()->nearPlane == 0.25f,
+	       "Editor Scene save/reopen lost typed changes, stable IDs or unknown fields");
 	context.target = nullptr;
 	Expect(static_cast<bool>(draw("window:Ursa.EditorFixtures.ProbeWindow")),
 	       "Managed tool window could not query selection and draw controls");
@@ -844,11 +908,16 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	Done(host.LoadScriptContent(replacement, Path("prj:Managed/Game.json")));
 	Done(host.LoadScriptAssembly(Take(source.Read(Path("ursa:TestScripts/Ursa.EditorFixtures.dll")))));
 	Done(host.ValidateScriptSession(replacement));
-	auto registrations = nlohmann::json::parse(ToStdString(Take(host.PrepareEditorExtensions(replacement))));
+	auto registrations = Take(host.PrepareEditorExtensions(replacement));
 	Expect(registrations.size() == descriptors.size(), "Reload duplicated extension registrations");
-	auto prefabRoot = GameObject::Create("Detached Prefab");
+	auto prefabDocument = Take(
+	    NewSceneDocument(Path("prj:EditorFixture.ursaprefab"), ResourceKind::Prefab, registry, documents->Session()));
+	auto prefabDraft = prefabDocument->Payload<SceneDraft>();
+	auto prefabRoot = prefabDraft->GetPrefabAsset()->Root();
 	auto prefabScript = Take(prefabRoot->AddComponent<ScriptBehaviourComponent>(script->TypeName()));
 	prefabScript->SetSerializedPayload(script->SerializedPayload());
+	Done(documents->RequestOpen(std::move(prefabDocument)));
+	context.document = documents->Current();
 	context.target = prefabScript;
 	context.selection.object = prefabRoot;
 	context.selection.roots = {prefabRoot};
@@ -861,6 +930,18 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	Expect(prefabEdited && prefabEdited.value &&
 	           nlohmann::json::parse(ToStdString(prefabScript->SerializedPayload()))["Fields"]["value"] == 9,
 	       "Reloaded Inspector retained old state or failed to edit a detached Prefab");
+	Expect(documents->Current()->Dirty(), "Prefab property Apply did not mark the current Prefab document Dirty");
+	Done(documents->SaveCurrent());
+	auto reopenedPrefab = Take(
+	    OpenSceneDocument(Path("prj:EditorFixture.ursaprefab"), ResourceKind::Prefab, registry, documents->Session()));
+	auto reopenedPrefabRoot = reopenedPrefab->Payload<SceneDraft>()->GetPrefabAsset()->Root();
+	auto* reopenedPrefabScript = reopenedPrefabRoot->FindComponent<ScriptBehaviourComponent>();
+	Expect(!documents->Current()->Dirty() && reopenedPrefabRoot->Id() == prefabRoot->Id() && reopenedPrefabScript &&
+	           reopenedPrefabScript->PersistentId() == prefabScript->PersistentId() &&
+	           nlohmann::json::parse(ToStdString(reopenedPrefabScript->SerializedPayload()))["Fields"]["value"] == 9 &&
+	           nlohmann::json::parse(ToStdString(
+	               reopenedPrefabScript->SerializedPayload()))["Fields"]["future"]["preserved"] == "unknown data",
+	       "Editor Prefab save/reopen lost property changes, unknown fields or stable IDs");
 	Done(host.CloseScriptSession(replacement));
 	ImGui::DestroyContext();
 	Expect(!invoke("menu:Tools/Test/Mark Dirty"), "Closed editing context retained a menu delegate");
@@ -885,6 +966,7 @@ int main(int argumentCount, char** arguments)
 		const Vector<String> fileNames{"Ursa.ManagedHost.runtimeconfig.json",
 		                               "Ursa.ManagedHost.deps.json",
 		                               "Ursa.ManagedHost.dll",
+		                               "Ursa.Bindings.dll",
 		                               "Ursa.Runtime.dll",
 		                               "Ursa.Rendering.dll",
 		                               "Ursa.Editor.dll"};
@@ -929,7 +1011,8 @@ int main(int argumentCount, char** arguments)
 			     {"ClrTypeName", ToStdString("Ursa.SessionFixtures." + type.first + ", Ursa.SessionFixtures")}});
 		}
 		const auto catalogBytes = JsonBytes(catalog);
-		nlohmann::json content{{"Version", 1u},
+		nlohmann::json content{{"Version", 2u},
+		                       {"RequiredBindings", Bindings::ScriptBindingRequirements(false)},
 		                       {"Group", "Game"},
 		                       {"TypeCatalog", ToStdString(sessionCatalogPath.ToString())},
 		                       {"CatalogFingerprint", ToStdString(Fingerprint(catalogBytes))}};
@@ -944,6 +1027,12 @@ int main(int argumentCount, char** arguments)
 		                                 {"Fingerprint", ToStdString(Fingerprint(dependencyBytes))}});
 		entries.push_back({sessionCatalogPath, catalogBytes});
 		entries.push_back({sessionContentPath, JsonBytes(content)});
+		auto incompatibleBindings = content;
+		incompatibleBindings["RequiredBindings"][0]["Hash"] = std::string(64, '0');
+		entries.push_back({Path("prj:Managed/IncompatibleBindings.json"), JsonBytes(incompatibleBindings)});
+		incompatibleBindings = content;
+		incompatibleBindings["RequiredBindings"].erase(incompatibleBindings["RequiredBindings"].begin());
+		entries.push_back({Path("prj:Managed/MissingBindings.json"), JsonBytes(incompatibleBindings)});
 		auto badContent = content;
 		badContent["Assemblies"][0]["Fingerprint"] = "0000000000000000";
 		entries.push_back({Path("prj:Managed/Invalid.json"), JsonBytes(badContent)});
@@ -966,7 +1055,7 @@ int main(int argumentCount, char** arguments)
 		files.runtimeConfig = Path("ursa:Ursa.ManagedHost.runtimeconfig.json");
 		files.entryAssembly = Path("ursa:Ursa.ManagedHost.dll");
 		files.dependencies = {Path("ursa:Ursa.ManagedHost.deps.json"), Path("ursa:Ursa.Runtime.dll"),
-		                      Path("ursa:Ursa.Rendering.dll")};
+		                      Path("ursa:Ursa.Rendering.dll"), Path("ursa:Ursa.Bindings.dll")};
 		files.scriptAssemblies = {scriptAssemblyPath};
 
 		auto staged = Take(MaterializeManagedHostFiles(filesystem, files));
@@ -1143,6 +1232,8 @@ int main(int argumentCount, char** arguments)
 		Expect(messages.size() >= 2, "Managed lifecycle dispatch damaged the host logging callback");
 		TestManagedRenderingComponentSerialization(*host, filesystem, sessionContentPath);
 		TestClassicRenderingExample(*host, sessionContentPath);
+		TestClassicRenderingExample(*host, sessionContentPath, 64);
+		TestManagedMatrixBindings(*host, filesystem, sessionContentPath);
 		TestPipelineAssetReload(*host, filesystem, sessionContentPath);
 		TestManagedForward(*host, sessionContentPath);
 		TestDocumentedCustomPipeline(*host, sessionContentPath);
@@ -1192,6 +1283,9 @@ int main(int argumentCount, char** arguments)
 			       "Content fingerprint mismatch was accepted");
 			Expect(!host->LoadScriptContent(runDomain, Path("prj:Managed/Editor.json")),
 			       "Player session accepted Editor content");
+			Expect(!host->LoadScriptContent(runDomain, Path("prj:Managed/IncompatibleBindings.json")) &&
+			           !host->LoadScriptContent(runDomain, Path("prj:Managed/MissingBindings.json")),
+			       "Player session accepted incompatible or missing binding module identities");
 			Done(host->LoadScriptContent(runDomain, sessionContentPath));
 			Done(host->ValidateScriptSession(runDomain));
 			ManagedScriptRuntime runRuntime(runScene, *host, *runApi, runDomain);

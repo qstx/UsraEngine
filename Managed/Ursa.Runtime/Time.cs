@@ -1,74 +1,10 @@
 namespace Ursa;
 
-public static unsafe class Time
+public static class Time
 {
-	public static float DeltaTime
-	{
-		get
-		{
-			float delta = 0;
-			float fixedDelta = 0;
-			double time = 0;
-			double fixedTime = 0;
-			ulong frame = 0;
-			EngineApi.GetTime(&delta, &fixedDelta, &time, &fixedTime, &frame);
-			return delta;
-		}
-	}
-
-	public static float FixedDeltaTime
-	{
-		get
-		{
-			float delta = 0;
-			float fixedDelta = 0;
-			double time = 0;
-			double fixedTime = 0;
-			ulong frame = 0;
-			EngineApi.GetTime(&delta, &fixedDelta, &time, &fixedTime, &frame);
-			return fixedDelta;
-		}
-	}
-
-	public static double ElapsedTime
-	{
-		get
-		{
-			float delta = 0;
-			float fixedDelta = 0;
-			double time = 0;
-			double fixedTime = 0;
-			ulong frame = 0;
-			EngineApi.GetTime(&delta, &fixedDelta, &time, &fixedTime, &frame);
-			return time;
-		}
-	}
-
-	public static double FixedElapsedTime
-	{
-		get
-		{
-			float delta = 0;
-			float fixedDelta = 0;
-			double time = 0;
-			double fixedTime = 0;
-			ulong frame = 0;
-			EngineApi.GetTime(&delta, &fixedDelta, &time, &fixedTime, &frame);
-			return fixedTime;
-		}
-	}
-
-	public static ulong FrameCount
-	{
-		get
-		{
-			float delta = 0;
-			float fixedDelta = 0;
-			double time = 0;
-			double fixedTime = 0;
-			ulong frame = 0;
-			EngineApi.GetTime(&delta, &fixedDelta, &time, &fixedTime, &frame);
-			return frame;
-		}
-	}
+	public static float DeltaTime => NativeRuntimeBindings.GetTime().DeltaTime;
+	public static float FixedDeltaTime => NativeRuntimeBindings.GetTime().FixedDeltaTime;
+	public static double ElapsedTime => NativeRuntimeBindings.GetTime().ElapsedTime;
+	public static double FixedElapsedTime => NativeRuntimeBindings.GetTime().FixedElapsedTime;
+	public static ulong FrameCount => NativeRuntimeBindings.GetTime().FrameCount;
 }

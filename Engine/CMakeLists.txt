@@ -11,6 +11,9 @@ add_library(Ursa::Engine ALIAS UrsaEngine)
 ursa_source_groups(UrsaEngine "Engine")
 
 target_include_directories(UrsaEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+if(NOT URSA_ENABLE_DOTNET)
+  target_include_directories(UrsaEngine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/Bindings/Generated/Native")
+endif()
 target_link_libraries(UrsaEngine PUBLIC Ursa::Runtime nlohmann_json::nlohmann_json)
 
 if(MSVC)

@@ -13,11 +13,12 @@
     {
         public override void OnInspectorGUI()
         {
-            var step = SerializedObject.FindProperty("/Fields/step");
+            SerializedObject.Update();
+            var step = SerializedObject.FindProperty("step");
             EditorGui.PropertyField(step, "Step");
             if (EditorGui.Button("Reset"))
             {
-                step.SetValue(1.0);
+                step.DoubleValue = 1.0;
             }
             SerializedObject.ApplyModifiedProperties();
         }
@@ -42,15 +43,25 @@ DrawDefaultInspector() 可显示其余持久字段。成功 Apply 会标记文�
     {
         public override void OnGUI()
         {
-            EditorGui.Text("Assets: " + EditorContext.Assets.GetArrayLength());
-            foreach (var selected in EditorContext.Selection.EnumerateArray())
+            EditorGui.Text("Assets: " + EditorContext.Assets.Length);
+            foreach (var selected in EditorContext.Selection)
             {
-                EditorGui.Text(selected.GetProperty("Name").GetString() ?? "");
+                EditorGui.Text(selected.Name + " (" + selected.Reference.Kind + ")");
             }
         }
     }
 
 EditorContext 提供选择、当前文档和资产信息，以及 MarkDirty、Save、OpenAsset。OpenAsset 使用 VFS 路径，并在界面安全边界处理文档切换。Run 中现有保存门槛仍生效。
+
+Selection 为 `EditorSelection[]`，Target 为可空 `EditorReference`，Document 为可空 `EditorDocument`，Assets 为 `EditorAsset[]` 快照。文档含 Id/Path/Kind/Dirty；引用含 Kind/PersistentId/TypeId 和可空 AssetReference，资产与子资产保留 GUID/local file ID。`ResolveObject(kind, persistentId)` 与 `ResolveAsset(asset, kind)` 在当前编辑图/资产加载器内校验身份；项目不能构造 native 地址。引用的描述可读取，引用控件或属性写入仍要求当前回调身份。
+
+## 类型化属性
+
+`FindProperty("field")` 或 `/Fields/...` 返回属性；`PropertyType`、`TypeName`、`ReferenceKind` 描述可用访问器。标量使用 BoolValue、IntValue/LongValue、UIntValue/ULongValue、FloatValue/DoubleValue、StringValue；数学值使用 Vector2Value/Vector3Value/Vector4Value/QuaternionValue/ColorValue。EnumNames、EnumValueIndex 提供选项，EnumLongValue/EnumULongValue 按 EnumIsUnsigned 保留完整 64 位底层数值。错误访问器抛出异常，不转换为另一种字段类型。
+
+对象/组件使用 ObjectReferenceValue，资产及 Mesh/Material/Texture/ScriptableObject/Shader/ComputeShader 使用 AssetReferenceValue。引用种类必须匹配，文档局部 Mesh/Material 身份仍可读取、保留与清空。数组/列表通过 ArraySize、ElementType 和 GetArrayElementAtIndex 编辑；设置 `IsNull = true` 保留可空状态，扩容使用元素类型的默认值，顺序不变。
+
+Update 重新捕获目标并丢弃未应用编辑；调用后须重新 FindProperty，旧属性版本会被拒绝。HasModifiedProperties 查询候选编辑。ApplyModifiedProperties 统一验证类型、数值范围、引用与所有集合元素；失败不部分修改目标或 Dirty，目标被外部修改时要求先 Update。读取和描述访问不产生持久修改。未知字段原样保留并在默认视图显示为不支持。
 
 ## 控件与会话约束
 
@@ -58,8 +69,10 @@ EditorGui 支持文本、按钮、数字、布尔、字符串、枚举选项、�
 
 Editor API 限主线程，且仅在菜单、窗口或 Inspector 回调内有效。不要把 SerializedObject、SerializedProperty 或布局对象留到下次回调；需要长期保存的工具状态使用普通 C# 数据、属性路径和持久 GUID。
 
+Editor 模块由 `NativeEditor.bindings.cs` 的 36 个具体方法生成，按一次回调安装并在退出时撤销。宿主扩展目录与调用也使用生成的 ManagedHost 回调，普通控件及属性传输不经过 JSON operation/exchange。GUI 控件要求活动 ImGui 帧；菜单中的保存、文档查询不需要 GUI 帧。异常退出会平衡未释放的布局组。
+
 注册、项目类型、实例与委托属于对应编辑会话。候选重载验证通过后替换注册；失败保留旧环境。异常会记录扩展标识和堆栈并停用该扩展，其余面板继续运行。关闭项目、重载及退出会注销会话注册并检查上下文卸载。
 
 ## 示例与验证
 
-Demo 示例包含移动组件 Inspector、保存菜单和项目概览窗口。宿主集成测试使用实际 ImGui 帧验证控件绘制、脚本／原生属性 Apply、VFS 保存、线程限制、异常隔离、旧属性句柄及会话注销。完整窗口交互验收单独记录，不能以这些测试代替人工操作证据。
+Demo 示例包含移动组件 Inspector、保存菜单和项目概览窗口。[可编译的 Editor 示例](Examples/Editor/TypedInspector.cs) 随 Ursa.EditorFixtures 构建。UrsaEditorBindingsTests 检查生成入口的类型、集合、引用、版本、事务及失效 token；宿主集成测试使用实际 ImGui 帧验证控件绘制、脚本／原生属性 Apply、VFS 保存、线程限制、异常隔离、旧属性句柄及会话注销。完整窗口交互验收单独记录，不能以这些测试代替人工操作证据。

@@ -10,7 +10,7 @@ public sealed class MaterialAsset : Material
 		Reference = reference;
 	}
 
-	internal static MaterialAsset FromBinding(JsonElement binding, NativeHandle handle)
+	internal static MaterialAsset FromArchive(JsonElement binding, NativeHandle handle)
 	{
 		var reference = binding.GetProperty("kind").GetString() == "asset" ?
 			binding.GetProperty("asset").Deserialize<AssetReference>(EngineApi.ResourceJson) : default;
@@ -21,9 +21,6 @@ public sealed class MaterialAsset : Material
 
 	public new static MaterialAsset Load(AssetReference reference)
 	{
-		return new MaterialAsset(reference, EngineApi.ResourceRequest<NativeHandle>(new
-		{
-			operation = "material.load", guid = reference.Guid, localFileId = reference.LocalFileId
-		}));
+		return new MaterialAsset(reference, NativeMaterialBindings.Load(NativeAssetReference.From(reference)));
 	}
 }

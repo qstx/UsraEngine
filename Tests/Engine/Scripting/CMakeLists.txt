@@ -3,6 +3,19 @@ target_link_libraries(UrsaManagedHandleTests PRIVATE Ursa::Engine)
 
 add_test(NAME UrsaManagedHandleTests COMMAND UrsaManagedHandleTests)
 
+ursa_add_test_executable(UrsaBindingSnapshotTests BindingSnapshotTests.cpp)
+target_link_libraries(UrsaBindingSnapshotTests PRIVATE Ursa::Engine)
+add_test(NAME UrsaBindingSnapshotTests COMMAND UrsaBindingSnapshotTests)
+
+ursa_add_test_executable(UrsaRenderingBindingsTests RenderingBindingsTests.cpp)
+target_link_libraries(UrsaRenderingBindingsTests PRIVATE UrsaTestFixtures)
+target_compile_definitions(UrsaRenderingBindingsTests PRIVATE
+  URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
+  URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
+  URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
+  URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
+add_test(NAME UrsaRenderingBindingsTests COMMAND UrsaRenderingBindingsTests)
+
 ursa_add_test_executable(UrsaManagedSceneApiTests ManagedSceneApiTests.cpp)
 target_link_libraries(UrsaManagedSceneApiTests PRIVATE Ursa::Engine)
 target_compile_definitions(UrsaManagedSceneApiTests PRIVATE

@@ -10,6 +10,7 @@
 #include <Serialization/ComponentRegistry.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Rendering/Pipeline/GraphicsSettings.hpp>
+#include <Scripting/Bindings/BindingRequirements.hpp>
 #include <algorithm>
 
 namespace Ursa::Editor
@@ -264,8 +265,9 @@ void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& op
 	{
 		Done(files.Mount("framework", frameworkRoot, MountAccess::ReadOnly));
 	}
-	Vector<String> bootstrap{"Ursa.ManagedHost.dll", "Ursa.ManagedHost.deps.json",
-	                         "Ursa.ManagedHost.runtimeconfig.json", "Ursa.Runtime.dll", "Ursa.Rendering.dll"};
+	Vector<String> bootstrap{
+	    "Ursa.ManagedHost.dll", "Ursa.ManagedHost.deps.json", "Ursa.ManagedHost.runtimeconfig.json",
+	    "Ursa.Runtime.dll",     "Ursa.Rendering.dll",         "Ursa.Bindings.dll"};
 	if (options.profile == "Editor")
 	{
 		bootstrap.push_back("Ursa.Editor.dll");
@@ -304,6 +306,12 @@ void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& op
 	const String groupName = options.profile == "Editor" ? "Editor" : "Game";
 	auto manifest =
 	    Json::parse(ToStdString(Take(files.ReadText(Path("lib:ScriptBuild/Manifests/" + groupName + ".json")))));
+	if (manifest.value("Version", 0u) != 2)
+	{
+		throw std::runtime_error("Script content must be rebuilt with the current binding contract");
+	}
+	Done(Scripting::Bindings::ValidateScriptBindingRequirements(manifest.at("RequiredBindings"),
+	                                                            group == ScriptAssemblyGroup::Editor));
 	for (auto& assembly : manifest["Assemblies"])
 	{
 		for (const char* field : {"Path", "PdbPath"})

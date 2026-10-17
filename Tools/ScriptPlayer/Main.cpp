@@ -99,7 +99,8 @@ private:
 		bootstrap.runtimeConfig = Path("ursa:Managed/Ursa.ManagedHost.runtimeconfig.json");
 		bootstrap.entryAssembly = Path("ursa:Managed/Ursa.ManagedHost.dll");
 		bootstrap.dependencies = {Path("ursa:Managed/Ursa.ManagedHost.deps.json"),
-		                          Path("ursa:Managed/Ursa.Runtime.dll"), Path("ursa:Managed/Ursa.Rendering.dll")};
+		                          Path("ursa:Managed/Ursa.Runtime.dll"), Path("ursa:Managed/Ursa.Rendering.dll"),
+		                          Path("ursa:Managed/Ursa.Bindings.dll")};
 		Done(host->Start(*files, bootstrap,
 		                 [](UInt32 level, const String& message)
 		                 {

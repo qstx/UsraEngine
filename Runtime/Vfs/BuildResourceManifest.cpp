@@ -221,8 +221,9 @@ Result<BuildResourceManifest> ValidateBuildResources(const VirtualFileSystem& fi
 	}
 	if (manifest.value.managed)
 	{
-		for (const String name : {"Ursa.ManagedHost.dll", "Ursa.ManagedHost.deps.json",
-		                          "Ursa.ManagedHost.runtimeconfig.json", "Ursa.Runtime.dll"})
+		for (const String name :
+		     {"Ursa.ManagedHost.dll", "Ursa.ManagedHost.deps.json", "Ursa.ManagedHost.runtimeconfig.json",
+		      "Ursa.Runtime.dll", "Ursa.Rendering.dll", "Ursa.Bindings.dll"})
 		{
 			if (std::none_of(manifest.value.outputs.begin(), manifest.value.outputs.end(),
 			                 [&](const auto& record) { return record.path == "Managed/" + name; }))

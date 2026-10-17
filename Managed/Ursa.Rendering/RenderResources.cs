@@ -3,6 +3,7 @@ using Ursa;
 
 namespace Ursa.Rendering;
 
+[Ursa.Bindings.WireValue]
 public enum GraphicsFormat : uint
 {
 	R8G8B8A8_UNorm,
@@ -33,6 +34,7 @@ public readonly struct RenderTargetIdentifier
 }
 
 [Flags]
+[Ursa.Bindings.WireValue]
 public enum GraphicsBufferTarget : uint
 {
 	Vertex = 1,
@@ -77,28 +79,23 @@ public sealed class RenderTexture : RenderResource, IDisposable
 	public static RenderTexture Create(RenderTextureDescriptor descriptor)
 	{
 		ArgumentNullException.ThrowIfNull(descriptor);
-		return FromHandle(EngineApi.ResourceRequest<NativeHandle>(new
+		return FromHandle(NativeRenderingBindings.CreateRenderTexture(new RenderTextureValue
 		{
-			operation = "renderTexture.create",
-			width = descriptor.Width,
-			height = descriptor.Height,
-			format = (uint)descriptor.ColorFormat,
-			depthBufferBits = descriptor.DepthBufferBits,
-			enableRandomWrite = descriptor.EnableRandomWrite,
-			msaaSamples = descriptor.MsaaSamples
+			Width = descriptor.Width, Height = descriptor.Height, ColorFormat = descriptor.ColorFormat,
+			DepthBufferBits = descriptor.DepthBufferBits, EnableRandomWrite = descriptor.EnableRandomWrite,
+			MsaaSamples = descriptor.MsaaSamples
 		}))!;
 	}
 
 	public void Release()
 	{
 		if (released) return;
-		EngineApi.ResourceRequest(new { operation = "renderTexture.release", handle = Handle });
+		NativeRenderingBindings.ReleaseRenderTexture(Handle);
 		released = true;
 	}
 	public void Dispose() => Release();
 
-	public byte[] GetRawData() => Array.ConvertAll(EngineApi.ResourceRequest<uint[]>(
-		new { operation = "renderTexture.readback", handle = Handle }), value => checked((byte)value));
+	public byte[] GetRawData() => NativeRenderingBindings.ReadRenderTexture(Handle);
 }
 
 public sealed class GraphicsBuffer : RenderResource, IDisposable
@@ -115,23 +112,16 @@ public sealed class GraphicsBuffer : RenderResource, IDisposable
 												 GraphicsBufferTarget.IndirectArguments;
 		if (target == 0 || (target & ~validTargets) != 0 || count == 0 || stride == 0)
 			throw new ArgumentOutOfRangeException(nameof(target));
-		return FromHandle(EngineApi.ResourceRequest<NativeHandle>(new
-		{
-			operation = "graphicsBuffer.create",
-			target = (uint)target,
-			count,
-			stride
-		}))!;
+		return FromHandle(NativeRenderingBindings.CreateGraphicsBuffer(target, count, stride))!;
 	}
 
 	public void Release()
 	{
 		if (released) return;
-		EngineApi.ResourceRequest(new { operation = "graphicsBuffer.release", handle = Handle });
+		NativeRenderingBindings.ReleaseGraphicsBuffer(Handle);
 		released = true;
 	}
 	public void Dispose() => Release();
 
-	public byte[] GetRawData(ulong offset, ulong size) => Array.ConvertAll(EngineApi.ResourceRequest<uint[]>(
-		new { operation = "graphicsBuffer.readback", handle = Handle, offset, size }), value => checked((byte)value));
+	public byte[] GetRawData(ulong offset, ulong size) => NativeRenderingBindings.ReadGraphicsBuffer(Handle, offset, size);
 }

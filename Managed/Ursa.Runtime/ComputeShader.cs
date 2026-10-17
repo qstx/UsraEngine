@@ -12,27 +12,14 @@ public sealed class ComputeShader
 	public int FindKernel(string name)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(name);
-		return EngineApi.ResourceRequest<int>(new
-		{
-			operation = "computeShader.findKernel",
-			guid = Reference.Guid,
-			localFileId = Reference.LocalFileId,
-			name
-		});
+		return NativeResourceBindings.FindComputeKernel(NativeAssetReference.From(Reference), name);
 	}
 
 	public (uint X, uint Y, uint Z) GetKernelThreadGroupSizes(int kernel)
 	{
 		if (kernel < 0) throw new ArgumentOutOfRangeException(nameof(kernel));
-		uint[] size = EngineApi.ResourceRequest<uint[]>(new
-		{
-			operation = "computeShader.threadGroup",
-			guid = Reference.Guid,
-			localFileId = Reference.LocalFileId,
-			kernel
-		});
-		if (size.Length != 3) throw new InvalidOperationException("Compute kernel thread-group metadata is invalid.");
-		return (size[0], size[1], size[2]);
+		ComputeThreadGroupSize size = NativeResourceBindings.GetComputeThreadGroupSize(NativeAssetReference.From(Reference), kernel);
+		return (size.X, size.Y, size.Z);
 	}
 
 	public static ComputeShader FromReference(AssetReference reference)

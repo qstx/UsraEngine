@@ -3,7 +3,6 @@
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <iostream>
-#include <nlohmann/json.hpp>
 #include <stdexcept>
 
 namespace
@@ -36,25 +35,24 @@ void Expect(bool condition, const char* message)
 	}
 }
 
-void ValidateExtensions(const String& serialized)
+void ValidateExtensions(const Vector<ManagedEditorExtension>& descriptors)
 {
-	const auto descriptors = nlohmann::json::parse(ToStdString(serialized));
-	Expect(descriptors.is_array(), "Managed Editor extension index is invalid");
-	const auto has = [&](const std::string& kind, const std::string& path, const std::string& target)
+	const auto has = [&](ManagedEditorExtensionKind kind, const String& path, const String& target)
 	{
 		for (const auto& descriptor : descriptors)
 		{
-			if (descriptor.value("Kind", std::string{}) == kind && descriptor.value("Path", std::string{}) == path &&
-			    descriptor.value("Target", std::string{}) == target)
+			if (descriptor.kind == kind && descriptor.path == path && descriptor.target == target)
 			{
 				return true;
 			}
 		}
 		return false;
 	};
-	Expect(has("Inspector", "", "demo.snake-controller") && has("Inspector", "", "demo.snake-board"),
+	Expect(has(ManagedEditorExtensionKind::Inspector, "", "demo.snake-controller") &&
+	           has(ManagedEditorExtensionKind::Inspector, "", "demo.snake-board"),
 	       "Managed Snake Inspector extensions were not registered");
-	Expect(has("Menu", "Tools/Snake/Save Current Scene", "") && has("Window", "Tools/Snake/Controls", ""),
+	Expect(has(ManagedEditorExtensionKind::Menu, "Tools/Snake/Save Current Scene", "") &&
+	           has(ManagedEditorExtensionKind::Window, "Tools/Snake/Controls", ""),
 	       "Managed Snake Tools menu or Editor window was not registered");
 }
 } // namespace
@@ -85,7 +83,8 @@ int main()
 		bootstrap.entryAssembly = Take(VirtualPath::Parse("ursa:Managed/Ursa.ManagedHost.dll"));
 		bootstrap.dependencies = {Take(VirtualPath::Parse("ursa:Managed/Ursa.ManagedHost.deps.json")),
 		                          Take(VirtualPath::Parse("ursa:Managed/Ursa.Runtime.dll")),
-		                          Take(VirtualPath::Parse("ursa:Managed/Ursa.Rendering.dll"))};
+		                          Take(VirtualPath::Parse("ursa:Managed/Ursa.Rendering.dll")),
+		                          Take(VirtualPath::Parse("ursa:Managed/Ursa.Bindings.dll"))};
 		Done(host->Start(filesystem, bootstrap,
 		                 [](UInt32 level, const String& message)
 		                 {

@@ -218,7 +218,8 @@ Result<void> EditorApplication::EnsureManagedHost()
 	files.runtimeConfig = path("ursa:Ursa.ManagedHost.runtimeconfig.json");
 	files.entryAssembly = path("ursa:Ursa.ManagedHost.dll");
 	files.dependencies = {path("ursa:Ursa.ManagedHost.deps.json"), path("ursa:Ursa.Runtime.dll"),
-	                      path("ursa:Ursa.Editor.dll"), path("ursa:Ursa.Rendering.dll")};
+	                      path("ursa:Ursa.Editor.dll"), path("ursa:Ursa.Rendering.dll"),
+	                      path("ursa:Ursa.Bindings.dll")};
 	auto started = host.value->Start(workspace->ContentFiles(), files,
 	                                 [](UInt32 level, const String& message)
 	                                 {
@@ -419,23 +420,7 @@ Result<void> EditorApplication::ReloadEditorScripts()
 		abandon();
 		return Result<void>::Failure(extensionDirectory.error);
 	}
-	Vector<ManagedExtensionDescriptor> candidateExtensions;
-	try
-	{
-		for (const auto& extension : nlohmann::json::parse(ToStdString(extensionDirectory.value)))
-		{
-			candidateExtensions.push_back({ToUrsaString(extension.at("Id").get<std::string>()),
-			                               ToUrsaString(extension.at("Kind").get<std::string>()),
-			                               ToUrsaString(extension.at("Path").get<std::string>()),
-			                               ToUrsaString(extension.at("Target").get<std::string>()),
-			                               ToUrsaString(extension.at("Title").get<std::string>())});
-		}
-	}
-	catch (const std::exception& error)
-	{
-		abandon();
-		return Result<void>::Failure(ToUrsaString(error.what()));
-	}
+	Vector<ManagedExtensionDescriptor> candidateExtensions = std::move(extensionDirectory.value);
 	auto registered = RegisterScriptComponentTypes(&candidateExtensions, candidate.value);
 	if (!registered)
 	{
@@ -570,6 +555,15 @@ Result<bool> EditorApplication::InvokeEditorTool(const ManagedExtensionDescripto
 	context.documents = documents.get();
 	context.workspace = workspace.get();
 	context.registry = &project->components;
+	if (selectionContext.kind == EditorSelectionKind::Asset)
+	{
+		const auto* asset = projectBrowser.Find(selectionContext.assetPath);
+		if (asset && !asset->folder)
+		{
+			context.assetSelection = AssetReference{asset->guid, 0};
+			context.assetSelectionName = asset->name;
+		}
+	}
 	context.openAsset = [this](const VirtualPath& path)
 	{
 		pendingManagedAsset = path;
@@ -615,7 +609,8 @@ void EditorApplication::DrawManagedMenus(const String& root)
 	const String prefix = root + "/";
 	for (const auto& extension : managedExtensions)
 	{
-		if ((extension.kind != "Menu" && extension.kind != "Window") || extension.path.rfind(prefix, 0) != 0)
+		if ((extension.kind != ManagedExtensionKind::Menu && extension.kind != ManagedExtensionKind::Window) ||
+		    extension.path.rfind(prefix, 0) != 0)
 		{
 			continue;
 		}
@@ -628,7 +623,7 @@ void EditorApplication::DrawManagedMenus(const String& root)
 		}
 		if (ImGui::MenuItem(remainder.c_str()))
 		{
-			if (extension.kind == "Window")
+			if (extension.kind == ManagedExtensionKind::Window)
 			{
 				managedOpenWindows.insert(extension.id);
 			}
@@ -1313,7 +1308,7 @@ void EditorApplication::DrawMainMenuBar()
 			const String root = extension.path.substr(0, extension.path.find('/'));
 			if (!root.empty() && root != "Tools" && root != "Scripts" && root != "File" && root != "Edit" &&
 			    root != "Assets" && root != "GameObject" && root != "Component" && root != "Window" && root != "Help" &&
-			    (extension.kind == "Menu" || extension.kind == "Window"))
+			    (extension.kind == ManagedExtensionKind::Menu || extension.kind == ManagedExtensionKind::Window))
 			{
 				managedMenuRoots.insert(root);
 			}
@@ -2416,7 +2411,7 @@ Result<void> EditorApplication::OnGui()
 	}
 	for (const auto& extension : managedExtensions)
 	{
-		if (extension.kind != "Window" || !managedOpenWindows.count(extension.id))
+		if (extension.kind != ManagedExtensionKind::Window || !managedOpenWindows.count(extension.id))
 		{
 			continue;
 		}
@@ -3010,7 +3005,7 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 	{
 		for (const auto& extension : *extensions)
 		{
-			if (extension.kind != "Inspector")
+			if (extension.kind != ManagedExtensionKind::Inspector)
 			{
 				continue;
 			}

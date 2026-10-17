@@ -43,7 +43,7 @@ cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON -DURSA_DOTNET_EXECUTABLE="C:/Program
 
 ## 项目脚本与编译
 
-启用 `URSA_ENABLE_DOTNET` 后，项目 `Assets` 中的 `.cs` 文件由 AssetDatabase 自动发现并维护 `.meta` GUID。路径中包含独立目录段 `Editor` 的脚本归入 Editor 程序集；其余脚本归入 Game 程序集。Editor 程序集引用 Game、`Ursa.Runtime` 和 `Ursa.Editor`，Game 程序集只引用 `Ursa.Runtime`，Player 不加载 Editor 脚本。
+启用 `URSA_ENABLE_DOTNET` 后，项目 `Assets` 中的 `.cs` 文件由 AssetDatabase 自动发现并维护 `.meta` GUID。路径中包含独立目录段 `Editor` 的脚本归入 Editor 程序集；其余脚本归入 Game 程序集。Game 程序集引用 `Ursa.Runtime`/`Ursa.Rendering`，Editor 额外引用 Game 与 `Ursa.Editor`；`Ursa.Bindings` 为引擎共享支持依赖，Player 不加载 Editor 脚本或 Editor 模块。
 
 Editor 会在项目的 `Library/ScriptBuild` 下生成 MSBuild 工程、脚本类型目录、编译暂存区和输出，不需要手工维护 `.csproj`。在编辑器中使用 `Scripts > Compile Scripts` 编译 Game 与 Editor 程序集；编译在后台运行，诊断显示在 Script Build 面板。Run 会检查脚本输入指纹；脚本尚未编译或编译后输入有变化时，Run 会后台编译最新输入，成功后才启动运行场景。清空项目 `Library` 后，下一次编译会重新发现脚本、生成目录并构建程序集。
 
@@ -153,6 +153,6 @@ public sealed class MoveWithInputBehaviour : Behaviour
 
 本机出现 Visual Studio 的 C1902/PDB 管理器版本不匹配时，可以重新配置构建目录并加入 `-DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded`。这将调试信息放入对象文件；它是工具链问题的规避选项，并非脚本系统的运行要求。
 
-`Transform.Position` 读写世界位置（父对象包含旋转或非均匀缩放时，通过父世界矩阵的逆转换成本地位置）；`LocalPosition`、`LocalRotation` 和 `LocalScale` 编辑本地数据。`GameObject.Destroy()` 在游戏回调中标记待销毁，并在阶段安全边界清理。桥接表为 NativeApiV3（Windows x64 296 字节）；旧版本或截断表被拒绝。
+`Transform.Position` 读写世界位置（父对象包含旋转或非均匀缩放时，通过父世界矩阵的逆转换成本地位置）；`LocalPosition`、`LocalRotation` 和 `LocalScale` 编辑本地数据。`GameObject.Destroy()` 在游戏回调中标记待销毁，并在阶段安全边界清理。桥接由 `.bindings.cs` 生成的 Runtime/Rendering/Editor/ManagedHost 模块提供；固定 InitializeBindings 引导校验完整身份与依赖，旧表已移除。对象/组件句柄仍校验会话、代数、种类及所属线程；native 地址复用不能让旧句柄指向替换组件。
 
 完整构建矩阵、自动测试和人工交互证据见 [验收记录](ManagedVerification.md)。

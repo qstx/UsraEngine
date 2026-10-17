@@ -11,11 +11,12 @@ using System.Runtime.Loader;
 using System.Text;
 using System.Text.Json;
 using Ursa;
+using Ursa.Bindings;
 
 namespace Ursa.ManagedHost;
 
 // Stable bridge entries survive; project contexts and registrations are session owned.
-internal static unsafe class ScriptSessions
+internal static class ScriptSessions
 {
 	private sealed class ProjectContext : AssemblyLoadContext
 	{
@@ -33,6 +34,9 @@ internal static unsafe class ScriptSessions
 		{
 			string identity = name.Name ?? throw new InvalidOperationException("Assembly identity is empty.");
 			if (identity == typeof(Behaviour).Assembly.GetName().Name) return typeof(Behaviour).Assembly;
+			if (identity == typeof(ScriptSessions).Assembly.GetName().Name) return typeof(ScriptSessions).Assembly;
+			if (identity == typeof(Ursa.Bindings.BindingModuleAttribute).Assembly.GetName().Name)
+				return typeof(Ursa.Bindings.BindingModuleAttribute).Assembly;
 			if (identity == typeof(Ursa.Rendering.RenderContextToken).Assembly.GetName().Name)
 				return typeof(Ursa.Rendering.RenderContextToken).Assembly;
 			if (identity == "Ursa.Editor")
@@ -75,15 +79,15 @@ internal static unsafe class ScriptSessions
 	private sealed class Session
 	{
 		internal readonly ProjectContext context;
-		internal NativeApiV6 api;
+		internal BindingSnapshot bindings;
 		internal IEditorExtensionSession? extensions;
 		internal string preparedReload = string.Empty;
 		internal readonly Dictionary<string, ScriptIdentity> identities = new(StringComparer.Ordinal);
 
-		internal Session(ulong id, bool editor, NativeApiV6 api)
+		internal Session(ulong id, bool editor)
 		{
 			context = new ProjectContext(id, editor);
-			this.api = api;
+			bindings = BindingRegistry.Fork(id);
 		}
 	}
 
@@ -105,14 +109,27 @@ internal static unsafe class ScriptSessions
 		if (ownerThread != Environment.CurrentManagedThreadId) throw new InvalidOperationException("Script sessions require the host main thread.");
 	}
 
-	internal static ulong Create(bool editor, NativeApiV6 api)
+	internal static ulong Create(bool editor)
 	{
 		RequireThread();
 		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
 		if (faulted) throw new InvalidOperationException("A project context did not unload. Restart before creating another script session.");
 		ulong id = nextId++;
-		sessions.Add(id, new Session(id, editor, api));
-		Select(id);
+		ulong previous = BehaviourRegistry.currentSession;
+		var candidate = new Session(id, editor);
+		try
+		{
+			sessions.Add(id, candidate);
+			Select(id);
+		}
+		catch
+		{
+			sessions.Remove(id);
+			BindingRegistry.Invalidate(candidate.bindings);
+			candidate.context.Unload();
+			if (previous != 0) Select(previous);
+			throw;
+		}
 		return id;
 	}
 
@@ -120,6 +137,7 @@ internal static unsafe class ScriptSessions
 	{
 		RequireThread();
 		if (!sessions.TryGetValue(id, out Session? session)) throw new InvalidOperationException("Script session is closed or unknown.");
+		BindingRegistry.Restore(session.bindings);
 		Ursa.Rendering.RenderPipelineManager.SelectSession(id);
 		BehaviourRegistry.currentSession = id;
 		ScriptableObjectRegistry.SelectSession(id);
@@ -128,16 +146,13 @@ internal static unsafe class ScriptSessions
 		BehaviourRegistry.identityResolver = type => session.identities.TryGetValue(type.FullName ?? type.Name, out ScriptIdentity identity)
 			? identity : BehaviourRegistry.DeclaredIdentity(type);
 		BehaviourRegistry.assemblyResolver = () => session.context.assemblies.Values.Append(typeof(Behaviour).Assembly);
-			NativeApiV6 api = session.api;
-		EngineApi.Initialize((nint)(&api));
 	}
 
 	private static IReadOnlyList<ScriptableAssetData> LoadScriptableAssetGraph(AssetReference reference)
 	{
-		using JsonDocument response = JsonDocument.Parse(EngineApi.ResourceRequest(new
-		{
-			operation = "scriptableasset.graph.load", guid = reference.Guid, localFileId = reference.LocalFileId
-		}).GetRawText());
+		ScriptableAssetGraphArchive archive = NativeSerializationBindings.LoadScriptableAssetGraph(NativeAssetReference.From(reference));
+		if (archive.Version != 1) throw new InvalidOperationException("Unsupported ScriptableAsset graph archive version.");
+		using JsonDocument response = JsonDocument.Parse(archive.Json);
 		var data = new List<ScriptableAssetData>();
 		foreach (JsonElement record in response.RootElement.EnumerateArray())
 		{
@@ -149,13 +164,23 @@ internal static unsafe class ScriptSessions
 		return data;
 	}
 
-	internal static void Bind(ulong id, NativeApiV6 api)
+	internal static void Bind(ulong id)
 	{
 		RequireThread();
 		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
 		if (!sessions.TryGetValue(id, out Session? session)) throw new InvalidOperationException("Script session is closed or unknown.");
-		session.api = api;
-		Select(id);
+		BindingSnapshot previous = session.bindings;
+		ulong previousSelection = BehaviourRegistry.currentSession;
+		session.bindings = BindingRegistry.Fork(id);
+		try { Select(id); }
+		catch
+		{
+			BindingRegistry.Invalidate(session.bindings);
+			session.bindings = previous;
+			if (previousSelection != 0) Select(previousSelection);
+			throw;
+		}
+		BindingRegistry.Invalidate(previous);
 	}
 
 	internal static void LoadAssembly(byte[] bytes)
@@ -194,9 +219,12 @@ internal static unsafe class ScriptSessions
 		using JsonDocument manifest = JsonDocument.Parse(text);
 		JsonElement root = manifest.RootElement;
 		string? group = root.GetProperty("Group").GetString();
-		if (root.GetProperty("Version").GetUInt32() != 1 || group is not ("Game" or "Editor") ||
+		if (root.GetProperty("Version").GetUInt32() != 2 || group is not ("Game" or "Editor") ||
 		    (group == "Editor" && !session.context.editor))
 			throw new InvalidOperationException("Content manifest version/group is not supported by this session.");
+		BindingContent.ValidateRequirements(root.GetProperty("RequiredBindings").EnumerateArray().Select(module => new BindingRequirement(
+			module.GetProperty("Id").GetUInt64(), module.GetProperty("Name").GetString()!, module.GetProperty("Hash").GetString()!,
+			module.GetProperty("FunctionCount").GetUInt32(), module.GetProperty("CallScoped").GetBoolean())), group == "Editor");
 		foreach (JsonElement record in root.GetProperty("Assemblies").EnumerateArray())
 		{
 			string path = record.GetProperty("Path").GetString() ?? throw new InvalidOperationException("Assembly path is empty.");
@@ -259,16 +287,17 @@ internal static unsafe class ScriptSessions
 		session.extensions = (IEditorExtensionSession)factory.Invoke(null, new object[] { session.context.assemblies.Values.ToArray() })!;
 	}
 
-	internal static string DescribeExtensions(ulong id)
+	internal static EditorExtensionInfo[] DescribeExtensions(ulong id)
 	{
 		Select(id);
 		return sessions[id].extensions?.Describe() ?? throw new InvalidOperationException("Editor extensions have not been prepared.");
 	}
 
-	internal static bool InvokeExtension(ulong id, string extension, nint api, int size)
+	internal static bool InvokeExtension(ulong id, string extension)
 	{
-		Select(id);
-		return sessions[id].extensions?.Invoke(extension, api, size) ?? false;
+		RequireThread();
+		if (BehaviourRegistry.currentSession != id) throw new InvalidOperationException("Editor callback requires its selected script session.");
+		return sessions[id].extensions?.Invoke(extension) ?? false;
 	}
 
 	internal static void PrepareReload(ulong id, string snapshots)
@@ -368,15 +397,21 @@ internal static unsafe class ScriptSessions
 
 	internal static void ConfigurePipeline(ulong id, string json)
 	{
-		Select(id);
 		using JsonDocument document = JsonDocument.Parse(json);
-		Ursa.Rendering.RenderPipelineAsset? asset = null;
+		AssetReference? reference = null;
 		if (document.RootElement.ValueKind != JsonValueKind.Null)
 		{
-			var reference = new AssetReference(document.RootElement.GetProperty("guid").GetString()!,
+			reference = new AssetReference(document.RootElement.GetProperty("guid").GetString()!,
 				document.RootElement.GetProperty("localFileId").GetUInt64());
-			asset = ScriptableObject.Load<Ursa.Rendering.RenderPipelineAsset>(reference);
 		}
+		ConfigurePipeline(id, reference);
+	}
+
+	internal static void ConfigurePipeline(ulong id, AssetReference? reference)
+	{
+		Select(id);
+		Ursa.Rendering.RenderPipelineAsset? asset = reference.HasValue
+			? ScriptableObject.Load<Ursa.Rendering.RenderPipelineAsset>(reference.Value) : null;
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(asset);
 		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
 	}
@@ -428,7 +463,7 @@ internal static unsafe class ScriptSessions
 		BehaviourRegistry.identityResolver = null;
 		BehaviourRegistry.currentSession = 0;
 		ScriptableObjectRegistry.SelectSession(0);
-		EngineApi.Clear();
+		BindingRegistry.Invalidate(session.bindings);
 		session.context.assemblies.Clear();
 		session.context.images.Clear();
 		session.context.symbols.Clear();
@@ -452,144 +487,5 @@ internal static unsafe class ScriptSessions
 		}
 		if (weak.IsAlive) faulted = true;
 		return !weak.IsAlive;
-	}
-}
-
-public static unsafe partial class Bootstrap
-{
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int ConfigureRenderPipeline(ulong id, byte* json, ulong length)
-	{
-		if (json == null || length == 0 || length > 4096) return 1;
-		try { ScriptSessions.ConfigurePipeline(id, Encoding.UTF8.GetString(new ReadOnlySpan<byte>(json, (int)length))); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"管线配置失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int RenderScene(ulong id, float aspect)
-	{
-		try { ScriptSessions.RenderScene(id, aspect); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"管线渲染失败：{error}"); return 2; }
-	}
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int TransferScriptableAssets(ulong source, ulong candidate)
-	{
-		try { ScriptSessions.TransferAssets(source, candidate); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"候选管线资产迁移失败：{error}"); return 2; }
-	}
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int PrepareEditorExtensions(ulong id)
-	{
-		try { ScriptSessions.PrepareExtensions(id); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"候选编辑器扩展注册失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int DescribeEditorExtensions(ulong id, byte* output, ulong capacity, ulong* required)
-	{
-		if (required == null || (output == null && capacity != 0)) return 1;
-		try
-		{
-			byte[] bytes = Encoding.UTF8.GetBytes(ScriptSessions.DescribeExtensions(id));
-			*required = (ulong)bytes.Length;
-			if (capacity < (ulong)bytes.Length) return 4;
-			bytes.AsSpan().CopyTo(new Span<byte>(output, bytes.Length));
-			return 0;
-		}
-		catch (Exception error) { Console.Error.WriteLine($"编辑器扩展目录读取失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int InvokeEditorExtension(ulong id, byte* extension, ulong length, nint api, int size)
-	{
-		if (extension == null || length == 0 || length > 4096 || api == 0) return 1;
-		try { return ScriptSessions.InvokeExtension(id, Encoding.UTF8.GetString(new ReadOnlySpan<byte>(extension, (int)length)), api, size) ? 0 : 2; }
-		catch (Exception error) { Console.Error.WriteLine($"编辑器扩展调用失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int PrepareScriptReload(ulong id, byte* text, ulong length)
-	{
-		if (text == null || length == 0 || length > 64ul * 1024 * 1024) return 1;
-		try { ScriptSessions.PrepareReload(id, Encoding.UTF8.GetString(new ReadOnlySpan<byte>(text, (int)length))); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"候选脚本字段恢复失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int ReadPreparedScriptReload(ulong id, byte* output, ulong capacity, ulong* required)
-	{
-		if (required == null || (output == null && capacity != 0)) return 1;
-		try
-		{
-			byte[] bytes = Encoding.UTF8.GetBytes(ScriptSessions.PreparedReload(id));
-			*required = (ulong)bytes.Length;
-			if (capacity < (ulong)bytes.Length) return 4;
-			bytes.AsSpan().CopyTo(new Span<byte>(output, bytes.Length));
-			return 0;
-		}
-		catch (Exception error) { Console.Error.WriteLine($"候选脚本字段读取失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int LoadEditorApi(byte* image, ulong length)
-	{
-		if (image == null || length == 0 || length > 256ul * 1024 * 1024) return 1;
-		try
-		{
-			ScriptSessions.RequireThread();
-			if (ScriptSessions.sharedEditorAssembly != null) return 0;
-			using var stream = new MemoryStream(new ReadOnlySpan<byte>(image, (int)length).ToArray(), writable: false);
-			AssemblyLoadContext context = AssemblyLoadContext.GetLoadContext(typeof(Behaviour).Assembly)!;
-			Assembly assembly = context.LoadFromStream(stream);
-			if (assembly.GetName().Name != "Ursa.Editor") throw new InvalidOperationException("Shared editor API identity is invalid.");
-			ScriptSessions.sharedEditorAssembly = assembly;
-			return 0;
-		}
-		catch (Exception error) { Console.Error.WriteLine($"编辑器 API 加载失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int LoadScriptContent(ulong id, byte* text, ulong length)
-	{
-		if (text == null || length == 0 || length > 16ul * 1024 * 1024) return 1;
-		try { ScriptSessions.LoadContent(id, Encoding.UTF8.GetString(new ReadOnlySpan<byte>(text, (int)length))); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"脚本内容清单加载失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int CreateScriptSession(uint kind, nint api, int size, ulong* output)
-	{
-		if (kind > 1 || output == null || Validate(api, size) != 0) return 1;
-		try { *output = ScriptSessions.Create(kind == 1, *(Ursa.NativeApiV6*)api); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"脚本会话创建失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int SelectScriptSession(ulong id)
-	{
-		try { ScriptSessions.Select(id); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"脚本会话选择失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int BindScriptSession(ulong id, nint api, int size)
-	{
-		if (Validate(api, size) != 0) return 1;
-		try { ScriptSessions.Bind(id, *(Ursa.NativeApiV6*)api); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"脚本会话绑定失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int ValidateScriptSession(ulong id)
-	{
-		try { ScriptSessions.Validate(id); return 0; }
-		catch (Exception error) { Console.Error.WriteLine($"脚本会话校验失败：{error}"); return 2; }
-	}
-
-	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-	public static int CloseScriptSession(ulong id)
-	{
-		try { return ScriptSessions.Close(id) ? 0 : 3; }
-		catch (Exception error) { Console.Error.WriteLine($"脚本会话卸载失败：{error}"); return 2; }
 	}
 }

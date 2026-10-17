@@ -1,13 +1,16 @@
 using System;
-using System.Text.Json;
 namespace Ursa;
 
+[Ursa.Bindings.WireValue]
 public enum MaterialType { Unlit, PbrMetallicRoughness }
 
+[Ursa.Bindings.WireValue]
 public enum MaterialTextureSlot { BaseColor, MetallicRoughness, Normal, Occlusion, Emissive }
 
+[Ursa.Bindings.WireValue]
 public struct MaterialSampler { public bool Linear; public bool Repeat; }
 
+[Ursa.Bindings.WireValue]
 public enum AlphaMode { Opaque, Mask, Blend }
 
 public class Material : RenderResource
@@ -16,84 +19,66 @@ public class Material : RenderResource
 
 	internal static Material? FromHandle(NativeHandle handle) => Wrap(handle, value => new Material(value));
 
-	public static Material Create(MaterialType type = MaterialType.Unlit) => FromHandle(EngineApi.ResourceRequest<NativeHandle>(new
-	{
-		operation = "material.create", type = type.ToString()
-	}))!;
+	public static Material Create(MaterialType type = MaterialType.Unlit) => FromHandle(NativeMaterialBindings.Create(type))!;
 
-	public static Material Load(AssetReference reference) => FromHandle(EngineApi.ResourceRequest<NativeHandle>(new
-	{
-		operation = "material.load", guid = reference.Guid, localFileId = reference.LocalFileId
-	}))!;
+	public static Material Load(AssetReference reference) => FromHandle(NativeMaterialBindings.Load(NativeAssetReference.From(reference)))!;
 
-	public Material Clone() => FromHandle(EngineApi.ResourceRequest<NativeHandle>(new { operation = "material.clone", handle = Handle }))!;
+	public Material Clone() => FromHandle(NativeMaterialBindings.Clone(Handle))!;
 
-	public void Destroy() => EngineApi.ResourceRequest(new { operation = "material.destroy", handle = Handle });
+	public void Destroy() => NativeMaterialBindings.Destroy(Handle);
 
-	private T Get<T>(string name) => EngineApi.ResourceRequest(new { operation = "material.get", handle = Handle }).GetProperty(name).Deserialize<T>(EngineApi.ResourceJson)!;
-
-	private void Set(string operation, object data) => EngineApi.ResourceRequest(new { operation, handle = Handle, data });
-
-	public Color Color { get => Get<Color>("baseColor"); set => Set("material.color", value); }
+	public Color Color { get => NativeMaterialBindings.GetParameters(Handle).BaseColor; set => NativeMaterialBindings.SetBaseColor(Handle, value); }
 	public Color BaseColor { get => Color; set => Color = value; }
-	public Color Emissive { get => Get<Color>("emissive"); set => Set("material.emissive", value); }
-	public float Metallic { get => Get<float>("metallic"); set => Set("material.metallic", value); }
-	public float Roughness { get => Get<float>("roughness"); set => Set("material.roughness", value); }
-	public float NormalScale { get => Get<float>("normalScale"); set => Set("material.normalScale", value); }
-	public float OcclusionStrength { get => Get<float>("occlusionStrength"); set => Set("material.occlusionStrength", value); }
-	public float AlphaCutoff { get => Get<float>("alphaCutoff"); set => Set("material.alphaCutoff", value); }
-	public AlphaMode AlphaMode { get => Get<AlphaMode>("alphaMode"); set => Set("material.alphaMode", value); }
+	public Color Emissive { get => NativeMaterialBindings.GetParameters(Handle).Emissive; set => NativeMaterialBindings.SetEmissive(Handle, value); }
+	public float Metallic { get => NativeMaterialBindings.GetParameters(Handle).Metallic; set => NativeMaterialBindings.SetMetallic(Handle, value); }
+	public float Roughness { get => NativeMaterialBindings.GetParameters(Handle).Roughness; set => NativeMaterialBindings.SetRoughness(Handle, value); }
+	public float NormalScale { get => NativeMaterialBindings.GetParameters(Handle).NormalScale; set => NativeMaterialBindings.SetNormalScale(Handle, value); }
+	public float OcclusionStrength { get => NativeMaterialBindings.GetParameters(Handle).OcclusionStrength; set => NativeMaterialBindings.SetOcclusionStrength(Handle, value); }
+	public float AlphaCutoff { get => NativeMaterialBindings.GetParameters(Handle).AlphaCutoff; set => NativeMaterialBindings.SetAlphaCutoff(Handle, value); }
+	public AlphaMode AlphaMode { get => NativeMaterialBindings.GetParameters(Handle).AlphaMode; set => NativeMaterialBindings.SetAlphaMode(Handle, value); }
 
 	public MaterialSampler Sampler
 	{
-		get => EngineApi.ResourceRequest<MaterialSampler>(new { operation = "material.sampler.get", handle = Handle });
-		set => Set("material.sampler.set", value);
+		get => NativeMaterialBindings.GetSampler(Handle);
+		set => NativeMaterialBindings.SetSampler(Handle, value);
 	}
 
 	public AssetReference? Shader
 	{
-		get => EngineApi.ResourceRequest<AssetReference?>(new { operation = "material.shader.get", handle = Handle });
-		set => Set("material.shader.set", value ?? throw new ArgumentNullException(nameof(value)));
+		get => NativeMaterialBindings.GetShader(Handle)?.ToManaged();
+		set => NativeMaterialBindings.SetShader(Handle, NativeAssetReference.From(value ?? throw new ArgumentNullException(nameof(value))));
 	}
 
-	public string[] Keywords => EngineApi.ResourceRequest<string[]>(new { operation = "material.keywords", handle = Handle });
+	public string[] Keywords => NativeMaterialBindings.GetKeywords(Handle);
 
 	public TextureAsset? GetTexture(MaterialTextureSlot slot)
 	{
-		var reference = EngineApi.ResourceRequest<AssetReference?>(new { operation = "material.texture.get", handle = Handle, slot = (uint)slot });
-		return reference.HasValue ? TextureAsset.Load(reference.Value) : null;
+		var reference = NativeMaterialBindings.GetTexture(Handle, slot);
+		return reference.HasValue ? TextureAsset.Load(reference.Value.ToManaged()) : null;
 	}
 
-	public void SetTexture(MaterialTextureSlot slot, TextureAsset? texture) => EngineApi.ResourceRequest(new
-	{
-		operation = "material.texture.set", handle = Handle, slot = (uint)slot, data = texture?.Reference
-	});
+	public void SetTexture(MaterialTextureSlot slot, TextureAsset? texture) => NativeMaterialBindings.SetTexture(Handle, slot,
+		texture is null ? null : NativeAssetReference.From(texture.Reference));
 
-	private T GetProperty<T>(string name) => EngineApi.ResourceRequest<T>(new { operation = "material.property.get", handle = Handle, name });
-
-	private void SetProperty(string name, string type, object? data) => EngineApi.ResourceRequest(new { operation = "material.property.set", handle = Handle, name, type, data });
-
-	public float GetFloat(string name) => GetProperty<float>(name);
-	public int GetInt(string name) => GetProperty<int>(name);
-	public Color GetColor(string name) => GetProperty<Color>(name);
-	public Vector4 GetVector(string name) => GetProperty<Vector4>(name);
+	public float GetFloat(string name) => NativeMaterialBindings.GetFloat(Handle, name);
+	public int GetInt(string name) => NativeMaterialBindings.GetInt(Handle, name);
+	public Color GetColor(string name) => NativeMaterialBindings.GetColor(Handle, name);
+	public Vector4 GetVector(string name) => NativeMaterialBindings.GetVector(Handle, name);
 
 	public TextureAsset? GetTexture(string name)
 	{
-		var reference = GetProperty<AssetReference?>(name);
-		return reference.HasValue ? TextureAsset.Load(reference.Value) : null;
+		var reference = NativeMaterialBindings.GetTextureProperty(Handle, name);
+		return reference.HasValue ? TextureAsset.Load(reference.Value.ToManaged()) : null;
 	}
 
-	public void SetFloat(string name, float value) => SetProperty(name, "Float", value);
-	public void SetInt(string name, int value) => SetProperty(name, "Int", value);
-	public void SetColor(string name, Color value) => SetProperty(name, "Color", value);
-	public void SetVector(string name, Vector4 value) => SetProperty(name, "Vector", value);
-	public void SetTexture(string name, TextureAsset? texture) => SetProperty(name, "Texture2D", texture?.Reference);
+	public void SetFloat(string name, float value) => NativeMaterialBindings.SetFloat(Handle, name, value);
+	public void SetInt(string name, int value) => NativeMaterialBindings.SetInt(Handle, name, value);
+	public void SetColor(string name, Color value) => NativeMaterialBindings.SetColor(Handle, name, value);
+	public void SetVector(string name, Vector4 value) => NativeMaterialBindings.SetVector(Handle, name, value);
+	public void SetTexture(string name, TextureAsset? texture) => NativeMaterialBindings.SetTextureProperty(Handle, name,
+		texture is null ? null : NativeAssetReference.From(texture.Reference));
 
-	public void RemovePropertyOverride(string name) => EngineApi.ResourceRequest(new { operation = "material.property.remove", handle = Handle, name });
+	public void RemovePropertyOverride(string name) => NativeMaterialBindings.RemovePropertyOverride(Handle, name);
 
-	public void SetKeywordEnabled(string name, bool enabled) => EngineApi.ResourceRequest(new
-	{
-		operation = "material.keyword", handle = Handle, name, data = enabled
-	});
+	public void SetKeywordEnabled(string name, bool enabled) => NativeMaterialBindings.SetKeyword(Handle, name, enabled);
 }

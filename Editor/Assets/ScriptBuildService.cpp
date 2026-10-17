@@ -2,6 +2,7 @@
 
 #include <Core/StringInterop.hpp>
 #include <Core/Memory/ContainerAllocator.hpp>
+#include <Scripting/Bindings/BindingRequirements.hpp>
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -281,6 +282,7 @@ Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>
 	manifest["EditorAssembly"] = ToStdString(PathToUrsaString(editorAssembly));
 	manifest["ReferenceDirectory"] = ToStdString(PathToUrsaString(referenceAssemblyDirectory));
 	manifest["OutputPath"] = ToStdString(PathToUrsaString(catalogOutputPath));
+	manifest["BindingsAssembly"] = ToStdString(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Bindings.dll"));
 	manifest["Sources"] = Json::array();
 	for (const ScriptSourceAsset& source : sources)
 	{
@@ -528,6 +530,9 @@ Result<void> ScriptBuildService::WriteProject(const VirtualPath& path, const Vec
 	document += "    <Reference Include=\"Ursa.Rendering\"><HintPath>" +
 	            XmlEscape(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Rendering.dll")) +
 	            "</HintPath></Reference>\n";
+	document += "    <Reference Include=\"Ursa.Bindings\"><HintPath>" +
+	            XmlEscape(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Bindings.dll")) +
+	            "</HintPath></Reference>\n";
 	if (editorProject)
 	{
 		document += "    <Reference Include=\"Ursa.Editor\"><HintPath>" + XmlEscape(PathToUrsaString(editorAssembly)) +
@@ -616,6 +621,19 @@ Result<String> ScriptBuildService::SourceFingerprint()
 		return Result<String>::Failure(refreshed.error);
 	}
 	UInt64 hash = 14695981039346656037ull;
+	HashString(hash, Scripting::Bindings::Manifest::generator);
+	HashString(hash, ToUrsaString(Scripting::Bindings::ScriptBindingRequirements(true).dump()));
+	for (const auto& dependency : Vector<std::filesystem::path>{
+	         runtimeAssembly, editorAssembly, runtimeAssembly.parent_path() / "Ursa.Rendering.dll",
+	         runtimeAssembly.parent_path() / "Ursa.Bindings.dll", catalogGeneratorAssembly})
+	{
+		auto bytes = ReadConfiguredFile(dependency);
+		if (!bytes)
+		{
+			return Result<String>::Failure(bytes.error);
+		}
+		HashBytes(hash, bytes.value.data(), bytes.value.size());
+	}
 	for (const ScriptSourceAsset& script : database.ScriptSources())
 	{
 		HashString(hash, script.path.ToString());
@@ -677,6 +695,12 @@ Result<bool> ScriptBuildService::IsBuildCurrent(ScriptAssemblyGroup group, const
 			return Result<bool>::Success(false);
 		}
 		const Json content = Json::parse(ToStdString(manifest.value));
+		if (content.value("Version", 0u) != 2 ||
+		    !Scripting::Bindings::ValidateScriptBindingRequirements(content.at("RequiredBindings"),
+		                                                            group == ScriptAssemblyGroup::Editor))
+		{
+			return Result<bool>::Success(false);
+		}
 		return Result<bool>::Success(document.value("fingerprint", std::string{}) == ToStdString(fingerprint.value) &&
 		                             content.value("BuildFingerprint", std::string{}) ==
 		                                 ToStdString(fingerprint.value));
@@ -710,9 +734,12 @@ Result<ScriptBuildReport> ScriptBuildService::BuildProject(const VirtualPath& pr
 			auto manifestPath =
 			    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Manifests/" + groupName + ".json").value;
 			auto manifest = filesystem.ReadText(manifestPath);
+			const Json content = manifest ? Json::parse(ToStdString(manifest.value)) : Json::object();
 			if (state.value("fingerprint", std::string{}) == ToStdString(fingerprint.value) && manifest &&
-			    Json::parse(ToStdString(manifest.value)).value("BuildFingerprint", std::string{}) ==
-			        ToStdString(fingerprint.value))
+			    content.value("Version", 0u) == 2 &&
+			    Scripting::Bindings::ValidateScriptBindingRequirements(content.at("RequiredBindings"),
+			                                                           group == ScriptAssemblyGroup::Editor) &&
+			    content.value("BuildFingerprint", std::string{}) == ToStdString(fingerprint.value))
 			{
 				return Result<ScriptBuildReport>::Success({true, group, assembly, "Script assemblies are up to date."});
 			}
@@ -833,7 +860,11 @@ Result<void> ScriptBuildService::PublishContent(ScriptAssemblyGroup group, const
 	    String(editorLibraryScheme) + ":ScriptBuild/Content/" + groupName + "/" + fingerprint + "/";
 	const VirtualPath manifestPath =
 	    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Manifests/" + groupName + ".json").value;
-	Json manifest{{"Version", 1u}, {"Group", ToStdString(groupName)}, {"BuildFingerprint", ToStdString(fingerprint)}};
+	Json manifest{
+	    {"Version", 2u},
+	    {"Group", ToStdString(groupName)},
+	    {"BuildFingerprint", ToStdString(fingerprint)},
+	    {"RequiredBindings", Scripting::Bindings::ScriptBindingRequirements(group == ScriptAssemblyGroup::Editor)}};
 	manifest["Assemblies"] = Json::array();
 	if (group == ScriptAssemblyGroup::Editor)
 	{
@@ -924,6 +955,9 @@ Result<void> ScriptBuildService::PublishContent(ScriptAssemblyGroup group, const
 Result<String> ScriptBuildService::BuildFingerprint(ScriptAssemblyGroup group, const String& configuration) const
 {
 	UInt64 hash = 1469598103934665603ull;
+	HashString(hash, Scripting::Bindings::Manifest::generator);
+	HashString(hash, ToUrsaString(
+	                     Scripting::Bindings::ScriptBindingRequirements(group == ScriptAssemblyGroup::Editor).dump()));
 	HashString(hash, group == ScriptAssemblyGroup::Game ? "Game" : "Editor");
 	HashString(hash, configuration);
 	HashString(hash, PathToUrsaString(dotnetExecutable));
@@ -951,6 +985,7 @@ Result<String> ScriptBuildService::BuildFingerprint(ScriptAssemblyGroup group, c
 		HashBytes(hash, bytes.value.data(), bytes.value.size());
 	}
 	Vector<std::filesystem::path> dependencies{runtimeAssembly, runtimeAssembly.parent_path() / "Ursa.Rendering.dll",
+	                                           runtimeAssembly.parent_path() / "Ursa.Bindings.dll",
 	                                           catalogGeneratorAssembly};
 	if (group == ScriptAssemblyGroup::Editor)
 	{

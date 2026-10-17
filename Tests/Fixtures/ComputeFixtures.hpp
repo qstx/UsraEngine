@@ -6,5 +6,6 @@
 namespace Ursa::Test
 {
 Result<std::shared_ptr<Shader::ShaderAsset>> CreateComputeFixture(const Shader::ShaderCompilerTools& tools,
-                                                                  ResourceId identity = ResourceId::Generate());
+                                                                  ResourceId identity = ResourceId::Generate(),
+                                                                  bool matrixProbe = false);
 } // namespace Ursa::Test

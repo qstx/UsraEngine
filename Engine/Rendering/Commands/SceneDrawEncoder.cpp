@@ -845,7 +845,14 @@ struct SceneDrawEncoder::Impl
 						{
 							throw std::runtime_error("Renderer uniform member exceeds its reflected block");
 						}
-						std::memcpy(bytes.data() + member.byteOffset, source, copySize);
+						if (member.type == "mat4" || member.type == "float4x4")
+						{
+							done(Shader::WriteShaderUniformValue(bytes, member, source, copySize));
+						}
+						else
+						{
+							std::memcpy(bytes.data() + member.byteOffset, source, copySize);
+						}
 					}
 				}
 				if (activeEncoding && activeEncoding->globals)
@@ -863,7 +870,8 @@ struct SceneDrawEncoder::Impl
 							throw std::runtime_error("Scene Shader global uniform size does not match reflection: " +
 							                         ToStdString(member.name));
 						}
-						std::memcpy(bytes.data() + member.byteOffset, global->second.bytes.data(), member.byteSize);
+						done(Shader::WriteShaderUniformValue(bytes, member, global->second.bytes.data(),
+						                                     member.byteSize));
 					}
 				}
 				if (activeEncoding && activeEncoding->frames && !cacheableMaterialGroup)
