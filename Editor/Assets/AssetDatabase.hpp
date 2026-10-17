@@ -19,6 +19,7 @@ struct AssetMetadata
 	Ursa::UInt32 importerVersion = 0;
 	nlohmann::json importSettings = nlohmann::json::object();
 	bool folder = false;
+	nlohmann::json scriptTypes = nlohmann::json::object();
 };
 
 struct AssetRecord
@@ -40,6 +41,7 @@ struct ScriptSourceAsset
 	VirtualPath path;
 	ResourceId guid;
 	ScriptAssemblyGroup group = ScriptAssemblyGroup::Game;
+	nlohmann::json identities = nlohmann::json::object();
 };
 
 struct ImportedArtifact
@@ -88,6 +90,8 @@ public:
 	Result<void> CreateFolder(const VirtualPath& path);
 
 	Result<AssetMetadata> Metadata(const VirtualPath& path) const;
+
+	Result<void> UpdateScriptIdentities(const ScriptSourceAsset& source, const nlohmann::json& identities);
 
 	Result<void> SetImporterSettings(const VirtualPath& path, const String& importer, Ursa::UInt32 importerVersion,
 	                                 const nlohmann::json& settings);

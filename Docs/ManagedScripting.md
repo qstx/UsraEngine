@@ -49,25 +49,24 @@ IDE 工程与正式脚本构建的输入模型、生成目录和输出隔离见 
 
 Editor 会在项目的 `Library/ScriptBuild` 下生成 MSBuild 工程、脚本类型目录、编译暂存区和输出，不需要手工维护 `.csproj`。在编辑器中使用 `Scripts > Compile Scripts` 编译 Game 与 Editor 程序集；编译在后台运行，诊断显示在 Script Build 面板。Run 会检查脚本输入指纹；脚本尚未编译或编译后输入有变化时，Run 会后台编译最新输入，成功后才启动运行场景。清空项目 `Library` 后，下一次编译会重新发现脚本、生成目录并构建程序集。
 
-每个公开、非抽象、非泛型的 `Behaviour` 派生类型都会加入 ScriptType 目录。推荐使用显式稳定标识，类型改名时保留原标识：
+每个公开、非抽象、非泛型的 `Behaviour` 派生类型都会加入 ScriptType 目录。普通脚本无需身份特性，由源 `.meta` 自动维护稳定身份：
 
 ```csharp
 using Ursa;
 
-[UrsaScriptType("sample.movement", Version = 1)]
 public sealed class MoveWithInputBehaviour : Behaviour
 {
     public float step = 1.0f;
 }
 ```
 
-未标注特性的类型会使用源 GUID 和 CLR 类型名生成默认标识；重命名这类类型会改变标识，因此用于场景或 Prefab 的脚本应显式声明 `UrsaScriptType`。编译缓存指纹包含源码、分组、运行时 API、.NET SDK 和引用程序集；编译期间输入发生变化时，暂存产物不会发布。编译错误不会覆盖最近一次成功构建的程序集。
+首次成功发现会把类型 ID、数据版本、local file ID 和主类型映射写入 `.cs.meta`；之后修改主类型类名、命名空间或随 sidecar 移动时保留身份。旧特性仍可兼容迁移，已有未注解脚本沿用旧自动 ID。规则、多类型文件边界和旧项目迁移见 [脚本身份与源元数据](ScriptIdentity.md)。编译指纹包含源码、身份元数据、分组、API、SDK 和引用程序集；过时或失败编译不发布候选产物。
 
 ## 脚本字段、Scene 与 Prefab
 
 公开实例字段默认保存；私有字段可使用 `[SerializeField]` 加入保存。静态、常量、只读、`[NonSerialized]` 字段和属性不会保存。当前支持数字、布尔值、字符串、枚举、`Vector3`、`Quaternion`、`Color`、`AssetReference`、`GameObject`/`Component` 引用，以及这些类型的一维数组和 `List<T>`。要求保存但类型不受支持时，保存会报告脚本类型和字段名，不会悄悄写入默认值。
 
-Scene 和 Prefab 会保存脚本的稳定 `UrsaScriptType` 标识、类型版本和字段值。对象、组件和资产引用通过持久 ID 保存；加载 Scene、Prefab 或 Run 副本时，引用会映射到新对象图，完成后才调用 Awake。Prefab 实例覆盖单独记录字段值，因此修改一个实例不会改写 Prefab 源。
+Scene 和 Prefab 会保存脚本的由源元数据维护的稳定类型标识、类型版本和字段值。对象、组件和资产引用通过持久 ID 保存；加载 Scene、Prefab 或 Run 副本时，引用会映射到新对象图，完成后才调用 Awake。Prefab 实例覆盖单独记录字段值，因此修改一个实例不会改写 Prefab 源。
 
 在 Hierarchy 选择 GameObject 后，从 Inspector 的 **Add Component > Scripts** 挂载脚本。Inspector 根据字段类型显示数字、布尔值、字符串、枚举、向量/颜色、引用和数组/列表控件。修改后保存 Scene 或 Prefab；重新打开时字段值仍会保留。选中 Prefab 实例修改脚本字段并保存 Scene 时，Editor 记录实例覆盖；Prefab 源文件保持不变。
 
@@ -76,7 +75,6 @@ Scene 和 Prefab 会保存脚本的稳定 `UrsaScriptType` 标识、类型版本
 ```csharp
 using Ursa;
 
-[UrsaScriptType("sample.movement", Version = 2)]
 public sealed class MoveWithInputBehaviour : Behaviour
 {
     [FormerlySerializedAs("moveStep")]
@@ -112,7 +110,6 @@ Stop 先停止更新并清理运行场景，再失效对象句柄、释放行为
 ```csharp
 using Ursa;
 
-[UrsaScriptType("sample.movement", Version = 1)]
 public sealed class MoveWithInputBehaviour : Behaviour
 {
     public float step = 1.0f;

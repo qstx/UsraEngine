@@ -91,6 +91,8 @@ public:
 
 	Result<UInt64> CreateBehaviour(const String& typeName, const ManagedHandle& gameObject);
 
+	Result<String> ResolveBehaviourType(UInt64 sessionId, const String& payload, const String& fallbackType) const;
+
 	Result<void> BindBehaviour(UInt64 instanceToken, const ManagedHandle& component);
 
 	Result<void> BindSceneApi(ManagedSceneApi& sceneApi);

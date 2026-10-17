@@ -1008,8 +1008,35 @@ int main(int argumentCount, char** arguments)
 			     {"ScriptType", ToStdString(type.second)},
 			     {"Version", 1u},
 			     {"Group", "Game"},
-			     {"ClrTypeName", ToStdString("Ursa.SessionFixtures." + type.first + ", Ursa.SessionFixtures")}});
+			     {"ClrTypeName", ToStdString("Ursa.SessionFixtures." + type.first + ", Ursa.SessionFixtures")},
+			     {"LegacyIdentity", fixtureTypeId == 1}});
 		}
+		catalog["Scripts"].push_back(
+		    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+		     {"LocalFileId", 5u},
+		     {"Kind", "Behaviour"},
+		     {"ScriptType", "auto:11111111-1111-4111-8111-111111111111:Ursa.SessionFixtures.AutoIdentityProbe"},
+		     {"Version", 1u},
+		     {"Group", "Game"},
+		     {"ClrTypeName", "Ursa.SessionFixtures.AutoIdentityProbe, Ursa.SessionFixtures"}});
+		catalog["Scripts"].push_back(
+		    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+		     {"LocalFileId", 6u},
+		     {"Kind", "Behaviour"},
+		     {"ScriptType", "test.serialized-probe"},
+		     {"Version", 1u},
+		     {"Group", "Game"},
+		     {"ClrTypeName", "Ursa.SessionFixtures.LegacySerializedProbe, Ursa.SessionFixtures"},
+		     {"LegacyIdentity", true}});
+		catalog["Scripts"].push_back(
+		    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+		     {"LocalFileId", 7u},
+		     {"Kind", "Behaviour"},
+		     {"ScriptType", "test.managed-render-component-probe"},
+		     {"Version", 1u},
+		     {"Group", "Game"},
+		     {"ClrTypeName", "Ursa.SessionFixtures.ManagedRenderComponentProbe, Ursa.SessionFixtures"},
+		     {"LegacyIdentity", true}});
 		const auto catalogBytes = JsonBytes(catalog);
 		nlohmann::json content{{"Version", 2u},
 		                       {"RequiredBindings", Bindings::ScriptBindingRequirements(false)},
@@ -1288,10 +1315,43 @@ int main(int argumentCount, char** arguments)
 			       "Player session accepted incompatible or missing binding module identities");
 			Done(host->LoadScriptContent(runDomain, sessionContentPath));
 			Done(host->ValidateScriptSession(runDomain));
+			Expect(
+			    Take(host->ResolveBehaviourType(runDomain, R"({"ScriptType":"test.session-probe"})",
+			                                    "Old.Namespace.RenamedProbe")) ==
+			            "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures" &&
+			        Take(host->ResolveBehaviourType(
+			            runDomain,
+			            R"({"ScriptType":"auto:11111111-1111-4111-8111-111111111111:Ursa.SessionFixtures.AutoIdentityProbe","SourceGuid":"11111111-1111-4111-8111-111111111111","LocalFileId":5})",
+			            "Previous.Namespace.AutoIdentityProbe")) ==
+			            "Ursa.SessionFixtures.AutoIdentityProbe, Ursa.SessionFixtures" &&
+			        !host->ResolveBehaviourType(
+			            runDomain,
+			            R"({"ScriptType":"auto:11111111-1111-4111-8111-Ursa.SessionFixtures.AutoIdentityProbe","SourceGuid":"11111111-1111-4111-8111-111111111111","LocalFileId":5})",
+			            "Old.Namespace.AutoIdentityProbe") &&
+			        Take(host->ResolveBehaviourType(
+			            runDomain,
+			            R"({"ScriptType":"test.session-probe","SourceGuid":"99999999-9999-4999-8999-999999999999","LocalFileId":1})",
+			            "Old.Namespace.RenamedProbe")) == "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures" &&
+			        !host->ResolveBehaviourType(runDomain, R"({"ScriptType":"test.session-probe","LocalFileId":999})",
+			                                    "") &&
+			        !host->ResolveBehaviourType(runDomain, R"({"ScriptType":"missing.type"})", ""),
+			    "Serialized script identity did not resolve renamed types or reject mismatched asset identities");
 			ManagedScriptRuntime runRuntime(runScene, *host, *runApi, runDomain);
 			auto runObject = Take(runScene.CreateGameObject("Run"));
 			auto scriptId =
 			    Take(runRuntime.CreateAndAdd(runObject, "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures"));
+			auto automaticIdentityOwner = Take(runScene.CreateGameObject("Auto Identity"));
+			auto automaticIdentityComponent = Take(runRuntime.CreateAndAdd(
+			    automaticIdentityOwner, "Ursa.SessionFixtures.AutoIdentityProbe, Ursa.SessionFixtures"));
+			auto* automaticIdentityScript =
+			    static_cast<ScriptBehaviourComponent*>(runScene.GetComponent(automaticIdentityComponent));
+			const auto automaticIdentityPayload = nlohmann::json::parse(
+			    ToStdString(Take(host->SerializeBehaviour(automaticIdentityScript->InstanceToken()))));
+			Expect(automaticIdentityScript->TypeName() ==
+			               "Ursa.SessionFixtures.AutoIdentityProbe, Ursa.SessionFixtures" &&
+			           automaticIdentityPayload["ScriptType"] ==
+			               "auto:11111111-1111-4111-8111-111111111111:Ursa.SessionFixtures.AutoIdentityProbe",
+			       "A script without UrsaScriptType did not resolve and serialize through its persisted type identity");
 			auto* script = static_cast<ScriptBehaviourComponent*>(runScene.GetComponent(scriptId));
 			const UInt64 previousToken = script->InstanceToken();
 			runScene.BeginFrame();
@@ -1311,11 +1371,12 @@ int main(int argumentCount, char** arguments)
 			       "Runtime AddComponent did not bind identity before immediate callbacks");
 			auto importedOwner = GameObject::Create("Imported");
 			auto importedScript = Take(importedOwner->AddComponent<ScriptBehaviourComponent>(
-			    "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures"));
+			    "Previous.Namespace.OldProbeName, Ursa.SessionFixtures"));
 			importedScript->SetSerializedPayload(
-			    R"({"FormatVersion":1,"ScriptType":"test.session-probe","Version":1,"Fields":{"value":13}})");
+			    R"({"FormatVersion":1,"ScriptType":"test.session-probe","SourceGuid":"99999999-9999-4999-8999-999999999999","LocalFileId":1,"Version":1,"Fields":{"value":13}})");
 			Done(runScene.AttachGameObject(importedOwner));
-			Expect(Take(importedOwner->Name()) == "Session:2:13",
+			Expect(Take(importedOwner->Name()) == "Session:2:13" &&
+			           importedScript->TypeName() == "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures",
 			       "Runtime graph attachment did not restore script fields before immediate Awake");
 			auto renderOwner = Take(runScene.CreateGameObject("Managed Render Components"));
 			Take(runRuntime.CreateAndAdd(renderOwner,

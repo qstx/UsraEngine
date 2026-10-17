@@ -259,8 +259,15 @@ Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input
 	manifest["Nullable"] = ToStdString(input.nullable);
 	manifest["BindingsAssembly"] = ToStdString(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Bindings.dll"));
 	manifest["Sources"] = Json::array();
+	Map<String, Vector<UInt8>> sourceBytes;
 	for (const ScriptSourceAsset& source : sources)
 	{
+		auto bytes = filesystem.Read(source.path);
+		if (!bytes)
+		{
+			return Result<void>::Failure(bytes.error);
+		}
+		sourceBytes[source.path.ToString()] = std::move(bytes.value);
 		auto nativeSource = filesystem.ResolveForExternalToolInterop(source.path);
 		if (!nativeSource)
 		{
@@ -272,6 +279,8 @@ Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input
 		sourceRecord["VirtualPath"] = ToStdString(source.path.ToString());
 		sourceRecord["Guid"] = ToStdString(source.guid.ToString());
 		sourceRecord["Group"] = source.group == ScriptAssemblyGroup::Editor ? "Editor" : "Game";
+		sourceRecord["Identities"] =
+		    source.identities.empty() ? Json{{"Version", 1u}, {"Types", Json::array()}} : source.identities;
 		manifest["Sources"].push_back(std::move(sourceRecord));
 	}
 	const std::string manifestText = manifest.dump(2);
@@ -439,6 +448,42 @@ Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input
 			     item.value("IsRenderPipeline", false), ToUrsaString(item.value("CreateAssetMenuName", std::string{})),
 			     ToUrsaString(item.value("CreateAssetFileName", std::string{})),
 			     item.value("CreateAssetMenuOrder", Int32{0})});
+		}
+		if (!document.contains("SourceMetadata") || !document["SourceMetadata"].is_array() ||
+		    document["SourceMetadata"].size() != sources.size())
+		{
+			return Result<void>::Failure("ScriptCatalog did not return all source metadata records");
+		}
+		Map<String, Json> identities;
+		for (const auto& item : document["SourceMetadata"])
+		{
+			const String path = ToUrsaString(item.at("VirtualPath").get<std::string>());
+			if (!identities.emplace(path, item.at("Identities")).second)
+			{
+				return Result<void>::Failure("ScriptCatalog returned duplicate source metadata records");
+			}
+			const auto source = std::find_if(sources.begin(), sources.end(),
+			                                 [&](const auto& entry) { return entry.path.ToString() == path; });
+			if (source == sources.end() || item.at("Guid") != ToStdString(source->guid.ToString()))
+			{
+				return Result<void>::Failure("ScriptCatalog returned metadata for an unknown source");
+			}
+		}
+		for (const auto& source : sources)
+		{
+			auto current = filesystem.Read(source.path);
+			if (!current || current.value != sourceBytes.at(source.path.ToString()))
+			{
+				return Result<void>::Failure("Script inputs changed during type discovery; retry the build");
+			}
+		}
+		for (const auto& source : sources)
+		{
+			auto updated = database.UpdateScriptIdentities(source, identities.at(source.path.ToString()));
+			if (!updated)
+			{
+				return updated;
+			}
 		}
 		scriptTypes = std::move(records);
 		return {};
@@ -624,6 +669,7 @@ Result<String> ScriptBuildService::SourceFingerprint()
 	{
 		HashString(hash, script.path.ToString());
 		HashString(hash, script.guid.ToString());
+		HashString(hash, ToUrsaString(script.identities.dump()));
 		HashString(hash, script.group == ScriptAssemblyGroup::Game ? "Game" : "Editor");
 		auto bytes = filesystem.Read(script.path);
 		if (!bytes)
@@ -921,6 +967,7 @@ Result<void> ScriptBuildService::PublishContent(ScriptAssemblyGroup group, const
 	try
 	{
 		catalog = Json::parse(ToStdString(catalogText.value));
+		catalog.erase("SourceMetadata");
 		if (group == ScriptAssemblyGroup::Game)
 		{
 			Json scripts = Json::array();
@@ -975,6 +1022,7 @@ Result<String> ScriptBuildService::BuildFingerprint(ScriptAssemblyGroup group, c
 		}
 		HashString(hash, source.path.ToString());
 		HashString(hash, source.guid.ToString());
+		HashString(hash, ToUrsaString(source.identities.dump()));
 		auto bytes = filesystem.Read(source.path);
 		if (!bytes)
 		{

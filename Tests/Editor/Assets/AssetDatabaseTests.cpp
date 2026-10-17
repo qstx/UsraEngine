@@ -178,6 +178,12 @@ void TestScriptDiscoveryAndGrouping(const std::filesystem::path& root)
 	Expect(scriptSources.size() == 4, "Script discovery included non-CS files or missed C# source files");
 	const ResourceId playerGuid = TakeMetadata(database, "prj:Scripts/PlayerMover.cs").guid;
 	const ResourceId editorGuid = TakeMetadata(database, "prj:Scripts/Editor/Tools/SceneTool.cs").guid;
+	const nlohmann::json identities = {{"Version", 1u},
+	                                   {"Types", nlohmann::json::array({{{"TypeName", "PlayerMover"},
+	                                                                     {"Id", "legacy.player"},
+	                                                                     {"Version", 1u},
+	                                                                     {"LocalFileId", 42u},
+	                                                                     {"Primary", true}}})}};
 	Expect(static_cast<bool>(filesystem.Exists(Path("prj:Scripts/PlayerMover.cs.meta")).value),
 	       "New C# source did not receive AssetDatabase metadata");
 	const auto findScript = [&database](const char* path) -> ScriptSourceAsset
@@ -196,12 +202,19 @@ void TestScriptDiscoveryAndGrouping(const std::filesystem::path& root)
 	           findScript("prj:EditorTools.cs").group == ScriptAssemblyGroup::Game &&
 	           findScript("prj:Scripts/Editorial/NotEditorScript.cs").group == ScriptAssemblyGroup::Game,
 	       "Script grouping did not use the exact Editor directory segment");
+	Expect(static_cast<bool>(database.UpdateScriptIdentities(findScript("prj:Scripts/PlayerMover.cs"), identities)),
+	       "Could not persist script type identities");
+	Expect(static_cast<bool>(database.SetImporterSettings(Path("prj:Scripts/PlayerMover.cs"), "test.script", 1,
+	                                                      nlohmann::json::object())) &&
+	           TakeMetadata(database, "prj:Scripts/PlayerMover.cs").scriptTypes == identities,
+	       "Changing importer settings discarded script identities");
 
 	Expect(
 	    static_cast<bool>(database.Move(Path("prj:Scripts/PlayerMover.cs"), Path("prj:Scripts/Editor/PlayerMover.cs"))),
 	    "Could not move a game script into the Editor group");
 	auto movedPlayer = findScript("prj:Scripts/Editor/PlayerMover.cs");
-	Expect(movedPlayer.guid == playerGuid && movedPlayer.group == ScriptAssemblyGroup::Editor,
+	Expect(movedPlayer.guid == playerGuid && movedPlayer.group == ScriptAssemblyGroup::Editor &&
+	           movedPlayer.identities == identities,
 	       "Moving a script changed its GUID or retained its old compiler group");
 
 	Expect(static_cast<bool>(
@@ -214,7 +227,8 @@ void TestScriptDiscoveryAndGrouping(const std::filesystem::path& root)
 	Expect(static_cast<bool>(database.Copy(Path("prj:Scripts/Editor/PlayerMover.cs"), Path("prj:Scripts/GameCopy.cs"))),
 	       "Could not copy a C# source asset");
 	auto copiedPlayer = findScript("prj:Scripts/GameCopy.cs");
-	Expect(copiedPlayer.guid != playerGuid && copiedPlayer.group == ScriptAssemblyGroup::Game,
+	Expect(copiedPlayer.guid != playerGuid && copiedPlayer.group == ScriptAssemblyGroup::Game &&
+	           copiedPlayer.identities.empty(),
 	       "Copied script source reused its GUID or inherited its Editor group");
 }
 

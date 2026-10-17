@@ -101,7 +101,12 @@ Result<void> ManagedScriptRuntime::AttachSerializedComponents()
 			{
 				return Result<void>::Failure(ownerHandle.error);
 			}
-			auto token = host.CreateBehaviour(script->TypeName(), ownerHandle.value);
+			auto type = host.ResolveBehaviourType(sessionId, script->SerializedPayload(), script->TypeName());
+			if (!type)
+			{
+				return Result<void>::Failure(type.error);
+			}
+			auto token = host.CreateBehaviour(type.value, ownerHandle.value);
 			if (!token)
 			{
 				return Result<void>::Failure(token.error);
@@ -112,6 +117,7 @@ Result<void> ManagedScriptRuntime::AttachSerializedComponents()
 				host.DestroyBehaviour(token.value);
 				return attached;
 			}
+			script->SetTypeName(std::move(type.value));
 			auto componentHandle = sceneApi.RegisterComponent(script);
 			if (!componentHandle)
 			{

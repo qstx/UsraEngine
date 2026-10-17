@@ -118,7 +118,7 @@ void Fill(uint3 id : SV_DispatchThreadID)
 
 `SaveGraphicsSettings` 对非空选择要求资产校验器，失败时保留现有文件。共享校验按 GUID 解析 `.ursaasset`，核对当前 Game 类型目录、RenderPipelineAsset 继承、资产 local file ID、脚本类型 GUID/local file ID 和版本；普通 ScriptableObject、材质、缺失类型或错误身份不能成为有效选择。
 
-项目管线由 `[UrsaScriptType]` 类型和 `[CreateAssetMenu]` 菜单声明，并覆写 `RenderPipelineAsset.CreatePipeline()`，示例见 [ProjectPipeline.cs](Examples/ProjectPipeline.cs)。通过项目 Graphics 设置选择已保存资产时，保存其 `.meta` GUID 与 local file ID；清除选择保存 `null` 并恢复默认 Forward。不要在 Behaviour 中以运行时 `CreateInstance` 代替项目选择，因为它没有可发布的资产身份。
+项目管线由 `RenderPipelineAsset` 派生类型和 `[CreateAssetMenu]` 菜单声明，脚本类型身份自动写入源 `.meta`，并覆写 `RenderPipelineAsset.CreatePipeline()`，示例见 [ProjectPipeline.cs](Examples/ProjectPipeline.cs)。通过项目 Graphics 设置选择已保存资产时，保存其 `.meta` GUID 与 local file ID；清除选择保存 `null` 并恢复默认 Forward。不要在 Behaviour 中以运行时 `CreateInstance` 代替项目选择，因为它没有可发布的资产身份。
 
 内容导入在发布前重复校验选择及依赖闭包，将配置放入 `prj:__UrsaSettings/Graphics.json`。松散内容和 Pak 包含同一份配置；源设置的增加、删除或修改会使已发布内容失效。导入期间设置变化或无效选择不会替换上一份成功发布的 manifest。`UrsaGraphicsSettingsTests` 验证结构与 VFS 保存失败，`UrsaAssetImportPipelineTests` 验证重开、移动、清除、非法资产以及松散/Pak 一致性。
 

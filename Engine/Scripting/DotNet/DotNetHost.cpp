@@ -34,6 +34,7 @@ namespace HostBindings = Bindings::ManagedHost;
 struct DotNetHost::BindingState
 {
 	Bindings::CallbackModule<HostBindings::Table> host;
+	Map<UInt64, nlohmann::json> scriptCatalogs;
 };
 
 #if defined(_WIN32)
@@ -350,6 +351,10 @@ Result<void> DotNetHost::BindModules(ManagedSceneApi* sceneApi)
 	}
 	auto candidate = std::make_unique<BindingState>();
 	candidate->host = std::move(connected.value);
+	if (bindingState)
+	{
+		candidate->scriptCatalogs = std::move(bindingState->scriptCatalogs);
+	}
 	bindingState = std::move(candidate);
 	return {};
 }
@@ -361,6 +366,67 @@ Result<void> DotNetHost::BindSceneApi(ManagedSceneApi& sceneApi)
 		return Result<void>::Failure("Managed host is not initialized");
 	}
 	return BindModules(&sceneApi);
+}
+
+Result<String> DotNetHost::ResolveBehaviourType(UInt64 sessionId, const String& payload,
+                                                const String& fallbackType) const
+{
+	if (sessionId == 0 || payload.empty())
+	{
+		return Result<String>::Success(fallbackType);
+	}
+	if (!bindingState || sessionFaulted)
+	{
+		return Result<String>::Failure("Managed type catalog is unavailable");
+	}
+	try
+	{
+		const auto data = nlohmann::json::parse(ToStdString(payload));
+		if (!data.contains("ScriptType"))
+		{
+			return Result<String>::Success(fallbackType);
+		}
+		const auto catalog = bindingState->scriptCatalogs.find(sessionId);
+		if (catalog == bindingState->scriptCatalogs.end())
+		{
+			String available;
+			for (const auto& item : bindingState->scriptCatalogs)
+			{
+				if (!available.empty())
+				{
+					available += ", ";
+				}
+				available +=
+				    ToUrsaString(std::to_string(item.first)) + ":" + ToUrsaString(std::to_string(item.second.size()));
+			}
+			return Result<String>::Failure(
+			    "Script identity '" + ToUrsaString(data.at("ScriptType").get<std::string>()) +
+			    "' has no published type catalog for session " + ToUrsaString(std::to_string(sessionId)) +
+			    " (loaded catalogs: " + available + ")");
+		}
+		for (const auto& type : catalog->second)
+		{
+			if (type.at("ScriptType") != data.at("ScriptType"))
+			{
+				continue;
+			}
+			if (type.value("Kind", std::string("Behaviour")) != "Behaviour" ||
+			    (!type.value("LegacyIdentity", false) && !data.value("SourceGuid", std::string{}).empty() &&
+			     data.at("SourceGuid") != type.at("SourceGuid")) ||
+			    (data.value("LocalFileId", UInt64{0}) != 0 && data.at("LocalFileId") != type.at("LocalFileId")))
+			{
+				return Result<String>::Failure("Serialized script asset identity differs from its session catalog");
+			}
+			return Result<String>::Success(ToUrsaString(type.at("ClrTypeName").get<std::string>()));
+		}
+		return Result<String>::Failure(
+		    "Serialized script type '" + ToUrsaString(data.at("ScriptType").get<std::string>()) +
+		    "' is missing from session " + ToUrsaString(std::to_string(sessionId)) + " catalog");
+	}
+	catch (const std::exception& error)
+	{
+		return Result<String>::Failure("Cannot resolve serialized script identity: " + ToUrsaString(error.what()));
+	}
 }
 
 Result<UInt64> DotNetHost::CreateBehaviour(const String& typeName, const ManagedHandle& gameObject)
@@ -605,6 +671,7 @@ Result<void> DotNetHost::LoadScriptContent(UInt64 sessionId, const VirtualPath& 
 	{
 		return Result<void>::Failure(bytes.error);
 	}
+	nlohmann::json scriptCatalog;
 	try
 	{
 		const auto content = nlohmann::json::parse(bytes.value.begin(), bytes.value.end());
@@ -619,6 +686,14 @@ Result<void> DotNetHost::LoadScriptContent(UInt64 sessionId, const VirtualPath& 
 		{
 			return requirements;
 		}
+		auto catalogPath = VirtualPath::Parse(ToUrsaString(content.at("TypeCatalog").get<std::string>()));
+		auto catalog =
+		    catalogPath ? filesystem->ReadText(catalogPath.value) : Result<String>::Failure(catalogPath.error);
+		if (!catalog)
+		{
+			return Result<void>::Failure(catalog.error);
+		}
+		scriptCatalog = nlohmann::json::parse(ToStdString(catalog.value)).at("Scripts");
 	}
 	catch (const std::exception& error)
 	{
@@ -633,6 +708,10 @@ Result<void> DotNetHost::LoadScriptContent(UInt64 sessionId, const VirtualPath& 
 	archive.F_Version = 1;
 	archive.F_Json = {bytes.value.data(), bytes.value.size(), 1, 0};
 	auto result = HostBindings::Call_ManagedHostBindings_LoadScriptContent(bindingState->host, sessionId, archive);
+	if (result)
+	{
+		bindingState->scriptCatalogs[sessionId] = std::move(scriptCatalog);
+	}
 	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 
@@ -694,6 +773,10 @@ Result<void> DotNetHost::CloseScriptSession(UInt64 sessionId)
 		return Result<void>::Failure("Managed host is unavailable");
 	}
 	auto result = HostBindings::Call_ManagedHostBindings_CloseScriptSession(bindingState->host, sessionId);
+	if (result && result.value != 0)
+	{
+		bindingState->scriptCatalogs.erase(sessionId);
+	}
 	if (result && result.value == 0)
 	{
 		sessionFaulted = true;

@@ -29,6 +29,7 @@ internal sealed class SourceEntry
 	public string VirtualPath { get; set; } = string.Empty;
 	public string Guid { get; set; } = string.Empty;
 	public string Group { get; set; } = string.Empty;
+	public ScriptIdentityTable Identities { get; set; } = new();
 }
 
 internal sealed class ScriptRecord
@@ -37,6 +38,7 @@ internal sealed class ScriptRecord
 	public string ScriptType { get; set; } = string.Empty;
 	public uint Version { get; set; }
 	public ulong LocalFileId { get; set; }
+	public bool LegacyIdentity { get; set; }
 	public string ClrTypeName { get; set; } = string.Empty;
 	public string VirtualPath { get; set; } = string.Empty;
 	public string Group { get; set; } = string.Empty;
@@ -66,6 +68,14 @@ internal sealed class Catalog
 {
 	public uint Version { get; set; } = 1;
 	public List<ScriptRecord> Scripts { get; set; } = new();
+	public List<SourceMetadataRecord> SourceMetadata { get; set; } = new();
+}
+
+internal sealed class SourceMetadataRecord
+{
+	public string Guid { get; set; } = string.Empty;
+	public string VirtualPath { get; set; } = string.Empty;
+	public ScriptIdentityTable Identities { get; set; } = new();
 }
 
 internal sealed class ScriptDiagnosticRecord
@@ -160,6 +170,7 @@ internal static class Program
 			INamedTypeSymbol? nonSerializedAttribute = compilation.GetTypeByMetadataName("System.NonSerializedAttribute");
 			INamedTypeSymbol? createAssetMenuAttribute = compilation.GetTypeByMetadataName("Ursa.CreateAssetMenuAttribute");
 			var catalog = new Catalog();
+			var metadata = new ScriptIdentityMetadata(manifest.Sources);
 			var typeIds = new Dictionary<string, string>(StringComparer.Ordinal);
 			var localIds = new Dictionary<ulong, string>();
 			var assetMenuNames = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -183,6 +194,11 @@ internal static class Program
 				SourceEntry source = manifest.Sources.First(item => item.VirtualPath == tree.FilePath);
 				SemanticModel semanticModel = compilation.GetSemanticModel(tree);
 				var root = tree.GetCompilationUnitRoot();
+				INamedTypeSymbol[] sourceTypes = root.DescendantNodes().OfType<ClassDeclarationSyntax>()
+					.Select(declaration => semanticModel.GetDeclaredSymbol(declaration)).OfType<INamedTypeSymbol>()
+					.Where(candidate => candidate.DeclaredAccessibility == Accessibility.Public && !candidate.IsAbstract &&
+						candidate.Arity == 0 && (DerivesFrom(candidate, behaviorBase) || DerivesFrom(candidate, assetBase)))
+					.Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default).ToArray();
 				foreach (ClassDeclarationSyntax declaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
 				{
 					if (semanticModel.GetDeclaredSymbol(declaration) is not INamedTypeSymbol type ||
@@ -211,7 +227,11 @@ internal static class Program
 						continue;
 					}
 
-					(string scriptTypeId, uint version) = ReadScriptType(type, scriptTypeAttribute, source);
+					(string? declaredId, uint declaredVersion) = ReadScriptType(type, scriptTypeAttribute, source);
+					StoredScriptIdentity identity = metadata.Resolve(source, type, sourceTypes, declaredId, declaredVersion,
+						MakeLocalFileId);
+					string scriptTypeId = identity.Id;
+					uint version = identity.Version;
 					string origin = $"{type.ToDisplayString()} in {source.VirtualPath}";
 					(string menuName, string fileName, int menuOrder) = ReadCreateAssetMenu(createMenu, type, source);
 					if (!string.IsNullOrEmpty(menuName) && assetMenuNames.TryGetValue(menuName, out string? previousMenu))
@@ -228,7 +248,7 @@ internal static class Program
 						throw new InvalidDataException($"Duplicate ScriptType '{scriptTypeId}': {previousType}; {origin}.");
 					}
 					typeIds.Add(scriptTypeId, origin);
-					ulong localFileId = MakeLocalFileId(scriptTypeId);
+					ulong localFileId = identity.LocalFileId;
 					if (localIds.TryGetValue(localFileId, out string? previousLocalId))
 					{
 						throw new InvalidDataException($"Duplicate ScriptType local file ID {localFileId}: {previousLocalId}; {origin}.");
@@ -249,6 +269,7 @@ internal static class Program
 						ScriptType = scriptTypeId,
 						Version = version,
 						LocalFileId = localFileId,
+						LegacyIdentity = identity.Legacy,
 						ClrTypeName = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) + ", " +
 						              (source.Group == "Editor" ? "Ursa.EditorScripts" : "Ursa.Game"),
 						VirtualPath = source.VirtualPath,
@@ -266,6 +287,14 @@ internal static class Program
 			activeDeclaration = null;
 			SaveDiagnostics(manifest, records);
 			catalog.Scripts.Sort((left, right) => string.CompareOrdinal(left.ScriptType, right.ScriptType));
+			foreach (SourceEntry source in manifest.Sources)
+			{
+				source.Identities.Types.Sort((left, right) => string.CompareOrdinal(left.Id, right.Id));
+				catalog.SourceMetadata.Add(new SourceMetadataRecord
+				{
+					Guid = source.Guid, VirtualPath = source.VirtualPath, Identities = source.Identities
+				});
+			}
 			Directory.CreateDirectory(Path.GetDirectoryName(manifest.OutputPath)!);
 			File.WriteAllText(manifest.OutputPath, JsonSerializer.Serialize(catalog, new JsonSerializerOptions { WriteIndented = true }));
 			return 0;
@@ -314,7 +343,7 @@ internal static class Program
 		return false;
 	}
 
-	private static (string Id, uint Version) ReadScriptType(INamedTypeSymbol type, INamedTypeSymbol? attributeType,
+	private static (string? Id, uint Version) ReadScriptType(INamedTypeSymbol type, INamedTypeSymbol? attributeType,
 		SourceEntry source)
 	{
 		if (attributeType != null)
@@ -338,10 +367,11 @@ internal static class Program
 						version = declaredVersion;
 					}
 				}
+				if (version == 0) throw new InvalidDataException($"Script data version must be positive: {type.Name}.");
 				return (id, version);
 			}
 		}
-		return ($"auto:{source.Guid}:{type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)}", 1);
+		return (null, 1);
 	}
 
 	private static ulong MakeLocalFileId(string id)

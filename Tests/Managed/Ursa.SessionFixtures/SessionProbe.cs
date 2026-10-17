@@ -18,6 +18,22 @@ public sealed class SessionProbe : Behaviour
 	}
 }
 
+// This fixture intentionally has no identity attribute; its catalog entry simulates .meta discovery.
+public sealed class AutoIdentityProbe : Behaviour
+{
+	public int awakeCount;
+
+	public override void Awake() => awakeCount++;
+}
+
+[UrsaScriptType("test.serialized-probe")]
+public sealed class LegacySerializedProbe : Behaviour
+{
+	public int savedValue;
+
+	public override void Awake() => GameObject.Name += "Restored:" + savedValue;
+}
+
 // Deliberately violates the ownership contract to exercise the unload fault gate.
 public sealed class LeakingProbe : Behaviour
 {

@@ -39,10 +39,9 @@ void Expect(bool condition, const char* message)
 	}
 }
 
-const char* source =
-    "using Ursa; namespace Workflow; [UrsaScriptType(\"workflow.probe\")] public sealed class Probe : Behaviour { "
-    "private static int count; public int value = Defaults(); private static int Defaults() => 5; "
-    "public override void Awake() { GameObject.Name = $\"Runtime:{++count}:{value}\"; } }\n";
+const char* source = "using Ursa; namespace Workflow; public sealed class Probe : Behaviour { "
+                     "private static int count; public int value = Defaults(); private static int Defaults() => 5; "
+                     "public override void Awake() { GameObject.Name = $\"Runtime:{++count}:{value}\"; } }\n";
 
 class WorkflowEditor final : public EditorApplication
 {
@@ -117,6 +116,7 @@ protected:
 				context.roots = draft->GetScene().RootGameObjects();
 				script = static_cast<Scripting::ScriptBehaviourComponent*>(Take(descriptor->create(context)));
 				auto payload = nlohmann::json::parse(ToStdString(script->SerializedPayload()));
+				stableScriptId = ToUrsaString(payload.at("ScriptType").get<std::string>());
 				Expect(payload["Fields"]["value"] == 5, "Add Component did not use the script constructor default");
 				auto properties = Take(SerializedObject::Create(*script));
 				Done(Take(properties->FindProperty("/Fields/value")).SetValue(19));
@@ -173,6 +173,7 @@ protected:
 			}
 			else if (phase == 4 && !RunningScene())
 			{
+				Expect(InspectorStatus().empty(), ("Run failed: " + ToStdString(InspectorStatus())).c_str());
 				RequestPlayToggle();
 			}
 			else if (phase == 4 && RunningScene())
@@ -200,8 +201,7 @@ protected:
 				{
 					if (!changedDuringRun)
 					{
-						WriteSource(String(source) + "[Ursa.UrsaScriptType(\"workflow.added\")] public sealed class "
-						                             "Added : Ursa.Behaviour {}\n");
+						WriteSource(String(source) + "public sealed class Added : Ursa.Behaviour {}\n");
 						Expect(!CompileScripts(), "Run allowed an explicit script reload");
 						changedDuringRun = true;
 						const String helper = "public class RuntimeOnlyHelper {}\n";
@@ -253,10 +253,25 @@ protected:
 				}
 				else
 				{
-					Done(Documents()->SaveCurrent());
-					Done(OpenCSharpProject({}, 1, 1, false));
-					phase = 8;
+					String renamed(source);
+					renamed.replace(renamed.find("namespace Workflow;"), String("namespace Workflow;").size(),
+					                "namespace RenamedWorkflow;");
+					renamed.replace(renamed.find("class Probe"), String("class Probe").size(), "class RenamedProbe");
+					WriteSource(renamed);
+					Done(CompileScripts());
+					phase = 9;
 				}
+			}
+			else if (phase == 9)
+			{
+				const auto payload = nlohmann::json::parse(ToStdString(script->SerializedPayload()));
+				Expect(script->TypeName() == "RenamedWorkflow.RenamedProbe, Ursa.Game" &&
+				           payload["ScriptType"] == ToStdString(stableScriptId) && payload["Fields"]["value"] == 19 &&
+				           Documents()->Current()->Dirty(),
+				       "Attribute-free class/namespace rename lost its identity, live component or unsaved fields");
+				Done(Documents()->SaveCurrent());
+				Done(OpenCSharpProject({}, 1, 1, false));
+				phase = 8;
 			}
 		}
 		catch (const std::exception& error)
@@ -276,6 +291,7 @@ private:
 	std::shared_ptr<SceneDraft> draft;
 	GameObject::Ptr owner;
 	Scripting::ScriptBehaviourComponent* script = nullptr;
+	String stableScriptId;
 	std::chrono::steady_clock::time_point deadline;
 	UInt32 phase = 0;
 	UInt32 runs = 0;

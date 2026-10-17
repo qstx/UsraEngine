@@ -129,6 +129,16 @@ Result<AssetMetadata> DecodeMetadata(const String& text, const VirtualPath& side
 			}
 			metadata.importSettings = document["settings"];
 		}
+		if (document.contains("scriptTypes"))
+		{
+			const auto& identities = document["scriptTypes"];
+			if (!identities.is_object() || identities.value("Version", 0u) != 1 || !identities.contains("Types") ||
+			    !identities["Types"].is_array())
+			{
+				return Result<AssetMetadata>::Failure("Invalid script type metadata at " + sidecar.ToString());
+			}
+			metadata.scriptTypes = identities;
+		}
 		return Result<AssetMetadata>::Success(std::move(metadata));
 	}
 	catch (const std::exception& error)
@@ -148,6 +158,10 @@ Result<String> EncodeMetadata(const AssetMetadata& metadata)
 		                 {"importer", ToStdString(metadata.importer)},
 		                 {"importerVersion", metadata.importerVersion},
 		                 {"settings", metadata.importSettings}};
+		if (!metadata.scriptTypes.empty())
+		{
+			document["scriptTypes"] = metadata.scriptTypes;
+		}
 		return Result<String>::Success(ToUrsaString(document.dump(2)));
 	}
 	catch (const std::exception& error)
@@ -543,6 +557,7 @@ Result<void> AssetDatabase::Refresh()
 		if (candidatePathsByGuid.find(guid) != candidatePathsByGuid.end())
 		{
 			metadata.guid = ResourceId::Generate();
+			metadata.scriptTypes = Json::object();
 			auto written = WriteMetadata(path.value, metadata);
 			if (!written)
 			{
@@ -606,6 +621,32 @@ Result<AssetMetadata> AssetDatabase::Metadata(const VirtualPath& path) const
 		return Result<AssetMetadata>::Failure("Asset is not indexed: " + path.ToString());
 	}
 	return Result<AssetMetadata>::Success(found->second.metadata);
+}
+
+Result<void> AssetDatabase::UpdateScriptIdentities(const ScriptSourceAsset& source, const Json& identities)
+{
+	if (!EndsWith(source.path.relative, ".cs") || !identities.is_object() || identities.value("Version", 0u) != 1 ||
+	    !identities.contains("Types") || !identities["Types"].is_array())
+	{
+		return Result<void>::Failure("Script identity update has an invalid source or metadata schema");
+	}
+	auto current = ReadMetadata(source.path);
+	if (!current || current.value.guid != source.guid || current.value.scriptTypes != source.identities)
+	{
+		return Result<void>::Failure("Script metadata changed during type discovery: " + source.path.ToString());
+	}
+	if (current.value.scriptTypes == identities || (current.value.scriptTypes.empty() && identities["Types"].empty()))
+	{
+		return {};
+	}
+	current.value.scriptTypes = identities;
+	auto saved = WriteMetadata(source.path, current.value);
+	if (saved)
+	{
+		assetsByPath[source.path.relative].metadata = std::move(current.value);
+		++revision;
+	}
+	return saved;
 }
 
 Result<void> AssetDatabase::SetImporterSettings(const VirtualPath& path, const String& importer,
@@ -1187,7 +1228,8 @@ Vector<ScriptSourceAsset> AssetDatabase::ScriptSources() const
 			begin = separator + 1;
 		}
 		result.push_back({entry.second.path, entry.second.metadata.guid,
-		                  editorScript ? ScriptAssemblyGroup::Editor : ScriptAssemblyGroup::Game});
+		                  editorScript ? ScriptAssemblyGroup::Editor : ScriptAssemblyGroup::Game,
+		                  entry.second.metadata.scriptTypes});
 	}
 	return result;
 }
@@ -1332,6 +1374,7 @@ Result<void> AssetDatabase::CommitTransfer(Vector<FileTransfer> files, bool move
 				return Result<void>::Failure(metadata.error);
 			}
 			metadata.value.guid = ResourceId::Generate();
+			metadata.value.scriptTypes = Json::object();
 			auto encoded = EncodeMetadata(metadata.value);
 			if (!encoded)
 			{
