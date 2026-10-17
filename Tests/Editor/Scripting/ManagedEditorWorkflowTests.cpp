@@ -63,7 +63,7 @@ protected:
 		Done(draft->GetScene().SetActiveCamera(camera->Id()));
 		document->MarkDirty();
 		Done(Documents()->RequestOpen(std::move(document)));
-		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(90);
+		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
 		return {};
 	}
 
@@ -84,6 +84,20 @@ protected:
 			}
 			if (ScriptWorkPending())
 			{
+				if (phase == 6 && ScriptIdeStatus().find("正在同步") != String::npos)
+				{
+					const auto originalRoot = Workspace()->ProjectRoot();
+					auto changedProject = OpenProject(originalRoot);
+					Expect(!changedProject && changedProject.error.find("script IDE") != String::npos &&
+					           Workspace()->ProjectRoot() == originalRoot,
+					       "Project switching did not protect an active IDE generation request");
+					checkedSwitchGuard = true;
+				}
+				if (phase == 8 && ScriptIdeStatus().find("正在同步") != String::npos)
+				{
+					completed = true;
+					window->RequestClose();
+				}
 				++responsiveFrames;
 				return {};
 			}
@@ -94,6 +108,9 @@ protected:
 				{
 					return {};
 				}
+				Expect(ScriptDebugInfo().find("CoreCLR: initialized") != String::npos &&
+				           ScriptDebugInfo().find(PathToUrsaString(Workspace()->ProjectRoot())) != String::npos,
+				       "Script debug information does not identify the active host/project");
 				ComponentInspectorContext context;
 				context.object = owner;
 				context.scene = &draft->GetScene();
@@ -114,6 +131,28 @@ protected:
 				       "Compilation diagnostics did not point to the source virtual path");
 				Expect(Project().componentEditors.FindType("Workflow.Probe, Ursa.Game") != nullptr,
 				       "Failed compilation removed the previous editing registration");
+				Expect(!ScriptDiagnostics().empty() && ScriptDiagnostics()[0].source.relative == "Probe.cs" &&
+				           ScriptDiagnostics()[0].line > 0 && ScriptDiagnostics()[0].column > 0,
+				       "Editor has no structured error source location");
+				Done(OpenCSharpProject({}, 1, 1, false));
+				phase = 6;
+			}
+			else if (phase == 6)
+			{
+				Expect(checkedSwitchGuard, "IDE generation did not exercise the project-switch guard");
+				Expect(ScriptIdeStatus().find("已同步") != String::npos,
+				       "Broken script blocked an IDE regeneration request");
+				const auto project = Take(Workspace()->Index().Filesystem().ReadText(
+				    Take(VirtualPath::Parse("lib:ScriptIDE/Projects/Game/Ursa.Game.csproj"))));
+				Expect(project.find("Probe.cs") != String::npos, "IDE project did not contain the broken script");
+				Expect(!OpenScriptDiagnostic(ScriptDiagnostics().size()), "An invalid diagnostic index was navigable");
+				Done(OpenScriptDiagnostic(0));
+				phase = 7;
+			}
+			else if (phase == 7)
+			{
+				Expect(Project().componentEditors.FindType("Workflow.Probe, Ursa.Game") != nullptr,
+				       "Opening an error in the IDE removed the last valid editing environment");
 				RequestPlayToggle();
 				phase = 2;
 			}
@@ -165,7 +204,12 @@ protected:
 						                             "Added : Ursa.Behaviour {}\n");
 						Expect(!CompileScripts(), "Run allowed an explicit script reload");
 						changedDuringRun = true;
+						const String helper = "public class RuntimeOnlyHelper {}\n";
+						Done(Workspace()->Index().Filesystem().WriteAtomic(
+						    Take(VirtualPath::Parse("prj:RuntimeOnlyHelper.cs")),
+						    Vector<UInt8>(helper.begin(), helper.end())));
 						deferredDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+						ideSyncDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
 						return {};
 					}
 					Expect(Project().componentEditors.FindType("Workflow.Added, Ursa.Game") == nullptr,
@@ -173,6 +217,18 @@ protected:
 					if (std::chrono::steady_clock::now() < deferredDeadline)
 					{
 						return {};
+					}
+					const auto gameProject = Take(Workspace()->Index().Filesystem().ReadText(
+					    Take(VirtualPath::Parse("lib:ScriptIDE/Projects/Game/Ursa.Game.csproj"))));
+					if (gameProject.find("RuntimeOnlyHelper.cs") == String::npos)
+					{
+						if (std::chrono::steady_clock::now() < ideSyncDeadline)
+						{
+							return {};
+						}
+						throw std::runtime_error(
+						    "IDE structure did not synchronize during Play: " + ToStdString(AssetStatus()) + "; " +
+						    ToStdString(ScriptIdeStatus()) + "; " + ToStdString(ScriptStatus()));
 					}
 				}
 				RequestPlayToggle();
@@ -198,8 +254,8 @@ protected:
 				else
 				{
 					Done(Documents()->SaveCurrent());
-					completed = true;
-					window->RequestClose();
+					Done(OpenCSharpProject({}, 1, 1, false));
+					phase = 8;
 				}
 			}
 		}
@@ -226,7 +282,9 @@ private:
 	UInt32 responsiveFrames = 0;
 	bool completed = false;
 	bool changedDuringRun = false;
+	bool checkedSwitchGuard = false;
 	std::chrono::steady_clock::time_point deferredDeadline;
+	std::chrono::steady_clock::time_point ideSyncDeadline;
 };
 } // namespace
 

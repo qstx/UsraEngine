@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework><OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="EnvDTE"><HintPath>$(VisualStudioInstallDirectory)/Common7/IDE/PublicAssemblies/envdte.dll</HintPath><EmbedInteropTypes>false</EmbedInteropTypes></Reference>
+    <Reference Include="EnvDTE80"><HintPath>$(VisualStudioInstallDirectory)/Common7/IDE/PublicAssemblies/envdte80.dll</HintPath><EmbedInteropTypes>false</EmbedInteropTypes></Reference>
+    <Reference Include="Microsoft.VisualStudio.Interop"><HintPath>$(VisualStudioInstallDirectory)/Common7/IDE/PublicAssemblies/Microsoft.VisualStudio.Interop.dll</HintPath><EmbedInteropTypes>false</EmbedInteropTypes></Reference>
+  </ItemGroup>
+  <Target Name="CheckVisualStudio" BeforeTargets="ResolveReferences" Condition="!Exists('$(VisualStudioInstallDirectory)/Common7/IDE/PublicAssemblies/Microsoft.VisualStudio.Interop.dll')">
+    <Error Text="Set VisualStudioInstallDirectory to a Visual Studio installation with debugger automation support." />
+  </Target>
+</Project>

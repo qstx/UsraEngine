@@ -242,6 +242,7 @@ internal static class ScriptSessions
 			{
 				byte[] pdb = EngineApi.ReadFile(pdbPath.GetString()!);
 				if (Fingerprint(pdb) != record.GetProperty("PdbFingerprint").GetString()) throw new InvalidOperationException("PDB content fingerprint differs.");
+				ScriptDebugSymbols.Validate(image, pdb);
 				session.context.symbols.Add(expectedName, pdb);
 			}
 		}

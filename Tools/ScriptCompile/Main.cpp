@@ -11,10 +11,11 @@ int main(int argumentCount, char** arguments)
 	using namespace Ursa::Editor;
 	if (argumentCount < 2 || argumentCount > 3)
 	{
-		std::cerr << "Usage: UrsaScriptCompile <project-directory> [Debug|Release]\n";
+		std::cerr << "Usage: UrsaScriptCompile <project-directory> [Debug|Release|--ide]\n";
 		return 2;
 	}
-	const String configuration = argumentCount == 3 ? arguments[2] : "Debug";
+	const bool ideOnly = argumentCount == 3 && String(arguments[2]) == "--ide";
+	const String configuration = argumentCount == 3 && !ideOnly ? arguments[2] : "Debug";
 	if (configuration != "Debug" && configuration != "Release")
 	{
 		std::cerr << "Script configuration must be Debug or Release\n";
@@ -43,6 +44,17 @@ int main(int argumentCount, char** arguments)
 	{
 		std::cerr << ToStdString(service.error) << '\n';
 		return 1;
+	}
+	if (ideOnly)
+	{
+		auto generated = service.value->GenerateIdeProjects();
+		if (!generated)
+		{
+			std::cerr << ToStdString(generated.error) << '\n';
+			return 1;
+		}
+		std::cout << ToStdString(PathToUrsaString(generated.value.solution)) << '\n';
+		return 0;
 	}
 	auto compiled = service.value->Build(ScriptAssemblyGroup::Editor, configuration);
 	if (!compiled)

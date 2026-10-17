@@ -43,6 +43,8 @@ cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON -DURSA_DOTNET_EXECUTABLE="C:/Program
 
 ## 项目脚本与编译
 
+IDE 工程与正式脚本构建的输入模型、生成目录和输出隔离见 [C# 工程与外部编辑器](CSharpIdeIntegration.md)。IDE 的结构指纹与包含源码内容的正式构建指纹分别管理；打开 IDE 工程不要求脚本语义校验成功，IDE 构建不会替代正式内容发布。
+
 启用 `URSA_ENABLE_DOTNET` 后，项目 `Assets` 中的 `.cs` 文件由 AssetDatabase 自动发现并维护 `.meta` GUID。路径中包含独立目录段 `Editor` 的脚本归入 Editor 程序集；其余脚本归入 Game 程序集。Game 程序集引用 `Ursa.Runtime`/`Ursa.Rendering`，Editor 额外引用 Game 与 `Ursa.Editor`；`Ursa.Bindings` 为引擎共享支持依赖，Player 不加载 Editor 脚本或 Editor 模块。
 
 Editor 会在项目的 `Library/ScriptBuild` 下生成 MSBuild 工程、脚本类型目录、编译暂存区和输出，不需要手工维护 `.csproj`。在编辑器中使用 `Scripts > Compile Scripts` 编译 Game 与 Editor 程序集；编译在后台运行，诊断显示在 Script Build 面板。Run 会检查脚本输入指纹；脚本尚未编译或编译后输入有变化时，Run 会后台编译最新输入，成功后才启动运行场景。清空项目 `Library` 后，下一次编译会重新发现脚本、生成目录并构建程序集。

@@ -1,0 +1,5 @@
+<Project><PropertyGroup>
+  <UrsaAcceptanceBuildRoot Condition="'$(UrsaAcceptanceBuildRoot)' == ''">$(MSBuildThisFileDirectory)../../../../Build/IdeAcceptance/VisualStudioController</UrsaAcceptanceBuildRoot>
+  <BaseIntermediateOutputPath>$(UrsaAcceptanceBuildRoot)/obj/</BaseIntermediateOutputPath>
+  <OutputPath>$(UrsaAcceptanceBuildRoot)/bin/$(Configuration)/</OutputPath>
+</PropertyGroup></Project>

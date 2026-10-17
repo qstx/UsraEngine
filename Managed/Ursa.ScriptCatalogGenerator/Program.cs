@@ -16,7 +16,10 @@ internal sealed class Manifest
 	public string EditorAssembly { get; set; } = string.Empty;
 	public string ReferenceDirectory { get; set; } = string.Empty;
 	public string OutputPath { get; set; } = string.Empty;
+	public string DiagnosticsPath { get; set; } = string.Empty;
 	public string BindingsAssembly { get; set; } = string.Empty;
+	public string LanguageVersion { get; set; } = "14.0";
+	public string Nullable { get; set; } = "enable";
 	public List<SourceEntry> Sources { get; set; } = new();
 }
 
@@ -65,6 +68,16 @@ internal sealed class Catalog
 	public List<ScriptRecord> Scripts { get; set; } = new();
 }
 
+internal sealed class ScriptDiagnosticRecord
+{
+	public string Path { get; set; } = string.Empty;
+	public int Line { get; set; }
+	public int Column { get; set; }
+	public string Severity { get; set; } = "error";
+	public string Code { get; set; } = string.Empty;
+	public string Message { get; set; } = string.Empty;
+}
+
 internal static class Program
 {
 	private static int Main(string[] arguments)
@@ -75,17 +88,25 @@ internal static class Program
 			return 2;
 		}
 
+		Manifest? activeManifest = null;
+		Location? activeDeclaration = null;
+		var records = new List<ScriptDiagnosticRecord>();
+
 		try
 		{
 			Manifest manifest = JsonSerializer.Deserialize<Manifest>(File.ReadAllText(arguments[0]))
 			                    ?? throw new InvalidDataException("Script catalog manifest is empty.");
+			activeManifest = manifest;
+			SaveDiagnostics(manifest, records);
 			if (!File.Exists(manifest.RuntimeAssembly) || !File.Exists(manifest.EditorAssembly) ||
 			    !Directory.Exists(manifest.ReferenceDirectory))
 			{
 				throw new FileNotFoundException("Script catalog compiler references are incomplete.");
 			}
 
-			var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+			if (!LanguageVersionFacts.TryParse(manifest.LanguageVersion, out LanguageVersion languageVersion))
+				throw new InvalidDataException("Unsupported script language version.");
+			var parseOptions = new CSharpParseOptions(languageVersion);
 			var trees = manifest.Sources.Select(source =>
 				CSharpSyntaxTree.ParseText(File.ReadAllText(source.Path), parseOptions, source.VirtualPath)).ToArray();
 			var references = Directory.GetFiles(manifest.ReferenceDirectory, "*.dll")
@@ -97,7 +118,8 @@ internal static class Program
 			if (!string.IsNullOrEmpty(manifest.BindingsAssembly))
 				references.Add(MetadataReference.CreateFromFile(manifest.BindingsAssembly));
 			var compilation = CSharpCompilation.Create("Ursa.ScriptCatalog", trees, references,
-				new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+				new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+					nullableContextOptions: manifest.Nullable == "enable" ? NullableContextOptions.Enable : NullableContextOptions.Disable));
 			var errors = compilation.GetDiagnostics().Where(diagnostic =>
 			{
 				if (diagnostic.Severity != DiagnosticSeverity.Error)
@@ -116,9 +138,13 @@ internal static class Program
 				foreach (Diagnostic diagnostic in errors)
 				{
 					Console.Error.WriteLine(diagnostic.ToString());
+					records.Add(Record(diagnostic.Location, diagnostic.Severity.ToString().ToLowerInvariant(), diagnostic.Id, diagnostic.GetMessage()));
 				}
+				SaveDiagnostics(manifest, records);
 				return 1;
 			}
+			foreach (Diagnostic warning in compilation.GetDiagnostics().Where(item => item.Severity == DiagnosticSeverity.Warning))
+				records.Add(Record(warning.Location, "warning", warning.Id, warning.GetMessage()));
 
 			INamedTypeSymbol behaviorBase = compilation.GetTypeByMetadataName("Ursa.Behaviour")
 			                                ?? throw new InvalidDataException("Ursa.Runtime does not define Ursa.Behaviour.");
@@ -165,6 +191,7 @@ internal static class Program
 						continue;
 					}
 
+					activeDeclaration = declaration.Identifier.GetLocation();
 					AttributeData? createMenu = createAssetMenuAttribute == null
 						                            ? null
 						                            : type.GetAttributes().FirstOrDefault(attribute =>
@@ -236,6 +263,8 @@ internal static class Program
 				}
 			}
 
+			activeDeclaration = null;
+			SaveDiagnostics(manifest, records);
 			catalog.Scripts.Sort((left, right) => string.CompareOrdinal(left.ScriptType, right.ScriptType));
 			Directory.CreateDirectory(Path.GetDirectoryName(manifest.OutputPath)!);
 			File.WriteAllText(manifest.OutputPath, JsonSerializer.Serialize(catalog, new JsonSerializerOptions { WriteIndented = true }));
@@ -244,8 +273,33 @@ internal static class Program
 		catch (Exception exception)
 		{
 			Console.Error.WriteLine(exception.Message);
+			if (activeManifest != null)
+			{
+				records.Add(Record(activeDeclaration, "error", "URSA-CATALOG", exception.Message));
+				try { SaveDiagnostics(activeManifest, records); }
+				catch (Exception writeError) { Console.Error.WriteLine(writeError.Message); }
+			}
 			return 2;
 		}
+	}
+
+	private static ScriptDiagnosticRecord Record(Location? location, string severity, string code, string message)
+	{
+		FileLinePositionSpan? span = location?.IsInSource == true ? location.GetLineSpan() : null;
+		return new ScriptDiagnosticRecord
+		{
+			Path = span?.Path ?? string.Empty,
+			Line = span.HasValue ? span.Value.StartLinePosition.Line + 1 : 0,
+			Column = span.HasValue ? span.Value.StartLinePosition.Character + 1 : 0,
+			Severity = severity, Code = code, Message = message
+		};
+	}
+
+	private static void SaveDiagnostics(Manifest manifest, List<ScriptDiagnosticRecord> records)
+	{
+		if (string.IsNullOrEmpty(manifest.DiagnosticsPath)) return;
+		Directory.CreateDirectory(Path.GetDirectoryName(manifest.DiagnosticsPath)!);
+		File.WriteAllText(manifest.DiagnosticsPath, JsonSerializer.Serialize(new { Version = 1, Diagnostics = records }));
 	}
 
 	private static bool DerivesFrom(INamedTypeSymbol type, INamedTypeSymbol baseType)

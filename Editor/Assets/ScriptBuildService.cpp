@@ -48,36 +48,6 @@ struct BuildProcessResult
 	String output;
 };
 
-String XmlEscape(const String& value)
-{
-	String escaped;
-	for (char character : value)
-	{
-		switch (character)
-		{
-			case '&':
-				escaped += "&amp;";
-				break;
-			case '<':
-				escaped += "&lt;";
-				break;
-			case '>':
-				escaped += "&gt;";
-				break;
-			case '"':
-				escaped += "&quot;";
-				break;
-			case '\'':
-				escaped += "&apos;";
-				break;
-			default:
-				escaped.push_back(character);
-				break;
-		}
-	}
-	return escaped;
-}
-
 #if defined(_WIN32)
 std::wstring QuoteArgument(const std::wstring& argument)
 {
@@ -168,7 +138,8 @@ Result<BuildProcessResult> RunDotNet(const std::filesystem::path& executable, co
 	return RunProcess(executable,
 	                  {L"build", project.wstring(), L"--configuration",
 	                   std::filesystem::u8path(ToStdString(configuration)).wstring(), L"--output", output.wstring(),
-	                   L"--nologo"},
+	                   L"--nologo", L"--disable-build-servers", L"-m:1", L"-nr:false",
+	                   L"-p:ErrorLog=" + (output / "CompilerDiagnostics.sarif").wstring()},
 	                  project.parent_path());
 }
 #endif
@@ -265,8 +236,9 @@ ScriptBuildService::Open(VirtualFileSystem& filesystem, AssetDatabase& database,
 	                           std::move(referenceAssemblyDirectory))));
 }
 
-Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>& sources, VirtualPath& catalogPath)
+Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input, VirtualPath& catalogPath)
 {
+	const auto sources = input.SourceAssets();
 	const VirtualPath manifestPath =
 	    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Inputs/ScriptCatalog.json").value;
 	const VirtualPath catalogDirectory = VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Catalog").value;
@@ -282,6 +254,9 @@ Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>
 	manifest["EditorAssembly"] = ToStdString(PathToUrsaString(editorAssembly));
 	manifest["ReferenceDirectory"] = ToStdString(PathToUrsaString(referenceAssemblyDirectory));
 	manifest["OutputPath"] = ToStdString(PathToUrsaString(catalogOutputPath));
+	manifest["DiagnosticsPath"] = ToStdString(PathToUrsaString(catalogOutputDirectory.value / "Diagnostics.json"));
+	manifest["LanguageVersion"] = ToStdString(input.languageVersion);
+	manifest["Nullable"] = ToStdString(input.nullable);
 	manifest["BindingsAssembly"] = ToStdString(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Bindings.dll"));
 	manifest["Sources"] = Json::array();
 	for (const ScriptSourceAsset& source : sources)
@@ -316,11 +291,27 @@ Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>
 	{
 		return Result<void>::Failure(nativeManifest.error);
 	}
+	const auto diagnosticsPath =
+	    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Catalog/Diagnostics.json").value;
+	auto previousDiagnostics = filesystem.Exists(diagnosticsPath);
+	if (previousDiagnostics && previousDiagnostics.value)
+	{
+		auto removed = filesystem.Remove(diagnosticsPath);
+		if (!removed)
+		{
+			return Result<void>::Failure(removed.error);
+		}
+	}
 	auto process = RunProcess(dotnetExecutable, {catalogGeneratorAssembly.wstring(), nativeManifest.value.wstring()},
 	                          nativeManifest.value.parent_path());
 	if (!process)
 	{
 		return Result<void>::Failure(process.error);
+	}
+	auto structured = ReadScriptDiagnostics(filesystem, diagnosticsPath, input.sources, "Catalog");
+	if (structured)
+	{
+		diagnosticRecords = std::move(structured.value);
 	}
 	if (process.value.exitCode != 0)
 	{
@@ -458,12 +449,34 @@ Result<void> ScriptBuildService::GenerateCatalog(const Vector<ScriptSourceAsset>
 	}
 }
 
+Result<ScriptProjectInput> ScriptBuildService::ProjectInput()
+{
+	return CollectScriptProjectInput(filesystem, database, runtimeAssembly, editorAssembly);
+}
+
+Result<ScriptIdeWorkspace> ScriptBuildService::GenerateIdeProjects()
+{
+	auto input = ProjectInput();
+	if (!input)
+	{
+		return Result<ScriptIdeWorkspace>::Failure(input.error);
+	}
+	return ScriptIdeProject::Generate(filesystem, input.value,
+	                                  [this]() -> Result<String>
+	                                  {
+		                                  auto current = ProjectInput();
+		                                  return current ? Result<String>::Success(current.value.StructureFingerprint())
+		                                                 : Result<String>::Failure(current.error);
+	                                  });
+}
+
 Result<ScriptProjectPaths> ScriptBuildService::GenerateProjects()
 {
-	auto refreshed = database.Refresh();
-	if (!refreshed)
+	diagnosticRecords.clear();
+	auto input = ProjectInput();
+	if (!input)
 	{
-		return Result<ScriptProjectPaths>::Failure(refreshed.error);
+		return Result<ScriptProjectPaths>::Failure(input.error);
 	}
 	const String base = String(editorLibraryScheme) + ":ScriptBuild/Generated/";
 	const String output = String(editorLibraryScheme) + ":ScriptBuild/Assemblies/";
@@ -476,18 +489,17 @@ Result<ScriptProjectPaths> ScriptBuildService::GenerateProjects()
 	    VirtualPath::Parse(base + "Ursa.Game.csproj").value, VirtualPath::Parse(base + "Ursa.Editor.csproj").value,
 	    VirtualPath::Parse(output + "Game/Ursa.Game.dll").value,
 	    VirtualPath::Parse(output + "Editor/Ursa.EditorScripts.dll").value, std::move(catalogPath.value)};
-	auto sources = database.ScriptSources();
-	auto catalog = GenerateCatalog(sources, projects.typeCatalog);
+	auto catalog = GenerateCatalog(input.value, projects.typeCatalog);
 	if (!catalog)
 	{
 		return Result<ScriptProjectPaths>::Failure(catalog.error);
 	}
-	auto game = WriteProject(projects.gameProject, sources, ScriptAssemblyGroup::Game, projects);
+	auto game = WriteProject(projects.gameProject, input.value, ScriptAssemblyGroup::Game, projects);
 	if (!game)
 	{
 		return Result<ScriptProjectPaths>::Failure(game.error);
 	}
-	auto editor = WriteProject(projects.editorProject, sources, ScriptAssemblyGroup::Editor, projects);
+	auto editor = WriteProject(projects.editorProject, input.value, ScriptAssemblyGroup::Editor, projects);
 	if (!editor)
 	{
 		return Result<ScriptProjectPaths>::Failure(editor.error);
@@ -497,46 +509,20 @@ Result<ScriptProjectPaths> ScriptBuildService::GenerateProjects()
 	return Result<ScriptProjectPaths>::Success(std::move(projects));
 }
 
-Result<void> ScriptBuildService::WriteProject(const VirtualPath& path, const Vector<ScriptSourceAsset>& sources,
+Result<void> ScriptBuildService::WriteProject(const VirtualPath& path, const ScriptProjectInput& input,
                                               ScriptAssemblyGroup group, const ScriptProjectPaths& projects)
 {
 	const bool editorProject = group == ScriptAssemblyGroup::Editor;
 	const String assemblyName = editorProject ? "Ursa.EditorScripts" : "Ursa.Game";
 	String document = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n";
-	document += "    <TargetFramework>net10.0</TargetFramework>\n";
-	document += "    <OutputType>Library</OutputType>\n";
+	document += input.Properties();
 	document += "    <AssemblyName>" + assemblyName + "</AssemblyName>\n";
-	document += "    <Nullable>enable</Nullable>\n";
-	document += "    <ImplicitUsings>disable</ImplicitUsings>\n";
-	document += "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n";
 	document += "  </PropertyGroup>\n  <ItemGroup>\n";
-	for (const ScriptSourceAsset& source : sources)
-	{
-		if (source.group != group)
-		{
-			continue;
-		}
-		auto pathOnDisk = filesystem.ResolveForExternalToolInterop(source.path);
-		if (!pathOnDisk)
-		{
-			return Result<void>::Failure("Script source cannot be passed to the compiler: " + source.path.ToString() +
-			                             ": " + pathOnDisk.error);
-		}
-		document += "    <Compile Include=\"" + XmlEscape(PathToUrsaString(pathOnDisk.value)) + "\" />\n";
-	}
+	document += input.CompileItems(group);
 	document += "  </ItemGroup>\n  <ItemGroup>\n";
-	document += "    <Reference Include=\"Ursa.Runtime\"><HintPath>" + XmlEscape(PathToUrsaString(runtimeAssembly)) +
-	            "</HintPath></Reference>\n";
-	document += "    <Reference Include=\"Ursa.Rendering\"><HintPath>" +
-	            XmlEscape(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Rendering.dll")) +
-	            "</HintPath></Reference>\n";
-	document += "    <Reference Include=\"Ursa.Bindings\"><HintPath>" +
-	            XmlEscape(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Bindings.dll")) +
-	            "</HintPath></Reference>\n";
+	document += input.FrameworkItems(group);
 	if (editorProject)
 	{
-		document += "    <Reference Include=\"Ursa.Editor\"><HintPath>" + XmlEscape(PathToUrsaString(editorAssembly)) +
-		            "</HintPath></Reference>\n";
 		auto gameAssembly = filesystem.ResolveForExternalToolInterop(projects.gameAssembly);
 		if (!gameAssembly)
 		{
@@ -560,7 +546,7 @@ Result<void> ScriptBuildService::WriteProject(const VirtualPath& path, const Vec
 			gameAssembly = Result<std::filesystem::path>::Success(markerPath.value.parent_path() / "Ursa.Game.dll");
 		}
 		document += "    <Reference Include=\"Ursa.Game\"><HintPath>" +
-		            XmlEscape(PathToUrsaString(gameAssembly.value)) + "</HintPath></Reference>\n";
+		            EscapeProjectXml(PathToUrsaString(gameAssembly.value)) + "</HintPath></Reference>\n";
 	}
 	document += "  </ItemGroup>\n</Project>\n";
 	Vector<UInt8> bytes;
@@ -741,7 +727,8 @@ Result<ScriptBuildReport> ScriptBuildService::BuildProject(const VirtualPath& pr
 			                                                           group == ScriptAssemblyGroup::Editor) &&
 			    content.value("BuildFingerprint", std::string{}) == ToStdString(fingerprint.value))
 			{
-				return Result<ScriptBuildReport>::Success({true, group, assembly, "Script assemblies are up to date."});
+				return Result<ScriptBuildReport>::Success(
+				    {true, group, assembly, "Script assemblies are up to date.", diagnosticRecords});
 			}
 		}
 		catch (const std::exception&)
@@ -770,6 +757,17 @@ Result<ScriptBuildReport> ScriptBuildService::BuildProject(const VirtualPath& pr
 	if (!process)
 	{
 		return Result<ScriptBuildReport>::Failure(process.error);
+	}
+	auto input = ProjectInput();
+	if (input)
+	{
+		auto records =
+		    ReadScriptDiagnostics(filesystem, VirtualPath::Parse(outputDirectory + "/CompilerDiagnostics.sarif").value,
+		                          input.value.sources, "Compiler");
+		if (records)
+		{
+			diagnosticRecords.insert(diagnosticRecords.end(), records.value.begin(), records.value.end());
+		}
 	}
 	if (process.value.exitCode == 0)
 	{
@@ -842,7 +840,8 @@ Result<ScriptBuildReport> ScriptBuildService::BuildProject(const VirtualPath& pr
 			diagnostics = ToUrsaString(text);
 		}
 	}
-	return Result<ScriptBuildReport>::Success({process.value.exitCode == 0, group, assembly, std::move(diagnostics)});
+	return Result<ScriptBuildReport>::Success(
+	    {process.value.exitCode == 0, group, assembly, std::move(diagnostics), diagnosticRecords});
 #else
 	(void)project;
 	(void)assembly;

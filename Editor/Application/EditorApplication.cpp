@@ -184,6 +184,21 @@ EditorApplication::~EditorApplication()
 
 void EditorApplication::FinishScriptJobs()
 {
+	if (scriptIdeJob.valid())
+	{
+		scriptIdeJob.wait();
+		scriptIdeJob = {};
+	}
+	if (scriptEditorJob.valid())
+	{
+		scriptEditorJob.wait();
+		scriptEditorJob = {};
+	}
+	if (scriptEditorDiscoveryJob.valid())
+	{
+		scriptEditorDiscoveryJob.wait();
+		scriptEditorDiscoveryJob = {};
+	}
 	if (scriptCheckJob.valid())
 	{
 		scriptCheckJob.wait();
@@ -654,6 +669,10 @@ Result<void> EditorApplication::OnStart()
 
 Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, const std::filesystem::path& package)
 {
+	if (scriptIdeJob.valid() || scriptEditorJob.valid())
+	{
+		return Result<void>::Failure("Wait for the script IDE request before changing projects");
+	}
 	if (assetImportJob.valid() || assetScanJob.valid())
 	{
 		return Result<void>::Failure("Wait for asset import/discovery before changing projects");
@@ -855,6 +874,11 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	}
 #endif
 	scriptCheckJob = {};
+	ideGenerationRequested = false;
+	ideOpenRequested = false;
+	ideSource = {};
+	scriptDiagnostics.clear();
+	scriptIdeStatus.clear();
 	observedScriptSources.clear();
 	scriptBuildService.reset();
 	scriptAssetDatabase.reset();
@@ -874,6 +898,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 			if (service)
 			{
 				scriptBuildService = std::move(service.value);
+				ideGenerationRequested = true;
 			}
 			else
 			{
@@ -952,6 +977,10 @@ void EditorApplication::DrawMainMenuBar()
 			ImGui::MenuItem("Undo", "Ctrl+Z");
 			ImGui::MenuItem("Redo", "Ctrl+Y");
 			ImGui::EndDisabled();
+			if (ImGui::MenuItem("External Tools", nullptr, showExternalTools))
+			{
+				showExternalTools = !showExternalTools;
+			}
 			DrawManagedMenus("Edit");
 			ImGui::EndMenu();
 		}
@@ -1323,11 +1352,24 @@ void EditorApplication::DrawMainMenuBar()
 		}
 		if (scriptBuildService && ImGui::BeginMenu("Scripts"))
 		{
-			const bool compiling = scriptBuildJob.valid() || scriptCheckJob.valid();
+			const bool compiling = scriptBuildJob.valid() || scriptCheckJob.valid() || scriptIdeJob.valid();
 			ImGui::BeginDisabled(compiling || play.Active());
 			if (ImGui::MenuItem("Compile Scripts"))
 			{
 				CompileScripts();
+			}
+			ImGui::EndDisabled();
+			ImGui::BeginDisabled(scriptIdeJob.valid() || scriptEditorJob.valid() || ideGenerationRequested);
+			if (ImGui::MenuItem("Open C# Project"))
+			{
+				auto opened = OpenCSharpProject();
+				scriptIdeStatus = opened ? String("等待打开 C# 工程……") : opened.error;
+			}
+			if (ImGui::MenuItem("Regenerate C# Project"))
+			{
+				auto generated = OpenCSharpProject({}, 1, 1, false);
+				scriptIdeStatus = generated ? String("等待重新生成 C# 工程……") : generated.error;
+				showExternalTools = true;
 			}
 			ImGui::EndDisabled();
 			DrawManagedMenus("Scripts");
@@ -1353,6 +1395,10 @@ Result<void> EditorApplication::OpenProjectBrowserAsset(const ProjectBrowserEntr
 	}
 	projectBrowser.SelectAsset(asset.path);
 	selectionContext.SelectAsset(asset.path);
+	if (PathFromUrsaString(asset.path.relative).extension() == ".cs")
+	{
+		return OpenCSharpProject(asset.path);
+	}
 	const auto openDocument = [&](Result<std::unique_ptr<EditorDocument>> opened) -> Result<void>
 	{
 		if (!opened)
@@ -2006,7 +2052,8 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 	ImGui::Begin("##EditorToolbar", nullptr, toolbarFlags);
 	ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowWidth() - 180.0f) * 0.5f));
 	const bool canRun = selectedDocument && selectedDocument->Kind() == ResourceKind::Scene &&
-	                    !documents->PromptPending() && !scriptBuildJob.valid() && !scriptCheckJob.valid();
+	                    !documents->PromptPending() && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
+	                    !scriptIdeJob.valid() && !ideGenerationRequested;
 	if (requestRun && !canRun)
 	{
 		requestRun = false;
@@ -2257,7 +2304,36 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 		if (ImGui::BeginPopup("Script Build Diagnostics"))
 		{
 			ImGui::SetNextWindowSize({700.0f, 360.0f}, ImGuiCond_Appearing);
-			ImGui::TextUnformatted(scriptBuildStatus.c_str());
+			for (Size index = 0; index < scriptDiagnostics.size(); ++index)
+			{
+				const auto& diagnostic = scriptDiagnostics[index];
+				ImGui::PushID(static_cast<Int32>(index));
+				const String label = diagnostic.severity + " " + diagnostic.code + " " + diagnostic.source.ToString() +
+				                     ":" + ToUrsaString(std::to_string(diagnostic.line)) + ":" +
+				                     ToUrsaString(std::to_string(diagnostic.column));
+				if (!diagnostic.source.scheme.empty() && diagnostic.line && diagnostic.column)
+				{
+					if (ImGui::Selectable(label.c_str()))
+					{
+						auto opened = OpenScriptDiagnostic(index);
+						if (!opened)
+						{
+							scriptIdeStatus = opened.error;
+							showExternalTools = true;
+						}
+					}
+				}
+				else
+				{
+					ImGui::TextUnformatted(label.c_str());
+				}
+				ImGui::TextWrapped("%s", diagnostic.message.c_str());
+				ImGui::PopID();
+			}
+			if (scriptDiagnostics.empty() || ImGui::CollapsingHeader("Build status and tool output"))
+			{
+				ImGui::TextUnformatted(scriptBuildStatus.c_str());
+			}
 			ImGui::EndPopup();
 		}
 	}
@@ -2266,6 +2342,7 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 
 Result<void> EditorApplication::OnGui()
 {
+	PumpScriptIde();
 	selectionContext.SetActiveDocument(documents && documents->Current() ? documents->Current()->Id() : ResourceId{});
 	if (!pendingManagedAsset.scheme.empty())
 	{
@@ -2280,6 +2357,7 @@ Result<void> EditorApplication::OnGui()
 	if (scriptBuildJob.valid() && scriptBuildJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
 	{
 		auto result = scriptBuildJob.get();
+		scriptDiagnostics = scriptBuildService ? scriptBuildService->LastDiagnostics() : Vector<ScriptDiagnostic>{};
 		if (!result)
 		{
 			scriptBuildStatus = result.error;
@@ -2330,18 +2408,26 @@ Result<void> EditorApplication::OnGui()
 		selectionContext.Clear();
 	}
 	const auto checkTime = std::chrono::steady_clock::now();
-	if (startupPlay && !scriptBuildJob.valid() && !scriptCheckJob.valid())
+	if (startupPlay && !scriptBuildJob.valid() && !scriptCheckJob.valid() && !scriptIdeJob.valid())
 	{
 		requestRun = true;
 	}
-	if (scriptBuildService && !startupPlay && !requestRun && !play.Active() && !scriptBuildJob.valid() &&
-	    !scriptCheckJob.valid() && checkTime >= nextScriptCheck)
+	if (scriptBuildService && !startupPlay && !requestRun && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
+	    !scriptIdeJob.valid() && !assetScanJob.valid() &&
+	    (!assetImportJob.valid() || assetImportJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready) &&
+	    checkTime >= nextScriptCheck)
 	{
 		ScriptBuildService* service = scriptBuildService.get();
-		scriptCheckJob = std::async(std::launch::async, [service] { return service->SourceFingerprint(); });
+		scriptCheckJob = std::async(std::launch::async,
+		                            [service]() -> Result<String>
+		                            {
+			                            auto ide = service->GenerateIdeProjects();
+			                            return ide ? service->SourceFingerprint() : Result<String>::Failure(ide.error);
+		                            });
 		nextScriptCheck = checkTime + std::chrono::seconds(2);
 	}
 	DrawMainMenuBar();
+	DrawExternalTools();
 	DrawGraphicsSettings();
 	if (!activeEditorTool.empty())
 	{

@@ -83,7 +83,7 @@ bool ContainedIn(const std::filesystem::path& root, const std::filesystem::path&
 
 String RelativePath(const std::filesystem::path& root, const std::filesystem::path& path)
 {
-	return PathToUrsaString(path.lexically_relative(root).generic_u8string());
+	return ToUrsaString(path.lexically_relative(root).generic_u8string());
 }
 
 String NativeError(const std::error_code& error)

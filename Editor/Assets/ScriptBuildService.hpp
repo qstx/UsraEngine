@@ -3,6 +3,9 @@
 #include <Assets/AssetDatabase.hpp>
 #include <Core/Result.hpp>
 #include <Scripting/ScriptTypeDescriptor.hpp>
+#include <Scripting/ScriptProjectModel.hpp>
+#include <Scripting/ScriptDiagnostic.hpp>
+#include <Scripting/ScriptIdeProject.hpp>
 #include <Vfs/VirtualFileSystem.hpp>
 #include <filesystem>
 
@@ -25,6 +28,7 @@ struct ScriptBuildReport
 	ScriptAssemblyGroup group = ScriptAssemblyGroup::Game;
 	VirtualPath assembly;
 	String diagnostics;
+	Vector<ScriptDiagnostic> records;
 };
 
 class ScriptBuildService final
@@ -36,6 +40,15 @@ public:
 	     std::filesystem::path catalogGeneratorAssembly, std::filesystem::path referenceAssemblyDirectory);
 
 	Result<ScriptProjectPaths> GenerateProjects();
+
+	Result<ScriptProjectInput> ProjectInput();
+
+	Result<ScriptIdeWorkspace> GenerateIdeProjects();
+
+	const Vector<ScriptDiagnostic>& LastDiagnostics() const
+	{
+		return diagnosticRecords;
+	}
 
 	Result<ScriptBuildReport> Build(ScriptAssemblyGroup group, const String& configuration = "Debug");
 
@@ -54,10 +67,10 @@ private:
 	                   std::filesystem::path catalogGeneratorAssembly,
 	                   std::filesystem::path referenceAssemblyDirectory);
 
-	Result<void> WriteProject(const VirtualPath& path, const Vector<ScriptSourceAsset>& sources,
-	                          ScriptAssemblyGroup group, const ScriptProjectPaths& projects);
+	Result<void> WriteProject(const VirtualPath& path, const ScriptProjectInput& input, ScriptAssemblyGroup group,
+	                          const ScriptProjectPaths& projects);
 
-	Result<void> GenerateCatalog(const Vector<ScriptSourceAsset>& sources, VirtualPath& catalogPath);
+	Result<void> GenerateCatalog(const ScriptProjectInput& input, VirtualPath& catalogPath);
 
 	Result<std::filesystem::path> EnsureToolDirectory(const VirtualPath& directory);
 
@@ -78,6 +91,7 @@ private:
 	std::filesystem::path referenceAssemblyDirectory;
 	ScriptProjectPaths generatedProjects;
 	Vector<ScriptTypeRecord> scriptTypes;
+	Vector<ScriptDiagnostic> diagnosticRecords;
 	bool projectsGenerated = false;
 };
 } // namespace Ursa::Editor

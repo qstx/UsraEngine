@@ -1,5 +1,6 @@
 #include <Assets/AssetDatabase.hpp>
 #include <Assets/ScriptBuildService.hpp>
+#include <Scripting/ExternalScriptEditor.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceId.hpp>
 #include <Scripting/Bindings/BindingRequirements.hpp>
@@ -88,7 +89,7 @@ int main(int argumentCount, char** arguments)
 		WriteSource(assets / "Scripts" / "Editor" / "SceneTool.cs",
 		            "using Ursa; namespace DemoScripts.Editor; "
 		            "[UrsaScriptType(\"editor.scene-tool\")] public sealed class SceneTool : Behaviour { } "
-		            "public sealed class EditorUtility { }\n");
+		            "public sealed class EditorUtility { private int unused; }\n");
 		WriteSource(assets / "Scripts" / "Settings.cs",
 		            "using Ursa; namespace DemoScripts; "
 		            "[UrsaScriptType(\"demo.settings\")] [CreateAssetMenu(MenuName = \"Demo/Settings\", "
@@ -113,6 +114,8 @@ int main(int argumentCount, char** arguments)
 		                             framework / "Ursa.Runtime.dll", framework / "Ursa.Editor.dll",
 		                             std::filesystem::u8path(arguments[4]), std::filesystem::u8path(arguments[5]));
 		Expect(static_cast<bool>(service), "Could not create ScriptBuild service");
+		Expect(static_cast<bool>(service.value->GenerateIdeProjects()),
+		       "IDE generation required a successful first Game build");
 		auto projects = service.value->GenerateProjects();
 		Expect(static_cast<bool>(projects), "ScriptBuild did not generate its projects");
 		Expect(service.value->ScriptTypes().size() == 5,
@@ -199,6 +202,14 @@ int main(int argumentCount, char** arguments)
 		{
 			throw std::runtime_error("ScriptBuild invocation failed: " + ToStdString(editorBuild.error));
 		}
+		bool compilerWarning = false;
+		for (const auto& diagnostic : editorBuild.value.records)
+		{
+			compilerWarning |= diagnostic.stage == "Compiler" && diagnostic.severity == "warning" &&
+			                   diagnostic.source.relative == "Scripts/Editor/SceneTool.cs" && diagnostic.line > 0 &&
+			                   diagnostic.column > 0 && !diagnostic.code.empty();
+		}
+		Expect(compilerWarning, "Compiler warnings lost structured source locations");
 		Expect(editorBuild.value.succeeded, ToStdString(editorBuild.value.diagnostics).c_str());
 		Expect(static_cast<bool>(filesystem.Exists(editorBuild.value.assembly).value),
 		       "ScriptBuild output did not appear at its VFS Library location");
@@ -312,6 +323,24 @@ int main(int argumentCount, char** arguments)
 		auto staleGameBuild = service.value->IsBuildCurrent(ScriptAssemblyGroup::Game);
 		Expect(staleGameBuild && !staleGameBuild.value,
 		       "ScriptBuild allowed Run with an assembly stale against changed source inputs");
+		const auto beforeIdeBuild = filesystem.Read(projects.value.gameAssembly);
+		auto ideWorkspace = service.value->GenerateIdeProjects();
+		Expect(static_cast<bool>(ideWorkspace), "Could not generate the stale-input IDE fixture");
+		auto ideBuild =
+		    ExternalScriptEditor::Launch({std::filesystem::u8path(arguments[1]),
+		                                  root,
+		                                  {"build", PathToUrsaString(ideWorkspace.value.solution), "--configuration",
+		                                   "Debug", "--nologo", "--disable-build-servers", "-m:1", "-nr:false"},
+		                                  60000});
+		if (!ideBuild)
+		{
+			throw std::runtime_error(ToStdString(ideBuild.error));
+		}
+		const auto afterIdeBuild = filesystem.Read(projects.value.gameAssembly);
+		staleGameBuild = service.value->IsBuildCurrent(ScriptAssemblyGroup::Game);
+		Expect(staleGameBuild && !staleGameBuild.value && beforeIdeBuild && afterIdeBuild &&
+		           beforeIdeBuild.value == afterIdeBuild.value,
+		       "IDE build replaced formal content or made stale formal inputs current");
 		Expect(static_cast<bool>(database.value->Refresh()),
 		       "AssetDatabase could not refresh reordered script declarations");
 		projects = service.value->GenerateProjects();
@@ -326,6 +355,13 @@ int main(int argumentCount, char** arguments)
 		       "AssetDatabase could not discover duplicate ScriptType fixture");
 		const auto lastGoodCatalog = filesystem.Read(projects.value.typeCatalog);
 		const auto duplicateCatalog = service.value->GenerateProjects();
+		Expect(!service.value->LastDiagnostics().empty() &&
+		           service.value->LastDiagnostics().back().code == "URSA-CATALOG" &&
+		           !service.value->LastDiagnostics().back().source.scheme.empty() &&
+		           service.value->LastDiagnostics().back().line > 0,
+		       "Type catalog validation error has no structured declaration location");
+		Expect(static_cast<bool>(service.value->GenerateIdeProjects()),
+		       "Duplicate stable type identities prevented IDE generation");
 		const auto retainedCatalog = filesystem.Read(projects.value.typeCatalog);
 		Expect(!duplicateCatalog && duplicateCatalog.error.find("DuplicateMover") != String::npos &&
 		           duplicateCatalog.error.find("RenamedMover") != String::npos &&
@@ -396,8 +432,18 @@ int main(int argumentCount, char** arguments)
 		WriteSource(assets / "Scripts" / "Broken.cs", "namespace DemoScripts; public class Broken { invalid }\n");
 		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase did not discover a broken script source");
 		auto brokenCatalog = service.value->GenerateProjects();
+		Expect(!service.value->LastDiagnostics().empty() &&
+		           service.value->LastDiagnostics().back().source.relative == "Scripts/Broken.cs" &&
+		           service.value->LastDiagnostics().back().line > 0 &&
+		           !service.value->LastDiagnostics().back().code.empty(),
+		       "Roslyn errors lost their structured source location or code");
+		Expect(static_cast<bool>(service.value->GenerateIdeProjects()), "Syntax errors prevented IDE generation");
 		Expect(!brokenCatalog && brokenCatalog.error.find("prj:Scripts/Broken.cs") != String::npos,
 		       "Script compiler diagnostics did not map the source path back to VFS");
+		WriteSource(assets / "Scripts" / "Broken.cs", "public class Broken : MissingBaseType { }\n");
+		Expect(static_cast<bool>(service.value->ProjectInput()) &&
+		           static_cast<bool>(service.value->GenerateIdeProjects()) && !service.value->GenerateProjects(),
+		       "Missing types blocked IDE generation or were accepted by the formal catalog");
 		auto retainedAssembly = filesystem.Read(projects.value.gameAssembly);
 		Expect(retainedAssembly && retainedAssembly.value == lastGoodAssembly.value,
 		       "A failed script compilation replaced the last good game assembly");

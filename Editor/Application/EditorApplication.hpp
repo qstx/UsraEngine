@@ -1,4 +1,5 @@
 #pragma once
+#include <Scripting/ExternalScriptEditor.hpp>
 
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
@@ -107,9 +108,27 @@ protected:
 
 	Result<void> CompileScripts();
 
+	Result<void> OpenCSharpProject(const VirtualPath& source = {}, UInt32 line = 1, UInt32 column = 1,
+	                               bool openEditor = true);
+
+	String ScriptDebugInfo() const;
+
+	Result<void> OpenScriptDiagnostic(Size index);
+
+	const Vector<ScriptDiagnostic>& ScriptDiagnostics() const
+	{
+		return scriptDiagnostics;
+	}
+
+	const String& ScriptIdeStatus() const
+	{
+		return scriptIdeStatus;
+	}
+
 	bool ScriptWorkPending() const
 	{
-		return scriptBuildJob.valid() || scriptCheckJob.valid() || (assetImportJob.valid() && !play.Active());
+		return scriptBuildJob.valid() || scriptCheckJob.valid() || scriptIdeJob.valid() || ideGenerationRequested ||
+		       (assetImportJob.valid() && !play.Active());
 	}
 
 	const String& ScriptStatus() const
@@ -214,6 +233,12 @@ private:
 
 	void DrawMainMenuBar();
 
+	void PumpScriptIde();
+
+	void DrawExternalTools();
+
+	void SetScriptEditorInput(const ScriptEditorConfig& config);
+
 	void DrawGraphicsSettings();
 
 	void DrawPlayToolbar(const EditorDocument* current);
@@ -271,9 +296,28 @@ private:
 	std::shared_ptr<Ursa::Scripting::DotNetHost> managedHost;
 	std::future<Result<ScriptBuildReport>> scriptBuildJob;
 	std::future<Result<String>> scriptCheckJob;
+	std::future<Result<ScriptIdeWorkspace>> scriptIdeJob;
+	std::future<Result<void>> scriptEditorJob;
+	std::future<Vector<ScriptEditorConfig>> scriptEditorDiscoveryJob;
+	Vector<ScriptEditorConfig> discoveredScriptEditors;
+	ScriptEditorConfig scriptEditorConfig;
+	std::filesystem::path scriptEditorPreferencesDirectory;
+	bool scriptEditorPreferencesLoaded = false;
+	bool scriptEditorDiscoveryRequested = false;
+	bool showExternalTools = false;
+	bool ideGenerationRequested = false;
+	bool ideOpenRequested = false;
+	VirtualPath ideSource;
+	UInt32 ideSourceLine = 1;
+	UInt32 ideSourceColumn = 1;
+	String scriptIdeStatus;
+	Array<char, 2048> scriptEditorExecutableInput{};
+	Array<char, 4096> scriptEditorProjectArgumentsInput{};
+	Array<char, 4096> scriptEditorSourceArgumentsInput{};
 	String observedScriptSources;
 	std::chrono::steady_clock::time_point nextScriptCheck;
 	String scriptBuildStatus;
+	Vector<ScriptDiagnostic> scriptDiagnostics;
 	UInt64 editingScriptSession = 0;
 	std::shared_ptr<void> editingScriptServices;
 	Vector<ManagedExtensionDescriptor> managedExtensions;
