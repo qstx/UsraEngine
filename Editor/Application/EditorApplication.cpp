@@ -1,5 +1,7 @@
 #include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
+#include <EditorIcon.hpp>
+#include <stb_image.h>
 #include <Assets/AssetImportPipeline.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
@@ -31,6 +33,8 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <chrono>
+#include <fstream>
+#include <limits>
 #include <cstdio>
 
 namespace Ursa::Editor
@@ -933,15 +937,85 @@ Result<void> EditorApplication::CompileScripts()
 #endif
 }
 
+String EditorApplication::MainWindowTitle() const
+{
+	String title;
+	if (workspace)
+	{
+		title = PathToUrsaString(workspace->ProjectRoot().filename()) + " - ";
+	}
+	const auto* current = documents ? documents->Current() : nullptr;
+	String documentName = current ? current->Path().FileName() : String("Untitled");
+	const auto extension = documentName.find_last_of('.');
+	if (extension != String::npos)
+	{
+		documentName.resize(extension);
+	}
+	title += documentName.empty() ? "Untitled" : documentName;
+	if (current && current->Dirty())
+	{
+		title += "*";
+	}
+	return title + " - " + editorProductName + " (" URSA_EDITOR_VERSION ")";
+}
+
+Result<void> EditorApplication::DecodeWindowIcon(const UInt8* encoded, Size size)
+{
+	if (!encoded || !size || size > static_cast<Size>(std::numeric_limits<int>::max()))
+	{
+		return Result<void>::Failure("Window icon image is empty or too large");
+	}
+	int width = 0;
+	int height = 0;
+	int channels = 0;
+	std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels(
+	    stbi_load_from_memory(encoded, static_cast<int>(size), &width, &height, &channels, STBI_rgb_alpha),
+	    stbi_image_free);
+	if (!pixels)
+	{
+		return Result<void>::Failure("Cannot decode window icon image");
+	}
+	Vector<UInt8> decoded(pixels.get(), pixels.get() + static_cast<Size>(width) * height * 4);
+	if (window)
+	{
+		auto applied = window->SetIcon(static_cast<UInt32>(width), static_cast<UInt32>(height), decoded);
+		if (!applied)
+		{
+			return applied;
+		}
+	}
+	windowIconWidth = static_cast<UInt32>(width);
+	windowIconHeight = static_cast<UInt32>(height);
+	windowIconPixels = std::move(decoded);
+	return {};
+}
+
+Result<void> EditorApplication::SetWindowIcon(const std::filesystem::path& path)
+{
+	std::ifstream input(path, std::ios::binary | std::ios::ate);
+	const auto size = input.tellg();
+	if (!input || size <= 0 || size > std::numeric_limits<int>::max())
+	{
+		return Result<void>::Failure("Cannot read window icon: " + PathToUrsaString(path));
+	}
+	Vector<UInt8> encoded(static_cast<Size>(size));
+	input.seekg(0);
+	if (!input.read(reinterpret_cast<char*>(encoded.data()), static_cast<std::streamsize>(size)))
+	{
+		return Result<void>::Failure("Cannot read window icon: " + PathToUrsaString(path));
+	}
+	return DecodeWindowIcon(encoded.data(), encoded.size());
+}
+
 void EditorApplication::DrawMainMenuBar()
 {
+	const auto title = MainWindowTitle();
+	if (window && window->Title() != title)
+	{
+		window->SetTitle(title);
+	}
 	if (ImGui::BeginMainMenuBar())
 	{
-		if (!assetImportStatus.empty())
-		{
-			ImGui::TextDisabled("%s", assetImportStatus.c_str());
-			ImGui::Separator();
-		}
 		ImGui::TextUnformatted("Ursa Editor");
 		ImGui::Separator();
 		EditorDocument* current = documents ? documents->Current() : nullptr;
@@ -2155,9 +2229,8 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 							{
 								auto userPlaySetup = project->playContextSetup;
 								auto managed = managedHost;
-								auto activeWindow = window;
 								VirtualPath gameContent = gameAssemblyPath;
-								playSetup = [this, userPlaySetup, managed, gameContent, activeWindow](
+								playSetup = [this, userPlaySetup, managed, gameContent](
 								                ComponentLoadContext& context) -> Result<std::shared_ptr<void>>
 								{
 									std::shared_ptr<void> projectServices;
@@ -2212,18 +2285,11 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 										}
 									}
 									context.SetSceneReadyCallback(
-									    [this, session, activeWindow, pipeline = graphicsSettings.value.renderPipeline](
+									    [this, session, pipeline = graphicsSettings.value.renderPipeline](
 									        Scene& scene, ComponentLoadContext& loadContext) -> Result<void>
 									    {
 										    session->sceneApi = std::make_unique<Scripting::ManagedSceneApi>(
-										        scene, &loadContext.Resources(),
-										        [activeWindow](const String& title)
-										        {
-											        if (activeWindow)
-											        {
-												        activeWindow->SetTitle(title);
-											        }
-										        });
+										        scene, &loadContext.Resources());
 										    session->sceneApi->SetRenderDevice(device);
 										    auto bound = session->host->BindScriptSession(session->sessionId,
 										                                                  *session->sceneApi);
@@ -3163,12 +3229,31 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, const String& title, bool visible,
                                     Ursa::UInt32 frameLimit)
 {
-	auto windowResult = Window::Create(width, height, title, visible);
+	editorProductName = title;
+	if (windowIconPixels.empty())
+	{
+		auto decoded = DecodeWindowIcon(editorIconPng, sizeof(editorIconPng));
+		if (!decoded)
+		{
+			return decoded;
+		}
+	}
+	auto windowResult = Window::Create(width, height, MainWindowTitle(), false);
 	if (!windowResult)
 	{
 		return Result<void>::Failure(windowResult.error);
 	}
 	window = std::move(windowResult.value);
+	auto applied = window->SetIcon(windowIconWidth, windowIconHeight, windowIconPixels);
+	if (!applied)
+	{
+		window.reset();
+		return applied;
+	}
+	if (visible)
+	{
+		window->Show();
+	}
 
 	Rhi::DeviceDesc deviceDesc;
 	deviceDesc.window = window;

@@ -20,6 +20,7 @@ int main(int argc, char** argv)
 	std::filesystem::path projectRoot;
 	std::filesystem::path package;
 	std::filesystem::path initialScene;
+	std::filesystem::path windowIcon;
 	Ursa::String startupWindow;
 	bool startupPlay = false;
 	for (int index = 1; index < argc; ++index)
@@ -60,6 +61,10 @@ int main(int argc, char** argv)
 		{
 			projectRoot = std::filesystem::u8path(argv[++index]);
 		}
+		else if (argument == "--icon" && index + 1 < argc)
+		{
+			windowIcon = std::filesystem::u8path(argv[++index]);
+		}
 		else if ((argument == "--scene" || argument == "--asset") && index + 1 < argc)
 		{
 			initialScene = std::filesystem::u8path(argv[++index]);
@@ -85,7 +90,7 @@ int main(int argc, char** argv)
 	{
 		std::cerr << "Usage: UrsaEditor --project <project-directory> [--scene <relative-scene-path>] "
 		             "[--asset <asset path>] [--view <Scene|Game|Material Preview|Inspector>] [--hidden] [--frames N] "
-		             "[--play] [--capture <output.png>] [--capture-frame N]\n";
+		             "[--play] [--icon <image.png>] [--capture <output.png>] [--capture-frame N]\n";
 		return 2;
 	}
 	if (initialScene.is_absolute())
@@ -94,6 +99,15 @@ int main(int argc, char** argv)
 		return 2;
 	}
 	Ursa::Editor::EditorApplication editor;
+	if (!windowIcon.empty())
+	{
+		auto configured = editor.SetWindowIcon(windowIcon);
+		if (!configured)
+		{
+			URSA_LOG_CRITICAL("Editor", configured.error);
+			return 2;
+		}
+	}
 	if (startupPlay && initialScene.extension() != ".ursascene")
 	{
 		std::cerr << "--play requires a .ursascene startup asset\n";

@@ -137,6 +137,9 @@ public:
 
 	String Title() const;
 
+	// RGBA8 pixels, ordered from the top-left corner.
+	Result<void> SetIcon(Ursa::UInt32 width, Ursa::UInt32 height, const Vector<Ursa::UInt8>& pixels);
+
 	String ClipboardText() const;
 
 	void SetClipboardText(const String& text);
@@ -152,6 +155,8 @@ public:
 	void Unsubscribe(Ursa::UInt64 subscription);
 
 	void Resize(Ursa::UInt32 width, Ursa::UInt32 height);
+
+	void Show();
 
 	void Minimize();
 

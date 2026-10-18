@@ -21,6 +21,12 @@ int main()
 	Expect(static_cast<bool>(created), "Cannot create test window");
 	auto window = std::move(created.value);
 	Expect(window->Width() == 320 && window->Height() == 240, "Logical window size is incorrect");
+	Expect(!window->SetIcon(0, 1, {}), "Empty window icon must be rejected");
+	Expect(!window->SetIcon(2, 2, {255, 255, 255, 255}), "Incomplete icon pixels must be rejected");
+	Expect(!window->SetIcon(UINT32_MAX, UINT32_MAX, {}), "Oversized icon dimensions must be rejected");
+#if defined(_WIN32) || defined(__linux__)
+	Expect(static_cast<bool>(window->SetIcon(1, 1, {255, 255, 255, 255})), "Cannot set window icon");
+#endif
 
 	auto empty = window->Subscribe({});
 	Expect(!empty, "Empty callback must be rejected");

@@ -19,6 +19,14 @@ ursa_collect_sources(URSA_EDITOR_SOURCES
 add_library(UrsaEditorCore STATIC ${URSA_EDITOR_SOURCES})
 add_library(Ursa::Editor ALIAS UrsaEditorCore)
 ursa_source_groups(UrsaEditorCore "Editor")
+
+# Embed the editor branding so every launcher works without an external icon file.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "Resources/UrsaEditor.png")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/Resources/UrsaEditor.png" editorIconHex HEX)
+string(REGEX REPLACE ".." "0x\\0," editorIconBytes "${editorIconHex}")
+configure_file(Resources/EditorIcon.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/Generated/EditorIcon.hpp" @ONLY)
+target_include_directories(UrsaEditorCore PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/Generated")
+target_compile_definitions(UrsaEditorCore PRIVATE URSA_EDITOR_VERSION="${PROJECT_VERSION}")
 target_include_directories(UrsaEditorCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(UrsaEditorCore PUBLIC Ursa::Engine UrsaImGui PRIVATE assimp::assimp Ursa::StbImage)
 if(WIN32)
@@ -32,6 +40,12 @@ target_compile_definitions(UrsaEditorCore PRIVATE
 ursa_collect_sources(editorLauncherSources "${CMAKE_CURRENT_SOURCE_DIR}/Launcher")
 add_executable(UrsaEditor ${editorLauncherSources})
 ursa_source_groups(UrsaEditor "Editor/Launcher")
+
+if(WIN32)
+  enable_language(RC)
+  configure_file(Resources/UrsaEditor.rc.in "${CMAKE_CURRENT_BINARY_DIR}/Generated/UrsaEditor.rc" @ONLY)
+  target_sources(UrsaEditor PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/Generated/UrsaEditor.rc")
+endif()
 target_link_libraries(UrsaEditor PRIVATE Ursa::Editor)
 ursa_attach_dotnet_host_runtime(UrsaEditor)
 if(NOT URSA_PROJECT_DIR STREQUAL "")

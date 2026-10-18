@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 #include <Window/Window.hpp>
 #include <algorithm>
+#include <limits>
 #include <mutex>
 
 namespace Ursa
@@ -280,6 +281,25 @@ String Window::Title() const
 	return glfwGetWindowTitle(static_cast<GLFWwindow*>(handle));
 }
 
+Result<void> Window::SetIcon(Ursa::UInt32 width, Ursa::UInt32 height, const Vector<Ursa::UInt8>& pixels)
+{
+	if (!width || !height || width > static_cast<Ursa::UInt32>(std::numeric_limits<int>::max()) ||
+	    height > static_cast<Ursa::UInt32>(std::numeric_limits<int>::max()) ||
+	    static_cast<Ursa::UInt64>(width) * height * 4 != pixels.size())
+	{
+		return Result<void>::Failure("Window icon must contain width x height RGBA8 pixels");
+	}
+	GLFWimage icon{static_cast<int>(width), static_cast<int>(height), const_cast<Ursa::UInt8*>(pixels.data())};
+	glfwGetError(nullptr);
+	glfwSetWindowIcon(static_cast<GLFWwindow*>(handle), 1, &icon);
+	const char* error = nullptr;
+	if (glfwGetError(&error) != GLFW_NO_ERROR)
+	{
+		return Result<void>::Failure(error ? error : "Cannot set window icon");
+	}
+	return {};
+}
+
 String Window::ClipboardText() const
 {
 	const char* text = glfwGetClipboardString(static_cast<GLFWwindow*>(handle));
@@ -347,6 +367,11 @@ void Window::Resize(Ursa::UInt32 width, Ursa::UInt32 height)
 	{
 		glfwSetWindowSize(static_cast<GLFWwindow*>(handle), static_cast<int>(width), static_cast<int>(height));
 	}
+}
+
+void Window::Show()
+{
+	glfwShowWindow(static_cast<GLFWwindow*>(handle));
 }
 
 void Window::Minimize()

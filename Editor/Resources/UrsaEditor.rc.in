@@ -1,0 +1,2 @@
+// GLFW loads this named resource when registering its native window class.
+GLFW_ICON ICON "@CMAKE_CURRENT_SOURCE_DIR@/Resources/UrsaEditor.ico"

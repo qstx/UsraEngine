@@ -66,6 +66,8 @@ public:
 
 	Result<void> OpenProject(const std::filesystem::path& root, const std::filesystem::path& package = {});
 
+	Result<void> SetWindowIcon(const std::filesystem::path& path);
+
 	Result<void> SetFrameCapture(std::filesystem::path output, UInt32 frame = 1)
 	{
 		return frameCapture.Configure(std::move(output), frame);
@@ -201,6 +203,15 @@ protected:
 	}
 
 private:
+	String MainWindowTitle() const;
+
+	Result<void> DecodeWindowIcon(const UInt8* encoded, Size size);
+
+	String editorProductName = "Ursa Editor";
+	Vector<UInt8> windowIconPixels;
+	UInt32 windowIconWidth = 0;
+	UInt32 windowIconHeight = 0;
+
 	Rendering::FrameCapture frameCapture;
 
 	void FinishAssetJobs();

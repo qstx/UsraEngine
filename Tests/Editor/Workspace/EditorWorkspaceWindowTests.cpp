@@ -1,6 +1,7 @@
 #include <Application/EditorApplication.hpp>
 #include <Core/Memory/Memory.hpp>
 #include <Core/Memory/LinearAllocator.hpp>
+#include <Core/StringInterop.hpp>
 #include <imgui_internal.h>
 #include <chrono>
 #include <filesystem>
@@ -28,6 +29,12 @@ protected:
 		if (!drawn)
 		{
 			return drawn;
+		}
+		const auto expectedPrefix =
+		    Ursa::PathToUrsaString(Workspace()->ProjectRoot().filename()) + " - Untitled - Editor Workspace Test (";
+		if (window->Title().find(expectedPrefix) != 0 || window->Title().back() != ')')
+		{
+			return Ursa::Result<void>::Failure("Editor window title is missing project, document or version");
 		}
 		if (++frames < 2)
 		{

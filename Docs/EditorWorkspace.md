@@ -4,6 +4,12 @@ UrsaEditor 使用可停靠面板。首次打开项目时，Hierarchy 位于左�
 
 窗口布局按项目保存在当前用户设置中；面板显隐状态保存在项目 `Library/Editor/Workspace/PanelVisibility.json`。清理项目 Library 会重置面板显隐设置；布局文件独立保存在用户数据目录。
 
+主窗口标题按 `项目 - 当前文档 - Ursa Editor (版本)` 显示；未打开文档时显示 `Untitled`，未保存文档的名称后带 `*`。切换、保存或重命名文档后会更新标题。Play 中的游戏脚本不会覆盖 Editor 标题。
+
+默认窗口图标使用 `Editor/Resources/UrsaEditor.png`，保留原有熊头标志，采用紧凑的 256×256 深色圆角底板和透明外缘，构建时嵌入 Editor。窗口显示前会完成图标解码和设置，避免启动时短暂出现系统默认图标。可以通过 `UrsaEditor --project <项目目录> --icon <PNG路径>` 指定其他窗口图标；嵌入 Editor 的宿主也可以调用 `EditorApplication::SetWindowIcon`。
+
+Windows 的 `UrsaEditor.exe` 同时嵌入 `Editor/Resources/UrsaEditor.ico`，包含 16、24、32、48、64、128 和 256 像素版本；GLFW 创建原生窗口时也会加载此资源。修改默认 PNG 后，运行 `Tools/GenerateEditorIcon.ps1` 同步生成 ICO，再重新构建 Editor。`--icon` 只覆盖运行中的窗口图标。
+
 ## 菜单与运行控制
 
 - **File**：保存当前文档、关闭文档或退出 Editor。关闭未保存文档时会询问保存、丢弃或取消。
