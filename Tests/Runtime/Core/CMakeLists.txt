@@ -33,28 +33,11 @@ add_test(NAME UrsaMemoryFactoryTests COMMAND UrsaMemoryFactoryTests)
 ursa_add_test_executable(UrsaLogTests LogTests.cpp)
 target_link_libraries(UrsaLogTests PRIVATE Ursa::Runtime)
 
-add_test(NAME UrsaLogTests COMMAND UrsaLogTests)
-
-add_test(NAME UrsaLogConsoleSmoke COMMAND UrsaLogTests)
-set_tests_properties(UrsaLogConsoleSmoke PROPERTIES PASS_REGULAR_EXPRESSION "\\[RHI\\].*")
-
-ursa_add_test_executable(UrsaLogHeaderSmoke LogHeaderSmoke.cpp)
-target_link_libraries(UrsaLogHeaderSmoke PRIVATE Ursa::Runtime)
-
-add_test(NAME UrsaLogHeaderSmoke COMMAND UrsaLogHeaderSmoke)
-
-ursa_add_test_executable(UrsaContainerHeaderSmoke ContainerHeaderSmoke.cpp)
-target_link_libraries(UrsaContainerHeaderSmoke PRIVATE Ursa::Runtime)
-
-add_test(NAME UrsaContainerHeaderSmoke COMMAND UrsaContainerHeaderSmoke)
+ursa_add_output_test(UrsaLogTests UrsaLogTests "\\[RHI\\].*")
 
 ursa_add_test_executable(UrsaStringInteropTests StringInteropTests.cpp)
 target_link_libraries(UrsaStringInteropTests PRIVATE Ursa::Runtime)
 
 add_test(NAME UrsaStringInteropTests COMMAND UrsaStringInteropTests)
 
-ursa_add_test_executable(UrsaRuntimeHeaderSmoke RuntimeHeaderSmoke.cpp)
-target_link_libraries(UrsaRuntimeHeaderSmoke PRIVATE Ursa::Runtime)
-
-add_test(NAME UrsaRuntimeHeaderSmoke COMMAND UrsaRuntimeHeaderSmoke)
 ursa_finalize_test_directory()

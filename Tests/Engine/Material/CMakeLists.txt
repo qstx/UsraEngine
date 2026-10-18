@@ -13,8 +13,4 @@ target_link_libraries(UrsaMaterialMigrationTests PRIVATE Ursa::Engine)
 
 add_test(NAME UrsaMaterialMigrationTests COMMAND UrsaMaterialMigrationTests)
 
-ursa_add_test_executable(UrsaMaterialHeaderSmoke MaterialHeaderSmoke.cpp)
-target_link_libraries(UrsaMaterialHeaderSmoke PRIVATE Ursa::Engine)
-
-add_test(NAME UrsaMaterialHeaderSmoke COMMAND UrsaMaterialHeaderSmoke)
 ursa_finalize_test_directory()

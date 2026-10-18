@@ -13,8 +13,4 @@ target_link_libraries(UrsaLightingTests PRIVATE Ursa::Engine)
 
 add_test(NAME UrsaLightingTests COMMAND UrsaLightingTests)
 
-ursa_add_test_executable(UrsaLightingHeaderSmoke LightingHeaderSmoke.cpp)
-target_link_libraries(UrsaLightingHeaderSmoke PRIVATE Ursa::Engine)
-
-add_test(NAME UrsaLightingHeaderSmoke COMMAND UrsaLightingHeaderSmoke)
 ursa_finalize_test_directory()

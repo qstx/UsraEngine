@@ -3,7 +3,7 @@
 #include <Rhi/RHI.hpp>
 #include <Window/Window.hpp>
 
-int main()
+int TestRuntimeHeader()
 {
 	Ursa::Vector<Ursa::UInt8> code{1, 2, 3, 4};
 	Ursa::Rhi::ShaderDesc documentedShader;

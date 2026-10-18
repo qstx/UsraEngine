@@ -4,11 +4,6 @@ target_compile_definitions(UrsaResourceVfsTests PRIVATE URSA_TEST_ENGINE_ASSET_R
 
 add_test(NAME UrsaResourceVfsTests COMMAND UrsaResourceVfsTests)
 
-ursa_add_test_executable(UrsaSerializableHeaderSmoke SerializableHeaderSmoke.cpp)
-target_link_libraries(UrsaSerializableHeaderSmoke PRIVATE Ursa::Engine)
-
-add_test(NAME UrsaSerializableHeaderSmoke COMMAND UrsaSerializableHeaderSmoke)
-
 ursa_add_test_executable(UrsaSerializationBaseTests SerializationBaseTests.cpp)
 target_link_libraries(UrsaSerializationBaseTests PRIVATE Ursa::Engine)
 

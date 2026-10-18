@@ -22,11 +22,8 @@ add_test(NAME UrsaRhiTests COMMAND UrsaRhiTests)
 ursa_add_test_executable(UrsaVulkanValidationLogTests VulkanValidationLogTests.cpp)
 target_link_libraries(UrsaVulkanValidationLogTests PRIVATE Ursa::Runtime Vulkan::Vulkan)
 
-add_test(NAME UrsaVulkanValidationLogTests COMMAND UrsaVulkanValidationLogTests)
-set_tests_properties(UrsaVulkanValidationLogTests PROPERTIES PASS_REGULAR_EXPRESSION "fallback before initialization")
-
-add_test(NAME UrsaVulkanValidationShutdownSmoke COMMAND UrsaVulkanValidationLogTests)
-set_tests_properties(UrsaVulkanValidationShutdownSmoke PROPERTIES PASS_REGULAR_EXPRESSION "fallback after shutdown")
+ursa_add_output_test(UrsaVulkanValidationLogTests UrsaVulkanValidationLogTests
+  "fallback before initialization" "fallback after shutdown")
 ursa_require_test_content(UrsaRhiTests UrsaRhiTests)
 
 ursa_finalize_test_directory()

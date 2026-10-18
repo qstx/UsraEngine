@@ -1,6 +1,6 @@
 #include <Core/Containers.hpp>
 
-int main()
+int TestContainerHeader()
 {
 	Ursa::Vector<int> sequence{1, 2};
 	Ursa::Array<int, 2> fixed{{3, 4}};

@@ -1,0 +1,11 @@
+execute_process(COMMAND "${EXECUTABLE}"
+  RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+message("${output}${errors}")
+if(NOT result STREQUAL "0")
+  message(FATAL_ERROR "${EXECUTABLE} failed: ${result}")
+endif()
+foreach(pattern IN LISTS REQUIRED_OUTPUT)
+  if(NOT "${output}${errors}" MATCHES "${pattern}")
+    message(FATAL_ERROR "Missing required output: ${pattern}")
+  endif()
+endforeach()

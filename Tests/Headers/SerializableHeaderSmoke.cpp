@@ -51,7 +51,7 @@ Ursa::Result<void> RegisterCounter(Ursa::ComponentRegistry& registry)
 }
 } // namespace
 
-int main()
+int TestSerializableHeader()
 {
 	Ursa::ComponentRegistry registry;
 	return RegisterCounter(registry) ? 0 : 1;

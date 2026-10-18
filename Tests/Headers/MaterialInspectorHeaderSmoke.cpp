@@ -3,7 +3,7 @@
 
 #include <stdexcept>
 
-int main()
+int TestMaterialInspectorHeader()
 {
 	Ursa::Editor::MaterialInspectors inspectors;
 	auto registered = inspectors.Register(

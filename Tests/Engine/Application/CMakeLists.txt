@@ -12,5 +12,5 @@ ursa_add_test_executable(UrsaApplicationSceneTests ApplicationSceneTests.cpp)
 target_link_libraries(UrsaApplicationSceneTests PRIVATE Ursa::Engine)
 
 add_test(NAME UrsaApplicationSceneTests COMMAND UrsaApplicationSceneTests)
-ursa_finalize_test_directory()
 ursa_require_test_content(UrsaApplicationSceneTests UrsaApplicationSceneTests)
+ursa_finalize_test_directory()

@@ -3,9 +3,11 @@ set(URSA_TEST_CONTENT_PROJECT "${URSA_BINARY_ROOT}/TestProjects/Runtime/$<CONFIG
 set(URSA_SHADER_TEST_PAK "${URSA_BINARY_ROOT}/Package/$<CONFIG>/ShaderContent.pak")
 set(URSA_MANAGED_TEST_STAGE_ROOT "${URSA_BINARY_ROOT}/Tests/Managed/Source")
 include(TestSupport.cmake)
+include(TestProfiles.cmake)
 # Some host fixture tests set TEMP/TMP to this isolated build directory.
 file(MAKE_DIRECTORY "${URSA_BINARY_ROOT}/Temp")
 add_subdirectory(Fixtures)
+add_subdirectory(Headers)
 if(URSA_ENABLE_DOTNET)
   add_subdirectory(Managed)
   add_subdirectory(Bindings)

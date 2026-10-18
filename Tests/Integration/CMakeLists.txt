@@ -20,7 +20,9 @@ endif()
 if(URSA_ENABLE_DOTNET)
 
   ursa_add_test_executable(UrsaDotNetHostTests DotNetHostTests.cpp)
-  target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::DotNetHost)
+  target_sources(UrsaDotNetHostTests PRIVATE DotNetHost/Rendering.cpp DotNetHost/PipelineReload.cpp
+    DotNetHost/Serialization.cpp DotNetHost/Editor.cpp DotNetHost/TestSupport.hpp)
+  target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::DotNetHost UrsaTestFixtures)
   target_compile_definitions(UrsaDotNetHostTests PRIVATE
     URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
     URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
@@ -179,7 +181,6 @@ if(TARGET UrsaAssetImport AND TARGET UrsaScriptPlayer AND NOT URSA_PROJECT_DIR S
     -PackageTool "$<TARGET_FILE:UrsaPak>" -Configuration "$<CONFIG>"
     -Project "${URSA_BINARY_ROOT}/TestProjects/Cli/$<CONFIG>" -Source "${URSA_TEST_SAMPLE_PROJECT}")
 endif()
-ursa_finalize_test_directory()
 
 get_property(integrationTests DIRECTORY PROPERTY TESTS)
 foreach(test IN LISTS integrationTests)
@@ -201,3 +202,5 @@ foreach(test IN ITEMS UrsaProfilerEditorWindowTests UrsaProjectPlaySessionTests 
     ursa_require_test_content(${test} ${test})
   endif()
 endforeach()
+
+ursa_finalize_test_directory()

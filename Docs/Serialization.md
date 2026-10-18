@@ -12,7 +12,7 @@ meaning changes; factories reject unsupported versions rather than guessing.
 ## Components
 
 The registration example below is compiled and exercised in
-`UrsaSerializableHeaderSmoke` and `UrsaCustomComponentTests` (their components also implement the archive methods).
+`UrsaPublicHeaderSmoke` (Serializable example) and `UrsaCustomComponentTests` (their components also implement the archive methods).
 
 ```cpp
 return registry.RegisterSerializable<CounterComponent>("game.Counter", 1,

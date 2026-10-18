@@ -55,3 +55,4 @@ add_test(NAME UrsaBindingsSignatureTests COMMAND "${CMAKE_COMMAND}"
   "-DPROBE_GENERATOR=${CMAKE_GENERATOR}"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/SignatureTests.cmake")
 set_tests_properties(UrsaBindingsSignatureTests PROPERTIES TIMEOUT 180)
+ursa_finalize_test_directory()

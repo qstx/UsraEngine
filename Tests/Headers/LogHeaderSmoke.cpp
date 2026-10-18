@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <string>
 
-int main()
+int TestLogHeader()
 {
 	const auto logRoot =
 	    std::filesystem::temp_directory_path() /

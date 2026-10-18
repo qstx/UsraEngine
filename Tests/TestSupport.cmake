@@ -9,6 +9,12 @@ function(ursa_add_test_executable target entry)
   endif()
 endfunction()
 
+function(ursa_add_output_test name target)
+  add_test(NAME ${name} COMMAND "${CMAKE_COMMAND}"
+    "-DEXECUTABLE=$<TARGET_FILE:${target}>" "-DREQUIRED_OUTPUT=${ARGN}"
+    -P "${URSA_SOURCE_ROOT}/Tests/CheckTestOutput.cmake")
+endfunction()
+
 function(ursa_test_shader target source)
   target_sources(${target} PRIVATE "${source}")
   set_source_files_properties("${source}" PROPERTIES HEADER_FILE_ONLY TRUE)
@@ -25,6 +31,7 @@ function(ursa_finalize_test_directory)
   foreach(test IN LISTS tests)
     set_property(TEST ${test} APPEND PROPERTY LABELS "${folder}")
     set_property(TEST ${test} PROPERTY WORKING_DIRECTORY "${URSA_BINARY_ROOT}")
+    ursa_classify_test(${test} "${folder}")
   endforeach()
 endfunction()
 

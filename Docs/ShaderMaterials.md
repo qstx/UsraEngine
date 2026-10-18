@@ -75,4 +75,4 @@ auto registered = project.materialInspectors.Register(
     });
 ```
 
-If the named Inspector is not registered or reports an error, the Editor shows that diagnostic and uses the generated property controls. The example callback is compiled by `UrsaMaterialInspectorHeaderSmoke`.
+If the named Inspector is not registered or reports an error, the Editor shows that diagnostic and uses the generated property controls. The example callback is compiled by `UrsaPublicHeaderSmoke` (MaterialInspector example, with the Editor enabled).

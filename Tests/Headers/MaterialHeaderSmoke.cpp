@@ -7,7 +7,7 @@
 #include <Vfs/MemoryFileProvider.hpp>
 #include <memory>
 
-int main()
+int TestMaterialHeader()
 {
 	auto material = std::make_shared<Ursa::MaterialInstance>(Ursa::MaterialType::PbrMetallicRoughness);
 	auto pixels = Ursa::MaterialTexture::Create(1, 1, Ursa::TextureColorSpace::Srgb, {220, 80, 40, 255});

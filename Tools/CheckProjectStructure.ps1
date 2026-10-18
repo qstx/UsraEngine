@@ -69,12 +69,14 @@ foreach ($directory in @('Runtime', 'Engine', 'Editor', 'Tools', 'Tests')) {
         if (-not $dotnetEnabled -and $relative -match '^Engine/Scripting/DotNet/') { continue }
         if (-not $editorEnabled -and $relative -match '^Tools/(AssetImport|AssetMigrate|MeshMigrate|ScriptCompile|ScriptPlayer)/') { continue }
         if (-not $dotnetEnabled -and $relative -match '^Tools/(ScriptCompile|ScriptPlayer)/') { continue }
+        if ((-not $editorEnabled -or -not $dotnetEnabled) -and $relative.StartsWith('Tools/IdeBridge/')) { continue }
         if ($relative.StartsWith('Tests/')) {
 			if (-not $dotnetEnabled -and $relative.StartsWith('Tests/Bindings/')) { continue }
             if (-not $editorEnabled -and $relative.StartsWith('Tests/Editor/')) { continue }
+            if (-not $editorEnabled -and $relative -eq 'Tests/Headers/MaterialInspectorHeaderSmoke.cpp') { continue }
             if (-not $dotnetEnabled -and $relative -match '^Tests/Editor/Scripting/') { continue }
             if ($relative.StartsWith('Tests/Integration/')) {
-                if ($relative -match '/DotNetHostTests.cpp$') { if (-not $dotnetEnabled) { continue } }
+                if ($relative -match '^Tests/Integration/(DotNetHostTests.cpp$|DotNetHost/)') { if (-not $dotnetEnabled) { continue } }
                 elseif (-not $dotnetEnabled -or -not $editorEnabled -or $cache -match 'URSA_PROJECT_DIR:PATH=\r?\n') { continue }
             }
         }

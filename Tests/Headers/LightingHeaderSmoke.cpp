@@ -1,6 +1,6 @@
 #include <Scene/Scene.hpp>
 
-int main()
+int TestLightingHeader()
 {
 	Ursa::Scene litScene;
 	auto cameraNode = litScene.CreateGameObject().value;

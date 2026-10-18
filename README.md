@@ -130,6 +130,11 @@ ctest --test-dir Build -C Release --output-on-failure
 
 `--parallel` without a job count lets CMake use the generator's default worker count. VS Code CMake Tools is also configured to choose the available worker count automatically.
 
+For daily CPU regression, use `ctest --test-dir Build -C Release -L fast --output-on-failure`.
+Use `-L slow` for extended regression, or omit the label to run everything. Resource labels
+include `gpu`, `window`, `import`, `build`, and `integration`; CTest automatically includes
+required fixture setup. See [test profiles](Tests/README.md) for commands and maintenance rules.
+
 Visual Studio/MSVC 构建默认启用 `URSA_MSVC_PARALLEL_COMPILE=ON`，为 C/C++ 工程生成 `/MP`，让同一个工程的多个源文件并行编译。未指定 `/MP` 的数量时，MSVC 使用可用逻辑处理器；`cmake --build ... --parallel` 则负责工程之间的并行调度。两者共同生效，直接在 Visual Studio 中打开生成的解决方案构建也能使用 `/MP`。需要关闭源文件并行时，重新配置 `-DURSA_MSVC_PARALLEL_COMPILE=OFF`。此选项仅作用于 Visual Studio 生成器和 MSVC，其他生成器继续使用自身的任务调度。链接、资源准备、相互依赖的阶段以及只有一个源文件的目标不保证占满所有核心。
 
 For a new clone, run the submodule update commands above before configuring CMake. A full recursive checkout may attempt EABase's unrelated test-only SSH submodules. CMake reads dependency sources from `ThirdParty/`, including EABase through a local FetchContent source override; configuration does not download dependencies.
@@ -292,7 +297,7 @@ auto independent = material->clone();
 
 Pixel input is tightly packed RGBA8, exactly `width * height * 4` bytes; dimensions must be positive. Base-color and emissive textures are sRGB, while metallic/roughness, normal, and occlusion textures are linear. The metallic/roughness texture uses green for roughness and blue for metallic; the occlusion texture uses red. Missing maps resolve to 1×1 neutral multipliers: white base color, roughness and metallic channels both 1, flat normal, occlusion 1, and white emissive. The default metallic and emissive *factors* are zero. Unlit accepts only a base-color texture and base-color parameters.
 
-Base-color channels and alpha, metallic, roughness, occlusion strength, and alpha cutoff must be finite values from 0 to 1. Normal scale and emissive RGB must be finite and nonnegative. `AlphaMode` accepts `Opaque`, `Mask`, and `Blend`; `setAlphaMode` also accepts a mask cutoff. Sampler settings choose linear or nearest filtering and repeat or clamp addressing. `UrsaMaterialHeaderSmoke` compiles and runs the example above; `UrsaMaterialTests` checks validation, sharing, cloning, and texture defaults.
+Base-color channels and alpha, metallic, roughness, occlusion strength, and alpha cutoff must be finite values from 0 to 1. Normal scale and emissive RGB must be finite and nonnegative. `AlphaMode` accepts `Opaque`, `Mask`, and `Blend`; `setAlphaMode` also accepts a mask cutoff. Sampler settings choose linear or nearest filtering and repeat or clamp addressing. `UrsaPublicHeaderSmoke` (Material example) compiles and runs the example above; `UrsaMaterialTests` checks validation, sharing, cloning, and texture defaults.
 
 ## Basic 3D math
 
@@ -387,7 +392,7 @@ litScene.SetAmbientLight({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f);
 auto frame = litScene.CollectRenderData(16.0f / 9.0f);
 ```
 
-The returned `SceneRenderData::lighting` is a value snapshot; later scene changes do not alter it. `SceneLighting::maxDirectionalLights` is 4 and `maxPointLights` is 8. Collecting a frame with more active lights returns an error with the actual count and capacity. `UrsaLightingHeaderSmoke` compiles and runs the example, and `UrsaLightingTests` checks transforms, activation, snapshots, validation, and capacity.
+The returned `SceneRenderData::lighting` is a value snapshot; later scene changes do not alter it. `SceneLighting::maxDirectionalLights` is 4 and `maxPointLights` is 8. Collecting a frame with more active lights returns an error with the actual count and capacity. `UrsaPublicHeaderSmoke` (Lighting example) compiles and runs the example, and `UrsaLightingTests` checks transforms, activation, snapshots, validation, and capacity.
 
 ## Material scene rendering
 
