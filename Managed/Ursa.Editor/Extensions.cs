@@ -22,12 +22,18 @@ public sealed class EditorWindowMenuAttribute : Attribute
 	public string Path { get; }
 }
 
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
-public sealed class CustomInspectorAttribute : Attribute
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class CustomEditorAttribute : Attribute
 {
-	public CustomInspectorAttribute(string stableType) { StableType = stableType; }
+	public CustomEditorAttribute(Type inspectedType)
+	{
+		ArgumentNullException.ThrowIfNull(inspectedType);
+		if (inspectedType.ContainsGenericParameters || !typeof(Component).IsAssignableFrom(inspectedType))
+			throw new ArgumentException("CustomEditor target must be a closed Component type.", nameof(inspectedType));
+		InspectedType = inspectedType;
+	}
 
-	public string StableType { get; }
+	public Type InspectedType { get; }
 }
 
 public abstract class Inspector
@@ -72,6 +78,9 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 						(Action)method.CreateDelegate(typeof(Action)));
 				}
 				if (type.IsAbstract || type.ContainsGenericParameters) continue;
+				CustomEditorAttribute? customEditor = type.GetCustomAttribute<CustomEditorAttribute>(inherit: false);
+				if (customEditor != null && !typeof(Inspector).IsAssignableFrom(type))
+					throw new InvalidOperationException($"CustomEditor '{type.FullName}' must derive from Inspector.");
 				if (typeof(EditorWindow).IsAssignableFrom(type))
 				{
 					EditorWindowMenuAttribute? menu = type.GetCustomAttribute<EditorWindowMenuAttribute>();
@@ -79,15 +88,15 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 					var window = (EditorWindow)Activator.CreateInstance(type)!;
 					registry.Add(new() { Id = "window:" + type.FullName, Kind = EditorExtensionKind.Window, Path = menu.Path, Target = "", Title = window.Title }, window.OnGUI);
 				}
-				if (typeof(Inspector).IsAssignableFrom(type))
+				if (customEditor != null)
 				{
-					foreach (CustomInspectorAttribute attribute in type.GetCustomAttributes<CustomInspectorAttribute>())
-					{
-						var inspector = (Inspector)Activator.CreateInstance(type)!;
-						registry.inspectors.Add(inspector);
-						registry.Add(new() { Id = "inspector:" + attribute.StableType, Kind = EditorExtensionKind.Inspector, Path = "", Target = attribute.StableType, Title = "" },
-							() => { inspector.SerializedObject = new SerializedObject(); inspector.OnInspectorGUI(); });
-					}
+					Type inspectedType = customEditor.InspectedType;
+					string target = typeof(Behaviour).IsAssignableFrom(inspectedType)
+						? BehaviourRegistry.IdentityFor(inspectedType).Id : Component.TypeIdFor(inspectedType);
+					var inspector = (Inspector)Activator.CreateInstance(type)!;
+					registry.inspectors.Add(inspector);
+					registry.Add(new() { Id = "inspector:" + target, Kind = EditorExtensionKind.Inspector, Path = "", Target = target, Title = "" },
+						() => { inspector.SerializedObject = new SerializedObject(); inspector.OnInspectorGUI(); });
 				}
 			}
 			return registry;

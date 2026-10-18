@@ -4,11 +4,11 @@
 
 ## 自定义 Inspector
 
-继承 Ursa.Editor.Inspector，使用稳定脚本标识或已暴露的原生组件标识匹配目标：
+继承 Ursa.Editor.Inspector，使用 `CustomEditor(typeof(组件类型))` 匹配目标：
 
     using Ursa.Editor;
 
-    [CustomInspector("demo.move-with-input")]
+    [CustomEditor(typeof(MoveWithInputBehaviour))]
     public sealed class MoveInspector : Inspector
     {
         public override void OnInspectorGUI()
@@ -24,7 +24,9 @@
         }
     }
 
-原生 Camera 的目标标识为 ursa.Camera，可编辑路径包括 /Fields/verticalFovRadians、/Fields/nearPlane 和 /Fields/farPlane。原生字段先在临时组件上验证，再提交到原对象。脚本属性校验类型、数值范围、枚举、引用和数组元素；失败时保留原值。
+脚本组件的 `Type` 在当前编辑会话中解析为类型目录的稳定标识；原生组件通过包装类型声明的标识匹配，例如 `[CustomEditor(typeof(CameraComponent))]`。类型转换在注册时完成，场景和 `.meta` 中的稳定标识不变。目标必须是非开放泛型的组件类型，按确切类型匹配；重复注册或缺少类型标识会报错。旧的字符串属性 `CustomInspector` 已移除。
+
+原生 Camera 可编辑字段包括 `verticalFovRadians`、`nearPlane` 和 `farPlane`。原生字段先在临时组件上验证，再提交到原对象。脚本属性校验类型、数值范围、枚举、引用和数组元素；失败时保留原值。
 
 DrawDefaultInspector() 可显示其余持久字段。成功 Apply 会标记文档 Dirty，并进入既有 Scene、独立 Prefab 保存和 Prefab 实例覆盖流程。未注册自定义 Inspector，或扩展被停用时，使用默认视图。
 

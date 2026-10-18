@@ -7,5 +7,6 @@
   <ItemGroup>
 	<Compile Include="../../../Docs/Examples/Editor/TypedInspector.cs" Link="TypedInspector.cs" />
     <ProjectReference Include="../../../Managed/Ursa.Editor/Ursa.Editor.csproj" />
+    <ProjectReference Include="../Ursa.SessionFixtures/Ursa.SessionFixtures.csproj" />
   </ItemGroup>
 </Project>

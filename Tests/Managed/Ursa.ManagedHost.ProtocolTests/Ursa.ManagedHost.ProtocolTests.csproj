@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="../../../Managed/Ursa.ManagedHost/Ursa.ManagedHost.csproj" />
     <ProjectReference Include="../../../Managed/Ursa.Runtime/Ursa.Runtime.csproj" />
+    <ProjectReference Include="../../../Managed/Ursa.Editor/Ursa.Editor.csproj" />
     <ProjectReference Include="../../../Managed/Ursa.Rendering/Ursa.Rendering.csproj" />
   </ItemGroup>
 </Project>

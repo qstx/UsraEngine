@@ -28,7 +28,7 @@ internal static class Menus
 	}
 }
 
-[CustomInspector("test.session-probe")]
+[CustomEditor(typeof(Ursa.SessionFixtures.SessionProbe))]
 public sealed class ProbeInspector : Inspector
 {
 	private static SerializedProperty? previousProperty;
@@ -72,7 +72,7 @@ public sealed class ProbeInspector : Inspector
 	}
 }
 
-[CustomInspector("ursa.Camera")]
+[CustomEditor(typeof(CameraComponent))]
 public sealed class CameraInspector : Inspector
 {
 	public override void OnInspectorGUI()

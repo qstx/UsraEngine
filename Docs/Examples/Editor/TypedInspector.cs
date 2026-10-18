@@ -1,17 +1,18 @@
+using Ursa;
 using Ursa.Editor;
 
 namespace Ursa.Examples;
 
 // Abstract examples are compiled with the Editor fixtures without registering project extensions.
-[CustomInspector("demo.move-with-input")]
-public abstract class TypedMovementInspector : Inspector
+[CustomEditor(typeof(CameraComponent))]
+public abstract class TypedCameraInspector : Inspector
 {
 	public override void OnInspectorGUI()
 	{
 		SerializedObject.Update();
-		var step = SerializedObject.FindProperty("step");
-		EditorGui.PropertyField(step, "Step");
-		if (EditorGui.Button("Reset")) step.DoubleValue = 1.0;
+		var nearPlane = SerializedObject.FindProperty("nearPlane");
+		EditorGui.PropertyField(nearPlane, "Near Plane");
+		if (EditorGui.Button("Reset")) nearPlane.DoubleValue = 0.1;
 		SerializedObject.ApplyModifiedProperties();
 	}
 }
