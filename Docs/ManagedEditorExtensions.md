@@ -59,7 +59,9 @@ Selection 为 `EditorSelection[]`，Target 为可空 `EditorReference`，Documen
 
 ## 类型化属性
 
-`FindProperty("field")` 或 `/Fields/...` 返回属性；`PropertyType`、`TypeName`、`ReferenceKind` 描述可用访问器。标量使用 BoolValue、IntValue/LongValue、UIntValue/ULongValue、FloatValue/DoubleValue、StringValue；数学值使用 Vector2Value/Vector3Value/Vector4Value/QuaternionValue/ColorValue。EnumNames、EnumValueIndex 提供选项，EnumLongValue/EnumULongValue 按 EnumIsUnsigned 保留完整 64 位底层数值。错误访问器抛出异常，不转换为另一种字段类型。
+`FindProperty` 使用 Unity 风格的公开路径：`FindProperty("width")` 查找字段，`FindProperty("position.x")` 查找向量分量，`FindProperty("modes.Array.data[1]")` 查找数组或列表元素。`SerializedProperty.PropertyPath` 和 `GetPropertyPaths()` 也返回此语法；`FindPropertyRelative("x")`、`FindPropertyRelative("Array.data[1]")` 分别用于相对分量和相对元素查找。向量和 Quaternion 使用 `x/y/z/w` 分量名，Color 使用 `r/g/b/a`。当前支持现有字段类型的分量和集合元素，不新增自定义嵌套对象的序列化能力。无效路径会报错；公开 API 不接受旧的 `/Fields/...` 存储路径，该格式仅用于内部传输和持久化数据。
+
+`PropertyType`、`TypeName`、`ReferenceKind` 描述可用访问器。标量使用 BoolValue、IntValue/LongValue、UIntValue/ULongValue、FloatValue/DoubleValue、StringValue；数学值使用 Vector2Value/Vector3Value/Vector4Value/QuaternionValue/ColorValue。EnumNames、EnumValueIndex 提供选项，EnumLongValue/EnumULongValue 按 EnumIsUnsigned 保留完整 64 位底层数值。错误访问器抛出异常，不转换为另一种字段类型。
 
 对象/组件使用 ObjectReferenceValue，资产及 Mesh/Material/Texture/ScriptableObject/Shader/ComputeShader 使用 AssetReferenceValue。引用种类必须匹配，文档局部 Mesh/Material 身份仍可读取、保留与清空。数组/列表通过 ArraySize、ElementType 和 GetArrayElementAtIndex 编辑；设置 `IsNull = true` 保留可空状态，扩容使用元素类型的默认值，顺序不变。
 

@@ -80,6 +80,7 @@ int main()
 		           component.SerializedPayload() == committedPayload,
 		       "Update did not discard pending edits without changing the target");
 		Expect(Take(serializedObject->DescribeProperty("/Fields/step")).at("Kind") == "FloatingPoint" &&
+		           Take(serializedObject->DescribeProperty("/Fields/position/0")).at("Kind") == "FloatingPoint" &&
 		           serializedObject->PropertyPaths().size() == 4,
 		       "Serialized property descriptors or field paths differ");
 		Done(speed.SetValue(7.0));

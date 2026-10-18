@@ -650,17 +650,26 @@ Result<Json> SerializedObject::DescribeProperty(const String& path) const
 		return Result<Json>::Success({{"Kind", "Unsupported"}, {"ElementKind", "Unsupported"}});
 	}
 	Json descriptor = pendingPayload["FieldTypes"].at(ToStdString(field));
-	const Size separator = path.find('/', String("/Fields/").size());
-	if (separator != String::npos)
+	Size separator = path.find('/', String("/Fields/").size());
+	while (separator != String::npos)
 	{
 		const auto kind = descriptor.value("Kind", std::string{});
-		if ((kind != "Array" && kind != "List") || path.find('/', separator + 1) != String::npos)
+		if (kind == "Array" || kind == "List")
 		{
-			return Result<Json>::Failure("Only declared array/list elements can be accessed as child properties");
+			descriptor["Kind"] = descriptor.value("ElementKind", std::string("Unsupported"));
+			descriptor["TypeName"] = descriptor.value("ElementTypeName", std::string{});
+			descriptor["ElementKind"] = "Unsupported";
 		}
-		descriptor["Kind"] = descriptor.value("ElementKind", std::string("Unsupported"));
-		descriptor["TypeName"] = descriptor.value("ElementTypeName", std::string{});
-		descriptor["ElementKind"] = "Unsupported";
+		else if (kind == "Vector2" || kind == "Vector3" || kind == "Vector4" || kind == "Quaternion" || kind == "Color")
+		{
+			descriptor = {{"Kind", "FloatingPoint"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.Single"}};
+		}
+		else
+		{
+			return Result<Json>::Failure(
+			    "Only declared collection elements and math components can be accessed as child properties");
+		}
+		separator = path.find('/', separator + 1);
 	}
 	return Result<Json>::Success(std::move(descriptor));
 }

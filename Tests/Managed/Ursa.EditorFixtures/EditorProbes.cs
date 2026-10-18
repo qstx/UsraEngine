@@ -54,7 +54,15 @@ public sealed class ProbeInspector : Inspector
 			if (EditorContext.Target?.Kind != EditorReferenceKind.Component) throw new InvalidOperationException("Inspector target kind was lost.");
 			// A retained property must never write to a later drawing scope.
 			if (previousProperty != null) previousProperty.LongValue = 1000L;
-			var value = SerializedObject.FindProperty("/Fields/value");
+			var value = SerializedObject.FindProperty("value");
+			if (value.PropertyPath != "value") throw new Exception("Field path exposed storage syntax.");
+			foreach (string path in SerializedObject.GetPropertyPaths())
+				if (path.StartsWith("/", StringComparison.Ordinal)) throw new Exception("Property enumeration exposed storage syntax.");
+			foreach (string invalidPath in new[] { "/Fields/value", "position/0", "position..x", "modes.0", "modes.Array.data[-1]", "modes.Array.data[]" })
+			{
+				try { _ = SerializedObject.FindProperty(invalidPath); throw new Exception("Invalid public property path was accepted."); }
+				catch (ArgumentException) { }
+			}
 			try { _ = value.BoolValue; throw new Exception("Mismatched accessor was accepted."); }
 			catch (InvalidOperationException) { }
 			long before = value.LongValue;
@@ -65,6 +73,18 @@ public sealed class ProbeInspector : Inspector
 			catch (InvalidOperationException) { }
 			value = SerializedObject.FindProperty("value");
 			if (value.LongValue != before || SerializedObject.HasModifiedProperties || SerializedObject.ApplyModifiedProperties()) throw new InvalidOperationException("Update changed or applied pending data.");
+			var position = SerializedObject.FindProperty("position");
+			var positionX = position.FindPropertyRelative("x");
+			if (positionX.PropertyPath != "position.x" || positionX.DoubleValue != SerializedObject.FindProperty("position.x").DoubleValue)
+				throw new Exception("Relative math component lookup differed from the dotted path.");
+			positionX.DoubleValue = 9.0;
+			if (position.Vector3Value.X != 9.0f) throw new Exception("Math component edit did not update the parent property.");
+			var modes = SerializedObject.FindProperty("modes");
+			var secondMode = modes.GetArrayElementAtIndex(1);
+			if (secondMode.PropertyPath != "modes.Array.data[1]" || secondMode.EnumULongValue != SerializedObject.FindProperty("modes.Array.data[1]").EnumULongValue ||
+				modes.FindPropertyRelative("Array.data[1]").EnumULongValue != secondMode.EnumULongValue)
+				throw new Exception("Collection element lookup differed from the Unity-style path.");
+			secondMode.EnumULongValue = 1;
 			value.LongValue += 1;
 			SerializedObject.ApplyModifiedProperties();
 			previousProperty = value;
@@ -77,7 +97,7 @@ public sealed class CameraInspector : Inspector
 {
 	public override void OnInspectorGUI()
 	{
-		SerializedObject.FindProperty("/Fields/nearPlane").DoubleValue = 0.25;
+		SerializedObject.FindProperty("nearPlane").DoubleValue = 0.25;
 		SerializedObject.ApplyModifiedProperties();
 	}
 }

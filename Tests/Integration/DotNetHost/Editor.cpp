@@ -33,7 +33,13 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	    owner, "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures"));
 	auto* script = static_cast<ScriptBehaviourComponent*>(draft->GetScene().GetComponent(scriptId));
 	script->SetSerializedPayload(
-	    R"({"FormatVersion":1,"ScriptType":"test.session-probe","Version":1,"Fields":{"value":7,"future":{"preserved":"unknown data"}},"FieldTypes":{"value":{"Kind":"SignedInteger","ElementKind":"Unsupported","TypeName":"System.Int32"}}})");
+	    R"({"FormatVersion":1,"ScriptType":"test.session-probe","Version":1,
+            "Fields":{"value":7,"position":[1.0,2.0,3.0],"modes":[1,3],"future":{"preserved":"unknown data"}},
+            "FieldTypes":{
+                "value":{"Kind":"SignedInteger","ElementKind":"Unsupported","TypeName":"System.Int32"},
+                "position":{"Kind":"Vector3","ElementKind":"Unsupported"},
+                "modes":{"Kind":"List","ElementKind":"Enumeration","ElementTypeName":"Ursa.SessionFixtures.ProbeMode",
+                    "EnumUnderlyingType":"System.Byte","EnumValues":["First","Second"],"EnumNumericValues":[1,3]}}})");
 	const ComponentId cameraId = Take(draft->GetScene().AddComponent<CameraComponent>(owner));
 	auto* camera = static_cast<CameraComponent*>(draft->GetScene().GetComponent(cameraId));
 	Done(documents->RequestOpen(std::move(document)));
@@ -89,6 +95,8 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	auto payload = nlohmann::json::parse(ToStdString(script->SerializedPayload()));
 	Expect(payload["Fields"]["value"] == 8 && documents->Current()->Dirty(),
 	       "Managed Inspector did not use the unified serialized property transaction");
+	Expect(payload["Fields"]["position"][0] == 9.0 && payload["Fields"]["modes"][1] == 1,
+	       "Unity-style nested and array property edits did not persist");
 	Expect(!draw("inspector:test.session-probe"),
 	       "A retained SerializedProperty was accepted in a later callback scope");
 	Expect(nlohmann::json::parse(ToStdString(script->SerializedPayload()))["Fields"]["value"] == 8,

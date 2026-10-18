@@ -32,7 +32,7 @@ public static class EditorGui
 	{
 		ArgumentNullException.ThrowIfNull(property);
 		property.RequireValid();
-		NativeEditorBindings.PropertyField(property.Revision, property.Path, label ?? property.Path);
+		NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, label ?? property.PropertyPath);
 	}
 	public static IDisposable Vertical()
 	{
