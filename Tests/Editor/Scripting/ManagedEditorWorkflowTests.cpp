@@ -41,7 +41,8 @@ void Expect(bool condition, const char* message)
 
 const char* source = "using Ursa; namespace Workflow; public sealed class Probe : Behaviour { "
                      "private static int count; public int value = Defaults(); private static int Defaults() => 5; "
-                     "public override void Awake() { GameObject.Name = $\"Runtime:{++count}:{value}\"; } }\n";
+                     "public override void Awake() { Application.SetWindowTitle(\"Gameplay title\"); "
+                     "GameObject.Name = $\"Runtime:{++count}:{value}\"; } }\n";
 
 class WorkflowEditor final : public EditorApplication
 {
@@ -75,6 +76,8 @@ protected:
 		}
 		try
 		{
+			Expect(window->Title().find("Gameplay title") == String::npos,
+			       "A gameplay window title request replaced the Editor document title");
 			if (std::chrono::steady_clock::now() > deadline)
 			{
 				throw std::runtime_error("Editor workflow timed out at phase " + std::to_string(phase) +

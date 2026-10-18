@@ -2288,8 +2288,9 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 									    [this, session, pipeline = graphicsSettings.value.renderPipeline](
 									        Scene& scene, ComponentLoadContext& loadContext) -> Result<void>
 									    {
+										    // Accept game title requests during Play while retaining the editor document title.
 										    session->sceneApi = std::make_unique<Scripting::ManagedSceneApi>(
-										        scene, &loadContext.Resources());
+										        scene, &loadContext.Resources(), [](const String&) {});
 										    session->sceneApi->SetRenderDevice(device);
 										    auto bound = session->host->BindScriptSession(session->sessionId,
 										                                                  *session->sceneApi);
