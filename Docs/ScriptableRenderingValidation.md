@@ -81,7 +81,54 @@ ctest --test-dir Engine/Build -C Release -R '^UrsaProjectPipelineSamplesTests$' 
 
 ## 窗口画面获取
 
-当前按用户选择使用命令行 `--capture <output.png> --capture-frame N`，配合 `--frames` 固定退出时机。Scene/Game/Material Preview 可用 `--view` 选择；管线资产可用 `--asset <path.ursaasset> --view Inspector` 单独捕获。Inspector 截图应给后台脚本目录生成留出帧数；新配置下已验证 `--frames 260 --capture-frame 250`。通信方式的按需获取留待后续处理。
+运行中的 Editor/Player 现可由外部调用 `UrsaCapture --pid <pid> --output <output.png> [--timeout-ms N]`，
+获取主线程接收请求后完成的下一幅完整客户区画面；成功后返回含实例、请求、尺寸和时间的 JSON。
+同一实例可重复调用，无需预先指定帧号，具体状态及控制目录见 [FrameCapture.md](FrameCapture.md)。
+
+原有命令行 `--capture <output.png> --capture-frame N` 配合 `--frames` 继续用于固定时机的基线。
+Scene/Game/Material Preview 可用 `--view` 选择；管线资产可用 `--asset <path.ursaasset> --view Inspector` 打开。
+按帧 Inspector 基线仍需给后台脚本目录生成留出帧数；此前已验证 `--frames 260 --capture-frame 250`。
+
+2026-10-18 的按需验收在真实 Editor Pause 中从后台进程连续启动两次 UrsaCapture。
+`Build/TestProjects/SrpAcceptance/Release/211f5562-2d68-40b8-a817-435b72a59bb5/08OnDemandPause.png`
+和 `09OnDemandRepeat.png` 均为 1100×760，回执中的 FrameSerial 分别为 15845 和 15971，
+SessionId 相同、RequestId 不同。原生 Update 计数、选择与未保存 Dirty 状态在两次捕获间保持不变。
+对应 `.result.json` 与图片同目录保存；固定帧的 01–07 图片和原三轮 Run/Stop 验收继续通过。
+
+本次 GPU 用例复用 `UrsaFrameCaptureTests`，同时覆盖 RGBA/BGRA、改变后的真实像素、一次读回复用、
+写入失败后旧 PNG 保留、后续恢复及过期请求无读回。无 GPU 的协议、Busy、超时、关闭、PID 复用和坏消息
+集中在一个 `UrsaWindowCaptureTests` 目标，另验证 UTF-8 CLI 与登记文件被读取期间的 ready 发布重试。
+
+实际 Player/Pak/Editor 调用的独立证据位于
+`Build/TestProjects/PipelineSamples/Release/14d67f27-d347-4eda-8c52-966f0273c91a/`：
+`ProbeAfterFix-*` 验证多实例、写入失败恢复、最小化/恢复和退出；`ProbePak-*`、`ProbeEditor-*` 验证重复调用。
+本机高 DPI 环境下，外部调整窗口后 `ProbeAfterFix-Resized.png` 的实际 framebuffer 为 1774×1129，
+回执与独立 PNG 解码尺寸一致；没有把 900×600 的窗口调整参数当作图像像素尺寸。
+
+完整最小化检查还暴露了 Player 的既有尺寸竞态：主循环检查之后 framebuffer 仍可能变为零，
+导致向托管渲染传入无效 aspect。已在 Player 渲染入口采样并校验尺寸，并只把明确的交换链暂挂起
+作为跳过呈现处理，其它渲染错误继续传播。`ProbeRaceFixed-*`（Release）和
+`Build/TestProjects/PipelineSamples/Debug/eb74624b-441b-4d65-b8da-954b2f49ae5b/ProbeDebugRaceFixed-*`
+分别验证连续三轮最小化超时和恢复后截图成功，随后验证目标退出不复用遗留结果、另一实例仍可截图。
+
+Debug 的完整 Editor 验收通过（含准备共 324.20 秒）。截图验证合入原三轮 Run/Stop 的第一轮，
+`Build/TestProjects/SrpAcceptance/Debug/b901ceaf-6114-443e-b41b-2a83304bbda7/08OnDemandPause.png`
+和 `09OnDemandRepeat.png` 为 1280×720，FrameSerial 分别为 20415、20513。
+两次外部 CLI 完成期间暂停计数、选择和 Dirty 不变，点击 Resume 后原生 Update 再次推进。
+CPU 快速回归 60/60 通过；无 Editor/.NET 的独立 UrsaCapture 和聚合协议回归通过；
+491 个 C++ 文件 clang-format 19 检查通过。
+
+最终完整重跑：Release 的 Editor SRP 与样例管线集成组（含准备）3/3 通过，
+其中 SRP 为 152.53 秒、样例管线为 120.35 秒；Debug 样例管线组（含准备）2/2 通过，为 147.00 秒。
+样例脚本真实运行松散 Player、Pak Player、普通 Editor，对每个实例重复请求、核对 PNG 尺寸、
+制造写入失败并恢复；松散 Player 另验证两个实例、实际缩放、连续三轮最小化/恢复及目标退出。
+最终样例证据分别位于 `Build/TestProjects/PipelineSamples/Release/2b87d4b9-48b7-43fc-9477-68485dcceb3c/`
+和 `Build/TestProjects/PipelineSamples/Debug/48640b4d-7926-4661-878a-86f5dcea0313/`。
+
+验证时 Engine 基线为 `a1fee715e8405b66158643787e78a2575dce1959`，实现位于本次工作树；
+主仓库基线为 `eb72a147a98a72dde90591f962b18e9576527cff`，Engine 引用尚待后续提交时更新。
+`Build/OnDemandEvidence.json` 保存源码及 Debug/Release 二进制 SHA-256、截图回执和验证日志索引。
+范围为正常运行的主窗口客户区；调试器挂起时获取历史画面、桌面标题栏/鼠标和持续录像不在本轮范围。
 
 `Build/Temp/SrpCreatedAssetInspectorFocused.png` 是命令行捕获的实际 Editor 界面，显示通过创建菜单生成的资产及其材质/计算引用、浮点和 tint 字段。此前 Inspector 错将资产 GUID 与脚本 GUID 比较，现以 payload 中的脚本身份验证类型。`UrsaScriptableAssetInspectorTests` 用真实 ImGui 控件导航验证字段 Dirty/保存及未知字段保留，避免仅以文件往返代替界面行为。
 

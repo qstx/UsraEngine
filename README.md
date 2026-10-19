@@ -130,6 +130,10 @@ ctest --test-dir Build -C Release --output-on-failure
 
 `--parallel` without a job count lets CMake use the generator's default worker count. VS Code CMake Tools is also configured to choose the available worker count automatically.
 
+To inspect a running Editor or Player, run `Build/Release/UrsaCapture.exe --pid <pid> --output capture.png`.
+It captures the next complete client-area image and returns one JSON result after saving the PNG.
+The target can remain open for repeated requests; see [window capture](Docs/FrameCapture.md) for timeouts and examples.
+
 For daily CPU regression, use `ctest --test-dir Build -C Release -L fast --output-on-failure`.
 Use `-L slow` for extended regression, or omit the label to run everything. Resource labels
 include `gpu`, `window`, `import`, `build`, and `integration`; CTest automatically includes

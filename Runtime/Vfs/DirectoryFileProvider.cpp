@@ -303,8 +303,8 @@ Result<void> DirectoryFileProvider::WriteAtomic(const String& relativePath, cons
 	const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
 	const auto suffix =
 	    std::to_string(timestamp) + "-" + std::to_string(temporaryId.fetch_add(1, std::memory_order_relaxed));
-	const auto temporary =
-	    target.value.parent_path() / (target.value.filename().u8string() + ".vfs-" + suffix + ".tmp");
+	const auto temporary = target.value.parent_path() /
+	                       std::filesystem::u8path(target.value.filename().u8string() + ".vfs-" + suffix + ".tmp");
 	{
 		std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
 		if (!output)

@@ -36,6 +36,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		return Result<void>::Failure(windowResult.error);
 	}
 	window = std::move(windowResult.value);
+	Rendering::WindowCaptureScope captureScope(frameCapture, "Player");
 	sceneFrameRunner.Reset();
 	Rhi::DeviceDesc deviceDesc;
 	deviceDesc.window = window;
@@ -61,6 +62,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 	}
 	if (!started)
 	{
+		frameCapture.StopWindowCapture();
 		if (scene)
 		{
 			scene->Clear();
@@ -71,12 +73,17 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		window.reset();
 		return started;
 	}
+	if (scene)
+	{
+		frameCapture.ReadyWindowCapture();
+	}
 	auto previous = std::chrono::steady_clock::now();
 	Result<void> result;
 	Ursa::UInt32 frames = 0;
 	while (!window->ShouldClose())
 	{
 		window->PollEvents();
+		frameCapture.PollWindowCapture();
 		if (window->FramebufferWidth() == 0 || window->FramebufferHeight() == 0)
 		{
 			window->WaitEvents();
@@ -117,6 +124,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 			break;
 		}
 	}
+	frameCapture.StopWindowCapture();
 	auto idle = device->WaitIdle();
 	if (scene)
 	{

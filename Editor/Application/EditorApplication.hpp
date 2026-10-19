@@ -153,6 +153,16 @@ protected:
 		return play.GetScene();
 	}
 
+	bool PlayPaused() const
+	{
+		return play.Paused();
+	}
+
+	const EditorSelectionContext& SelectionState() const
+	{
+		return selectionContext;
+	}
+
 	void FinishScriptJobs();
 
 	void DrawManagedMenus(const String& root);

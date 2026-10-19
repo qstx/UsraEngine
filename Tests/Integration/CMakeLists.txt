@@ -1,11 +1,14 @@
 if(URSA_ENABLE_DOTNET AND URSA_BUILD_EDITOR)
   if(NOT URSA_PROJECT_DIR STREQUAL "")
     ursa_add_test_executable(UrsaEditorSrpAcceptanceTests EditorSrpAcceptanceTests.cpp)
+    target_sources(UrsaEditorSrpAcceptanceTests PRIVATE CaptureCliAcceptance.cpp)
+    target_compile_definitions(UrsaEditorSrpAcceptanceTests PRIVATE URSA_CAPTURE_CLI="$<TARGET_FILE:UrsaCapture>")
+    add_dependencies(UrsaEditorSrpAcceptanceTests UrsaCapture)
     target_link_libraries(UrsaEditorSrpAcceptanceTests PRIVATE Ursa::Editor)
     ursa_attach_dotnet_host_runtime(UrsaEditorSrpAcceptanceTests)
     add_test(NAME UrsaEditorSrpAcceptanceTests COMMAND UrsaEditorSrpAcceptanceTests
       "${URSA_TEST_SAMPLE_PROJECT}" "${URSA_BINARY_ROOT}/TestProjects/SrpAcceptance/$<CONFIG>")
-    set_tests_properties(UrsaEditorSrpAcceptanceTests PROPERTIES TIMEOUT 240
+    set_tests_properties(UrsaEditorSrpAcceptanceTests PROPERTIES TIMEOUT 360
       ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/SrpAcceptanceUser;TEMP=${URSA_BINARY_ROOT}/Temp;TMP=${URSA_BINARY_ROOT}/Temp")
   endif()
 
@@ -170,6 +173,7 @@ if(TARGET UrsaAssetImport AND TARGET UrsaScriptPlayer AND NOT URSA_PROJECT_DIR S
       -File "${CMAKE_CURRENT_SOURCE_DIR}/ProjectPipelineSamplesTests.ps1"
       -Importer "$<TARGET_FILE:UrsaAssetImport>" -Player "$<TARGET_FILE:UrsaScriptPlayer>"
       -PackageTool "$<TARGET_FILE:UrsaPak>"
+      -Capture "$<TARGET_FILE:UrsaCapture>"
       -Editor "$<TARGET_FILE:UrsaEditor>" -Source "${URSA_TEST_SAMPLE_PROJECT}"
       -Configuration "$<CONFIG>" -OutputRoot "${URSA_BINARY_ROOT}/TestProjects/PipelineSamples/$<CONFIG>")
     set_tests_properties(UrsaProjectPipelineSamplesTests PROPERTIES TIMEOUT 240)

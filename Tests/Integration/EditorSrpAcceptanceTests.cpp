@@ -1,4 +1,5 @@
 #include <Application/EditorApplication.hpp>
+#include "CaptureCliAcceptance.hpp"
 #include <Assets/SceneDraft.hpp>
 #include <Rendering/Pipeline/GraphicsSettings.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
@@ -92,7 +93,8 @@ public:
 protected:
 	Result<void> OnStart() override
 	{
-		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
+		// Includes external capture processes and diagnostic builds in Debug.
+		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(300);
 		return EditorApplication::OnStart();
 	}
 
@@ -108,7 +110,8 @@ protected:
 			if (std::chrono::steady_clock::now() > deadline)
 			{
 				throw std::runtime_error("SRP acceptance timed out at phase " + std::to_string(phase) + ": " +
-				                         ToStdString(AssetStatus()) + "; " + ToStdString(ScriptStatus()));
+				                         ToStdString(AssetStatus()) + "; " + ToStdString(ScriptStatus()) + "; " +
+				                         ToStdString(InspectorStatus()));
 			}
 			if (AssetWorkPending() || ScriptWorkPending() || ++settledFrames < 4)
 			{
@@ -221,9 +224,25 @@ protected:
 					}
 					FocusPanel("Game");
 					Capture("05Game" + ToUrsaString(std::to_string(runs)) + ".png");
-					Next();
+					if (runs == 0)
+					{
+						Take(Take(RunningScene()->CreateGameObject("Capture simulation probe"))
+						         ->AddComponent<PauseProbe>(simulationUpdates));
+						Activate("##EditorToolbar", "Pause");
+						phase = 23;
+						settledFrames = 0;
+					}
+					else
+					{
+						Next();
+					}
 					break;
 				case 14:
+					if (runs == 0)
+					{
+						Expect(!PlayPaused() && simulationUpdates > pausedUpdates,
+						       "Resume did not restart simulation after capture");
+					}
 					RequestPlayToggle();
 					Next();
 					break;
@@ -282,6 +301,48 @@ protected:
 					verified = true;
 					window->RequestClose();
 					break;
+				case 23:
+					if (!PlayPaused())
+					{
+						return {};
+					}
+					pausedUpdates = simulationUpdates;
+					selectionBeforeCapture = SelectionState();
+					captureFuture = std::async(std::launch::async, [this]
+					                           { return Test::RunCaptureCli(evidence / "08OnDemandPause.png"); });
+					Next();
+					break;
+				case 24:
+					if (captureFuture.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+					{
+						return {};
+					}
+					firstCapture = Take(captureFuture.get());
+					CheckCapture(firstCapture);
+					std::ofstream(evidence / "08OnDemandPause.result.json")
+					    << Diagnostics::SerializeCaptureResult(firstCapture).c_str();
+					captureFuture = std::async(std::launch::async, [this]
+					                           { return Test::RunCaptureCli(evidence / "09OnDemandRepeat.png"); });
+					Next();
+					break;
+				case 25:
+				{
+					if (captureFuture.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+					{
+						return {};
+					}
+					const auto repeated = Take(captureFuture.get());
+					CheckCapture(repeated);
+					Expect(repeated.frameSerial > firstCapture.frameSerial &&
+					           repeated.request.requestId != firstCapture.request.requestId,
+					       "Repeated external CLI request did not capture another completed Editor frame");
+					std::ofstream(evidence / "09OnDemandRepeat.result.json")
+					    << Diagnostics::SerializeCaptureResult(repeated).c_str();
+					Activate("##EditorToolbar", "Pause");
+					phase = 14;
+					settledFrames = 0;
+					break;
+				}
 			}
 		}
 		catch (const std::exception& error)
@@ -292,6 +353,43 @@ protected:
 	}
 
 private:
+	class PauseProbe final : public Component
+	{
+	public:
+		explicit PauseProbe(UInt64& counter) : updates(counter)
+		{
+		}
+
+		Result<void> Update(const FrameContext&) override
+		{
+			++updates;
+			return {};
+		}
+
+	private:
+		UInt64& updates;
+	};
+
+	void CheckCapture(const Diagnostics::CaptureResult& result)
+	{
+		Expect(result.Succeeded() && result.request.pid == Diagnostics::CaptureProcessId() &&
+		           result.width == window->FramebufferWidth() && result.height == window->FramebufferHeight(),
+		       "External CLI did not return the current Editor framebuffer");
+		Expect(PlayPaused() && simulationUpdates == pausedUpdates && Documents()->Current()->Dirty(),
+		       "Capturing resumed simulation or changed Dirty state");
+		const auto& selected = SelectionState();
+		Expect(selected.kind == selectionBeforeCapture.kind && selected.objectId == selectionBeforeCapture.objectId &&
+		           selected.documentId == selectionBeforeCapture.documentId &&
+		           selected.assetPath == selectionBeforeCapture.assetPath,
+		       "Capturing changed the Editor selection");
+	}
+
+	std::future<Result<Diagnostics::CaptureResult>> captureFuture;
+	Diagnostics::CaptureResult firstCapture;
+	EditorSelectionContext selectionBeforeCapture;
+	UInt64 simulationUpdates = 0;
+	UInt64 pausedUpdates = 0;
+
 	void Next()
 	{
 		std::cout << "Completed UI phase " << phase++ << '\n';

@@ -123,8 +123,21 @@ private:
 
 	Result<void> OnRender(Rendering::FrameCapture* capture) override
 	{
+		const auto width = window->FramebufferWidth();
+		const auto height = window->FramebufferHeight();
+		if (!width || !height)
+		{
+			return {};
+		}
 		sceneApi->SetFrameCapture(capture);
-		return host->RenderScene(domain, Float32(window->FramebufferWidth()) / Float32(window->FramebufferHeight()));
+		auto result = host->RenderScene(domain, Float32(width) / Float32(height));
+		// The surface can become suspended after the size sample but before image acquisition.
+		if (!result &&
+		    result.error.find("Window render target is suspended while its framebuffer is zero sized") != String::npos)
+		{
+			return {};
+		}
+		return result;
 	}
 
 	Result<void> InitializeRenderPipeline() override
@@ -203,7 +216,7 @@ int main(int argc, char** argv)
 		std::filesystem::path project;
 		std::filesystem::path engineAssets;
 		std::filesystem::path package;
-		String scenePath = "ScriptSample/ScriptPlayer.ursascene";
+		String scenePath = "Snake/Snake.ursascene";
 		bool stressWindow = false;
 		for (int index = 1; index < argc; ++index)
 		{

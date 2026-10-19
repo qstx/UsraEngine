@@ -1,4 +1,4 @@
-param([string]$Importer, [string]$Player, [string]$Editor, [string]$PackageTool, [string]$Source,
+param([string]$Importer, [string]$Player, [string]$Editor, [string]$PackageTool, [string]$Capture, [string]$Source,
       [string]$OutputRoot, [string]$Configuration)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -110,5 +110,15 @@ try {
             } finally { $packed.Dispose() }
         }
     } finally { $computed.Dispose() }
+    if ($Capture) {
+        . "$PSScriptRoot/ProjectCaptureSamples.ps1"
+        Test-CaptureSamples $Player @('--project', $project, '--scene', 'MaterialShowcase.ursascene', '--hidden') 'LooseCapture' $true
+        if ($PackageTool) {
+            Test-CaptureSamples $Player @('--pak', "$project/Content.pak", '--scene', 'MaterialShowcase.ursascene', '--hidden') 'PakCapture'
+        }
+        if ($Editor) {
+            Test-CaptureSamples $Editor @('--project', $project, '--scene', 'MaterialShowcase.ursascene', '--hidden') 'EditorCapture'
+        }
+    }
     Write-Output "Demo pipeline pixels passed; evidence: $project"
 } finally { $env:URSA_USER_DATA_ROOT = $savedUserRoot }

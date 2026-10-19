@@ -5,6 +5,9 @@ function(ursa_add_tool target module)
   ursa_source_groups(${target} "Tools/${module}")
 endfunction()
 
+ursa_add_tool(UrsaCapture Capture)
+target_link_libraries(UrsaCapture PRIVATE Ursa::Runtime)
+
 ursa_add_tool(UrsaPak Pak)
 target_link_libraries(UrsaPak PRIVATE Ursa::Engine)
 target_compile_definitions(UrsaPak PRIVATE URSA_BUILD_CONFIGURATION="$<CONFIG>")

@@ -1,6 +1,7 @@
 ursa_collect_sources(URSA_RUNTIME_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/Core" "${CMAKE_CURRENT_SOURCE_DIR}/Window"
-  "${CMAKE_CURRENT_SOURCE_DIR}/Rhi" "${CMAKE_CURRENT_SOURCE_DIR}/Vfs")
+  "${CMAKE_CURRENT_SOURCE_DIR}/Rhi" "${CMAKE_CURRENT_SOURCE_DIR}/Vfs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Diagnostics")
 add_library(UrsaRuntime STATIC ${URSA_RUNTIME_SOURCES})
 add_library(Ursa::Runtime ALIAS UrsaRuntime)
 ursa_source_groups(UrsaRuntime "Runtime")

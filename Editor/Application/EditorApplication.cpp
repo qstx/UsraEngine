@@ -3255,6 +3255,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	{
 		window->Show();
 	}
+	Rendering::WindowCaptureScope captureScope(frameCapture, "Editor");
 
 	Rhi::DeviceDesc deviceDesc;
 	deviceDesc.window = window;
@@ -3472,11 +3473,16 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		result = OnStart();
 	}
 	auto previous = std::chrono::steady_clock::now();
+	if (result)
+	{
+		frameCapture.ReadyWindowCapture();
+	}
 	const auto startupPlayDeadline = previous + std::chrono::seconds(60);
 	Ursa::UInt32 frames = 0;
 	while (result && !window->ShouldClose())
 	{
 		window->PollEvents();
+		frameCapture.PollWindowCapture();
 		if (window->ShouldClose() && documents && documents->Current() && documents->Current()->Dirty() &&
 		    !exitRequested)
 		{
@@ -3618,6 +3624,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		}
 	}
 
+	frameCapture.StopWindowCapture();
 	const auto idle = device->WaitIdle();
 	FinishScriptJobs();
 	play.Stop();
@@ -3737,9 +3744,9 @@ Result<void> EditorApplication::PresentGuiFrame(bool capture)
 			submittedFence = std::move(submitted.value);
 		}
 	}
-	if (result && capture)
+	if (result)
 	{
-		result = frameCapture.Capture(device, acquired.value.texture, Rhi::ResourceState::Present);
+		result = frameCapture.Capture(device, acquired.value.texture, Rhi::ResourceState::Present, capture);
 	}
 	if (result)
 	{

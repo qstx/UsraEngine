@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $engineRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if (-not $BuildDir) { $BuildDir = Join-Path $engineRoot 'Build' }
-if (-not $ProjectDir) { $ProjectDir = Join-Path $engineRoot '../Demo' }
+if (-not $ProjectDir) { $ProjectDir = Join-Path $BuildDir "TestProjects/Sample/$Configuration" }
 if (-not $OutputDir) { $OutputDir = Join-Path $BuildDir ('SrpBaseline/' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
 $BuildDir = (Resolve-Path -LiteralPath $BuildDir).Path
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
