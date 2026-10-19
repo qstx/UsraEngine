@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Core/Log.hpp>
@@ -333,17 +334,17 @@ void EditorDocuments::DrawUnsavedPrompt()
 	{
 		ImGui::TextWrapped("%s", lastError.c_str());
 	}
-	if (ImGui::Button("Save"))
+	if (Icons::Button("Save"))
 	{
 		ResolvePrompt(UnsavedChoice::Save);
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Discard"))
+	if (Icons::Button("Discard"))
 	{
 		ResolvePrompt(UnsavedChoice::Discard);
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Cancel"))
+	if (Icons::Button("Cancel"))
 	{
 		ResolvePrompt(UnsavedChoice::Cancel);
 	}

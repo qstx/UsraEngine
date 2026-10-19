@@ -18,6 +18,12 @@ public:
 	EditorConsolePanel(const EditorConsolePanel&) = delete;
 	EditorConsolePanel& operator=(const EditorConsolePanel&) = delete;
 
+	Vector<LogRecord> Records() const;
+
+	void Clear();
+
+	static Array<Size, 5> Counts(const Vector<LogRecord>& records);
+
 	void Draw(bool& open, String& diagnostic, const ContextHandler& contextHandler = {});
 
 private:

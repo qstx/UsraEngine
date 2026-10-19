@@ -13,6 +13,7 @@ struct ProjectBrowserEntry
 	String name;
 	bool folder = false;
 	std::optional<ResourceKind> kind;
+	String importer;
 };
 
 class ProjectBrowserModel final

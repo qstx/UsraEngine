@@ -1,3 +1,5 @@
+#include <Ui/EditorIcons.hpp>
+#include <Serialization/PrefabResource.hpp>
 #include <Core/Types.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Serialization/PrefabAsset.hpp>
@@ -115,7 +117,17 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open)
 		{
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
-		const bool open = ImGui::TreeNodeEx("##gameObject", flags, "%s", label.c_str());
+		const auto active = object->ActiveInHierarchy();
+		if (active && !active.value)
+		{
+			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.45f);
+		}
+		const bool open =
+		    Icons::TreeNode("##gameObject", flags, Icons::ForObject(object, object == asset.Root()), label.c_str());
+		if (active && !active.value)
+		{
+			ImGui::PopStyleVar();
+		}
 		if (ImGui::IsItemClicked())
 		{
 			selected = id;
@@ -175,7 +187,17 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node)
 	{
 		flags |= ImGuiTreeNodeFlags_Selected;
 	}
-	const bool open = ImGui::TreeNodeEx("##node", flags, "%s", display.c_str());
+	const auto active = scene.ActiveInHierarchy(node);
+	if (active && !active.value)
+	{
+		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.45f);
+	}
+	const bool open = Icons::TreeNode(
+	    "##node", flags, Icons::ForObject(node, prefabObjects.find(key) != prefabObjects.end()), display.c_str());
+	if (active && !active.value)
+	{
+		ImGui::PopStyleVar();
+	}
 	if (ImGui::IsItemClicked())
 	{
 		selected = id.value;
@@ -198,11 +220,22 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node)
 	return Result<bool>::Success(false);
 }
 
-Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open)
+Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneResource* linked)
 {
 	if (open && !*open)
 	{
 		return Result<bool>::Success(false);
+	}
+	prefabObjects.clear();
+	if (linked)
+	{
+		for (const auto& scope : linked->scopedIds)
+		{
+			for (const auto& entry : scope.second)
+			{
+				prefabObjects.emplace(entry.second, true);
+			}
+		}
 	}
 	ImGui::Begin("Hierarchy", open);
 	for (GameObject::Ptr root : scene.RootGameObjects())

@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
 #include <EditorIcon.hpp>
@@ -41,6 +42,11 @@ namespace Ursa::Editor
 {
 namespace
 {
+Float32 EditorToolbarHeight(Float32 width)
+{
+	return width < 180.f ? 112.f : width < 300.f ? 76.f : 44.f;
+}
+
 #if defined(URSA_ENABLE_DOTNET)
 struct ManagedEditingSessionState
 {
@@ -640,7 +646,7 @@ void EditorApplication::DrawManagedMenus(const String& root)
 			submenus.insert(remainder.substr(0, separator));
 			continue;
 		}
-		if (ImGui::MenuItem(remainder.c_str()))
+		if (Icons::MenuItem(remainder.c_str()))
 		{
 			if (extension.kind == ManagedExtensionKind::Window)
 			{
@@ -658,7 +664,7 @@ void EditorApplication::DrawManagedMenus(const String& root)
 	}
 	for (const String& submenu : submenus)
 	{
-		if (ImGui::BeginMenu(submenu.c_str()))
+		if (Icons::BeginMenu(submenu.c_str()))
 		{
 			DrawManagedMenus(prefix + submenu);
 			ImGui::EndMenu();
@@ -1019,10 +1025,10 @@ void EditorApplication::DrawMainMenuBar()
 		ImGui::TextUnformatted("Ursa Editor");
 		ImGui::Separator();
 		EditorDocument* current = documents ? documents->Current() : nullptr;
-		if (ImGui::BeginMenu("File"))
+		if (Icons::BeginMenu("File"))
 		{
 			ImGui::BeginDisabled(!documents || !current || play.Active());
-			if (ImGui::MenuItem("Save", "Ctrl+S"))
+			if (Icons::MenuItem("Save", "Ctrl+S"))
 			{
 				auto saved = documents->SaveCurrent();
 				workspaceError = saved ? String{} : saved.error;
@@ -1031,42 +1037,42 @@ void EditorApplication::DrawMainMenuBar()
 					RequestAssetImport();
 				}
 			}
-			if (ImGui::MenuItem("Close Document"))
+			if (Icons::MenuItem("Close Document"))
 			{
 				auto closed = documents->RequestClose();
 				workspaceError = closed ? String{} : closed.error;
 			}
 			ImGui::EndDisabled();
 			ImGui::Separator();
-			if (ImGui::MenuItem("Exit"))
+			if (Icons::MenuItem("Exit"))
 			{
 				exitRequested = true;
 			}
 			DrawManagedMenus("File");
 			ImGui::EndMenu();
 		}
-		if (ImGui::BeginMenu("Edit"))
+		if (Icons::BeginMenu("Edit"))
 		{
 			ImGui::BeginDisabled();
-			ImGui::MenuItem("Undo", "Ctrl+Z");
-			ImGui::MenuItem("Redo", "Ctrl+Y");
+			Icons::MenuItem("Undo", "Ctrl+Z");
+			Icons::MenuItem("Redo", "Ctrl+Y");
 			ImGui::EndDisabled();
-			if (ImGui::MenuItem("External Tools", nullptr, showExternalTools))
+			if (Icons::MenuItem("External Tools", nullptr, showExternalTools))
 			{
 				showExternalTools = !showExternalTools;
 			}
 			DrawManagedMenus("Edit");
 			ImGui::EndMenu();
 		}
-		if (ImGui::BeginMenu("Assets"))
+		if (Icons::BeginMenu("Assets"))
 		{
 			ImGui::BeginDisabled(!workspace || play.Active());
-			ImGui::MenuItem("Auto Refresh", nullptr, &autoRefreshAssets);
-			if (ImGui::MenuItem("Reimport All"))
+			Icons::MenuItem("Auto Refresh", nullptr, &autoRefreshAssets);
+			if (Icons::MenuItem("Reimport All"))
 			{
 				RequestAssetImport({}, true);
 			}
-			if (ImGui::MenuItem("Refresh", "Ctrl+R"))
+			if (Icons::MenuItem("Refresh", "Ctrl+R"))
 			{
 				RequestAssetImport();
 				auto refreshed = workspace->Refresh();
@@ -1077,34 +1083,34 @@ void EditorApplication::DrawMainMenuBar()
 					workspaceError = refreshed ? String{} : refreshed.error;
 				}
 			}
-			if (ImGui::BeginMenu("Create"))
+			if (Icons::BeginMenu("Create"))
 			{
-				if (ImGui::MenuItem("Folder"))
+				if (Icons::MenuItem("Folder"))
 				{
 					auto created = CreateProjectFolder();
 					workspaceError = created ? String{} : created.error;
 				}
-				if (ImGui::MenuItem("Scene"))
+				if (Icons::MenuItem("Scene"))
 				{
 					auto created = CreateProjectAsset(ResourceKind::Scene);
 					workspaceError = created ? String{} : created.error;
 				}
-				if (ImGui::MenuItem("Prefab"))
+				if (Icons::MenuItem("Prefab"))
 				{
 					auto created = CreateProjectAsset(ResourceKind::Prefab);
 					workspaceError = created ? String{} : created.error;
 				}
-				if (ImGui::MenuItem("Material"))
+				if (Icons::MenuItem("Material"))
 				{
 					auto created = CreateProjectAsset(ResourceKind::Material);
 					workspaceError = created ? String{} : created.error;
 				}
-				if (ImGui::MenuItem("PBR Material"))
+				if (Icons::MenuItem("PBR Material"))
 				{
 					auto created = CreateProjectAsset(ResourceKind::Material, MaterialType::PbrMetallicRoughness);
 					workspaceError = created ? String{} : created.error;
 				}
-				if (ImGui::MenuItem("Texture"))
+				if (Icons::MenuItem("Texture"))
 				{
 					auto created = CreateProjectAsset(ResourceKind::Texture);
 					workspaceError = created ? String{} : created.error;
@@ -1129,7 +1135,7 @@ void EditorApplication::DrawMainMenuBar()
 					          });
 					for (const ScriptTypeDescriptor* type : assetTypes)
 					{
-						if (ImGui::MenuItem(type->createAssetMenuName.c_str()))
+						if (Icons::MenuItem(type->createAssetMenuName.c_str()))
 						{
 							auto created = CreateProjectScriptableAsset(*type, type->createAssetFileName);
 							workspaceError = created ? String{} : created.error;
@@ -1139,7 +1145,7 @@ void EditorApplication::DrawMainMenuBar()
 				ImGui::EndMenu();
 			}
 			ImGui::BeginDisabled(selectionContext.kind != EditorSelectionKind::Asset || play.Active());
-			if (ImGui::MenuItem("Rename Selected"))
+			if (Icons::MenuItem("Rename Selected"))
 			{
 				projectBrowserPanel.RequestRenameSelected();
 			}
@@ -1148,11 +1154,11 @@ void EditorApplication::DrawMainMenuBar()
 			DrawManagedMenus("Assets");
 			ImGui::EndMenu();
 		}
-		if (ImGui::BeginMenu("GameObject"))
+		if (Icons::BeginMenu("GameObject"))
 		{
 			const bool canCreateObject = current && current->Kind() == ResourceKind::Scene && !play.Active();
 			ImGui::BeginDisabled(!canCreateObject);
-			if (ImGui::MenuItem("Create Empty"))
+			if (Icons::MenuItem("Create Empty"))
 			{
 				auto draft = current->Payload<SceneDraft>();
 				auto& scene = draft->GetScene();
@@ -1175,7 +1181,7 @@ void EditorApplication::DrawMainMenuBar()
 			DrawManagedMenus("GameObject");
 			ImGui::EndMenu();
 		}
-		if (ImGui::BeginMenu("Component"))
+		if (Icons::BeginMenu("Component"))
 		{
 			auto draft = current ? current->Payload<SceneDraft>() : nullptr;
 			GameObject::Ptr selectedObject;
@@ -1237,7 +1243,7 @@ void EditorApplication::DrawMainMenuBar()
 						ImGui::EndMenu();
 					}
 					category = type.category;
-					if (!ImGui::BeginMenu(category.c_str()))
+					if (!Icons::BeginMenu(category.c_str()))
 					{
 						category.clear();
 						continue;
@@ -1246,7 +1252,7 @@ void EditorApplication::DrawMainMenuBar()
 				auto available = selectedObject ? project->componentEditors.CanCreate(type.type, context)
 				                                : Result<void>::Failure("Select a GameObject first");
 				ImGui::BeginDisabled(!available || play.Active());
-				if (ImGui::MenuItem(type.displayName.c_str()))
+				if (Icons::MenuItem(type.displayName.c_str()))
 				{
 					auto created = project->componentEditors.Create(type.type, context);
 					workspaceError = created ? String{} : created.error;
@@ -1265,14 +1271,14 @@ void EditorApplication::DrawMainMenuBar()
 			DrawManagedMenus("Component");
 			ImGui::EndMenu();
 		}
-		if (ImGui::BeginMenu("Window"))
+		if (Icons::BeginMenu("Window"))
 		{
-			if (ImGui::MenuItem("Project Graphics Settings", nullptr, showGraphicsSettings))
+			if (Icons::MenuItem("Project Graphics Settings", nullptr, showGraphicsSettings))
 			{
 				showGraphicsSettings = !showGraphicsSettings;
 			}
 			ImGui::Separator();
-			if (ImGui::MenuItem("Reset Layout"))
+			if (Icons::MenuItem("Reset Layout"))
 			{
 				auto cleared = gui->ClearSavedLayout();
 				workspaceError = cleared ? String{} : cleared.error;
@@ -1290,37 +1296,37 @@ void EditorApplication::DrawMainMenuBar()
 				}
 			}
 			ImGui::Separator();
-			if (ImGui::MenuItem("Project", nullptr, showProjectPanel))
+			if (Icons::MenuItem("Project", nullptr, showProjectPanel))
 			{
 				showProjectPanel = !showProjectPanel;
 			}
-			if (ImGui::MenuItem("Hierarchy", nullptr, showHierarchyPanel))
+			if (Icons::MenuItem("Hierarchy", nullptr, showHierarchyPanel))
 			{
 				showHierarchyPanel = !showHierarchyPanel;
 			}
-			if (ImGui::MenuItem("Inspector", nullptr, showInspectorPanel))
+			if (Icons::MenuItem("Inspector", nullptr, showInspectorPanel))
 			{
 				showInspectorPanel = !showInspectorPanel;
 			}
-			if (ImGui::MenuItem("Scene", nullptr, showScenePanel))
+			if (Icons::MenuItem("Scene", nullptr, showScenePanel))
 			{
 				showScenePanel = !showScenePanel;
 			}
-			if (ImGui::MenuItem("Game", nullptr, showGamePanel))
+			if (Icons::MenuItem("Game", nullptr, showGamePanel))
 			{
 				showGamePanel = !showGamePanel;
 			}
-			if (ImGui::MenuItem("Console", nullptr, showConsolePanel))
+			if (Icons::MenuItem("Console", nullptr, showConsolePanel))
 			{
 				showConsolePanel = !showConsolePanel;
 			}
 			DrawManagedMenus("Window");
 			ImGui::EndMenu();
 		}
-		if (ImGui::BeginMenu("Help"))
+		if (Icons::BeginMenu("Help"))
 		{
-			ImGui::MenuItem("Ursa Editor Documentation", nullptr, false, false);
-			ImGui::MenuItem("About Ursa Editor", nullptr, false, false);
+			Icons::MenuItem("Ursa Editor Documentation", nullptr, false, false);
+			Icons::MenuItem("About Ursa Editor", nullptr, false, false);
 			DrawManagedMenus("Help");
 			ImGui::EndMenu();
 		}
@@ -1364,7 +1370,7 @@ void EditorApplication::DrawMainMenuBar()
 			}
 			return context;
 		};
-		if (ImGui::BeginMenu("Tools"))
+		if (Icons::BeginMenu("Tools"))
 		{
 			auto context = makeToolContext();
 			auto registeredTools = project->tools.Tools();
@@ -1384,7 +1390,7 @@ void EditorApplication::DrawMainMenuBar()
 						ImGui::EndMenu();
 					}
 					category = tool.category;
-					if (!ImGui::BeginMenu(category.c_str()))
+					if (!Icons::BeginMenu(category.c_str()))
 					{
 						category.clear();
 						continue;
@@ -1392,7 +1398,7 @@ void EditorApplication::DrawMainMenuBar()
 				}
 				auto available = project->tools.CanExecute(tool.id, context);
 				ImGui::BeginDisabled(play.Active() || !available);
-				if (ImGui::MenuItem(tool.displayName.c_str()))
+				if (Icons::MenuItem(tool.displayName.c_str()))
 				{
 					activeEditorTool = tool.id;
 				}
@@ -1418,28 +1424,28 @@ void EditorApplication::DrawMainMenuBar()
 		}
 		for (const String& root : managedMenuRoots)
 		{
-			if (ImGui::BeginMenu(root.c_str()))
+			if (Icons::BeginMenu(root.c_str()))
 			{
 				DrawManagedMenus(root);
 				ImGui::EndMenu();
 			}
 		}
-		if (scriptBuildService && ImGui::BeginMenu("Scripts"))
+		if (scriptBuildService && Icons::BeginMenu("Scripts"))
 		{
 			const bool compiling = scriptBuildJob.valid() || scriptCheckJob.valid() || scriptIdeJob.valid();
 			ImGui::BeginDisabled(compiling || play.Active());
-			if (ImGui::MenuItem("Compile Scripts"))
+			if (Icons::MenuItem("Compile Scripts"))
 			{
 				CompileScripts();
 			}
 			ImGui::EndDisabled();
 			ImGui::BeginDisabled(scriptIdeJob.valid() || scriptEditorJob.valid() || ideGenerationRequested);
-			if (ImGui::MenuItem("Open C# Project"))
+			if (Icons::MenuItem("Open C# Project"))
 			{
 				auto opened = OpenCSharpProject();
 				scriptIdeStatus = opened ? String("等待打开 C# 工程……") : opened.error;
 			}
-			if (ImGui::MenuItem("Regenerate C# Project"))
+			if (Icons::MenuItem("Regenerate C# Project"))
 			{
 				auto generated = OpenCSharpProject({}, 1, 1, false);
 				scriptIdeStatus = generated ? String("等待重新生成 C# 工程……") : generated.error;
@@ -1974,7 +1980,7 @@ void EditorApplication::DrawGraphicsSettings()
 		ImGui::EndCombo();
 	}
 	ImGui::BeginDisabled(AssetWorkPending() || !workspace->Database());
-	if (ImGui::Button("Apply Graphics Settings"))
+	if (Icons::Button("Apply Graphics Settings"))
 	{
 		auto applied = ApplyGraphicsSettings(graphicsSettingsCandidate);
 		graphicsSettingsDiagnostic = applied ? String{} : applied.error;
@@ -2119,12 +2125,12 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 	const auto* selectedDocument = current;
 	const ImGuiViewport* viewport = ImGui::GetMainViewport();
 	ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_Always);
-	ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, 36.0f), ImGuiCond_Always);
+	ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, EditorToolbarHeight(viewport->WorkSize.x)), ImGuiCond_Always);
 	constexpr ImGuiWindowFlags toolbarFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
 	                                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
 	                                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 	ImGui::Begin("##EditorToolbar", nullptr, toolbarFlags);
-	ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowWidth() - 180.0f) * 0.5f));
+	ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowWidth() - 110.0f) * 0.5f));
 	const bool canRun = selectedDocument && selectedDocument->Kind() == ResourceKind::Scene &&
 	                    !documents->PromptPending() && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
 	                    !scriptIdeJob.valid() && !ideGenerationRequested;
@@ -2133,7 +2139,9 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 		requestRun = false;
 	}
 	ImGui::BeginDisabled(!play.Active() && !canRun);
-	if (ImGui::Button(play.Active() ? "Stop" : "Play") || requestRun)
+	if (Icons::Button("Run", play.Active() ? Icons::Icon::Stop : Icons::Icon::Play, play.Active() ? "Stop" : "Play",
+	                  play.Active()) ||
+	    requestRun)
 	{
 		requestRun = false;
 		runAfterScriptBuild = false;
@@ -2339,10 +2347,10 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 		}
 	}
 	ImGui::EndDisabled();
-	if (play.Active())
+	ImGui::BeginDisabled(!play.Active());
 	{
-		ImGui::SameLine();
-		if (ImGui::Button(play.Paused() ? "Resume" : "Pause"))
+		Icons::SameLine();
+		if (Icons::Button("Pause", Icons::Icon::Pause, play.Paused() ? "Resume" : "Pause", play.Paused()))
 		{
 			if (play.Paused())
 			{
@@ -2353,20 +2361,34 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 				play.Pause();
 			}
 		}
-		ImGui::SameLine();
+		Icons::SameLine();
 		ImGui::BeginDisabled(!play.Paused());
-		if (ImGui::Button("Step"))
+		if (Icons::Button("Step", Icons::Icon::Step, "Step"))
 		{
 			play.Step();
 		}
 		ImGui::EndDisabled();
 	}
+	ImGui::EndDisabled();
 	if (!scriptBuildStatus.empty())
 	{
-		ImGui::SameLine();
-		if (ImGui::SmallButton("Script Build"))
+		Icons::SameLine();
+		const bool compiling = scriptBuildJob.valid();
+		const bool buildFailed =
+		    !scriptDiagnostics.empty() &&
+		    std::any_of(scriptDiagnostics.begin(), scriptDiagnostics.end(), [](const ScriptDiagnostic& diagnostic)
+		                { return diagnostic.severity == "error" || diagnostic.severity == "Error"; });
+		if (Icons::Button("ScriptBuildStatus",
+		                  compiling     ? Icons::Icon::Build
+		                  : buildFailed ? Icons::Icon::Error
+		                                : Icons::Icon::Info,
+		                  "Script build diagnostics"))
 		{
 			ImGui::OpenPopup("Script Build Diagnostics");
+		}
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		{
+			ImGui::SetTooltip("%s", scriptBuildStatus.c_str());
 		}
 		if (ImGui::BeginPopup("Script Build Diagnostics"))
 		{
@@ -2585,7 +2607,7 @@ Result<void> EditorApplication::OnGui()
 		}
 	}
 	const ImGuiViewport* viewport = ImGui::GetMainViewport();
-	constexpr Ursa::Float32 toolbarHeight = 36.0f;
+	const Float32 toolbarHeight = EditorToolbarHeight(viewport->WorkSize.x);
 	const ImVec2 dockspacePosition(viewport->WorkPos.x, viewport->WorkPos.y + toolbarHeight);
 	const ImVec2 dockspaceSize(viewport->WorkSize.x, std::max(1.0f, viewport->WorkSize.y - toolbarHeight));
 	ImGui::SetNextWindowPos(dockspacePosition, ImGuiCond_Always);
@@ -2667,14 +2689,14 @@ Result<void> EditorApplication::OnGui()
 		ImGui::TextUnformatted(shaderImportView->SourcePath().ToString().c_str());
 		ImGui::TextDisabled("%s", shaderImportView->SourceReadOnly() ? "Read-only source" : "Writable project source");
 		ImGui::BeginDisabled(play.Active());
-		if (ImGui::Button("Reimport Shader"))
+		if (Icons::Button("Reimport Shader"))
 		{
 			RequestAssetImport(shaderImportView->SourcePath(), true);
 		}
 		ImGui::EndDisabled();
 		if (shaderImportView->Imported())
 		{
-			ImGui::SameLine();
+			Icons::SameLine();
 			ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.4f, 1.0f), "%s",
 			                   shaderImportView->SourceReadOnly() ? "Compiled in memory (read-only)" : "Imported");
 		}
@@ -2838,7 +2860,7 @@ Result<void> EditorApplication::OnGui()
 		{
 			if (play.Active())
 			{
-				auto hierarchyResult = hierarchy.Draw(*play.GetScene(), &showHierarchyPanel);
+				auto hierarchyResult = hierarchy.Draw(*play.GetScene(), &showHierarchyPanel, draft->LinkedScene());
 				if (!hierarchyResult)
 				{
 					inspectorError = hierarchyResult.error;

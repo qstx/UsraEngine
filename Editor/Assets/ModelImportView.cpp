@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Serialization/AssetReference.hpp>
 #include <Assets/ModelImportView.hpp>
 #include <Assets/ProjectAssetImporter.hpp>
@@ -208,7 +209,7 @@ Result<void> ModelImportView::Draw(AssetDatabase& database, bool canReimport,
 		dirty = true;
 	}
 	ImGui::BeginDisabled(!canReimport || (!dirty && hasImported));
-	const bool reimport = ImGui::Button("Reimport");
+	const bool reimport = Icons::Button("Reimport");
 	ImGui::EndDisabled();
 	if (reimport)
 	{
@@ -227,7 +228,7 @@ Result<void> ModelImportView::Draw(AssetDatabase& database, bool canReimport,
 	if (hasImported)
 	{
 		ImGui::BeginDisabled(!instantiate);
-		if (ImGui::Button("Add to Scene") && instantiate)
+		if (Icons::Button("Add to Scene") && instantiate)
 		{
 			auto added = instantiate();
 			if (!added)

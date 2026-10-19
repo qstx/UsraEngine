@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Inspector/SceneInspectorPanel.hpp>
 #include <Inspector/MeshInspector.hpp>
 
@@ -18,9 +19,10 @@ namespace Ursa::Editor
 {
 namespace
 {
-bool DrawAddComponentBrowser(ComponentEditors& componentEditors, ComponentInspectorContext& context, String& diagnostic)
+bool DrawAddComponentBrowser(ComponentEditors& componentEditors, ComponentInspectorContext& context, String& diagnostic,
+                             const Vector<ScriptTypeDescriptor>* scriptTypes)
 {
-	if (ImGui::Button("Add Component"))
+	if (Icons::Button("Add Component"))
 	{
 		ImGui::OpenPopup("AddComponentPopup");
 	}
@@ -51,7 +53,11 @@ bool DrawAddComponentBrowser(ComponentEditors& componentEditors, ComponentInspec
 			}
 			auto available = componentEditors.CanCreate(descriptor.type, context);
 			ImGui::BeginDisabled(!available);
-			if (ImGui::Selectable(descriptor.displayName.c_str()))
+			const bool script =
+			    scriptTypes &&
+			    std::any_of(scriptTypes->begin(), scriptTypes->end(), [&](const ScriptTypeDescriptor& type)
+			                { return type.kind == ScriptTypeKind::Behaviour && type.clrTypeName == descriptor.type; });
+			if (Icons::Selectable(Icons::ForComponent(descriptor.type, script), descriptor.displayName.c_str()))
 			{
 				auto created = componentEditors.Create(descriptor.type, context);
 				diagnostic = created ? String{} : created.error;
@@ -94,7 +100,7 @@ bool DrawSerializedReference(nlohmann::json& value, const String& kind, const Co
 	{
 		return false;
 	}
-	if (ImGui::Selectable("None", !currentId))
+	if (Icons::Selectable(Icons::Icon::Close, "None", !currentId))
 	{
 		value = nullptr;
 		changed = true;
@@ -108,7 +114,7 @@ bool DrawSerializedReference(nlohmann::json& value, const String& kind, const Co
 		{
 			const ResourceId id = context.scene ? context.scene->PersistentId(object).value : object->Id();
 			const String label = object->Name().value + "##" + id.ToString();
-			if (ImGui::Selectable(label.c_str(), id == currentId))
+			if (Icons::Selectable(Icons::Icon::Link, label.c_str(), id == currentId))
 			{
 				value = {{"$ursaReference", {{"Kind", "GameObject"}, {"Id", ToStdString(id.ToString())}}}};
 				changed = true;
@@ -128,7 +134,7 @@ bool DrawSerializedReference(nlohmann::json& value, const String& kind, const Co
 					}
 				}
 				const String label = component->SerializationType() + "##" + id.ToString();
-				if (ImGui::Selectable(label.c_str(), id == currentId))
+				if (Icons::Selectable(Icons::Icon::Link, label.c_str(), id == currentId))
 				{
 					value = {{"$ursaReference", {{"Kind", "Component"}, {"Id", ToStdString(id.ToString())}}}};
 					changed = true;
@@ -167,7 +173,7 @@ bool DrawSerializedAssetReference(nlohmann::json& value, const ProjectWorkspace&
 	bool changed = false;
 	if (ImGui::BeginCombo("##Asset", preview.c_str()))
 	{
-		if (ImGui::Selectable("None", !currentId))
+		if (Icons::Selectable(Icons::Icon::Close, "None", !currentId))
 		{
 			value = nullptr;
 			changed = true;
@@ -175,7 +181,7 @@ bool DrawSerializedAssetReference(nlohmann::json& value, const ProjectWorkspace&
 		for (const ResourceEntry& entry : workspace.Resources())
 		{
 			const String label = entry.location.path.FileName() + "##" + entry.id.ToString();
-			if (ImGui::Selectable(label.c_str(), entry.id == currentId))
+			if (Icons::Selectable(Icons::Icon::Link, label.c_str(), entry.id == currentId))
 			{
 				value = {{"guid", ToStdString(entry.id.ToString())}, {"localFileId", 0u}};
 				changed = true;
@@ -310,14 +316,14 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 		bool changed = false;
 		if (ImGui::BeginCombo("##Resource", preview.c_str()))
 		{
-			if (ImGui::Selectable("None"))
+			if (Icons::Selectable(Icons::Icon::Close, "None"))
 			{
 				value = nullptr;
 				changed = true;
 			}
 			const auto choose = [&](AssetReference reference, const String& label)
 			{
-				if (ImGui::Selectable(label.c_str()))
+				if (Icons::Selectable(Icons::Icon::Link, label.c_str()))
 				{
 					value = {{"$ursaReference",
 					          {{"Kind", expected == ResourceKind::Mesh ? "Mesh" : "Material"},
@@ -367,10 +373,10 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 		{
 			ImGui::PushID(static_cast<int>(index));
 			ImGui::Text("[%u]", static_cast<unsigned int>(index));
-			ImGui::SameLine();
+			Icons::SameLine();
 			changed |= DrawSerializedScriptValue(value[index], elementKind, {}, descriptor, workspace, context);
-			ImGui::SameLine();
-			if (ImGui::SmallButton("-"))
+			Icons::SameLine();
+			if (Icons::SmallButton("-"))
 			{
 				value.erase(value.begin() + static_cast<std::ptrdiff_t>(index));
 				changed = true;
@@ -379,7 +385,7 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 			}
 			ImGui::PopID();
 		}
-		if (ImGui::SmallButton("Add element"))
+		if (Icons::SmallButton("Add element"))
 		{
 			nlohmann::json item = nullptr;
 			if (elementKind == "Boolean")
@@ -592,6 +598,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				inspectorContext.roots = {asset->Root()};
 				inspectorContext.prefab = asset;
 				inspectorContext.loadContext = &loadContext;
+				Icons::Section(Icons::ForObject(object, object == asset->Root()), "GameObject");
 				String name = object->Name().value;
 				char nameBuffer[257]{};
 				std::memcpy(nameBuffer, name.data(), std::min<Ursa::Size>(name.size(), sizeof(nameBuffer) - 1));
@@ -608,16 +615,16 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					diagnostic = set ? String{} : set.error;
 					changed |= static_cast<bool>(set);
 				}
-				if (ImGui::Button("Add child"))
+				if (Icons::Button("Add child"))
 				{
 					auto child = GameObject::Create("GameObject");
 					auto parented = child->SetParent(object);
 					diagnostic = parented ? String{} : parented.error;
 					changed |= static_cast<bool>(parented);
 				}
-				ImGui::SameLine();
+				Icons::SameLine();
 				ImGui::BeginDisabled(!object->Parent());
-				if (ImGui::Button("Delete GameObject"))
+				if (Icons::Button("Delete GameObject"))
 				{
 					auto removed = object->Destroy();
 					diagnostic = removed ? String{} : removed.error;
@@ -632,6 +639,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				auto local = object->GetLocalTransform();
 				if (local)
 				{
+					Icons::Section(Icons::Icon::Move, "Transform");
 					LocalTransform transform = local.value;
 					Ursa::Float32 position[3]{transform.position.x, transform.position.y, transform.position.z};
 					Ursa::Float32 scale[3]{transform.scale.x, transform.scale.y, transform.scale.z};
@@ -654,6 +662,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					const auto* descriptor = scriptHeader ? componentEditors.FindType(scriptHeader->TypeName())
 					                         : codec      ? componentEditors.FindType(codec.value->type)
 					                                      : nullptr;
+					Icons::Inline(Icons::ForComponent(component->SerializationType(), scriptHeader != nullptr));
 					ImGui::SeparatorText(descriptor     ? descriptor->displayName.c_str()
 					                     : scriptHeader ? scriptHeader->TypeName().c_str()
 					                     : codec        ? codec.value->type.c_str()
@@ -664,7 +673,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						component->SetEnabled(componentEnabled);
 						changed = true;
 					}
-					ImGui::SameLine();
+					Icons::SameLine();
 					const ComponentEditor* customEditor = componentEditors.Find(scriptHeader ? scriptHeader->TypeName()
 					                                                            : codec      ? codec.value->type
 					                                                                         : String{});
@@ -749,7 +758,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					{
 						ImGui::TextDisabled("No property editor registered; serialized data is preserved");
 					}
-					if (ImGui::Button("Remove component"))
+					if (Icons::ComponentMenu())
 					{
 						auto removed = object->RemoveComponent(component);
 						diagnostic = removed ? String{} : removed.error;
@@ -757,7 +766,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					}
 					ImGui::PopID();
 				}
-				changed |= DrawAddComponentBrowser(componentEditors, inspectorContext, diagnostic);
+				changed |= DrawAddComponentBrowser(componentEditors, inspectorContext, diagnostic, scriptTypes);
 			}
 			if (!diagnostic.empty())
 			{
@@ -774,7 +783,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		return Result<bool>::Success(changed);
 	}
 	Scene& scene = draft->GetScene();
-	auto hierarchyChanged = hierarchy.Draw(scene, hierarchyOpen);
+	auto hierarchyChanged = hierarchy.Draw(scene, hierarchyOpen, draft->LinkedScene());
 	if (!hierarchyChanged)
 	{
 		return hierarchyChanged;
@@ -812,6 +821,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		else
 		{
 			GameObject::Ptr node = selected.value;
+			Icons::Section(Icons::ForObject(node, hierarchy.IsPrefabObject(node->Id())), "GameObject");
 			auto name = scene.GameObjectName(node);
 			if (!name)
 			{
@@ -873,18 +883,18 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 							if (mapping.second == selectedId.value.ToString())
 							{
 								ImGui::Text("Prefab instance: %s", instance.first.c_str());
-								if (ImGui::Button("Apply Prefab"))
+								if (Icons::Button("Apply Prefab"))
 								{
 									prefabOperation = ResourceId::Parse(instance.first).value;
 									applyPrefab = true;
 								}
-								ImGui::SameLine();
-								if (ImGui::Button("Revert Prefab"))
+								Icons::SameLine();
+								if (Icons::Button("Revert Prefab"))
 								{
 									prefabOperation = ResourceId::Parse(instance.first).value;
 									applyPrefab = false;
 								}
-								if (ImGui::Button("Pin label override"))
+								if (Icons::Button("Pin label override"))
 								{
 									auto instanceId = ResourceId::Parse(instance.first);
 									auto sourceId = ResourceId::Parse(mapping.first);
@@ -903,14 +913,14 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					}
 				}
 			}
-			if (ImGui::Button("Add child"))
+			if (Icons::Button("Add child"))
 			{
 				auto added = scene.CreateGameObject(node);
 				diagnostic = added ? String{} : added.error;
 				changed |= static_cast<bool>(added);
 			}
-			ImGui::SameLine();
-			if (ImGui::Button("Delete node"))
+			Icons::SameLine();
+			if (Icons::Button("Delete node"))
 			{
 				auto removed = scene.DestroyGameObject(node);
 				diagnostic = removed ? String{} : removed.error;
@@ -943,16 +953,16 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					{
 						const Ursa::Size index = static_cast<Ursa::Size>(position - siblings.begin());
 						ImGui::BeginDisabled(index == 0);
-						if (ImGui::Button("Move up"))
+						if (Icons::Button("Move up"))
 						{
 							auto moved = scene.ReorderGameObject(node, index - 1);
 							diagnostic = moved ? String{} : moved.error;
 							changed |= static_cast<bool>(moved);
 						}
 						ImGui::EndDisabled();
-						ImGui::SameLine();
+						Icons::SameLine();
 						ImGui::BeginDisabled(index + 1 >= siblings.size());
-						if (ImGui::Button("Move down"))
+						if (Icons::Button("Move down"))
 						{
 							auto moved = scene.ReorderGameObject(node, index + 1);
 							diagnostic = moved ? String{} : moved.error;
@@ -1005,6 +1015,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				const auto local = scene.GetLocalTransform(node);
 				if (local)
 				{
+					Icons::Section(Icons::Icon::Move, "Transform");
 					LocalTransform value = local.value;
 					Ursa::Float32 position[3]{value.position.x, value.position.y, value.position.z};
 					Ursa::Float32 scale[3]{value.scale.x, value.scale.y, value.scale.z};
@@ -1060,6 +1071,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					auto* scriptHeader = dynamic_cast<Scripting::ScriptBehaviourComponent*>(object);
 					const auto* descriptor = scriptHeader ? componentEditors.FindType(scriptHeader->TypeName())
 					                                      : componentEditors.FindType(codec.value->type);
+					Icons::Inline(Icons::ForComponent(object->SerializationType(), scriptHeader != nullptr));
 					ImGui::SeparatorText(descriptor     ? descriptor->displayName.c_str()
 					                     : scriptHeader ? scriptHeader->TypeName().c_str()
 					                                    : codec.value->type.c_str());
@@ -1074,8 +1086,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 							changed |= static_cast<bool>(set);
 						}
 					}
-					ImGui::SameLine();
-					const bool remove = ImGui::Button("Remove component");
+					Icons::SameLine();
+					const bool remove = Icons::ComponentMenu();
 					if (remove)
 					{
 						auto removed = scene.RemoveComponent(componentId);
@@ -1146,7 +1158,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 								diagnostic = "Camera requires 0 < FOV < 180 and 0 < Near < Far";
 							}
 						}
-						if (ImGui::Button("Use as game camera"))
+						if (Icons::Button("Use as game camera"))
 						{
 							auto set = scene.SetActiveCamera(componentId);
 							diagnostic = set ? String{} : set.error;
@@ -1210,7 +1222,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					}
 					ImGui::PopID();
 				}
-				changed |= DrawAddComponentBrowser(componentEditors, inspectorContext, diagnostic);
+				changed |= DrawAddComponentBrowser(componentEditors, inspectorContext, diagnostic, scriptTypes);
 			}
 		}
 		if (!diagnostic.empty())
@@ -1291,7 +1303,8 @@ void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* i
 		}
 		else
 		{
-			ImGui::TextUnformatted(name.value.c_str());
+			Icons::Text(Icons::ForObject(selected.value, hierarchy.IsPrefabObject(selected.value->Id())),
+			            name.value.c_str());
 			ImGui::Separator();
 			ImGui::Text("Active: %s", active.value ? "Yes" : "No");
 			ImGui::Text("Position: %.3f, %.3f, %.3f", transform.value.position.x, transform.value.position.y,
@@ -1303,7 +1316,10 @@ void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* i
 			for (Component* component : selected.value->Components())
 			{
 				ImGui::PushID(component->PersistentId().ToString().c_str());
-				ImGui::SeparatorText(component->SerializationType().c_str());
+				Icons::Section(
+				    Icons::ForComponent(component->SerializationType(),
+				                        dynamic_cast<Scripting::ScriptBehaviourComponent*>(component) != nullptr),
+				    component->SerializationType().c_str());
 				if (component->SupportsEnabled())
 				{
 					bool enabled = component->IsEnabled();

@@ -1,5 +1,18 @@
 # Inspector components and Editor extensions
 
+Component headers and Add Component results show type icons alongside readable
+names. Built-in cameras, meshes, renderers and lights have dedicated icons;
+project behaviours use a script icon and unknown native types use a generic
+component icon. Existing registration APIs require no icon argument.
+
+Each editable component has a tooltip-labeled More button. Its menu retains the
+explicit Remove component command and existing availability rules. Enable
+controls remain visible only for components that support them. Popup identity
+uses the component's persistent identity so repeated types stay independent.
+Scene, Prefab and runtime inspection use the same icon mapping; runtime edits
+retain their existing temporary behavior. Reference pickers and list operations
+use the shared icon style without changing reference types or saved identities.
+
 Hierarchy displays ordered GameObjects and selection. The Inspector follows the
 selection in either a Scene or a PrefabAsset. It contains the object's name,
 enabled state and transform, then a section for each attached component.

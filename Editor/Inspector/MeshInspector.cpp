@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Inspector/MeshInspector.hpp>
 #include <Assets/MeshAssetEditor.hpp>
 #include <Scene/MeshFilterComponent.hpp>
@@ -63,15 +64,16 @@ bool Picker(const char* label, AssetReference current, const Vector<Candidate>& 
 	bool changed = false;
 	if (ImGui::BeginCombo(label, preview.c_str()))
 	{
-		if (ImGui::Selectable("None"))
+		if (Icons::Selectable(Icons::Icon::Close, "None"))
 		{
 			selected = {};
 			changed = true;
 		}
 		for (const auto& option : options)
 		{
-			if (ImGui::Selectable(option.label.c_str(), option.reference.guid == current.guid &&
-			                                                option.reference.localFileId == current.localFileId))
+			if (Icons::Selectable(Icons::Icon::Link, option.label.c_str(),
+			                      option.reference.guid == current.guid &&
+			                          option.reference.localFileId == current.localFileId))
 			{
 				selected = option.reference;
 				changed = true;
@@ -187,7 +189,7 @@ Result<bool> EditMaterial(MaterialInstance& material, ProjectWorkspace& workspac
 			}
 			changed = true;
 		}
-		if (ImGui::SmallButton("Reset"))
+		if (Icons::SmallButton("Reset"))
 		{
 			auto result = material.RemovePropertyOverride(property.identifier);
 			if (!result)
@@ -246,7 +248,7 @@ Result<bool> DrawMeshInspector(Component& component, ProjectWorkspace& workspace
 			            snapshot->data.bounds.minimum.y, snapshot->data.bounds.minimum.z,
 			            snapshot->data.bounds.maximum.x, snapshot->data.bounds.maximum.y,
 			            snapshot->data.bounds.maximum.z);
-			if (ImGui::Button("Save Mesh As..."))
+			if (Icons::Button("Save Mesh As..."))
 			{
 				ImGui::OpenPopup("Save Mesh As");
 			}
@@ -256,7 +258,7 @@ Result<bool> DrawMeshInspector(Component& component, ProjectWorkspace& workspace
 				static bool replace = true;
 				ImGui::InputText("Asset path", path, sizeof(path));
 				ImGui::Checkbox("Replace this binding", &replace);
-				if (ImGui::Button("Save"))
+				if (Icons::Button("Save"))
 				{
 					auto parsed = VirtualPath::Parse(path);
 					if (!parsed)
@@ -332,19 +334,19 @@ Result<bool> DrawMeshInspector(Component& component, ProjectWorkspace& workspace
 				materials[i] = std::move(loaded.value);
 				changed = true;
 			}
-			if (i && ImGui::SmallButton("Up"))
+			if (i && Icons::SmallButton("Up"))
 			{
 				std::swap(materials[i], materials[i - 1]);
 				changed = true;
 			}
 			ImGui::SameLine();
-			if (i + 1 < materials.size() && ImGui::SmallButton("Down"))
+			if (i + 1 < materials.size() && Icons::SmallButton("Down"))
 			{
 				std::swap(materials[i], materials[i + 1]);
 				changed = true;
 			}
 			ImGui::SameLine();
-			if (ImGui::SmallButton("Clear"))
+			if (Icons::SmallButton("Clear"))
 			{
 				materials[i].reset();
 				changed = true;
@@ -355,7 +357,7 @@ Result<bool> DrawMeshInspector(Component& component, ProjectWorkspace& workspace
 			}
 			else if (materials[i]->IsValid())
 			{
-				if (materials[i]->AssetIdentity().guid && ImGui::SmallButton("Make Local Copy"))
+				if (materials[i]->AssetIdentity().guid && Icons::SmallButton("Make Local Copy"))
 				{
 					materials[i] = materials[i]->Clone();
 					changed = true;

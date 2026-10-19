@@ -62,6 +62,10 @@ private:
 
 	Result<void> UploadAtlas(ImTextureData* data);
 
+	Result<ImTextureID> UploadImage(const UInt8* pixels, UInt32 width, UInt32 height);
+
+	Result<void> LoadEditorIcons(const VirtualFileSystem& files);
+
 	static const char* GetClipboardText(ImGuiContext* guiContext);
 
 	static void SetClipboardText(ImGuiContext* guiContext, const char* text);
@@ -94,6 +98,7 @@ private:
 	bool depthTestEnabled = false;
 	bool depthWriteEnabled = false;
 	Rhi::SamplerPtr atlasSampler;
+	ImTextureID editorIconsId = 0;
 	Vector<Ursa::UInt8> editorFontBytes;
 	Rhi::BufferPtr vertexBuffer;
 	Rhi::BufferPtr indexBuffer;

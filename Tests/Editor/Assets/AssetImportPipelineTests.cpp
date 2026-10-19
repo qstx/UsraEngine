@@ -69,6 +69,19 @@ int main()
 		     ToUrsaString(
 		         nlohmann::json{{"version", 1}, {"guid", ToStdString(builtinGuid.ToString())}, {"folder", false}}
 		             .dump()));
+		for (const char* file : {"Icons.meta", "Icons/Editor.meta", "Icons/Editor/EditorIcons.png.meta",
+		                         "Icons/Editor/EditorIcons.json.meta", "Icons/Editor/Unused.svg.meta"})
+		{
+			const String name(file);
+			Text(sources, Path((String("ursa:") + file).c_str()),
+			     ToUrsaString(nlohmann::json{{"version", 1},
+			                                 {"guid", ToStdString(ResourceId::Generate().ToString())},
+			                                 {"folder", name == "Icons.meta" || name == "Icons/Editor.meta"}}
+			                      .dump()));
+		}
+		Text(sources, Path("ursa:Icons/Editor/EditorIcons.png"), "raw PNG payload");
+		Text(sources, Path("ursa:Icons/Editor/EditorIcons.json"), "icon UV manifest");
+		Text(sources, Path("ursa:Icons/Editor/Unused.svg"), "maintenance-only vector source");
 		sources = {};
 		Done(sources.MountProvider(engineScheme, builtin, MountAccess::ReadOnly));
 		Done(sources.MountProvider(projectScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
@@ -89,6 +102,21 @@ int main()
 		AssetImportOptions options;
 		options.buildScripts = false;
 		auto first = Take(AssetImportPipeline::Prepare(*workspace, options));
+		Expect(Take(first.runtimeFiles.Read(Path("ursa:Icons/Editor/EditorIcons.png"))) ==
+		               Take(sources.Read(Path("ursa:Icons/Editor/EditorIcons.png"))) &&
+		           Take(first.runtimeFiles.Exists(Path("ursa:Icons/Editor/EditorIcons.json"))) &&
+		           !Take(first.runtimeFiles.Exists(Path("ursa:Icons/Editor/Unused.svg"))),
+		       "Editor icon publication must retain raw payload paths and exclude vector originals");
+		AssetImportOptions iconOptions = options;
+		iconOptions.bootstrapOnly = true;
+		const auto bootstrap = Take(AssetImportPipeline::Prepare(*workspace, iconOptions));
+		Expect(Take(bootstrap.runtimeFiles.Exists(Path("ursa:Icons/Editor/EditorIcons.png"))),
+		       "Editor bootstrap omitted its icon resources");
+		iconOptions.bootstrapOnly = false;
+		iconOptions.profile = "Player";
+		const auto player = Take(AssetImportPipeline::Prepare(*workspace, iconOptions));
+		Expect(!Take(player.runtimeFiles.Exists(Path("ursa:Icons/Editor/EditorIcons.png"))),
+		       "Player content unexpectedly includes Editor icon resources");
 		Expect(first.importedAssets == 4, "Cold import did not prepare builtin and native project assets");
 		auto resources = Take(ResourceSession::Open(first.runtimeFiles));
 		auto oldMaterial = Take(resources->LoadMaterial(materialGuid));

@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Application/EditorApplication.hpp>
 
 #include <Core/StringInterop.hpp>
@@ -247,7 +248,7 @@ void EditorApplication::DrawExternalTools()
 			                          scriptEditorSourceArgumentsInput.size(), {-1, 50});
 			ImGui::TextUnformatted("Source position support depends on the configured arguments.");
 		}
-		if (ImGui::Button("Save preferences"))
+		if (Icons::Button("Save preferences"))
 		{
 			try
 			{
@@ -274,7 +275,7 @@ void EditorApplication::DrawExternalTools()
 		}
 		ImGui::SameLine();
 		ImGui::BeginDisabled(!scriptBuildService || scriptIdeJob.valid() || scriptEditorJob.valid());
-		if (ImGui::Button("Open C# Project"))
+		if (Icons::Button("Open C# Project"))
 		{
 			auto opened = OpenCSharpProject();
 			if (!opened)
@@ -285,7 +286,7 @@ void EditorApplication::DrawExternalTools()
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::BeginDisabled(scriptEditorDiscoveryJob.valid());
-		if (ImGui::Button("Refresh installed editors"))
+		if (Icons::Button("Refresh installed editors"))
 		{
 			scriptEditorDiscoveryRequested = false;
 		}
@@ -295,7 +296,7 @@ void EditorApplication::DrawExternalTools()
 		ImGui::Separator();
 		const String debugInfo = ScriptDebugInfo();
 		ImGui::TextWrapped("%s", debugInfo.c_str());
-		if (ImGui::Button("Copy debug information"))
+		if (Icons::Button("Copy debug information"))
 		{
 			ImGui::SetClipboardText(debugInfo.c_str());
 		}

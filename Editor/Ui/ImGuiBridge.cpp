@@ -2,6 +2,8 @@
 #include <Core/Types.hpp>
 #include <Core/Memory/MemoryContainers.hpp>
 #include <Ui/ImGuiBridge.hpp>
+#include <Ui/EditorIcons.hpp>
+#include <stb_image.h>
 #include <ImGuizmo.h>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -349,6 +351,11 @@ Result<void> ImGuiBridge::Initialize()
 		return Result<void>::Failure(sampler.error);
 	}
 	atlasSampler = std::move(sampler.value);
+	auto loadedIcons = LoadEditorIcons(engineFiles.value);
+	if (!loadedIcons)
+	{
+		URSA_LOG_WARN("Editor", "Editor icons unavailable; using readable labels: " + loadedIcons.error);
+	}
 	if (window)
 	{
 		auto subscriptionResult = window->Subscribe(
@@ -456,6 +463,12 @@ ImGuiBridge::~ImGuiBridge()
 	if (context)
 	{
 		ImGui::SetCurrentContext(context);
+		Icons::ClearAtlas(context);
+		if (editorIconsId)
+		{
+			device->WaitIdle();
+			UnregisterTexture(editorIconsId);
+		}
 		ImGui::DestroyContext(context);
 	}
 }
@@ -741,6 +754,109 @@ void ImGuiBridge::UnregisterTexture(ImTextureID id)
 	textureResources.erase(id);
 }
 
+Result<ImTextureID> ImGuiBridge::UploadImage(const UInt8* pixels, UInt32 width, UInt32 height)
+{
+	const Size byteCount = static_cast<Size>(width) * height * 4;
+	auto upload = device->CreateBuffer({byteCount, Rhi::BufferUsage::TransferSource, Rhi::Memory::Upload});
+	if (!upload)
+	{
+		return Result<ImTextureID>::Failure(upload.error);
+	}
+	auto written = upload.value->Write(0, pixels, byteCount);
+	if (!written)
+	{
+		return Result<ImTextureID>::Failure(written.error);
+	}
+	auto texture = device->CreateTexture(
+	    {width, height, Rhi::Format::RgbA8Unorm, Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination});
+	if (!texture)
+	{
+		return Result<ImTextureID>::Failure(texture.error);
+	}
+	auto command = device->CreateCommandList();
+	if (!command)
+	{
+		return Result<ImTextureID>::Failure(command.error);
+	}
+	auto result = command.value->Begin();
+	if (result)
+	{
+		result = command.value->Barrier(texture.value, Rhi::ResourceState::Undefined,
+		                                Rhi::ResourceState::TransferDestination);
+	}
+	if (result)
+	{
+		result = command.value->CopyBufferToTexture(upload.value, texture.value);
+	}
+	if (result)
+	{
+		result = command.value->Barrier(texture.value, Rhi::ResourceState::TransferDestination,
+		                                Rhi::ResourceState::ShaderRead);
+	}
+	if (result)
+	{
+		result = command.value->End();
+	}
+	if (!result)
+	{
+		return Result<ImTextureID>::Failure(result.error);
+	}
+	auto submitted = device->Submit(command.value);
+	if (!submitted)
+	{
+		return Result<ImTextureID>::Failure(submitted.error);
+	}
+	result = submitted.value->Wait();
+	if (!result)
+	{
+		return Result<ImTextureID>::Failure(result.error);
+	}
+	auto registered = RegisterTexture(std::move(texture.value), atlasSampler);
+	if (!registered)
+	{
+		return Result<ImTextureID>::Failure(registered.error);
+	}
+	return registered;
+}
+
+Result<void> ImGuiBridge::LoadEditorIcons(const VirtualFileSystem& files)
+{
+	const auto imagePath = VirtualPath::Parse("ursa:Icons/Editor/EditorIcons.png");
+	const auto manifestPath = VirtualPath::Parse("ursa:Icons/Editor/EditorIcons.json");
+	auto bytes = files.Read(imagePath.value);
+	auto manifest = files.Read(manifestPath.value);
+	if (!bytes || !manifest || bytes.value.empty() ||
+	    bytes.value.size() > static_cast<Size>((std::numeric_limits<int>::max)()))
+	{
+		return Result<void>::Failure("Missing or invalid Engine icon resource");
+	}
+	int width = 0;
+	int height = 0;
+	int channels = 0;
+	using ImagePtr = std::unique_ptr<stbi_uc, decltype(&stbi_image_free)>;
+	ImagePtr pixels(
+	    stbi_load_from_memory(bytes.value.data(), static_cast<int>(bytes.value.size()), &width, &height, &channels, 4),
+	    stbi_image_free);
+	if (!pixels || width <= 0 || height <= 0 || width > 4096 || height > 4096)
+	{
+		return Result<void>::Failure("Invalid Editor icon PNG");
+	}
+	auto uploaded = UploadImage(pixels.get(), static_cast<UInt32>(width), static_cast<UInt32>(height));
+	if (!uploaded)
+	{
+		return Result<void>::Failure(uploaded.error);
+	}
+	String text(reinterpret_cast<const char*>(manifest.value.data()), manifest.value.size());
+	auto configured = Icons::SetAtlas(context, uploaded.value, text);
+	if (!configured)
+	{
+		UnregisterTexture(uploaded.value);
+		return configured;
+	}
+	editorIconsId = uploaded.value;
+	return {};
+}
+
 Result<void> ImGuiBridge::UploadAtlas(ImTextureData* data)
 {
 	if (!data || data->Width <= 0 || data->Height <= 0 || !data->Pixels)
@@ -773,61 +889,7 @@ Result<void> ImGuiBridge::UploadAtlas(ImTextureData* data)
 	{
 		return Result<void>::Failure("Unsupported ImGui font atlas format");
 	}
-	auto upload = device->CreateBuffer({byteCount, Rhi::BufferUsage::TransferSource, Rhi::Memory::Upload});
-	if (!upload)
-	{
-		return Result<void>::Failure(upload.error);
-	}
-	auto written = upload.value->Write(0, rgba.data(), byteCount);
-	if (!written)
-	{
-		return written;
-	}
-	auto texture = device->CreateTexture(
-	    {width, height, Rhi::Format::RgbA8Unorm, Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination});
-	if (!texture)
-	{
-		return Result<void>::Failure(texture.error);
-	}
-	auto command = device->CreateCommandList();
-	if (!command)
-	{
-		return Result<void>::Failure(command.error);
-	}
-	auto result = command.value->Begin();
-	if (result)
-	{
-		result = command.value->Barrier(texture.value, Rhi::ResourceState::Undefined,
-		                                Rhi::ResourceState::TransferDestination);
-	}
-	if (result)
-	{
-		result = command.value->CopyBufferToTexture(upload.value, texture.value);
-	}
-	if (result)
-	{
-		result = command.value->Barrier(texture.value, Rhi::ResourceState::TransferDestination,
-		                                Rhi::ResourceState::ShaderRead);
-	}
-	if (result)
-	{
-		result = command.value->End();
-	}
-	if (!result)
-	{
-		return result;
-	}
-	auto submitted = device->Submit(command.value);
-	if (!submitted)
-	{
-		return Result<void>::Failure(submitted.error);
-	}
-	result = submitted.value->Wait();
-	if (!result)
-	{
-		return result;
-	}
-	auto registered = RegisterTexture(std::move(texture.value), atlasSampler);
+	auto registered = UploadImage(rgba.data(), width, height);
 	if (!registered)
 	{
 		return Result<void>::Failure(registered.error);

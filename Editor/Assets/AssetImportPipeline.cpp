@@ -49,13 +49,19 @@ bool IsShader(const VirtualPath& path)
 
 bool BootstrapAsset(const AssetRecord& asset)
 {
-	return asset.path.scheme == engineScheme && (asset.path.relative.rfind("Shaders/Editor/", 0) == 0 ||
-	                                             asset.path.relative.rfind("Shaders/Renderer3D/", 0) == 0 ||
-	                                             asset.path.relative.rfind("Fonts/Editor/", 0) == 0);
+	return asset.path.scheme == engineScheme &&
+	       (asset.path.relative.rfind("Shaders/Editor/", 0) == 0 ||
+	        asset.path.relative.rfind("Shaders/Renderer3D/", 0) == 0 ||
+	        asset.path.relative.rfind("Fonts/Editor/", 0) == 0 || asset.path.relative.rfind("Icons/Editor/", 0) == 0);
 }
 
 bool RuntimeAsset(const AssetRecord& asset)
 {
+	if (asset.path.scheme == engineScheme && asset.path.relative.rfind("Icons/Editor/", 0) == 0)
+	{
+		return asset.path.relative == "Icons/Editor/EditorIcons.png" ||
+		       asset.path.relative == "Icons/Editor/EditorIcons.json";
+	}
 	const auto extension = PathFromUrsaString(asset.path.relative).extension();
 	return extension != ".cs" && extension != ".hlsli" && extension != ".hlsl" && extension != ".frag" &&
 	       extension != ".vert" && extension != ".comp" && extension != ".md" && extension != ".mtl";
@@ -452,7 +458,8 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			                         (!options.bootstrapOnly || BootstrapAsset(asset)) &&
 			                         !(options.profile == "Player" && asset.path.scheme == engineScheme &&
 			                           (asset.path.relative.rfind("Shaders/Editor/", 0) == 0 ||
-			                            asset.path.relative.rfind("Fonts/Editor/", 0) == 0));
+			                            asset.path.relative.rfind("Fonts/Editor/", 0) == 0 ||
+			                            asset.path.relative.rfind("Icons/Editor/", 0) == 0));
 		                  }));
 		ProjectAssetImporter importer;
 		if (hasScriptableAssets)
@@ -470,8 +477,20 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			}
 			if (options.profile == "Player" && asset.path.scheme == engineScheme &&
 			    (asset.path.relative.rfind("Shaders/Editor/", 0) == 0 ||
-			     asset.path.relative.rfind("Fonts/Editor/", 0) == 0))
+			     asset.path.relative.rfind("Fonts/Editor/", 0) == 0 ||
+			     asset.path.relative.rfind("Icons/Editor/", 0) == 0))
 			{
+				continue;
+			}
+			// Editor image assets are UI payloads, not authored textures. Preserve their VFS names and PNG bytes.
+			if (asset.path.scheme == engineScheme && asset.path.relative.rfind("Icons/Editor/", 0) == 0)
+			{
+				const auto blob = StoreBlob(files, Take(files.Read(asset.path)), ".editor-icon");
+				AddEntry(report.snapshot, files, asset.path, blob);
+				if (progress)
+				{
+					progress(++processed, total, asset.path);
+				}
 				continue;
 			}
 			auto* database = asset.path.scheme == engineScheme ? workspace.BuiltinDatabase() : workspace.Database();

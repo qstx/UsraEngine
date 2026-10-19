@@ -6,7 +6,8 @@
 namespace Ursa
 {
 class PrefabAsset;
-}
+struct LinkedSceneResource;
+} // namespace Ursa
 
 namespace Ursa::Editor
 {
@@ -28,8 +29,13 @@ public:
 		return selected;
 	}
 
+	bool IsPrefabObject(ResourceId id) const
+	{
+		return prefabObjects.find(id.ToString()) != prefabObjects.end();
+	}
+
 	// Returns true if a persistent scene property changed.
-	Result<bool> Draw(Scene& scene, bool* open = nullptr);
+	Result<bool> Draw(Scene& scene, bool* open = nullptr, const LinkedSceneResource* linked = nullptr);
 
 	Result<bool> Draw(PrefabAsset& asset, bool* open = nullptr);
 
@@ -39,5 +45,6 @@ private:
 	Result<bool> DrawGameObject(Scene& scene, GameObject::Ptr object);
 
 	ResourceId selected;
+	Map<String, bool> prefabObjects;
 };
 } // namespace Ursa::Editor

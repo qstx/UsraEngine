@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Core/Types.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/MaterialInspectors.hpp>
@@ -341,6 +342,7 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 	auto& material = draft->Material();
 	bool changed = false;
 	ImGui::Begin("Inspector");
+	Icons::Section(Icons::Icon::Material, "Material");
 	if (const auto shader = material.Shader())
 	{
 		ImGui::Text("Shader: %s", shader->name.c_str());
@@ -447,7 +449,7 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 					                                         : "Default (" + current.value.textureDefault + ")";
 					if (ImGui::BeginCombo(label.c_str(), preview.c_str()))
 					{
-						if (ImGui::Selectable("Use Shader Default", !overridden))
+						if (Icons::Selectable(Icons::Icon::Revert, "Use Shader Default", !overridden))
 						{
 							auto set = SetShaderMaterialTexture(document, property.identifier, {}, documents.Session());
 							diagnostic = set ? String{} : set.error;
@@ -461,7 +463,8 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 							}
 							ImGui::PushID(entry.id.ToString().c_str());
 							const String textureName = entry.location.path.FileName();
-							if (ImGui::Selectable(textureName.c_str(), current.value.textureId == entry.id))
+							if (Icons::Selectable(Icons::Icon::Texture, textureName.c_str(),
+							                      current.value.textureId == entry.id))
 							{
 								auto set = SetShaderMaterialTexture(document, property.identifier, entry.id,
 								                                    documents.Session());
@@ -574,7 +577,7 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 		String preview = selected ? selected.ToString() : String("None");
 		if (ImGui::BeginCombo(slotNames[slot], preview.c_str()))
 		{
-			if (ImGui::Selectable("None", !selected))
+			if (Icons::Selectable(Icons::Icon::Close, "None", !selected))
 			{
 				auto set = draft->SetTextureId(kind, {}, documents.Session());
 				diagnostic = set ? String{} : set.error;
@@ -590,7 +593,7 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 				shownTextureIds.insert(entry.id.ToString());
 				ImGui::PushID(entry.id.ToString().c_str());
 				const auto label = entry.location.path.FileName();
-				if (ImGui::Selectable(label.c_str(), selected == entry.id))
+				if (Icons::Selectable(Icons::Icon::Texture, label.c_str(), selected == entry.id))
 				{
 					auto set = draft->SetTextureId(kind, entry.id, documents.Session());
 					diagnostic = set ? String{} : set.error;
@@ -619,7 +622,7 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 					const String id = asset.metadata.guid.ToString();
 					ImGui::PushID(id.c_str());
 					const String label = asset.path.FileName();
-					if (ImGui::Selectable(label.c_str(), selected == asset.metadata.guid))
+					if (Icons::Selectable(Icons::Icon::Texture, label.c_str(), selected == asset.metadata.guid))
 					{
 						auto set = draft->SetTextureId(kind, asset.metadata.guid, documents.Session());
 						diagnostic = set ? String{} : set.error;

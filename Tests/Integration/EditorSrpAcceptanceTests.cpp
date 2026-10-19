@@ -192,7 +192,7 @@ protected:
 					       "Graphics widgets did not apply the created pipeline");
 					FocusPanel("Scene");
 					Capture("03Scene.png");
-					if (!SelectProjectItem("Materials", "[Folder] Materials"))
+					if (!SelectProjectItem("Materials", "Materials"))
 					{
 						return {};
 					}

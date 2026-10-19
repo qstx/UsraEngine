@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Scene/SceneViewPanel.hpp>
 
 #include <Scene/EditorScenePreview.hpp>
@@ -325,6 +326,8 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	                                   : gamePresetWidth == 4 && gamePresetHeight == 3   ? "4:3"
 	                                                                                     : "9:16")
 	                                : fixedLabel.c_str();
+	const Float32 resolutionLabelWidth = ImGui::CalcTextSize("Resolution").x + ImGui::GetStyle().ItemInnerSpacing.x;
+	ImGui::SetNextItemWidth(std::max(1.f, std::min(220.f, ImGui::GetContentRegionAvail().x - resolutionLabelWidth)));
 	if (ImGui::BeginCombo("Resolution", selectedLabel))
 	{
 		if (ImGui::Selectable("Free Aspect", gameSizeMode == GameViewSizeMode::FreeAspect))
@@ -390,7 +393,7 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 			}
 		}
 		ImGui::Separator();
-		if (ImGui::MenuItem("Add Custom Resolution..."))
+		if (Icons::MenuItem("Add Custom Resolution..."))
 		{
 			customPresetEditingId.clear();
 			customPresetName.fill(0);
@@ -404,8 +407,8 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	}
 	if (!selectedCustomPreset.empty())
 	{
-		ImGui::SameLine();
-		if (ImGui::SmallButton("Edit"))
+		Icons::SameLine();
+		if (Icons::SmallButton("Edit"))
 		{
 			auto found = std::find_if(customPresets.begin(), customPresets.end(), [this](const GameViewPreset& preset)
 			                          { return preset.id == selectedCustomPreset; });
@@ -421,8 +424,8 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 				requestOpenCustomPreset = true;
 			}
 		}
-		ImGui::SameLine();
-		if (ImGui::SmallButton("Delete"))
+		Icons::SameLine();
+		if (Icons::SmallButton("Delete"))
 		{
 			customPresets.erase(std::remove_if(customPresets.begin(), customPresets.end(),
 			                                   [this](const GameViewPreset& preset)
@@ -447,7 +450,7 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 		ImGui::Combo("Type", &customPresetMode, modes, 2);
 		ImGui::InputInt("Width", &customPresetWidth);
 		ImGui::InputInt("Height", &customPresetHeight);
-		if (ImGui::Button("Save"))
+		if (Icons::Button("Save"))
 		{
 			const auto capabilities = device->Capabilities();
 			const auto valid = ResolveViewportSize(
@@ -508,16 +511,17 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 				ImGui::CloseCurrentPopup();
 			}
 		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel"))
+		Icons::SameLine();
+		if (Icons::Button("Cancel"))
 		{
 			editCustomPreset = false;
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::EndPopup();
 	}
-	ImGui::SameLine();
-	ImGui::SetNextItemWidth(150);
+	const Float32 scaleLabelWidth = ImGui::CalcTextSize("Scale").x + ImGui::GetStyle().ItemInnerSpacing.x;
+	Icons::SameLine(150.f + scaleLabelWidth);
+	ImGui::SetNextItemWidth(std::max(1.f, std::min(150.f, ImGui::GetContentRegionAvail().x - scaleLabelWidth)));
 	Float32 sliderValue = std::log2(std::max(gameScale, 0.1f));
 	if (ImGui::SliderFloat("Scale", &sliderValue, -3.321928f, 2.32f, "%.2f"))
 	{
@@ -525,7 +529,7 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 		gameFit = false;
 		settingsChanged = true;
 	}
-	ImGui::SameLine();
+	Icons::SameLine(50.f);
 	if (gameFit)
 	{
 		ImGui::TextUnformatted("Fit");
@@ -534,8 +538,8 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	{
 		ImGui::Text("%.2fx", gameScale);
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Fit"))
+	Icons::SameLine();
+	if (Icons::Button("Fit", Icons::Icon::Fit, "Fit game view"))
 	{
 		gameFit = true;
 		gamePan = {};
@@ -556,17 +560,17 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 	{
 		if (ImGui::Begin("Scene", &showScene))
 		{
-			if (ImGui::Button("Translate"))
+			if (Icons::Button("Translate", Icons::Icon::Move, "Translate", gizmoOperation == GizmoOperation::Translate))
 			{
 				gizmoOperation = GizmoOperation::Translate;
 			}
-			ImGui::SameLine();
-			if (ImGui::Button("Rotate"))
+			Icons::SameLine();
+			if (Icons::Button("Rotate", Icons::Icon::Rotate, "Rotate", gizmoOperation == GizmoOperation::Rotate))
 			{
 				gizmoOperation = GizmoOperation::Rotate;
 			}
-			ImGui::SameLine();
-			if (ImGui::Button("Scale"))
+			Icons::SameLine();
+			if (Icons::Button("Scale", Icons::Icon::Scale, "Scale", gizmoOperation == GizmoOperation::Scale))
 			{
 				gizmoOperation = GizmoOperation::Scale;
 			}

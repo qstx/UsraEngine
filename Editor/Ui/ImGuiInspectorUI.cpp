@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Ui/ImGuiInspectorUI.hpp>
 #include <imgui.h>
 
@@ -43,7 +44,7 @@ Result<bool> ImGuiInspectorUI::Select(const String& label, const Vector<Inspecto
 	bool changed = false;
 	for (const auto& option : options)
 	{
-		if (ImGui::Selectable(option.label.c_str(), option.id == selected))
+		if (Icons::Selectable(Icons::Icon::Link, option.label.c_str(), option.id == selected))
 		{
 			selected = option.id;
 			changed = true;

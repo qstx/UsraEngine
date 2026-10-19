@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
 #include <Assets/TextureDraft.hpp>
@@ -198,6 +199,7 @@ Result<bool> DrawTextureInspector(EditorDocument& document, String& diagnostic)
 	}
 	bool changed = false;
 	ImGui::Begin("Inspector");
+	Icons::Section(Icons::Icon::Texture, "Texture");
 	int width = static_cast<int>(draft->GetWidth());
 	int height = static_cast<int>(draft->GetHeight());
 	if (ImGui::InputInt("Width", &width) && width > 0)
@@ -219,7 +221,7 @@ Result<bool> DrawTextureInspector(EditorDocument& document, String& diagnostic)
 		diagnostic = set ? String{} : set.error;
 		changed |= static_cast<bool>(set);
 	}
-	if (ImGui::Button("Generate checker"))
+	if (Icons::Button("Generate checker"))
 	{
 		auto generated = draft->GenerateChecker(2, {255, 255, 255, 255}, {50, 50, 50, 255});
 		diagnostic = generated ? String{} : generated.error;

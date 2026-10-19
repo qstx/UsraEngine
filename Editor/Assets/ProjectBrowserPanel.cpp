@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Serialization/AssetReference.hpp>
 #include <Assets/ProjectBrowserPanel.hpp>
 
@@ -62,15 +63,15 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	                         destinationPath.size());
 	ImGui::InputTextWithHint("##NewFolderName", "New folder name", folderName.data(), folderName.size());
 	ImGui::BeginDisabled(readOnly || !actions.createFolder);
-	if (ImGui::Button("Create Folder"))
+	if (Icons::Button("Create Folder"))
 	{
 		auto created = actions.createFolder(String(folderName.data()));
 		diagnostic = created ? String{} : created.error;
 	}
 	ImGui::EndDisabled();
-	ImGui::SameLine();
+	Icons::SameLine();
 	ImGui::BeginDisabled(readOnly || selection.kind != EditorSelectionKind::Asset || !actions.renameAsset);
-	if (ImGui::Button("Rename Selected"))
+	if (Icons::Button("Rename Selected"))
 	{
 		auto renamed = RenameSelected(model, selection, actions);
 		diagnostic = renamed ? String{} : renamed.error;
@@ -89,7 +90,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		ImGui::Text("Rename %s", selection.assetPath.FileName().c_str());
 		ImGui::InputText("New path", destinationPath.data(), destinationPath.size());
-		if (ImGui::Button("Rename") && actions.renameAsset)
+		if (Icons::Button("Rename") && actions.renameAsset)
 		{
 			auto renamed = RenameSelected(model, selection, actions);
 			diagnostic = renamed ? String{} : renamed.error;
@@ -99,14 +100,14 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				ImGui::CloseCurrentPopup();
 			}
 		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel"))
+		Icons::SameLine();
+		if (Icons::Button("Cancel"))
 		{
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::EndPopup();
 	}
-	if (actions.refresh && ImGui::SmallButton("Refresh"))
+	if (actions.refresh && Icons::Button("Refresh", Icons::Icon::Refresh, "Refresh assets (Ctrl+R)"))
 	{
 		auto refreshed = actions.refresh();
 		diagnostic = refreshed ? String{} : refreshed.error;
@@ -125,8 +126,10 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			hierarchy.ClearSelection();
 		}
 	};
-	if (ImGui::TreeNodeEx("Assets", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
-	                                    (currentFolder.empty() ? ImGuiTreeNodeFlags_Selected : 0)))
+	if (Icons::TreeNode("Assets",
+	                    ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+	                        (currentFolder.empty() ? ImGuiTreeNodeFlags_Selected : 0),
+	                    Icons::Icon::Folder, "Assets"))
 	{
 		if (ImGui::IsItemClicked())
 		{
@@ -141,7 +144,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			{
 				flags |= ImGuiTreeNodeFlags_Selected;
 			}
-			const bool folderOpen = ImGui::TreeNodeEx("##folder", flags, "%s", folder.name.c_str());
+			const bool folderOpen = Icons::TreeNode("##folder", flags, Icons::Icon::Folder, folder.name.c_str());
 			if (ImGui::IsItemClicked())
 			{
 				selectFolder(folder.path.relative);
@@ -163,10 +166,18 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		ImGui::TreePop();
 	}
 	ImGui::EndChild();
-	ImGui::SameLine();
+	Icons::SameLine();
 	ImGui::BeginChild("ProjectFolderContents", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
-	ImGui::BeginChild("ProjectBreadcrumbs", ImVec2(0.0f, 26.0f), ImGuiChildFlags_None);
-	if (ImGui::SmallButton("Assets"))
+	const Size pathParts =
+	    currentFolder.empty() ? 0 : 1 + static_cast<Size>(std::count(currentFolder.begin(), currentFolder.end(), '/'));
+	const Float32 breadcrumbWidth = ImGui::CalcTextSize("Assets").x + ImGui::CalcTextSize(currentFolder.c_str()).x +
+	                                static_cast<Float32>(pathParts + 1) * 48.f;
+	ImGui::SetNextWindowContentSize({breadcrumbWidth, 0.f});
+	const Float32 breadcrumbHeight =
+	    std::max(28.f, ImGui::GetFrameHeight()) + ImGui::GetStyle().ItemSpacing.y + ImGui::GetStyle().ScrollbarSize;
+	ImGui::BeginChild("ProjectBreadcrumbs", ImVec2(0.0f, breadcrumbHeight), ImGuiChildFlags_None,
+	                  ImGuiWindowFlags_HorizontalScrollbar);
+	if (Icons::Button("Assets", Icons::Icon::Folder, "Assets", false, true))
 	{
 		selectFolder({});
 	}
@@ -177,8 +188,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		const Size separator = currentFolder.find('/', cursor);
 		const String part = currentFolder.substr(cursor, separator == String::npos ? String::npos : separator - cursor);
 		breadcrumbPath = breadcrumbPath.empty() ? part : breadcrumbPath + "/" + part;
-		ImGui::SameLine();
-		if (ImGui::SmallButton(part.c_str()))
+		Icons::SameLine();
+		if (Icons::Button(part.c_str(), Icons::Icon::Folder, part.c_str(), false, true))
 		{
 			selectFolder(breadcrumbPath);
 		}
@@ -190,6 +201,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	ImGui::EndChild();
 	ImGui::SetNextItemWidth(-1.0f);
+	Icons::Inline(Icons::Icon::Search);
+	ImGui::SetNextItemWidth(-1.0f);
 	ImGui::InputTextWithHint("##ProjectSearch", "Search Assets", searchText.data(), searchText.size());
 	const String search(searchText.data());
 	if (search.empty())
@@ -197,7 +210,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		for (const ProjectBrowserEntry& folder : model.ChildFolders(currentFolder))
 		{
 			ImGui::PushID(folder.path.relative.c_str());
-			if (ImGui::Selectable((String("[Folder] ") + folder.name).c_str()))
+			if (Icons::Selectable(Icons::Icon::Folder, folder.name.c_str()))
 			{
 				selectFolder(folder.path.relative);
 			}
@@ -209,14 +222,14 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			if (ImGui::BeginPopupContextItem("FolderActions"))
 			{
-				if (ImGui::MenuItem("Open"))
+				if (Icons::MenuItem("Open"))
 				{
 					selectFolder(folder.path.relative);
 				}
 				ImGui::BeginDisabled(readOnly);
-				if (ImGui::BeginMenu("Create"))
+				if (Icons::BeginMenu("Create"))
 				{
-					if (ImGui::MenuItem("Folder") && actions.createFolder)
+					if (Icons::MenuItem("Folder") && actions.createFolder)
 					{
 						model.NavigateTo(folder.path.relative);
 						auto created = actions.createFolder(String(folderName.data()));
@@ -231,7 +244,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					      {"PBR Material", ResourceKind::Material, MaterialType::PbrMetallicRoughness},
 					      {"Texture", ResourceKind::Texture, MaterialType::Unlit}})
 					{
-						if (ImGui::MenuItem(std::get<0>(item)) && actions.createAsset)
+						if (Icons::MenuItem(std::get<0>(item)) && actions.createAsset)
 						{
 							model.NavigateTo(folder.path.relative);
 							destinationPath.fill(0);
@@ -242,7 +255,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					}
 					for (const ScriptTypeDescriptor* type : scriptableAssetTypes)
 					{
-						if (ImGui::MenuItem(type->createAssetMenuName.c_str()) && actions.createScriptableAsset)
+						if (Icons::MenuItem(type->createAssetMenuName.c_str()) && actions.createScriptableAsset)
 						{
 							model.NavigateTo(folder.path.relative);
 							auto created = actions.createScriptableAsset(*type, type->createAssetFileName);
@@ -257,7 +270,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				}
 				ImGui::EndDisabled();
 				ImGui::BeginDisabled(!actions.renameAsset || readOnly);
-				if (ImGui::MenuItem("Rename Selected"))
+				if (Icons::MenuItem("Rename Selected"))
 				{
 					selection.SelectAsset(folder.path);
 					model.SelectAsset(folder.path);
@@ -274,7 +287,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		ImGui::PushID(asset.path.relative.c_str());
 		const bool selected = model.SelectedAsset() == asset.path;
 		const String label = search.empty() ? asset.name : asset.path.relative;
-		if (ImGui::Selectable(label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick))
+		if (Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative), label.c_str(),
+		                      selected, ImGuiSelectableFlags_AllowDoubleClick))
 		{
 			model.SelectAsset(asset.path);
 			selection.SelectAsset(asset.path);
@@ -300,13 +314,13 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 		if (ImGui::BeginPopupContextItem("AssetActions"))
 		{
-			if (ImGui::MenuItem("Open") && actions.openAsset)
+			if (Icons::MenuItem("Open") && actions.openAsset)
 			{
 				auto opened = actions.openAsset(asset);
 				diagnostic = opened ? String{} : opened.error;
 			}
 			ImGui::BeginDisabled(!actions.renameAsset || readOnly);
-			if (ImGui::MenuItem("Rename Selected"))
+			if (Icons::MenuItem("Rename Selected"))
 			{
 				renameRequested = true;
 			}

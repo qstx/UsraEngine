@@ -47,3 +47,15 @@ Editor 默认使用 Engine 自带的 `Noto Sans SC` 字体，不依赖项目 `As
 字体来源、SIL Open Font License 1.1 和 SHA-256 见 [Editor 字体资源说明](../Assets/Fonts/Editor/README.md)。替换字体时，将兼容的新字体放在同一 Engine 资源路径，并保留对应许可与归属文件；松散资源和 `.pak` 均使用该 VFS 路径。
 
 项目可通过 `Ursa.Editor` 注册自定义 Inspector、菜单、工具窗口和 Editor 工具，见 [C# 编辑器扩展](ManagedEditorExtensions.md)。
+
+## 常用图标
+
+Editor 的运行、场景工具、Project、Hierarchy、Inspector、Console、菜单和辅助面板使用同一套 Engine 内置图标。纯图标按钮悬停后显示操作说明；当前工具和运行状态以按下背景区分，不可用操作变暗并禁止执行。Pause 和 Step 保留位置，Step 只在暂停时有效。保存、删除、应用和确认等操作保留文字。
+
+Project 的文件夹、场景、Prefab、材质、纹理、Shader、网格、模型、脚本和 ScriptableObject 使用类型图标，名称与搜索路径保持可读。未知文件显示通用文件图标。Hierarchy 优先显示可确认的 Prefab、Camera、Light、Renderer 类型，其余显示 GameObject；禁用对象和父级禁用的对象变暗。图标不增加组件子行，也不改变资产 GUID 或对象选择。
+
+Console 保留 Trace、Debug、Info、Warning、Error 五个独立筛选按钮；按钮数量表示当前内存历史中该等级的总条数，不受显示筛选影响。Critical 归入 Error，保留条目仍显示 Critical 等级。历史淘汰后数量同步更新；Clear 清空内存历史及计数，不删除日志文件；带上下文的日志可用定位图标跳转。
+
+导入器、网格编辑、Graphics Settings、External Tools 和保存确认共用图标样式；扩展菜单和自定义类型没有专用图标时使用通用标识，现有 C# API 不需要增加图标参数。图标资源通过 `ursa:Icons/Editor` 加载，支持松散和打包内容；加载失败时显示文字回退并记录一次初始化警告。资源维护与生成方法见 [图标说明](../Assets/Icons/Editor/README.md)。
+
+图标与文字使用逻辑 UI 单位，支持高密度显示；窄面板中的按钮可换行。原有面板停靠名称不变，现有用户布局继续适用。Project 当前保留列表浏览，本次不提供缩略图网格。

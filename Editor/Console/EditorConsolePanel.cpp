@@ -1,6 +1,8 @@
+#include <Ui/EditorIcons.hpp>
 #include <Console/EditorConsolePanel.hpp>
 
 #include <Core/Containers.hpp>
+#include <Core/StringInterop.hpp>
 #include <imgui.h>
 #include <ctime>
 #include <mutex>
@@ -120,6 +122,48 @@ EditorConsolePanel::~EditorConsolePanel()
 	Log::Unsubscribe(listenerId);
 }
 
+Vector<LogRecord> EditorConsolePanel::Records() const
+{
+	std::lock_guard<std::mutex> lock(state->mutex);
+	return Vector<LogRecord>(state->records.begin(), state->records.end());
+}
+
+void EditorConsolePanel::Clear()
+{
+	std::lock_guard<std::mutex> lock(state->mutex);
+	state->records.clear();
+}
+
+Array<Size, 5> EditorConsolePanel::Counts(const Vector<LogRecord>& records)
+{
+	Array<Size, 5> counts{};
+	for (const auto& record : records)
+	{
+		switch (record.level)
+		{
+			case LogLevel::Trace:
+				++counts[0];
+				break;
+			case LogLevel::Debug:
+				++counts[1];
+				break;
+			case LogLevel::Info:
+				++counts[2];
+				break;
+			case LogLevel::Warn:
+				++counts[3];
+				break;
+			case LogLevel::Error:
+			case LogLevel::Critical:
+				++counts[4];
+				break;
+			case LogLevel::Off:
+				break;
+		}
+	}
+	return counts;
+}
+
 void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandler& contextHandler)
 {
 	if (!open)
@@ -131,32 +175,31 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		ImGui::End();
 		return;
 	}
-	if (ImGui::Button("Clear"))
+	if (Icons::Button("Clear", Icons::Icon::Delete, "Clear console"))
 	{
-		std::lock_guard<std::mutex> lock(state->mutex);
-		state->records.clear();
+		Clear();
 	}
-	ImGui::SameLine();
-	ImGui::Checkbox("Trace", &showTrace);
-	ImGui::SameLine();
-	ImGui::Checkbox("Debug", &showDebug);
-	ImGui::SameLine();
-	ImGui::Checkbox("Info", &showInfo);
-	ImGui::SameLine();
-	ImGui::Checkbox("Warning", &showWarnings);
-	ImGui::SameLine();
-	ImGui::Checkbox("Error", &showErrors);
-	Vector<LogRecord> snapshot;
+	const auto snapshot = Records();
+	const auto counts = Counts(snapshot);
+	const char* labels[]{"Trace", "Debug", "Info", "Warning", "Error"};
+	const Icons::Icon icons[]{Icons::Icon::Trace, Icons::Icon::Debug, Icons::Icon::Info, Icons::Icon::Warning,
+	                          Icons::Icon::Error};
+	bool* filters[]{&showTrace, &showDebug, &showInfo, &showWarnings, &showErrors};
+	for (Size level = 0; level < 5; ++level)
 	{
-		std::lock_guard<std::mutex> lock(state->mutex);
-		snapshot.assign(state->records.begin(), state->records.end());
+		const String label = String(labels[level]) + " " + ToUrsaString(std::to_string(counts[level]));
+		Icons::SameLine(ImGui::CalcTextSize(label.c_str()).x + 48.f);
+		if (Icons::Button(labels[level], icons[level], label.c_str(), *filters[level], true))
+		{
+			*filters[level] = !*filters[level];
+		}
 	}
 	if (ImGui::BeginTable("ConsoleEntries", 4,
 	                      ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
 	                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp))
 	{
 		ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 142.0f);
-		ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 68.0f);
+		ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 100.0f);
 		ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, 110.0f);
 		ImGui::TableSetupColumn("Message", ImGuiTableColumnFlags_WidthStretch);
 		ImGui::TableHeadersRow();
@@ -174,6 +217,12 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			ImGui::TextUnformatted(timestamp.c_str());
 			ImGui::TableSetColumnIndex(1);
 			const ImVec4 color = LevelColor(record.level);
+			const auto icon = record.level == LogLevel::Trace   ? Icons::Icon::Trace
+			                  : record.level == LogLevel::Debug ? Icons::Icon::Debug
+			                  : record.level == LogLevel::Info  ? Icons::Icon::Info
+			                  : record.level == LogLevel::Warn  ? Icons::Icon::Warning
+			                                                    : Icons::Icon::Error;
+			Icons::Inline(icon);
 			ImGui::TextColored(color, "%s", LevelLabel(record.level));
 			ImGui::TableSetColumnIndex(2);
 			ImGui::TextUnformatted(record.category.c_str());
@@ -182,7 +231,7 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			if (contextHandler && (!record.context.resourcePath.empty() || !record.context.objectId.empty()))
 			{
 				ImGui::SameLine();
-				if (ImGui::SmallButton("Locate"))
+				if (Icons::Button("Locate", Icons::Icon::Locate, "Locate log context"))
 				{
 					auto located = contextHandler(record);
 					diagnostic = located ? String{} : located.error;

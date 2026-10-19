@@ -49,6 +49,7 @@ Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 		entry.guid = asset.metadata.guid;
 		entry.name = FileName(asset.path.relative);
 		entry.folder = asset.metadata.folder;
+		entry.importer = asset.metadata.importer;
 		const auto kind = kindsByPath.find(asset.path.relative);
 		if (kind != kindsByPath.end())
 		{

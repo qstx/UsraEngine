@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Inspector/AssetInspectorPanel.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Serialization/AssetReference.hpp>
@@ -420,7 +421,7 @@ bool DrawFieldValue(nlohmann::json& value, const ScriptFieldTypeDescriptor& fiel
 			ImGui::SetNextItemWidth(-42.0f);
 			changed |= DrawFieldValue(value[index], element, workspace);
 			ImGui::SameLine();
-			if (ImGui::SmallButton("-"))
+			if (Icons::SmallButton("-"))
 			{
 				value.erase(value.begin() + static_cast<std::ptrdiff_t>(index));
 				changed = true;
@@ -429,7 +430,7 @@ bool DrawFieldValue(nlohmann::json& value, const ScriptFieldTypeDescriptor& fiel
 			}
 			ImGui::PopID();
 		}
-		if (ImGui::SmallButton("Add element"))
+		if (Icons::SmallButton("Add element"))
 		{
 			value.push_back(DefaultValue(field.elementKind));
 			changed = true;
@@ -596,7 +597,8 @@ void AssetInspectorPanel::Draw(ProjectWorkspace& workspace, const ProjectBrowser
 	}
 	else
 	{
-		ImGui::TextUnformatted(asset->name.c_str());
+		Icons::Text(Icons::ForAsset(asset->folder, asset->kind, asset->importer, asset->path.relative),
+		            asset->name.c_str());
 		ImGui::Separator();
 		ImGui::Text("Path: %s", asset->path.ToString().c_str());
 		ImGui::Text("GUID: %s", asset->guid.ToString().c_str());
@@ -699,7 +701,7 @@ void AssetInspectorPanel::Draw(ProjectWorkspace& workspace, const ProjectBrowser
 					}
 					const bool writable = static_cast<bool>(workspace.CheckWritable(asset->path));
 					ImGui::BeginDisabled(!scriptableDirty || !writable);
-					if (ImGui::Button("Save ScriptableObject"))
+					if (Icons::Button("Save ScriptableObject"))
 					{
 						bool valid = true;
 						for (const ScriptFieldTypeDescriptor& field : type->fields)
@@ -831,7 +833,7 @@ void AssetInspectorPanel::Draw(ProjectWorkspace& workspace, const ProjectBrowser
 		}
 		if (!asset->folder && openAsset)
 		{
-			if (ImGui::Button("Open"))
+			if (Icons::Button("Open"))
 			{
 				openAsset(*asset);
 			}

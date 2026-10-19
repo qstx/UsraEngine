@@ -1,3 +1,4 @@
+#include <Ui/EditorIcons.hpp>
 #include <Assets/TextureImportView.hpp>
 #include <Assets/ProjectAssetImporter.hpp>
 #include <Serialization/TextureResource.hpp>
@@ -264,7 +265,7 @@ Result<void> TextureImportView::Draw(AssetDatabase& database, Rhi::DevicePtr dev
 		dirty = true;
 	}
 	ImGui::BeginDisabled(!canReimport || (!dirty && hasImported));
-	const bool reimport = ImGui::Button("Reimport");
+	const bool reimport = Icons::Button("Reimport");
 	ImGui::EndDisabled();
 	if (reimport)
 	{
