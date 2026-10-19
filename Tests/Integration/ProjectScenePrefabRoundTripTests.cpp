@@ -1,5 +1,9 @@
 #include <Core/StringInterop.hpp>
 #include <Scene/Scene.hpp>
+#include <Scene/MeshFilterComponent.hpp>
+#include <Scene/MeshRendererComponent.hpp>
+#include <Vfs/AssetRoots.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <Serialization/PrefabResource.hpp>
@@ -78,31 +82,68 @@ void ValidateController(const Scripting::ScriptBehaviourComponent& behavior)
 {
 	const auto payload = nlohmann::json::parse(ToStdString(behavior.SerializedPayload()));
 	Expect(payload.value("ScriptType", std::string{}) == "demo.snake-controller" &&
-	           payload.value("SourceGuid", std::string{}) == "9bf784f0-7489-4622-9ce5-334ae31c0fd0" &&
+	           payload.value("SourceGuid", std::string{}) == "7f6ce254-214b-45bb-afa8-e3bb99f58c88" &&
 	           payload.value("LocalFileId", UInt64{}) == 4788986422269556870ull &&
 	           payload["Fields"].value("width", 0) == 16 && payload["Fields"].value("height", 0) == 16 &&
-	           payload["Fields"].value("seed", 0u) == 1u,
+	           payload["Fields"].value("seed", 0u) == 1u && payload["Fields"]["segmentObjects"].size() == 256 &&
+	           payload["Fields"]["foodObject"].contains("$ursaReference"),
 	       "C# Snake controller payload changed during scene serialization");
 }
 
-void ValidateBoard(const Scripting::ScriptBehaviourComponent& behavior)
+void ValidateBoard(GameObject::Ptr board)
 {
-	const auto payload = nlohmann::json::parse(ToStdString(behavior.SerializedPayload()));
-	Expect(payload.value("ScriptType", std::string{}) == "demo.snake-board" &&
-	           payload.value("SourceGuid", std::string{}) == "9bf784f0-7489-4622-9ce5-334ae31c0fd0" &&
-	           payload.value("LocalFileId", UInt64{}) == 5986131520760667172ull &&
-	           payload["Fields"].value("width", 0) == 16 && payload["Fields"].value("height", 0) == 16,
-	       "C# Snake Board payload changed during Prefab serialization");
+	Expect(board->Components().empty() && board->Children().size() == 257,
+	       "Board must contain its base and all 256 tiles before gameplay");
+	for (const auto& child : board->Children())
+	{
+		Expect(child->FindComponent<MeshFilterComponent>() && child->FindComponent<MeshRendererComponent>() &&
+		           !child->FindComponent<Scripting::ScriptBehaviourComponent>(),
+		       "Board geometry must be authored rather than created by a script");
+	}
+}
+
+void ValidatePresentation(Scene& scene)
+{
+	auto root = scene.RootGameObjects().front();
+	const auto payload = nlohmann::json::parse(
+	    ToStdString(ScriptComponent(root, "Ursa.Demo.SnakeController, Ursa.Game").SerializedPayload()));
+	const auto& fields = payload["Fields"];
+	Size visible = 0;
+	Set<String> identities;
+	for (const auto& value : fields["segmentObjects"])
+	{
+		const auto id = Take(ResourceId::Parse(ToUrsaString(value["$ursaReference"]["Id"].get<std::string>())));
+		auto segment = Take(scene.GameObjectById(id));
+		Expect(identities.insert(id.ToString()).second && segment->FindComponent<MeshRendererComponent>(),
+		       "Snake segment references must resolve to distinct authored mesh objects");
+		visible += Take(segment->ActiveSelf()) ? 1 : 0;
+	}
+	Expect(visible == 3, "Edit mode must show the three initial Snake segments");
+	const auto foodId =
+	    Take(ResourceId::Parse(ToUrsaString(fields["foodObject"]["$ursaReference"]["Id"].get<std::string>())));
+	auto food = Take(scene.GameObjectById(foodId));
+	Expect(Take(food->ActiveSelf()) && food->FindComponent<MeshRendererComponent>(),
+	       "Edit mode must show the authored food object");
 }
 } // namespace
 
-int main()
+int main(int count, char** arguments)
 {
 	using namespace Ursa;
 	try
 	{
-		VirtualFileSystem filesystem;
-		SeedMemoryFileSystem(filesystem, std::filesystem::u8path(URSA_PROJECT_ASSETS_DIR));
+		auto filesystem = Take(OpenEngineFileSystem(Take(ResolveEngineSourceRoot())));
+		if (count == 3 && String(arguments[1]) == "--save-assets")
+		{
+			Done(filesystem.MountProvider("prj",
+			                              Take(DirectoryFileProvider::Open(std::filesystem::u8path(arguments[2]))),
+			                              MountAccess::ReadWrite));
+		}
+		else
+		{
+			Expect(count == 1, "Expected no arguments or --save-assets <assets directory>");
+			SeedMemoryFileSystem(filesystem, std::filesystem::u8path(URSA_PROJECT_ASSETS_DIR));
+		}
 		auto resources = Take(ResourceSession::Open(filesystem));
 		ComponentRegistry registry;
 		Done(RegisterBuiltinComponents(registry));
@@ -117,6 +158,7 @@ int main()
 		ValidateController(ScriptComponent(root, "Ursa.Demo.SnakeController, Ursa.Game"));
 		Expect(linked.document.value("instances", nlohmann::json::array()).size() == 1,
 		       "Snake Scene lost its Board Prefab reference");
+		ValidatePresentation(*linked.scene);
 		Done(SaveLinkedSceneResource(filesystem, scenePath, linked, registry));
 		linked.scene->Clear();
 
@@ -124,8 +166,7 @@ int main()
 		auto prefab = Take(LoadPrefabResource(filesystem, prefabPath, registry, prefabContext));
 		Expect(prefab.id.ToString() == "75727361-0000-0000-0300-000000000001",
 		       "Snake Board Prefab resource ID changed");
-		ValidateBoard(
-		    ScriptComponent(prefab.scene->RootGameObjects().front(), "Ursa.Demo.SnakeBoardBehaviour, Ursa.Game"));
+		ValidateBoard(prefab.scene->RootGameObjects().front());
 		Done(SavePrefabResource(filesystem, prefabPath, prefab.id, *prefab.scene,
 		                        prefab.scene->RootGameObjects().front(), registry));
 		prefab.scene->Clear();
@@ -137,14 +178,14 @@ int main()
 		       "Snake Scene IDs changed after saving and reopening");
 		ValidateController(
 		    ScriptComponent(reloadedScene.scene->RootGameObjects().front(), "Ursa.Demo.SnakeController, Ursa.Game"));
+		ValidatePresentation(*reloadedScene.scene);
 		reloadedScene.scene->Clear();
 
 		ComponentLoadContext reloadedPrefabContext(*resources);
 		auto reloadedPrefab = Take(LoadPrefabResource(filesystem, prefabPath, registry, reloadedPrefabContext));
 		Expect(reloadedPrefab.id.ToString() == "75727361-0000-0000-0300-000000000001",
 		       "Snake Prefab ID changed after saving and reopening");
-		ValidateBoard(ScriptComponent(reloadedPrefab.scene->RootGameObjects().front(),
-		                              "Ursa.Demo.SnakeBoardBehaviour, Ursa.Game"));
+		ValidateBoard(reloadedPrefab.scene->RootGameObjects().front());
 		reloadedPrefab.scene->Clear();
 		std::cout << "C# Snake Scene and Board Prefab round-trip passed.\n";
 		return 0;

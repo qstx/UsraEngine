@@ -1,0 +1,21 @@
+{
+  "folder": false,
+  "guid": "7df958d2-3cc6-43ad-a1cf-74b411e82831",
+  "importer": "",
+  "importerVersion": 0,
+  "scriptTypes": {
+    "Types": [
+      {
+        "Id": "demo.script-player",
+        "LocalFileId": 8868545238168456338,
+        "Primary": true,
+        "TypeName": "ScriptPlayerBehaviour",
+        "Version": 1,
+        "Legacy": true
+      }
+    ],
+    "Version": 1
+  },
+  "settings": {},
+  "version": 1
+}

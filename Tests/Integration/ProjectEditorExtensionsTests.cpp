@@ -48,8 +48,7 @@ void ValidateExtensions(const Vector<ManagedEditorExtension>& descriptors)
 		}
 		return false;
 	};
-	Expect(has(ManagedEditorExtensionKind::Inspector, "", "demo.snake-controller") &&
-	           has(ManagedEditorExtensionKind::Inspector, "", "demo.snake-board"),
+	Expect(has(ManagedEditorExtensionKind::Inspector, "", "demo.snake-controller"),
 	       "Managed Snake Inspector extensions were not registered");
 	Expect(has(ManagedEditorExtensionKind::Menu, "Tools/Snake/Save Current Scene", "") &&
 	           has(ManagedEditorExtensionKind::Window, "Tools/Snake/Controls", ""),

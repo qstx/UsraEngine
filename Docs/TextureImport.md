@@ -38,5 +38,5 @@ return Ursa::Editor::TextureImporter::Import(database, sourcePath, settings.valu
 `UrsaTextureImporterTests` generates PNG and JPEG VFS fixtures to verify decode,
 settings persistence, mip serialization, cache hits, dependency invalidation,
 failure safety, and runtime `ResourceSession` loading. `UrsaDemoTextureImportTests`
-imports the sample `Demo/Assets/Textures/UrsaEngine.png` without modifying its
+imports the sample `Engine/Tests/Fixtures/SampleAssets/Textures/UrsaEngine.png` without modifying its
 source bytes.

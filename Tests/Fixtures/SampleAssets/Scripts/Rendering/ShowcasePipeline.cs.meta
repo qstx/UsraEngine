@@ -1,0 +1,21 @@
+{
+  "folder": false,
+  "guid": "750646c3-29e7-4ed1-a3c5-e6106ed2906e",
+  "importer": "",
+  "importerVersion": 0,
+  "scriptTypes": {
+    "Types": [
+      {
+        "Id": "demo.showcase-pipeline",
+        "LocalFileId": 14259409928301600216,
+        "Primary": true,
+        "TypeName": "Ursa.Demo.Rendering.ShowcasePipelineAsset",
+        "Version": 1,
+        "Legacy": true
+      }
+    ],
+    "Version": 1
+  },
+  "settings": {},
+  "version": 1
+}

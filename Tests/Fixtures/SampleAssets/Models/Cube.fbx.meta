@@ -1,0 +1,16 @@
+{
+  "folder": false,
+  "guid": "81bda3ba-7c33-49d7-9788-ae9bd10d6b2a",
+  "importer": "ursa.Model",
+  "importerVersion": 5,
+  "settings": {
+    "flipUvs": false,
+    "generateNormals": true,
+    "generateTangents": true,
+    "importMaterials": true,
+    "importTextures": true,
+    "maxBoneInfluences": 4,
+    "scaleFactor": 1.0
+  },
+  "version": 1
+}

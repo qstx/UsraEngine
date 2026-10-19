@@ -1,0 +1,21 @@
+{
+  "format": "UrsaMaterial",
+  "id": "8b8e4e91-58a2-4a26-a2d5-0a64365d3401",
+  "keywords": [],
+  "parameters": {
+    "alphaCutoff": 0.5,
+    "alphaMode": "Opaque",
+    "baseColor": [0.12, 0.45, 0.95, 1.0],
+    "emissive": [0.0, 0.0, 0.0, 1.0],
+    "metallic": 0.0,
+    "normalScale": 1.0,
+    "occlusionStrength": 1.0,
+    "roughness": 0.75,
+    "sampler": {"linear": true, "repeat": true}
+  },
+  "propertyOverrides": {},
+  "samplerOverridden": true,
+  "textures": {},
+  "type": "PbrMetallicRoughness",
+  "version": 2
+}

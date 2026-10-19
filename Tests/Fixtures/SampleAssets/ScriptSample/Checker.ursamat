@@ -1,0 +1,58 @@
+{
+  "format": "UrsaMaterial",
+  "id": "66666666-6666-4666-8666-666666666666",
+  "keywords": [],
+  "parameters": {
+    "alphaCutoff": 0.5,
+    "alphaMode": "Opaque",
+    "baseColor": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "sampler": {
+      "linear": true,
+      "repeat": true
+    }
+  },
+  "propertyOverrides": {
+    "_AlphaCutoff": {
+      "float": 0.5,
+      "type": "Range"
+    },
+    "_AlphaMode": {
+      "int": 0,
+      "type": "Int"
+    },
+    "_BaseColor": {
+      "type": "Color",
+      "vector": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "_MainTex": {
+      "textureId": {
+        "guid": "55555555-5555-4555-8555-555555555555",
+        "localFileId": 0
+      },
+      "type": "Texture2D"
+    }
+  },
+  "samplerOverridden": false,
+  "shaderId": {
+    "guid": "10000000-0000-4000-8000-000000000001",
+    "localFileId": 0
+  },
+  "textures": {
+    "baseColor": {
+      "guid": "55555555-5555-4555-8555-555555555555",
+      "localFileId": 0
+    }
+  },
+  "type": "Unlit",
+  "version": 2
+}

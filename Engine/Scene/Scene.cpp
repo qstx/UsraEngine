@@ -1082,7 +1082,9 @@ Result<void> Scene::SynchronizeLifecycle(const FrameContext& context)
 		return false;
 	};
 
-	for (Ursa::UInt32 pass = 0; pass < 1024; ++pass)
+	// Initial enable/start transitions each consume a pass without being reentrant changes.
+	const Ursa::Size passLimit = components.size() * 2 + 1024;
+	for (Ursa::Size pass = 0; pass < passLimit; ++pass)
 	{
 		TemporaryVector<ComponentId> order{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Scene)};
 		for (const GameObject::Ptr& root : rootObjects)

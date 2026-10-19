@@ -1,0 +1,21 @@
+{
+  "folder": false,
+  "guid": "b1b44da0-89d5-4cc9-bc51-7f93140228c7",
+  "importer": "",
+  "importerVersion": 0,
+  "scriptTypes": {
+    "Types": [
+      {
+        "Id": "demo.material-showcase",
+        "LocalFileId": 9478622931139913799,
+        "Primary": true,
+        "TypeName": "MaterialShowcaseBehaviour",
+        "Version": 1,
+        "Legacy": true
+      }
+    ],
+    "Version": 1
+  },
+  "settings": {},
+  "version": 1
+}

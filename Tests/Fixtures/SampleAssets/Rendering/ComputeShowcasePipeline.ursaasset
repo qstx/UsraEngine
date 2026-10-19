@@ -1,0 +1,34 @@
+{
+  "format": "UrsaScriptableAsset",
+  "version": 1,
+  "localFileId": 14259409928301600216,
+  "typeId": "demo.showcase-pipeline",
+  "typeVersion": 1,
+  "payload": {
+    "FormatVersion": 1,
+    "ScriptType": "demo.showcase-pipeline",
+    "Version": 1,
+    "SourceGuid": "750646c3-29e7-4ed1-a3c5-e6106ed2906e",
+    "LocalFileId": 14259409928301600216,
+    "Fields": {
+      "compositeMaterial": { "$ursaReference": { "Kind": "Material", "Id": "", "Resource": {
+        "kind": "asset", "asset": { "guid": "45a9b0cb-4809-46e7-9abf-925d313398f2", "localFileId": 0 }
+      } } },
+      "patternShader": { "$ursaReference": { "Kind": "ComputeShader", "Id": "", "Resource": {
+        "guid": "4f73523a-1ae5-45a5-a129-d5363cfc885b", "localFileId": 0
+      } } },
+      "replacementMaterial": { "$ursaReference": { "Kind": "Material", "Id": "", "Resource": {
+        "kind": "asset", "asset": { "guid": "8b8e4e91-58a2-4a26-a2d5-0a64365d3401", "localFileId": 0 }
+      } } },
+      "tint": [1, 1, 1, 1],
+      "patternStrength": 0.6
+    },
+    "FieldTypes": {
+      "compositeMaterial": { "Kind": "MaterialReference", "ElementKind": "Unsupported", "TypeName": "Ursa.Material", "ElementTypeName": "" },
+      "patternShader": { "Kind": "ComputeShaderReference", "ElementKind": "Unsupported", "TypeName": "Ursa.ComputeShader", "ElementTypeName": "" },
+      "replacementMaterial": { "Kind": "MaterialReference", "ElementKind": "Unsupported", "TypeName": "Ursa.Material", "ElementTypeName": "" },
+      "tint": { "Kind": "Vector4", "ElementKind": "Unsupported", "TypeName": "Ursa.Vector4", "ElementTypeName": "" },
+      "patternStrength": { "Kind": "FloatingPoint", "ElementKind": "Unsupported", "TypeName": "System.Single", "ElementTypeName": "" }
+    }
+  }
+}

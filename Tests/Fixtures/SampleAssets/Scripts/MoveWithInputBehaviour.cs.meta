@@ -1,0 +1,21 @@
+{
+  "folder": false,
+  "guid": "9c32b1d8-5188-4380-9b57-dd3e230384e0",
+  "importer": "",
+  "importerVersion": 0,
+  "scriptTypes": {
+    "Types": [
+      {
+        "Id": "demo.move-with-input",
+        "LocalFileId": 12276342577873390499,
+        "Primary": true,
+        "TypeName": "MoveWithInputBehaviour",
+        "Version": 1,
+        "Legacy": true
+      }
+    ],
+    "Version": 1
+  },
+  "settings": {},
+  "version": 1
+}

@@ -308,6 +308,30 @@ private:
 	bool createdDuringUpdate = false;
 };
 
+void TestLargeAuthoredSceneLifecycle()
+{
+	Ursa::Vector<Ursa::String> trace;
+	Ursa::Scene scene;
+	constexpr Ursa::Size count = 600;
+	for (Ursa::Size index = 0; index < count; ++index)
+	{
+		auto object = Take(scene.CreateGameObject("Authored object"));
+		Take(scene.AddComponent<LifecycleComponent>(object, trace, "authored"));
+	}
+	scene.BeginFrame();
+	done(scene.Update({}));
+	Expect(trace.size() == count * 4, "Large authored scene did not complete its initial lifecycle");
+	for (Ursa::Size index = 0; index < count; ++index)
+	{
+		Expect(trace[index] == "authored:awake" && trace[count + index] == "authored:enable" &&
+		           trace[count * 2 + index] == "authored:start" && trace[count * 3 + index] == "authored:update",
+		       "Large authored scene initialized components out of order or more than once");
+	}
+	trace.clear();
+	done(scene.Update({}));
+	Expect(trace.size() == count, "Large authored scene repeated initialization on a subsequent update");
+}
+
 void TestNativeLifecycleTransitions()
 {
 	Ursa::Scene scene;
@@ -667,6 +691,7 @@ int main()
 		TestTransformAndActivation();
 		TestComponents();
 		TestNativeLifecycleTransitions();
+		TestLargeAuthoredSceneLifecycle();
 		TestRuntimeCreationLifecycleBoundary();
 		TestDestructionCleanupRules();
 		TestDeferredChanges();

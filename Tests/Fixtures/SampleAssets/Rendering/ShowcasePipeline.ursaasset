@@ -1,0 +1,31 @@
+{
+  "format": "UrsaScriptableAsset",
+  "version": 1,
+  "localFileId": 14259409928301600216,
+  "typeId": "demo.showcase-pipeline",
+  "typeVersion": 1,
+  "payload": {
+    "FormatVersion": 1,
+    "ScriptType": "demo.showcase-pipeline",
+    "Version": 1,
+    "SourceGuid": "750646c3-29e7-4ed1-a3c5-e6106ed2906e",
+    "LocalFileId": 14259409928301600216,
+    "FieldTypes": {
+      "compositeMaterial": { "Kind": "MaterialReference", "ElementKind": "Unsupported", "TypeName": "Ursa.Material", "ElementTypeName": "" },
+      "tint": { "Kind": "Vector4", "ElementKind": "Unsupported", "TypeName": "Ursa.Vector4", "ElementTypeName": "" }
+    },
+    "Fields": {
+      "compositeMaterial": {
+        "$ursaReference": {
+          "Kind": "Material",
+          "Id": "",
+          "Resource": {
+            "kind": "asset",
+            "asset": { "guid": "45a9b0cb-4809-46e7-9abf-925d313398f2", "localFileId": 0 }
+          }
+        }
+      },
+      "tint": [0.9, 1, 0.85, 1]
+    }
+  }
+}

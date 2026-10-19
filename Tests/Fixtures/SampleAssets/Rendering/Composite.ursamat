@@ -1,0 +1,17 @@
+{
+  "format": "UrsaMaterial",
+  "version": 2,
+  "id": "45a9b0cb-4809-46e7-9abf-925d313398f2",
+  "type": "Unlit",
+  "shaderId": { "guid": "f7ed5050-133a-4754-980a-6a7c7e0786c3", "localFileId": 0 },
+  "keywords": [],
+  "samplerOverridden": true,
+  "parameters": {
+    "baseColor": [1, 1, 1, 1],
+    "alphaMode": "Opaque",
+    "alphaCutoff": 0.5,
+    "sampler": { "linear": true, "repeat": false }
+  },
+  "textures": {},
+  "propertyOverrides": {}
+}

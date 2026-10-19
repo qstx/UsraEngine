@@ -44,6 +44,16 @@ void Expect(bool condition, const char* message)
 	}
 }
 
+Size CountObjects(const GameObject::Ptr& object)
+{
+	Size count = 1;
+	for (const auto& child : object->Children())
+	{
+		count += CountObjects(child);
+	}
+	return count;
+}
+
 struct ManagedPlayServices
 {
 	std::shared_ptr<DotNetHost> host;
@@ -156,6 +166,7 @@ int main()
 			return Result<std::shared_ptr<void>>::Success(services);
 		};
 
+		const Size authoredObjects = CountObjects(root);
 		PlaySession play;
 		Done(play.Start(*draft, sceneId, registry, *resources, setup));
 		const Float32 delta = 1.0f / 60.0f;
@@ -175,6 +186,8 @@ int main()
 		Done(play.Tick(delta, nullptr, {}));
 		Expect(services->title.find("Score: 0") != String::npos,
 		       "Managed Snake restart did not restore the initial score");
+		Expect(CountObjects(play.GetScene()->RootGameObjects().front()) == authoredObjects,
+		       "Snake gameplay must reuse authored objects when growing, losing, and restarting");
 		play.Stop();
 		if (controller->SerializedPayload() != unsavedPayload || draft->GetScene().RootGameObjects().size() != 1)
 		{

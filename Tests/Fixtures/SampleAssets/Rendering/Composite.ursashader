@@ -1,0 +1,45 @@
+Shader "Demo/Composite"
+{
+	Properties
+	{
+		_DemoTint ("Pipeline Tint", Vector) = (0.9, 1, 0.85, 1)
+		_Source ("Scene Color", 2D) = "black" {}
+		_Pattern ("Compute Pattern", 2D) = "white" {}
+		_DemoPatternStrength ("Pattern Strength", Range(0, 1)) = 0
+	}
+	SubShader
+	{
+		Pass
+		{
+			Name "Composite"
+			Cull Off
+			ZWrite Off
+			ZTest Always
+			HLSLPROGRAM
+#pragma vertex VSMain
+#pragma fragment PSMain
+Texture2D<float4> _Source;
+Texture2D<float4> _Pattern;
+SamplerState sourceSampler;
+cbuffer CompositeParameters { float4 _DemoTint; float _DemoPatternStrength; }
+struct Varyings { float4 position : SV_Position; float2 uv : TEXCOORD0; };
+Varyings VSMain(uint id : SV_VertexID)
+{
+	Varyings result;
+	float2 uv = float2((id << 1) & 2, id & 2);
+	result.position = float4(uv * 2 - 1, 0, 1);
+	result.uv = float2(uv.x, 1 - uv.y);
+	return result;
+}
+float4 PSMain(Varyings input) : SV_Target0
+{
+	float2 edge = min(input.uv, 1 - input.uv);
+	if (min(edge.x, edge.y) < 0.015) return float4(0.1, 0.8, 0.3, 1);
+	float3 color = _Source.Sample(sourceSampler, input.uv).rgb * _DemoTint.rgb;
+	float3 pattern = _Pattern.Sample(sourceSampler, input.uv).rgb;
+	return float4(lerp(color, color * pattern, _DemoPatternStrength), 1);
+}
+ENDHLSL
+		}
+	}
+}

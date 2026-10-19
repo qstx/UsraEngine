@@ -1,0 +1,196 @@
+{
+  "activeCamera": "d3000000-0000-4000-8000-000000000103",
+  "ambient": {
+    "color": [
+      0.8,
+      0.9,
+      1.0,
+      1.0
+    ],
+    "intensity": 0.3
+  },
+  "format": "UrsaScene",
+  "gameObjects": [
+    {
+      "components": [
+        {
+          "data": {
+            "scriptPayload": {
+              "Fields": {
+                "ceramicMaterial": {
+                  "guid": "8b8e4e91-58a2-4a26-a2d5-0a64365d3401",
+                  "localFileId": 0
+                },
+                "checkerMaterial": {
+                  "guid": "66666666-6666-4666-8666-666666666666",
+                  "localFileId": 0
+                },
+                "goldMaterial": {
+                  "guid": "a3f83e80-98a7-4d9e-a606-1c4a572b376b",
+                  "localFileId": 0
+                }
+              },
+              "FormatVersion": 1,
+              "LocalFileId": 9478622931139913799,
+              "ScriptType": "demo.material-showcase",
+              "SourceGuid": "b1b44da0-89d5-4cc9-bc51-7f93140228c7",
+              "Version": 1
+            },
+            "typeName": "MaterialShowcaseBehaviour, Ursa.Game"
+          },
+          "enabled": true,
+          "id": "d3000000-0000-4000-8000-000000000102",
+          "type": "ursa.ScriptBehaviour",
+          "version": 1
+        }
+      ],
+      "enabled": true,
+      "id": "d3000000-0000-4000-8000-000000000101",
+      "localTransform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "name": "Material Showcase",
+      "parentId": null
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "farPlane": 100.0,
+            "nearPlane": 0.1,
+            "verticalFovRadians": 0.7853982
+          },
+          "enabled": true,
+          "id": "d3000000-0000-4000-8000-000000000103",
+          "type": "ursa.Camera",
+          "version": 1
+        }
+      ],
+      "enabled": true,
+      "id": "d3000000-0000-4000-8000-000000000104",
+      "localTransform": {
+        "position": [
+          0,
+          1.4,
+          9
+        ],
+        "rotation": [
+          -0.0773,
+          0,
+          0,
+          0.997
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "name": "Showcase Camera",
+      "parentId": "d3000000-0000-4000-8000-000000000101"
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "color": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "intensity": 3.0
+          },
+          "enabled": true,
+          "id": "d3000000-0000-4000-8000-000000000105",
+          "type": "ursa.DirectionalLight",
+          "version": 1
+        }
+      ],
+      "enabled": true,
+      "id": "d3000000-0000-4000-8000-000000000106",
+      "localTransform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "name": "Sun",
+      "parentId": "d3000000-0000-4000-8000-000000000101"
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "color": [
+              1.0,
+              0.6,
+              0.25,
+              1.0
+            ],
+            "intensity": 35.0,
+            "range": 9.0
+          },
+          "enabled": true,
+          "id": "d3000000-0000-4000-8000-000000000107",
+          "type": "ursa.PointLight",
+          "version": 1
+        }
+      ],
+      "enabled": true,
+      "id": "d3000000-0000-4000-8000-000000000108",
+      "localTransform": {
+        "position": [
+          2.0,
+          2.5,
+          3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "name": "Warm Fill",
+      "parentId": "d3000000-0000-4000-8000-000000000101"
+    }
+  ],
+  "id": "d3000000-0000-4000-8000-000000000100",
+  "localResourceVersion": 1,
+  "localResources": [],
+  "sceneGraphVersion": 2,
+  "version": 1
+}

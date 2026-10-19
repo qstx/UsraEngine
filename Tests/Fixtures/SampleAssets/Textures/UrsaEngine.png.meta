@@ -1,0 +1,16 @@
+{
+  "folder": false,
+  "guid": "40489bee-a2db-4edd-9e62-a36e749a8552",
+  "importer": "ursa.Texture",
+  "importerVersion": 1,
+  "settings": {
+    "alpha": true,
+    "filter": "Linear",
+    "generateMipmaps": true,
+    "maxDimension": 4096,
+    "sRgb": true,
+    "type": "Default",
+    "wrap": "Repeat"
+  },
+  "version": 1
+}
