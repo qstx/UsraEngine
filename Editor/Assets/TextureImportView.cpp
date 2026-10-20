@@ -16,22 +16,6 @@ String AssetDisplayPath(const VirtualPath& path)
 	return path.scheme == projectScheme ? String("Assets/") + path.relative : path.ToString();
 }
 
-template <class T> T Take(Result<T> result)
-{
-	if (!result)
-	{
-		throw std::runtime_error(ToStdString(result.error));
-	}
-	return std::move(result.value);
-}
-
-void done(Result<void> result)
-{
-	if (!result)
-	{
-		throw std::runtime_error(ToStdString(result.error));
-	}
-}
 } // namespace
 
 Result<std::unique_ptr<TextureImportView>> TextureImportView::Open(VirtualPath source,
@@ -46,93 +30,7 @@ Result<std::unique_ptr<TextureImportView>> TextureImportView::Open(VirtualPath s
 	    std::unique_ptr<TextureImportView>(new TextureImportView(std::move(source), sourceSettings)));
 }
 
-Result<void> TextureImportView::UploadPreview(Rhi::DevicePtr device, ImGuiBridge& gui,
-                                              const MaterialTexturePtr& texture, ImTextureID& textureId,
-                                              Rhi::TexturePtr& gpuTexture, Rhi::SamplerPtr& gpuSampler)
-{
-	if (!device || !texture)
-	{
-		return Result<void>::Failure("Texture preview needs a device and decoded texture");
-	}
-	Ursa::Size uploadBytes = texture->GetPixels().size();
-	for (const TextureMip& mipmap : texture->GetMipmaps())
-	{
-		uploadBytes += mipmap.pixels.size();
-	}
-	auto upload = device->CreateBuffer({uploadBytes, Rhi::BufferUsage::TransferSource, Rhi::Memory::Upload});
-	if (!upload)
-	{
-		return Result<void>::Failure(upload.error);
-	}
-	Ursa::Size offset = 0;
-	auto written = upload.value->Write(offset, texture->GetPixels().data(), texture->GetPixels().size());
-	if (!written)
-	{
-		return written;
-	}
-	offset += texture->GetPixels().size();
-	for (const TextureMip& mipmap : texture->GetMipmaps())
-	{
-		written = upload.value->Write(offset, mipmap.pixels.data(), mipmap.pixels.size());
-		if (!written)
-		{
-			return written;
-		}
-		offset += mipmap.pixels.size();
-	}
-	const Rhi::Format format =
-	    texture->GetColorSpace() == TextureColorSpace::Srgb ? Rhi::Format::RgbA8Srgb : Rhi::Format::RgbA8Unorm;
-	auto createdTexture = device->CreateTexture({texture->GetWidth(), texture->GetHeight(), format,
-	                                             Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination,
-	                                             texture->GetMipLevels()});
-	if (!createdTexture)
-	{
-		return Result<void>::Failure(createdTexture.error);
-	}
-	try
-	{
-		auto command = Take(device->CreateCommandList());
-		done(command->Begin());
-		done(command->Barrier(createdTexture.value, Rhi::ResourceState::Undefined,
-		                      Rhi::ResourceState::TransferDestination));
-		offset = 0;
-		for (Ursa::UInt32 mipLevel = 0; mipLevel < texture->GetMipLevels(); ++mipLevel)
-		{
-			const Ursa::Size mipBytes =
-			    mipLevel == 0 ? texture->GetPixels().size() : texture->GetMipmaps()[mipLevel - 1].pixels.size();
-			done(command->CopyBufferToTexture(upload.value, createdTexture.value, mipLevel, offset));
-			offset += mipBytes;
-		}
-		done(command->Barrier(createdTexture.value, Rhi::ResourceState::TransferDestination,
-		                      Rhi::ResourceState::ShaderRead));
-		done(command->End());
-		auto fence = Take(device->Submit(command));
-		done(fence->Wait());
-	}
-	catch (const std::exception& error)
-	{
-		return Result<void>::Failure(ToUrsaString(error.what()));
-	}
-	const MaterialSampler samplerSettings = texture->DefaultSampler();
-	auto createdSampler = device->CreateSampler(
-	    {samplerSettings.linear, samplerSettings.repeat, static_cast<Ursa::Float32>(texture->GetMipLevels() - 1)});
-	if (!createdSampler)
-	{
-		return Result<void>::Failure(createdSampler.error);
-	}
-	auto registered = gui.RegisterTexture(createdTexture.value, createdSampler.value);
-	if (!registered)
-	{
-		return Result<void>::Failure(registered.error);
-	}
-	textureId = registered.value;
-	gpuTexture = std::move(createdTexture.value);
-	gpuSampler = std::move(createdSampler.value);
-	return {};
-}
-
-Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr device, ImGuiBridge& gui,
-                                         bool cachedOnly)
+Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr, ImGuiBridge&, bool cachedOnly)
 {
 	auto sourceResult = TextureImporter::DecodeSourceImage(database.Filesystem(), sourcePath);
 	if (!sourceResult)
@@ -170,41 +68,6 @@ Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr
 		diagnostic = importedResult.error;
 		return Result<void>::Failure(diagnostic);
 	}
-	ImTextureID newSourceId = ImTextureID_Invalid;
-	Rhi::TexturePtr newSourceTexture;
-	Rhi::SamplerPtr newSourceSampler;
-	auto sourceUploaded =
-	    UploadPreview(device, gui, sourceResult.value, newSourceId, newSourceTexture, newSourceSampler);
-	if (!sourceUploaded)
-	{
-		diagnostic = sourceUploaded.error;
-		return sourceUploaded;
-	}
-	ImTextureID newPreviewId = ImTextureID_Invalid;
-	Rhi::TexturePtr newPreviewTexture;
-	Rhi::SamplerPtr newPreviewSampler;
-	auto previewUploaded =
-	    UploadPreview(device, gui, importedResult.value.texture, newPreviewId, newPreviewTexture, newPreviewSampler);
-	if (!previewUploaded)
-	{
-		gui.UnregisterTexture(newSourceId);
-		diagnostic = previewUploaded.error;
-		return previewUploaded;
-	}
-	if (sourcePreviewId != ImTextureID_Invalid)
-	{
-		gui.UnregisterTexture(sourcePreviewId);
-	}
-	if (previewId != ImTextureID_Invalid)
-	{
-		gui.UnregisterTexture(previewId);
-	}
-	sourcePreviewId = newSourceId;
-	sourcePreviewTexture = std::move(newSourceTexture);
-	sourcePreviewSampler = std::move(newSourceSampler);
-	previewId = newPreviewId;
-	previewTexture = std::move(newPreviewTexture);
-	previewSampler = std::move(newPreviewSampler);
 	sourceTexture = std::move(sourceResult.value);
 	imported = std::move(importedResult.value);
 	hasImported = true;
@@ -287,25 +150,7 @@ Result<void> TextureImportView::Draw(AssetDatabase& database, Rhi::DevicePtr dev
 		ImGui::Text("Imported: %u x %u, %u mip levels", imported.texture->GetWidth(), imported.texture->GetHeight(),
 		            imported.texture->GetMipLevels());
 		ImGui::TextDisabled("GUID: %s", imported.guid.ToString().c_str());
-		if (HasPreview())
-		{
-			if (ImGui::BeginTable("TexturePreviews", 2))
-			{
-				const Ursa::Float32 sourceScale =
-				    (std::min)(1.0f, 320.0f / (std::max)(sourceTexture->GetWidth(), sourceTexture->GetHeight()));
-				const Ursa::Float32 importedScale =
-				    (std::min)(1.0f, 320.0f / (std::max)(imported.texture->GetWidth(), imported.texture->GetHeight()));
-				ImGui::TableNextColumn();
-				ImGui::TextUnformatted("Source");
-				ImGui::Image(sourcePreviewId,
-				             ImVec2(sourceTexture->GetWidth() * sourceScale, sourceTexture->GetHeight() * sourceScale));
-				ImGui::TableNextColumn();
-				ImGui::TextUnformatted("Imported");
-				ImGui::Image(previewId, ImVec2(imported.texture->GetWidth() * importedScale,
-				                               imported.texture->GetHeight() * importedScale));
-				ImGui::EndTable();
-			}
-		}
+		ImGui::TextDisabled("View Source, Imported, channels and mips in Inspector Preview.");
 	}
 	if (!diagnostic.empty())
 	{
@@ -315,21 +160,10 @@ Result<void> TextureImportView::Draw(AssetDatabase& database, Rhi::DevicePtr dev
 	return {};
 }
 
-void TextureImportView::Close(ImGuiBridge& gui)
+void TextureImportView::Close(ImGuiBridge&)
 {
-	if (sourcePreviewId != ImTextureID_Invalid)
-	{
-		gui.UnregisterTexture(sourcePreviewId);
-	}
-	if (previewId != ImTextureID_Invalid)
-	{
-		gui.UnregisterTexture(previewId);
-	}
-	sourcePreviewId = ImTextureID_Invalid;
-	previewId = ImTextureID_Invalid;
-	sourcePreviewTexture.reset();
-	sourcePreviewSampler.reset();
-	previewTexture.reset();
-	previewSampler.reset();
+	sourceTexture.reset();
+	imported = {};
+	hasImported = false;
 }
 } // namespace Ursa::Editor

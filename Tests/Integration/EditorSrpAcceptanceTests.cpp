@@ -9,6 +9,11 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#if defined(_WIN32)
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+#endif
 
 namespace
 {
@@ -94,7 +99,7 @@ protected:
 	Result<void> OnStart() override
 	{
 		// Includes external capture processes and diagnostic builds in Debug.
-		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(300);
+		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(600);
 		return EditorApplication::OnStart();
 	}
 
@@ -107,13 +112,29 @@ protected:
 		}
 		try
 		{
+			const auto now = std::chrono::steady_clock::now();
+			if (now >= nextProgress)
+			{
+				std::ofstream(evidence / "Progress.json") << nlohmann::json{
+				    {"phase", phase},
+				    {"assetPending", AssetWorkPending()},
+				    {"compilationPending", ScriptCompilationPending()},
+				    {"renderReady", EditingRenderReady()},
+				    {"assetStatus", ToStdString(AssetStatus())},
+				    {"scriptStatus", ToStdString(ScriptStatus())},
+				    {"inspectorStatus",
+				     ToStdString(InspectorStatus())}}.dump(2);
+				nextProgress = now + std::chrono::seconds(2);
+			}
 			if (std::chrono::steady_clock::now() > deadline)
 			{
 				throw std::runtime_error("SRP acceptance timed out at phase " + std::to_string(phase) + ": " +
 				                         ToStdString(AssetStatus()) + "; " + ToStdString(ScriptStatus()) + "; " +
 				                         ToStdString(InspectorStatus()));
 			}
-			if (AssetWorkPending() || ScriptWorkPending() || ++settledFrames < 4)
+			// Periodic source/IDE discovery can always have another job queued. Wait
+			// for actual compilation and render readiness, not a gap in read-only polling.
+			if (AssetWorkPending() || ScriptCompilationPending() || !EditingRenderReady() || ++settledFrames < 4)
 			{
 				return {};
 			}
@@ -142,6 +163,16 @@ protected:
 				{
 					if (!Take(files.Exists(assetPath)))
 					{
+						if (settledFrames > 8)
+						{
+							Capture("CreatePending.png");
+							Expect(++createAttempts <= 2,
+							       "Create menu activation did not create its asset; see CreatePending.png");
+							ImGui::ClosePopupsOverWindow(ImGui::FindWindowByName("##MainMenuBar"), false);
+							Activate("##MainMenuBar", "Assets");
+							phase = 1;
+							settledFrames = 0;
+						}
 						return {};
 					}
 					guid = Take(Workspace()->Database()->Metadata(assetPath)).guid;
@@ -184,10 +215,8 @@ protected:
 					Next();
 					break;
 				case 10:
-					if (!InspectorStatus().empty())
-					{
-						return {};
-					}
+					Expect(InspectorStatus().empty(),
+					       ("Graphics/viewport diagnostic: " + ToStdString(InspectorStatus())).c_str());
 					Expect(Take(Rendering::ReadGraphicsSettings(files)).renderPipeline.guid == guid,
 					       "Graphics widgets did not apply the created pipeline");
 					FocusPanel("Scene");
@@ -207,14 +236,17 @@ protected:
 					Next();
 					break;
 				case 12:
-					if (!ImGui::FindWindowByName("Material Preview"))
+					if (!InspectorPreview() || !InspectorPreview()->State().HasImage())
 					{
 						Expect(settledFrames < 30, "Material selection opened no preview; see ProjectSelection.png");
 						return {};
 					}
 					SetStartupWindow("Material Preview");
+					previewPipelineVersion = InspectorPreview()->State().DisplayedTarget().pipelineVersion;
+					Expect(InspectorPreview()->ImageRect().width > 0 && InspectorPreview()->ImageRect().height > 0,
+					       "Inspector Preview has no image region");
 					Capture("04Preview.png");
-					RequestPlayToggle();
+					QueuePlayToggle();
 					Next();
 					break;
 				case 13:
@@ -243,7 +275,7 @@ protected:
 						Expect(!PlayPaused() && simulationUpdates > pausedUpdates,
 						       "Resume did not restart simulation after capture");
 					}
-					RequestPlayToggle();
+					QueuePlayToggle();
 					Next();
 					break;
 				case 15:
@@ -255,29 +287,47 @@ protected:
 					       "Run/Stop lost an unsaved editing object");
 					if (++runs < 3)
 					{
-						RequestPlayToggle();
+						QueuePlayToggle();
 						phase = 13;
 						settledFrames = 0;
 						break;
 					}
+					FinishScriptJobs();
 					std::ofstream(Workspace()->ProjectRoot() / "Assets/AcceptancePipeline.cs", std::ios::app)
 					    << "\n// Stop reload acceptance\n";
 					Done(CompileScripts());
 					Next();
 					break;
 				case 16:
+					Expect(InspectorPreview()->State().DisplayedTarget().pipelineVersion > previewPipelineVersion &&
+					           !InspectorPreview()->State().IsStale(),
+					       "Actual script pipeline reload did not publish a new Preview pipeline version");
 					Expect(Asset().Payload()["Fields"]["enabled"].get<bool>() &&
 					           Take(Rendering::ReadGraphicsSettings(files)).renderPipeline.guid == guid,
 					       "Reload lost the saved field or pipeline selection");
 					window->Resize(1100, 760);
+#if defined(_WIN32)
+					minimizedOwner = this;
+					minimizedRenderCount = InspectorPreview()->RenderCount();
+					minimizedTime = InspectorPreview()->Clock().Time();
+					restoreWindow = glfwGetWin32Window(static_cast<GLFWwindow*>(Detail::WindowAccess::Native(*window)));
+					restoreTimer = SetTimer(restoreWindow, 0, 300, RestorePreviewWindow);
+					Expect(restoreTimer != 0, "Cannot schedule preview minimize/restore test");
 					window->Minimize();
-					window->PollEvents();
-					window->Restore();
+#else
+					minimizedVerified = true;
+#endif
 					FocusPanel("Scene");
 					Capture("06ReloadedScene.png");
 					Next();
 					break;
 				case 17:
+#if defined(_WIN32)
+					glfwHideWindow(static_cast<GLFWwindow*>(Detail::WindowAccess::Native(*window)));
+#endif
+					Expect(minimizedVerified, "Minimized Editor rendered or advanced Inspector Preview");
+					Expect(!ImGui::FindWindowByName("Material Preview"),
+					       "Legacy entry created a duplicate preview window");
 					Expect(InspectorStatus().empty(), "Viewport pipeline reported an Inspector diagnostic");
 					Activate("Project Graphics Settings", "##DefaultRenderPipeline");
 					Next();
@@ -352,7 +402,57 @@ protected:
 		return {};
 	}
 
+	void OnStop() override
+	{
+#if defined(_WIN32)
+		if (restoreTimer)
+		{
+			KillTimer(restoreWindow, restoreTimer);
+			restoreTimer = 0;
+		}
+		if (minimizedOwner == this)
+		{
+			minimizedOwner = nullptr;
+		}
+#endif
+	}
+
 private:
+	void QueuePlayToggle()
+	{
+		// The toolbar rejects Run/Stop while background discovery is active.
+		// Drain it before queuing; requestRun then prevents another check next frame.
+		FinishScriptJobs();
+		RequestPlayToggle();
+	}
+
+#if defined(_WIN32)
+	static inline AcceptanceEditor* minimizedOwner = nullptr;
+	HWND restoreWindow = nullptr;
+	UINT_PTR restoreTimer = 0;
+
+	static void CALLBACK RestorePreviewWindow(HWND target, UINT, UINT_PTR timerId, DWORD)
+	{
+		KillTimer(target, timerId);
+		if (minimizedOwner)
+		{
+			auto& owner = *minimizedOwner;
+			owner.restoreTimer = 0;
+			owner.minimizedVerified = owner.InspectorPreview()->RenderCount() == owner.minimizedRenderCount &&
+			                          owner.InspectorPreview()->Clock().Time() == owner.minimizedTime;
+			owner.window->Restore();
+			// Let the restored size reach GLFW before hiding this acceptance window.
+			// Hiding from the timer can leave a zero framebuffer and strand WaitEvents.
+			owner.window->Resize(1100, 760);
+			glfwPostEmptyEvent();
+			minimizedOwner = nullptr;
+		}
+	}
+#endif
+	bool minimizedVerified = false;
+	UInt64 minimizedRenderCount = 0;
+	Float64 minimizedTime = 0;
+
 	class PauseProbe final : public Component
 	{
 	public:
@@ -485,12 +585,15 @@ private:
 	const VirtualPath assetPath = Take(VirtualPath::Parse("prj:AcceptancePipeline.ursaasset"));
 	std::filesystem::path evidence;
 	std::chrono::steady_clock::time_point deadline;
+	std::chrono::steady_clock::time_point nextProgress;
 	std::shared_ptr<SceneDraft> draft;
 	GameObject::Ptr marker;
 	ResourceId guid;
 	UInt32 phase = 0;
 	UInt32 settledFrames = 0;
+	UInt32 createAttempts = 0;
 	UInt32 runs = 0;
+	UInt64 previewPipelineVersion = 0;
 	bool verified = false;
 };
 } // namespace

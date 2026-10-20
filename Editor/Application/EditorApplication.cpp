@@ -179,6 +179,7 @@ EditorApplication::~EditorApplication()
 	}
 	FinishScriptJobs();
 	play.Stop();
+	assetPreview.reset();
 #if defined(URSA_ENABLE_DOTNET)
 	if (managedHost && editingScriptSession)
 	{
@@ -455,6 +456,10 @@ Result<void> EditorApplication::ReloadEditorScripts()
 	const UInt64 previous = editingScriptSession;
 	auto previousServices = std::move(editingScriptServices);
 	editingScriptSession = candidate.value;
+	if (assetPreview)
+	{
+		assetPreview->Reload(true);
+	}
 	editingScriptServices = std::move(candidateServices);
 	managedExtensions = std::move(candidateExtensions);
 	for (auto& fields : replacements)
@@ -484,6 +489,13 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 		return Result<void>::Failure("Asset opening requires Stop mode and an open project");
 	}
 	auto kind = ResourceKindForPath(path);
+	if (path.scheme == projectResourceScheme &&
+	    ((kind && kind.value != ResourceKind::Scene) || IsTextureSource(path) || IsModelSource(path)))
+	{
+		projectBrowser.SelectAsset(path);
+		selectionContext.SelectAsset(path);
+		showInspectorPanel = true;
+	}
 	Result<std::unique_ptr<EditorDocument>> opened =
 	    Result<std::unique_ptr<EditorDocument>>::Failure("This asset has no editing document");
 	if (kind && (kind.value == ResourceKind::Scene || kind.value == ResourceKind::Prefab))
@@ -813,6 +825,9 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	{
 		return Result<void>::Failure(documentsResult.error);
 	}
+	// Release private preview graphs before their project and script services.
+	const bool hadPreview = assetPreview != nullptr;
+	assetPreview.reset();
 	if (textureImportView && gui)
 	{
 		textureImportView->Close(*gui);
@@ -854,6 +869,10 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	runAfterScriptBuild = false;
 	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(openedWorkspace->ContentFiles()));
 	documents = std::move(documentsResult.value);
+	if (hadPreview)
+	{
+		assetPreview = std::make_unique<AssetPreviewPanel>(device, *gui);
+	}
 	workspace = std::move(openedWorkspace);
 	showProjectPanel = true;
 	showHierarchyPanel = true;
@@ -1808,6 +1827,10 @@ Result<void> EditorApplication::ApplyGraphicsSettings(AssetReference pipeline)
 		return saved;
 	}
 	graphicsSettingsCandidate = pipeline;
+	if (assetPreview)
+	{
+		assetPreview->Reload(true);
+	}
 	RequestAssetImport();
 	return {};
 }
@@ -2431,6 +2454,14 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 
 Result<void> EditorApplication::OnGui()
 {
+	if (assetPreview)
+	{
+		auto begun = assetPreview->BeginFrame();
+		if (!begun)
+		{
+			return begun;
+		}
+	}
 	PumpScriptIde();
 	selectionContext.SetActiveDocument(documents && documents->Current() ? documents->Current()->Id() : ResourceId{});
 	if (!pendingManagedAsset.scheme.empty())
@@ -2492,6 +2523,7 @@ Result<void> EditorApplication::OnGui()
 		}
 	}
 	if (selectionContext.kind == EditorSelectionKind::Asset && documents && documents->Current() &&
+	    documents->Current()->Kind() == ResourceKind::Scene &&
 	    documents->Current()->Path() == selectionContext.assetPath)
 	{
 		selectionContext.Clear();
@@ -2752,8 +2784,8 @@ Result<void> EditorApplication::OnGui()
 			inspectorError = drawn.error;
 		}
 	}
-	if (selectionContext.kind != EditorSelectionKind::Asset && documents && documents->Current() &&
-	    documents->Current()->Kind() == ResourceKind::Texture)
+	if (showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset && documents &&
+	    documents->Current() && documents->Current()->Kind() == ResourceKind::Texture)
 	{
 		auto inspected = DrawTextureInspector(*documents->Current(), inspectorError);
 		if (!inspected)
@@ -2761,86 +2793,16 @@ Result<void> EditorApplication::OnGui()
 			workspaceError = inspected.error;
 		}
 	}
-	std::shared_ptr<MaterialInstance> materialToPreview;
-	bool previewMaterialAvailable = false;
-	if (documents && documents->Current() && documents->Current()->Kind() == ResourceKind::Material)
+	if (showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset && documents &&
+	    documents->Current() && documents->Current()->Kind() == ResourceKind::Material)
 	{
-		if (selectionContext.kind != EditorSelectionKind::Asset)
+		ImGuiInspectorUI ui;
+		auto inspected = DrawMaterialInspector(*documents->Current(), *documents, *workspace, inspectorError,
+		                                       &project->materialInspectors, &ui);
+		if (!inspected)
 		{
-			ImGuiInspectorUI materialInspectorUi;
-			auto inspected = DrawMaterialInspector(*documents->Current(), *documents, *workspace, inspectorError,
-			                                       &project->materialInspectors, &materialInspectorUi);
-			if (!inspected)
-			{
-				workspaceError = inspected.error;
-			}
+			workspaceError = inspected.error;
 		}
-		auto draft = documents->Current()->Payload<MaterialDraft>();
-		if (draft)
-		{
-			materialToPreview = draft->MaterialPtr();
-			previewMaterialAvailable = true;
-			materialPreviewDocument.reset();
-			materialPreviewKey = documents->Current()->Path().ToString();
-		}
-	}
-	if (!previewMaterialAvailable && selectionContext.kind == EditorSelectionKind::Asset && documents && workspace)
-	{
-		const ProjectBrowserEntry* selectedAsset = projectBrowser.Find(selectionContext.assetPath);
-		if (selectedAsset && !selectedAsset->folder && selectedAsset->kind == ResourceKind::Material)
-		{
-			const String key =
-			    selectedAsset->path.ToString() + ":" + selectedAsset->guid.ToString() + ":" +
-			    ToUrsaString(std::to_string(workspace->Database() ? workspace->Database()->Revision() : 0));
-			if (key != materialPreviewKey)
-			{
-				materialPreviewKey = key;
-				materialPreviewDocument.reset();
-				auto opened = OpenMaterialDocument(selectedAsset->path, documents->Session(), *workspace);
-				if (opened)
-				{
-					materialPreviewDocument = std::move(opened.value);
-				}
-				else
-				{
-					inspectorError = opened.error;
-				}
-			}
-			auto draft = materialPreviewDocument ? materialPreviewDocument->Payload<MaterialDraft>() : nullptr;
-			if (draft)
-			{
-				materialToPreview = draft->MaterialPtr();
-				previewMaterialAvailable = true;
-			}
-		}
-		else
-		{
-			materialPreviewDocument.reset();
-			materialPreviewKey.clear();
-		}
-	}
-	if (previewMaterialAvailable && materialPreview)
-	{
-		auto rendered = materialPreview->Render(
-		    materialToPreview,
-		    [this](Scene& previewScene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
-		           std::optional<Rendering::CameraType> cameraFilter,
-		           std::optional<Rendering::CameraData> cameraOverride)
-		    { return RenderManagedViewport(previewScene, target, cameraFilter, std::move(cameraOverride)); });
-		if (!rendered)
-		{
-			inspectorError = rendered.error;
-		}
-		ImGui::Begin("Material Preview");
-		if (rendered)
-		{
-			ImGui::Image(materialPreview->ImageId(), ImVec2(256, 256));
-		}
-		else
-		{
-			ImGui::TextWrapped("%s", rendered.error.c_str());
-		}
-		ImGui::End();
 	}
 	if (documents && documents->Current() &&
 	    (documents->Current()->Kind() == ResourceKind::Scene || documents->Current()->Kind() == ResourceKind::Prefab))
@@ -2947,6 +2909,19 @@ Result<void> EditorApplication::OnGui()
 	}
 	if (workspace)
 	{
+		auto prepared = assetPreview->Prepare(*workspace, projectBrowser, selectionContext,
+		                                      documents ? documents->Current() : nullptr,
+		                                      ProjectSettingsKey(workspace->ProjectRoot()));
+		if (!prepared)
+		{
+			return prepared;
+		}
+		if (startupWindow == "Material Preview")
+		{
+			showInspectorPanel = true;
+			assetPreview->Expand();
+			startupWindow = "Inspector";
+		}
 		assetInspectorPanel.Draw(
 		    *workspace, projectBrowser, selectionContext, showInspectorPanel,
 		    scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr,
@@ -2956,7 +2931,48 @@ Result<void> EditorApplication::OnGui()
 			    workspaceError = opened ? String{} : opened.error;
 			    return opened;
 		    },
-		    [this](const VirtualPath& path) { RequestAssetImport(path, true); });
+		    [this](const VirtualPath& path) { RequestAssetImport(path, true); },
+		    assetPreview->Supported() ? assetPreview->ReservedHeight() : 0,
+		    assetPreview->Supported()
+		        ? std::function<void(Float32)>(
+		              [this](Float32 maximumHeight)
+		              {
+			              AssetPreviewTextureInput input;
+			              if (textureImportView)
+			              {
+				              input = {textureImportView->SourcePath(), textureImportView->SourceTexture(),
+				                       textureImportView->ImportedTexture()};
+			              }
+			              assetPreview->Draw(*workspace, project->components, &input, maximumHeight);
+		              })
+		        : std::function<void(Float32)>{},
+		    [this]
+		    {
+			    const auto* entry = projectBrowser.Find(selectionContext.assetPath);
+			    auto* document = documents ? documents->Current() : nullptr;
+			    if (!entry || !document || entry->guid != document->Id() || entry->path != document->Path())
+			    {
+				    return;
+			    }
+			    if (document->Kind() == ResourceKind::Material)
+			    {
+				    ImGuiInspectorUI ui;
+				    auto result = DrawMaterialInspector(*document, *documents, *workspace, inspectorError,
+				                                        &project->materialInspectors, &ui, true);
+				    if (!result)
+				    {
+					    inspectorError = result.error;
+				    }
+			    }
+			    else if (document->Kind() == ResourceKind::Texture)
+			    {
+				    auto result = DrawTextureInspector(*document, inspectorError, true);
+				    if (!result)
+				    {
+					    inspectorError = result.error;
+				    }
+			    }
+		    });
 	}
 	consolePanel.Draw(showConsolePanel, inspectorError,
 	                  [this](const LogRecord& record) -> Result<void>
@@ -3312,20 +3328,11 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	}
 	gui = std::move(guiResult.value);
 	dockLayoutInitialized = gui->HasSavedLayout();
-	auto materialPreviewResult = MaterialPreview::Create(device, *gui);
-	if (!materialPreviewResult)
-	{
-		gui.reset();
-		swapchain.reset();
-		device.reset();
-		window.reset();
-		return Result<void>::Failure(materialPreviewResult.error);
-	}
-	materialPreview = std::move(materialPreviewResult.value);
+	assetPreview = std::make_unique<AssetPreviewPanel>(device, *gui);
 	auto scenePanelResult = SceneViewPanel::Create(device, *gui);
 	if (!scenePanelResult)
 	{
-		materialPreview.reset();
+		assetPreview.reset();
 		gui.reset();
 		swapchain.reset();
 		device.reset();
@@ -3534,6 +3541,15 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		}
 		if (window->FramebufferWidth() == 0 || window->FramebufferHeight() == 0)
 		{
+			if (assetPreview)
+			{
+				result = assetPreview->BeginFrame();
+				if (!result)
+				{
+					break;
+				}
+				result = assetPreview->RenderPending(0, {});
+			}
 			window->WaitEvents();
 			previous = std::chrono::steady_clock::now();
 			continue;
@@ -3624,8 +3640,19 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		}
 		if (result)
 		{
+			if (assetPreview)
+			{
+				result = assetPreview->RenderPending(
+				    deltaSeconds,
+				    [this](Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+				           std::optional<Rendering::CameraType> filter, std::optional<Rendering::CameraData> camera)
+				    { return RenderManagedViewport(scene, target, filter, std::move(camera)); });
+			}
 			URSA_PROFILE_SCOPE("Editor.EndFrame");
-			result = gui->EndFrame();
+			if (result)
+			{
+				result = gui->EndFrame();
+			}
 		}
 		if (!result)
 		{
@@ -3655,6 +3682,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		documents->SetSaveBlocked(false);
 	}
 	OnStop();
+	assetPreview.reset();
 	if (textureImportView && gui)
 	{
 		textureImportView->Close(*gui);
@@ -3681,7 +3709,6 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	selectionContext.Clear();
 	hierarchy.ClearSelection();
 	sceneViewPanel.reset();
-	materialPreview.reset();
 	if (assetImportJob.valid())
 	{
 		assetImportJob.wait();
@@ -3855,17 +3882,9 @@ void EditorApplication::FinishAssetJobs()
 			{
 				ready = sceneViewPanel->ReloadResources();
 			}
-			if (ready && materialPreview)
+			if (ready && assetPreview)
 			{
-				auto preview = MaterialPreview::Create(device, *gui);
-				if (preview)
-				{
-					materialPreview = std::move(preview.value);
-				}
-				else
-				{
-					ready = Result<void>::Failure(preview.error);
-				}
+				assetPreview->Reload();
 			}
 #if defined(URSA_ENABLE_DOTNET)
 			if (managedHost)

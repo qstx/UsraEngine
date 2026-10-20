@@ -35,7 +35,17 @@ public:
 
 	bool HasPreview() const
 	{
-		return sourcePreviewId != ImTextureID_Invalid && previewId != ImTextureID_Invalid;
+		return sourceTexture && hasImported && imported.texture;
+	}
+
+	const MaterialTexturePtr& SourceTexture() const
+	{
+		return sourceTexture;
+	}
+
+	MaterialTexturePtr ImportedTexture() const
+	{
+		return hasImported ? imported.texture : nullptr;
 	}
 
 private:
@@ -44,20 +54,11 @@ private:
 	{
 	}
 
-	Result<void> UploadPreview(Rhi::DevicePtr device, ImGuiBridge& gui, const MaterialTexturePtr& texture,
-	                           ImTextureID& id, Rhi::TexturePtr& gpuTexture, Rhi::SamplerPtr& gpuSampler);
-
 	VirtualPath sourcePath;
 	TextureImportSettings settings;
 	TextureImportResult imported;
 	MaterialTexturePtr sourceTexture;
 	String diagnostic;
-	ImTextureID sourcePreviewId = ImTextureID_Invalid;
-	ImTextureID previewId = ImTextureID_Invalid;
-	Rhi::TexturePtr sourcePreviewTexture;
-	Rhi::SamplerPtr sourcePreviewSampler;
-	Rhi::TexturePtr previewTexture;
-	Rhi::SamplerPtr previewSampler;
 	bool hasImported = false;
 	bool dirty = false;
 };

@@ -6,11 +6,13 @@ the source GUID; import output is a versioned `.ursatex` runtime artifact in the
 rebuildable `lib:Artifacts/` cache. `ResourceSession` resolves that GUID to the
 latest valid artifact through the AssetDatabase resolver.
 
-Select a source image under `Assets/` to open **Texture Import** in the Inspector.
+Select a source image under `Assets/` to view **Inspector Preview**. Double-click opens **Texture Import** settings.
 The source preview remains at the original dimensions; the imported preview shows
 the effective size and mip chain. Change a setting and choose **Reimport** to
 produce a new artifact. A decode or import failure leaves the previous preview
 and successful artifact available.
+
+Image controls now live in the shared [Inspector Preview](EditorAssetPreviews.md): Source/Imported, RGBA/RGB and individual channels, real stored mip levels, Fit, physical-pixel 100%, and pan. The import settings window shares decoded content and owns no duplicate GPU preview images. Read-only packaged textures remain viewable when source images are absent; unapplied/stale imports are identified as the last successful result.
 
 The first importer supports these settings:
 

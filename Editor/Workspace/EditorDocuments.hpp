@@ -46,6 +46,12 @@ public:
 	void MarkDirty()
 	{
 		dirty = true;
+		++revision;
+	}
+
+	UInt64 Revision() const
+	{
+		return revision;
 	}
 
 	template <class T> void SetPayload(std::shared_ptr<T> value)
@@ -73,6 +79,7 @@ private:
 	VirtualPath path;
 	DocumentWriter writer;
 	bool dirty = false;
+	UInt64 revision = 0;
 	std::shared_ptr<void> payload;
 	std::type_index payloadType{typeid(void)};
 };

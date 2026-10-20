@@ -190,7 +190,7 @@ Result<std::unique_ptr<EditorDocument>> OpenTextureDocument(const VirtualPath& p
 	return document;
 }
 
-Result<bool> DrawTextureInspector(EditorDocument& document, String& diagnostic)
+Result<bool> DrawTextureInspector(EditorDocument& document, String& diagnostic, bool embedded)
 {
 	auto draft = document.Payload<TextureDraft>();
 	if (!draft)
@@ -198,7 +198,10 @@ Result<bool> DrawTextureInspector(EditorDocument& document, String& diagnostic)
 		return Result<bool>::Failure("Texture document has no texture draft");
 	}
 	bool changed = false;
-	ImGui::Begin("Inspector");
+	if (!embedded)
+	{
+		ImGui::Begin("Inspector");
+	}
 	Icons::Section(Icons::Icon::Texture, "Texture");
 	int width = static_cast<int>(draft->GetWidth());
 	int height = static_cast<int>(draft->GetHeight());
@@ -272,7 +275,10 @@ Result<bool> DrawTextureInspector(EditorDocument& document, String& diagnostic)
 	{
 		ImGui::TextWrapped("%s", diagnostic.c_str());
 	}
-	ImGui::End();
+	if (!embedded)
+	{
+		ImGui::End();
+	}
 	if (changed)
 	{
 		document.MarkDirty();

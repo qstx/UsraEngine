@@ -124,7 +124,8 @@ Result<ResourceId> SceneDraft::MaterialId(const std::shared_ptr<MaterialInstance
 	return resources.IdentifyMaterial(material);
 }
 
-Result<GameObject::Ptr> SceneDraft::InstantiateModel(ResourceId modelGuid, const nlohmann::json& modelDocument)
+Result<GameObject::Ptr> SceneDraft::InstantiateModel(ResourceId modelGuid, const nlohmann::json& modelDocument,
+                                                     bool initializeAnimation)
 {
 	if (!modelGuid || !modelDocument.is_object() || modelDocument.value("format", std::string{}) != "UrsaModel" ||
 	    modelDocument.value("version", Ursa::UInt32{0}) != 1 || !modelDocument.contains("nodes") ||
@@ -328,9 +329,10 @@ Result<GameObject::Ptr> SceneDraft::InstantiateModel(ResourceId modelGuid, const
 	{
 		return rootObject;
 	}
-	if (modelDocument.contains("skeletonLocalFileIds") && modelDocument["skeletonLocalFileIds"].is_array() &&
-	    !modelDocument["skeletonLocalFileIds"].empty() && modelDocument.contains("animationClipLocalFileIds") &&
-	    modelDocument["animationClipLocalFileIds"].is_array() && !modelDocument["animationClipLocalFileIds"].empty())
+	if (initializeAnimation && modelDocument.contains("skeletonLocalFileIds") &&
+	    modelDocument["skeletonLocalFileIds"].is_array() && !modelDocument["skeletonLocalFileIds"].empty() &&
+	    modelDocument.contains("animationClipLocalFileIds") && modelDocument["animationClipLocalFileIds"].is_array() &&
+	    !modelDocument["animationClipLocalFileIds"].empty())
 	{
 		if (!modelDocument["skeletonLocalFileIds"][0].is_number_unsigned() ||
 		    !modelDocument["animationClipLocalFileIds"][0].is_number_unsigned())

@@ -498,6 +498,19 @@ void ImGuiBridge::SetClipboardText(ImGuiContext* guiContext, const char* text)
 Result<void> ImGuiBridge::BeginFrame(Ursa::Float32 deltaSeconds, Ursa::UInt32 width, Ursa::UInt32 height,
                                      Ursa::UInt32 framebufferWidth, Ursa::UInt32 framebufferHeight)
 {
+	if (!retiredTextures.empty())
+	{
+		auto idle = device->WaitIdle();
+		if (!idle)
+		{
+			return idle;
+		}
+		for (const auto id : retiredTextures)
+		{
+			UnregisterTexture(id);
+		}
+		retiredTextures.clear();
+	}
 	if (!width || !height)
 	{
 		return Result<void>::Failure("ImGui frame size must be positive");
@@ -752,6 +765,14 @@ void ImGuiBridge::UnregisterTexture(ImTextureID id)
 {
 	groups.erase(id);
 	textureResources.erase(id);
+}
+
+void ImGuiBridge::RetireTexture(ImTextureID id)
+{
+	if (groups.find(id) != groups.end())
+	{
+		retiredTextures.push_back(id);
+	}
 }
 
 Result<ImTextureID> ImGuiBridge::UploadImage(const UInt8* pixels, UInt32 width, UInt32 height)

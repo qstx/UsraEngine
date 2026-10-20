@@ -67,5 +67,5 @@ Result<std::unique_ptr<EditorDocument>> NewTextureDocument(const VirtualPath& pa
 
 Result<std::unique_ptr<EditorDocument>> OpenTextureDocument(const VirtualPath& path, const ResourceIndex& index);
 
-Result<bool> DrawTextureInspector(EditorDocument& document, String& diagnostic);
+Result<bool> DrawTextureInspector(EditorDocument& document, String& diagnostic, bool embedded = false);
 } // namespace Ursa::Editor

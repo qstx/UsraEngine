@@ -71,7 +71,8 @@ public:
 
 	Result<void> AssignMaterial(ComponentId component, ResourceId materialId, ResourceSession& resourceSession);
 
-	Result<GameObject::Ptr> InstantiateModel(ResourceId modelGuid, const nlohmann::json& modelDocument);
+	Result<GameObject::Ptr> InstantiateModel(ResourceId modelGuid, const nlohmann::json& modelDocument,
+	                                         bool initializeAnimation = true);
 
 	Result<ResourceId> MaterialId(const std::shared_ptr<MaterialInstance>& material) const;
 

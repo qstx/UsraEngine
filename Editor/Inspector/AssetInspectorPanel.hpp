@@ -16,7 +16,8 @@ public:
 
 	void Draw(ProjectWorkspace& workspace, const ProjectBrowserModel& model, const EditorSelectionContext& selection,
 	          bool& open, const Vector<ScriptTypeDescriptor>* scriptTypes, const OpenAsset& openAsset,
-	          const RequestImport& requestImport);
+	          const RequestImport& requestImport, Float32 footerHeight = 0,
+	          const std::function<void(Float32)>& footer = {}, const std::function<void()>& properties = {});
 
 private:
 	String inspectedMeshKey;

@@ -126,6 +126,16 @@ Result<void> SceneRenderer::Record(const Mat4& viewProjection, const Vector<Mesh
 	return executor->Submit();
 }
 
+Result<Rhi::FencePtr> SceneRenderer::DrawOffscreen(const std::shared_ptr<Rendering::RenderTextureResource>& target,
+                                                   const Mat4& viewProjection,
+                                                   const Vector<Rendering::RenderObject>& draws,
+                                                   const SceneLighting& lighting, Vec3 cameraPosition,
+                                                   Rhi::ResourceState finalState)
+{
+	output = target;
+	return DrawOffscreen(target->color, viewProjection, draws, lighting, cameraPosition, finalState);
+}
+
 Result<Rhi::FencePtr> SceneRenderer::DrawOffscreen(const Rhi::TexturePtr& color, const Mat4& viewProjection,
                                                    const Vector<MeshDraw>& draws, const SceneLighting& lighting,
                                                    Vec3 cameraPosition, Rhi::ResourceState finalState)

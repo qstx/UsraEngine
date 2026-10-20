@@ -60,5 +60,5 @@ Result<void> SetShaderMaterialTexture(EditorDocument& document, const String& id
 Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& documents,
                                    const ProjectWorkspace& workspace, String& diagnostic,
                                    const MaterialInspectors* customInspectors = nullptr,
-                                   InspectorUI* inspectorUI = nullptr);
+                                   InspectorUI* inspectorUI = nullptr, bool embedded = false);
 } // namespace Ursa::Editor

@@ -10,6 +10,7 @@ function(ursa_classify_test test folder)
     UrsaTextureImporterTests UrsaScriptableAssetInspectorTests UrsaEditorShaderImportTests
     UrsaMeshEditorWindowTests UrsaAssetRefreshWindowTests UrsaEditorWorkspaceWindowTests
     UrsaProfilerEditorWindowTests UrsaEditorSrpAcceptanceTests UrsaDotNetHostSmoke
+    UrsaAssetPreviewPanelTests UrsaAssetPreviewWorkspaceTests
     UrsaProjectModelImportTests UrsaProjectPlaySessionTests UrsaProjectPipelineSamplesTests
     UrsaAssetImportCliTests UrsaProjectSnakePlayerSmoke UrsaProjectSnakeGameplaySmoke
     UrsaProjectMaterialPlayerSmoke UrsaProjectMaterialEditorSmoke UrsaProjectEditorOpenSmoke
@@ -17,7 +18,7 @@ function(ursa_classify_test test folder)
   set(windowTests
     UrsaWindowInputTests UrsaRendererWindowTests UrsaEditorCompositeWindowTests
     UrsaMeshEditorWindowTests UrsaAssetRefreshWindowTests UrsaEditorWorkspaceWindowTests
-    UrsaProfilerEditorWindowTests UrsaEditorSrpAcceptanceTests
+    UrsaProfilerEditorWindowTests UrsaEditorSrpAcceptanceTests UrsaAssetPreviewWorkspaceTests
     UrsaProjectMaterialEditorSmoke UrsaProjectEditorOpenSmoke UrsaProjectPipelineSamplesTests
     UrsaProjectSnakePlayerSmoke UrsaProjectSnakeGameplaySmoke UrsaProjectSnakePakSmoke)
   set(buildTests

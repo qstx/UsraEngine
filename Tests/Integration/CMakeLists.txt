@@ -4,11 +4,11 @@ if(URSA_ENABLE_DOTNET AND URSA_BUILD_EDITOR)
     target_sources(UrsaEditorSrpAcceptanceTests PRIVATE CaptureCliAcceptance.cpp)
     target_compile_definitions(UrsaEditorSrpAcceptanceTests PRIVATE URSA_CAPTURE_CLI="$<TARGET_FILE:UrsaCapture>")
     add_dependencies(UrsaEditorSrpAcceptanceTests UrsaCapture)
-    target_link_libraries(UrsaEditorSrpAcceptanceTests PRIVATE Ursa::Editor)
+    target_link_libraries(UrsaEditorSrpAcceptanceTests PRIVATE Ursa::Editor glfw)
     ursa_attach_dotnet_host_runtime(UrsaEditorSrpAcceptanceTests)
     add_test(NAME UrsaEditorSrpAcceptanceTests COMMAND UrsaEditorSrpAcceptanceTests
       "${URSA_TEST_SAMPLE_PROJECT}" "${URSA_BINARY_ROOT}/TestProjects/SrpAcceptance/$<CONFIG>")
-    set_tests_properties(UrsaEditorSrpAcceptanceTests PROPERTIES TIMEOUT 360
+    set_tests_properties(UrsaEditorSrpAcceptanceTests PROPERTIES TIMEOUT 900
       ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/SrpAcceptanceUser;TEMP=${URSA_BINARY_ROOT}/Temp;TMP=${URSA_BINARY_ROOT}/Temp")
   endif()
 

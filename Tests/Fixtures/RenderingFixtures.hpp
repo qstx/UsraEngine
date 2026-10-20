@@ -40,6 +40,10 @@ class SceneRenderer final
 {
 public:
 	static Result<std::unique_ptr<SceneRenderer>> Create(Rhi::DevicePtr device);
+	Result<Rhi::FencePtr> DrawOffscreen(const std::shared_ptr<Rendering::RenderTextureResource>& target,
+	                                    const Mat4& viewProjection, const Vector<Rendering::RenderObject>& draws,
+	                                    const SceneLighting& lighting, Vec3 cameraPosition,
+	                                    Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead);
 	Result<Rhi::FencePtr> DrawOffscreen(const Rhi::TexturePtr& color, const Mat4& viewProjection,
 	                                    const Vector<MeshDraw>& draws, const SceneLighting& lighting = {},
 	                                    Vec3 cameraPosition = {},

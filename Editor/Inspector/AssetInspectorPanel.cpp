@@ -579,16 +579,30 @@ bool ValidateFieldValue(const nlohmann::json& value, const ScriptFieldTypeDescri
 void AssetInspectorPanel::Draw(ProjectWorkspace& workspace, const ProjectBrowserModel& model,
                                const EditorSelectionContext& selection, bool& open,
                                const Vector<ScriptTypeDescriptor>* scriptTypes, const OpenAsset& openAsset,
-                               const RequestImport& requestImport)
+                               const RequestImport& requestImport, Float32 footerHeight,
+                               const std::function<void(Float32)>& footer, const std::function<void()>& properties)
 {
 	if (!open || selection.kind != EditorSelectionKind::Asset)
 	{
 		return;
 	}
-	if (!ImGui::Begin("Inspector", &open))
+	const auto flags =
+	    footer ? ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse : ImGuiWindowFlags_None;
+	if (!ImGui::Begin("Inspector", &open, flags))
 	{
 		ImGui::End();
 		return;
+	}
+	Float32 maximumFooterHeight = 0;
+	if (footer)
+	{
+		const auto availableHeight = ImGui::GetContentRegionAvail().y;
+		const auto spacing = ImGui::GetStyle().ItemSpacing.y;
+		maximumFooterHeight = std::max(0.f, availableHeight - 40.f - spacing);
+		const auto effectiveFooterHeight = std::clamp(footerHeight, 0.f, maximumFooterHeight);
+		ImGui::BeginChild("AssetProperties",
+		                  ImVec2(0, std::max(40.f, availableHeight - effectiveFooterHeight - spacing)),
+		                  ImGuiChildFlags_None);
 	}
 	const ProjectBrowserEntry* asset = model.Find(selection.assetPath);
 	if (!asset)
@@ -831,6 +845,14 @@ void AssetInspectorPanel::Draw(ProjectWorkspace& workspace, const ProjectBrowser
 				ImGui::Text("Importer Version: %u", metadata.value.importerVersion);
 			}
 		}
+		if (properties)
+		{
+			properties();
+		}
+		if (!footer && !asset->folder)
+		{
+			ImGui::TextDisabled("No preview is available for this asset.");
+		}
 		if (!asset->folder && openAsset)
 		{
 			if (Icons::Button("Open"))
@@ -838,6 +860,11 @@ void AssetInspectorPanel::Draw(ProjectWorkspace& workspace, const ProjectBrowser
 				openAsset(*asset);
 			}
 		}
+	}
+	if (footer)
+	{
+		ImGui::EndChild();
+		footer(maximumFooterHeight);
 	}
 	ImGui::End();
 }

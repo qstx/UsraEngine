@@ -7,6 +7,15 @@
 
 namespace Ursa::Editor
 {
+enum class MaterialPreviewShape
+{
+	Sphere,
+	Cube,
+	Plane
+};
+
+Result<MeshPtr> CreateMaterialPreviewMesh(MaterialPreviewShape shape);
+
 class MaterialPreview final
 {
 public:
@@ -16,6 +25,12 @@ public:
 	~MaterialPreview();
 
 	Result<void> Render(const std::shared_ptr<MaterialInstance>& material, const EditorRenderViewport& renderViewport);
+	Result<void> Render(const std::shared_ptr<MaterialInstance>& material, const Camera& camera,
+	                    const EditorRenderViewport& renderViewport, ResourceId identity = {});
+	Result<void> RenderScene(Scene& scene, const Camera& camera, const EditorRenderViewport& renderViewport,
+	                         ResourceId identity = {});
+	Result<void> Resize(UInt32 width, UInt32 height);
+	Result<void> SetShape(MaterialPreviewShape shape);
 
 	ImTextureID ImageId() const
 	{
@@ -45,5 +60,8 @@ private:
 	ImTextureID imageId = ImTextureID_Invalid;
 	Scene previewScene;
 	MeshRendererComponent* previewRenderer = nullptr;
+	MeshFilterComponent* previewFilter = nullptr;
+	MaterialPreviewShape shape = MaterialPreviewShape::Cube;
+	ResourceId cameraIdentity = ResourceId::Generate();
 };
 } // namespace Ursa::Editor

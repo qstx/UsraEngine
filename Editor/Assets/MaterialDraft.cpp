@@ -332,7 +332,7 @@ Result<void> SetShaderMaterialTexture(EditorDocument& document, const String& id
 
 Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& documents,
                                    const ProjectWorkspace& workspace, String& diagnostic,
-                                   const MaterialInspectors* customInspectors, InspectorUI* inspectorUI)
+                                   const MaterialInspectors* customInspectors, InspectorUI* inspectorUI, bool embedded)
 {
 	auto draft = document.Payload<MaterialDraft>();
 	if (!draft)
@@ -341,7 +341,10 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 	}
 	auto& material = draft->Material();
 	bool changed = false;
-	ImGui::Begin("Inspector");
+	if (!embedded)
+	{
+		ImGui::Begin("Inspector");
+	}
 	Icons::Section(Icons::Icon::Material, "Material");
 	if (const auto shader = material.Shader())
 	{
@@ -359,7 +362,10 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 					{
 						document.MarkDirty();
 					}
-					ImGui::End();
+					if (!embedded)
+					{
+						ImGui::End();
+					}
 					return customResult;
 				}
 				customInspectorDiagnostic = customResult.error + "; using the Shader property Inspector";
@@ -487,7 +493,10 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 		{
 			ImGui::TextWrapped("%s", diagnostic.c_str());
 		}
-		ImGui::End();
+		if (!embedded)
+		{
+			ImGui::End();
+		}
 		if (changed)
 		{
 			document.MarkDirty();
@@ -638,7 +647,10 @@ Result<bool> DrawMaterialInspector(EditorDocument& document, EditorDocuments& do
 	{
 		ImGui::TextWrapped("%s", diagnostic.c_str());
 	}
-	ImGui::End();
+	if (!embedded)
+	{
+		ImGui::End();
+	}
 	if (changed)
 	{
 		document.MarkDirty();

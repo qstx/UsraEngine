@@ -1,5 +1,17 @@
 if(URSA_BUILD_EDITOR)
 
+  ursa_add_test_executable(UrsaAssetPreviewPanelTests AssetPreviewPanelTests.cpp)
+  target_link_libraries(UrsaAssetPreviewPanelTests PRIVATE Ursa::Editor Ursa::StbImage)
+  target_compile_definitions(UrsaAssetPreviewPanelTests PRIVATE
+    URSA_PREVIEW_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx")
+  add_test(NAME UrsaAssetPreviewPanelTests COMMAND UrsaAssetPreviewPanelTests
+    "${URSA_BINARY_ROOT}/Temp/AssetPreviewEvidence/$<CONFIG>")
+  ursa_require_test_content(UrsaAssetPreviewPanelTests UrsaAssetPreviewPanelTests)
+
+  ursa_add_test_executable(UrsaAssetPreviewStateTests AssetPreviewStateTests.cpp)
+  target_link_libraries(UrsaAssetPreviewStateTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaAssetPreviewStateTests COMMAND UrsaAssetPreviewStateTests)
+
   ursa_add_test_executable(UrsaScriptableAssetSourceTests ScriptableAssetSourceTests.cpp)
   target_link_libraries(UrsaScriptableAssetSourceTests PRIVATE Ursa::Editor)
   add_test(NAME UrsaScriptableAssetSourceTests COMMAND UrsaScriptableAssetSourceTests)

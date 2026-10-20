@@ -15,7 +15,7 @@
 #include <Assets/ProjectBrowserPanel.hpp>
 #include <Inspector/AssetInspectorPanel.hpp>
 #include <Console/EditorConsolePanel.hpp>
-#include <Assets/MaterialPreview.hpp>
+#include <Assets/AssetPreviewPanel.hpp>
 #include <Assets/MaterialInspectors.hpp>
 #include <Assets/ShaderImportView.hpp>
 #include <Assets/TextureImportView.hpp>
@@ -133,6 +133,16 @@ protected:
 		       (assetImportJob.valid() && !play.Active());
 	}
 
+	bool ScriptCompilationPending() const
+	{
+		return scriptBuildJob.valid();
+	}
+
+	bool EditingRenderReady() const
+	{
+		return editingScriptSession != 0 && editingScriptServices != nullptr;
+	}
+
 	const String& ScriptStatus() const
 	{
 		return scriptBuildStatus;
@@ -195,6 +205,11 @@ protected:
 	EditorDocuments* Documents() const
 	{
 		return documents.get();
+	}
+
+	AssetPreviewPanel* InspectorPreview() const
+	{
+		return assetPreview.get();
 	}
 
 	void RefreshAssets(const VirtualPath& scope = {}, bool force = false)
@@ -292,9 +307,7 @@ private:
 	std::unique_ptr<EditorProject> project;
 	String activeEditorTool;
 	std::unique_ptr<ImGuiBridge> gui;
-	std::unique_ptr<MaterialPreview> materialPreview;
-	std::unique_ptr<EditorDocument> materialPreviewDocument;
-	String materialPreviewKey;
+	std::unique_ptr<AssetPreviewPanel> assetPreview;
 	std::unique_ptr<ShaderImportView> shaderImportView;
 	std::unique_ptr<TextureImportView> textureImportView;
 	std::unique_ptr<ModelImportView> modelImportView;

@@ -34,6 +34,8 @@ Project 左侧显示 `Assets` 文件夹树，右侧显示所选文件夹中的�
 
 Hierarchy 只显示 Scene 或 Prefab 中的 GameObject 层级。选择对象会让单一 Inspector 显示该对象、Transform 和组件。选中 Project 资产时 Inspector 切换为该资产信息；打开资产后由对应的资产文档 Inspector 接管。
 
+材质、纹理、模型、Mesh 和 Prefab 共用 Inspector 底部可折叠、可调整高度的 Preview。查看资产不会切换作者文档或要求保存；匹配的材质、纹理和 Prefab 草稿可预览未保存值。模型包含选片、播放/暂停及时间轴。展开偏好和逻辑高度按项目保存到用户设置，坏设置整组回退到展开/280，写入失败保留本次内存状态并提示。操作与隔离规则见 [资产预览](EditorAssetPreviews.md)。`--view Inspector` 保留折叠偏好；`--view "Material Preview"` 兼容入口在读取偏好后展开并聚焦 Inspector，不创建独立窗口或重置其他停靠面板。
+
 Scene 面板提供 Transform Gizmo。Game 面板在 Play 模式显示运行画面；编辑模式下显示提示。Play 中的 Hierarchy 内容是临时运行副本，Stop 后回到编辑文档。
 
 ## Console

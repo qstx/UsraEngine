@@ -85,6 +85,11 @@ void TestImagesFontsAndClipping(const DevicePtr& device)
 	draw->AddText(ImVec2(2, 30), IM_COL32(255, 255, 255, 255), "A");
 	draw->AddText(ImVec2(2, 45), IM_COL32(255, 255, 255, 255), u8"中");
 	done(bridge->EndFrame());
+	const auto beforeRetirement = bridge->RegisteredTextureCount();
+	bridge->RetireTexture(redId);
+	bridge->RetireTexture(greenId);
+	Expect(bridge->RegisteredTextureCount() == beforeRetirement,
+	       "Retiring a preview image invalidated CPU draw data before recording");
 	Expect(ImGui::GetFont()->GetFontBaked(ImGui::GetFontSize())->FindGlyphNoFallback(0x4E2D) != nullptr,
 	       "Dynamic Chinese glyph was not loaded into the Editor font atlas");
 
@@ -136,8 +141,10 @@ void TestImagesFontsAndClipping(const DevicePtr& device)
 		}
 	}
 	Expect(chinesePixels > 8, "Chinese fallback glyph did not render to the RHI target");
-	bridge->UnregisterTexture(redId);
-	bridge->UnregisterTexture(greenId);
+	done(bridge->BeginFrame(1.f / 60.f, width, height));
+	Expect(bridge->RegisteredTextureCount() + 2 == beforeRetirement,
+	       "Retired images were not released at the safe frame boundary");
+	done(bridge->EndFrame());
 }
 
 void TestHighDpiDisplayScale(const DevicePtr& device)

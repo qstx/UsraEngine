@@ -41,6 +41,8 @@ four-weight GPU skinning in the PBR vertex shader. Animator Controller graphs,
 blend trees, retargeting, root motion, and morph-target animation are not
 supported yet.
 
+Selecting a model now opens its complete hierarchy in [Inspector Preview](EditorAssetPreviews.md), without adding it to the authoring Scene. Whole-model and stable Mesh sub-asset views support orbit, zoom and reset. Animated FBX previews start in bind pose and support clip selection, play/pause, looping, positive speed and paused scrubbing through the exact endpoint. This uses a private clock and explicit pose sampling, without Scene Update or gameplay callbacks. Prefab previews similarly use private read-only snapshots; opening or instantiating remains an explicit authoring action.
+
 `UrsaDemoModelImportTests` imports and places the supplied `Cube.fbx` into a
 Scene, saves and reopens its hierarchy, and checks an OBJ/MTL fixture using
 `UrsaEngine.png`, an embedded-texture FBX fixture from the pinned Assimp

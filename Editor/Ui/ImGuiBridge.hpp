@@ -35,6 +35,14 @@ public:
 
 	void UnregisterTexture(ImTextureID id);
 
+	// Preserve current CPU draw data; release at the next frame after GPU completion.
+	void RetireTexture(ImTextureID id);
+
+	Size RegisteredTextureCount() const
+	{
+		return groups.size();
+	}
+
 	ImGuiContext* Context() const
 	{
 		return context;
@@ -104,6 +112,7 @@ private:
 	Rhi::BufferPtr indexBuffer;
 	UnorderedMap<int, Rhi::PipelinePtr> pipelines;
 	UnorderedMap<ImTextureID, Rhi::BindGroupPtr> groups;
+	Vector<ImTextureID> retiredTextures;
 	UnorderedMap<ImTextureID, Vector<Rhi::BindingResource>> textureResources;
 	UnorderedMap<ImTextureData*, ImTextureID> atlasIds;
 	ImTextureID nextTextureId = 1;
