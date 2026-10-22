@@ -43,7 +43,7 @@ AssetPreviewKind PreviewKind(std::optional<ResourceKind> kind, const VirtualPath
 
 bool AssetPreviewTarget::Supported() const
 {
-	return kind != AssetPreviewKind::None && static_cast<bool>(identity.guid);
+	return (custom || kind != AssetPreviewKind::None) && static_cast<bool>(identity.guid);
 }
 
 bool AssetPreviewTarget::SameIdentity(const AssetPreviewTarget& other) const
@@ -77,7 +77,8 @@ bool AssetPreviewState::Select(AssetPreviewTarget selected)
 {
 	const bool identityChanged = !target.SameIdentity(selected);
 	const bool changed = identityChanged || target.contentVersion != selected.contentVersion ||
-	                     target.pipelineVersion != selected.pipelineVersion || target.draft != selected.draft;
+	                     target.pipelineVersion != selected.pipelineVersion || target.draft != selected.draft ||
+	                     target.custom != selected.custom;
 	target = std::move(selected);
 	if (identityChanged)
 	{

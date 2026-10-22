@@ -5,11 +5,41 @@
 #include <cstring>
 #include <cmath>
 #include <atomic>
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace Ursa::Scripting
 {
+Result<ManagedHandle> ManagedSceneApi::RegisterTexture(const MaterialTexturePtr& texture)
+{
+	RequireResourceAccess();
+	if (!texture)
+	{
+		return Result<ManagedHandle>::Failure("Cannot register a null texture");
+	}
+	auto handle = handles->Register(const_cast<MaterialTexture*>(texture.get()), ManagedHandleKind::Asset);
+	if (handle)
+	{
+		ownedTextures[handle.value.index] = texture;
+	}
+	return handle;
+}
+
+Result<MaterialTexturePtr> ManagedSceneApi::ReadTexture(const ManagedHandle& handle) const
+{
+	RequireResourceAccess();
+	auto checked = handles->Resolve(handle, ManagedHandleKind::Asset);
+	if (!checked)
+	{
+		return Result<MaterialTexturePtr>::Failure(checked.error);
+	}
+	const auto found = ownedTextures.find(handle.index);
+	return found != ownedTextures.end() ? Result<MaterialTexturePtr>::Success(found->second)
+	                                    : Result<MaterialTexturePtr>::Failure("Handle does not identify a texture");
+}
+
 namespace
 {
 std::atomic<UInt64> nextRenderSessionId{1};
@@ -41,6 +71,23 @@ ManagedSceneApi::ManagedSceneApi(Scene& scene, ResourceSession* resources,
 ManagedSceneApi::~ManagedSceneApi()
 {
 	Deactivate();
+}
+
+const FrameContext* ManagedSceneApi::SetFrameContext(const FrameContext* context)
+{
+	const auto* previous = frameContext;
+	frameContext = context;
+	return previous;
+}
+
+void ManagedSceneApi::SetBehaviourRuntime(ManagedBehaviourRuntime* runtime)
+{
+	behaviourRuntime = runtime;
+}
+
+GameObject::Ptr ManagedSceneApi::SetLifecycleOwner(GameObject::Ptr owner)
+{
+	return std::exchange(lifecycleOwner, std::move(owner));
 }
 
 UInt64 ManagedSceneApi::SessionIdentity() const
@@ -126,7 +173,7 @@ void ManagedSceneApi::SetFrameCapture(Rendering::FrameCapture* capture)
 
 Result<ManagedHandle> ManagedSceneApi::Register(const GameObject::Ptr& object)
 {
-	if (!scene.Contains(object))
+	if (!Contains(object))
 	{
 		return Result<ManagedHandle>::Failure("Cannot expose a GameObject outside this Scene to managed code");
 	}
@@ -161,7 +208,7 @@ Result<GameObject::Ptr> ManagedSceneApi::Resolve(const ManagedHandle& handle) co
 		return Result<GameObject::Ptr>::Failure("Managed GameObject handle has no tracked Scene object");
 	}
 	GameObject::Ptr object = objectEntry->second.lock();
-	if (!object || object.get() != resolved.value || !object->IsValid() || object->TryGetScene() != &scene)
+	if (!object || object.get() != resolved.value || !Contains(object))
 	{
 		handles->Invalidate(handle);
 		return Result<GameObject::Ptr>::Failure("Managed GameObject handle no longer belongs to this Scene");
@@ -175,7 +222,7 @@ Result<ManagedHandle> ManagedSceneApi::RegisterComponent(Component* component, c
 	{
 		return Result<ManagedHandle>::Failure("Cannot expose a null Component to managed code");
 	}
-	if (component->TryGetScene() != &scene || !owner || !owner->IsValid())
+	if (!Contains(owner) || component->TryGetScene() != owner->TryGetScene())
 	{
 		return Result<ManagedHandle>::Failure("Cannot expose a Component that is detached from this Scene");
 	}
@@ -187,7 +234,7 @@ Result<ManagedHandle> ManagedSceneApi::RegisterComponent(Component* component, c
 	if (handle)
 	{
 		const auto previous = componentIdentities.find(handle.value.index);
-		if (previous != componentIdentities.end() && previous->second != component->Id())
+		if (previous != componentIdentities.end() && previous->second != component->PersistentId())
 		{
 			handles->Invalidate(handle.value);
 			handle = handles->Register(component, ManagedHandleKind::Component);
@@ -197,7 +244,7 @@ Result<ManagedHandle> ManagedSceneApi::RegisterComponent(Component* component, c
 			}
 		}
 		componentOwners[handle.value.index] = owner;
-		componentIdentities[handle.value.index] = component->Id();
+		componentIdentities[handle.value.index] = component->PersistentId();
 	}
 	return handle;
 }
@@ -224,23 +271,18 @@ Result<Component*> ManagedSceneApi::ResolveComponent(const ManagedHandle& handle
 		return Result<Component*>::Failure("Managed Component handle has no tracked owner");
 	}
 	auto owner = ownerEntry->second.lock();
-	if (!owner || !owner->IsValid() || owner->TryGetScene() != &scene)
+	if (!Contains(owner))
 	{
 		handles->Invalidate(handle);
 		return Result<Component*>::Failure("Managed Component handle no longer belongs to this Scene");
 	}
-	auto ids = scene.ComponentsOf(owner);
-	if (!ids)
+	for (Component* component : owner->Components())
 	{
-		return Result<Component*>::Failure(ids.error);
-	}
-	for (ComponentId id : ids.value)
-	{
-		if (scene.GetComponent(id) == resolved.value)
+		if (component == resolved.value)
 		{
 			const auto identity = componentIdentities.find(handle.index);
-			if (identity == componentIdentities.end() || identity->second != id ||
-			    resolved.value->TryGetScene() != &scene || resolved.value->GetGameObject() != owner)
+			if (identity == componentIdentities.end() || identity->second != component->PersistentId() ||
+			    component->TryGetScene() != owner->TryGetScene() || component->GetGameObject() != owner)
 			{
 				handles->Invalidate(handle);
 				return Result<Component*>::Failure("Managed Component was removed, replaced or moved");
@@ -250,5 +292,117 @@ Result<Component*> ManagedSceneApi::ResolveComponent(const ManagedHandle& handle
 	}
 	handles->Invalidate(handle);
 	return Result<Component*>::Failure("Managed Component handle is stale");
+}
+
+void ManagedSceneApi::SetDetachedRoots(Vector<GameObject::Ptr> roots)
+{
+	Require(0);
+	for (const auto& root : roots)
+	{
+		if (!root || !root->IsValid() || root->TryGetScene())
+		{
+			throw std::runtime_error("Detached managed graph roots must be live assets outside a Scene");
+		}
+	}
+	detachedRoots = std::move(roots);
+}
+
+Result<GameObject::Ptr> ManagedSceneApi::CreateObject(String name)
+{
+	RequireSceneMutation();
+	if (detachedRoots.empty())
+	{
+		return scene.CreateGameObject(std::move(name));
+	}
+	auto object = GameObject::Create(std::move(name));
+	detachedRoots.push_back(object);
+	return Result<GameObject::Ptr>::Success(std::move(object));
+}
+
+bool ManagedSceneApi::Contains(const GameObject::Ptr& object) const
+{
+	if (!object || !object->IsValid())
+	{
+		return false;
+	}
+	if (scene.Contains(object))
+	{
+		return true;
+	}
+	// Pending destruction removes the object from normal Scene queries before its
+	// OnDisable/OnDestroy callbacks run. Only that callback's live owner remains accessible.
+	if (object == lifecycleOwner && object->TryGetScene() == &scene)
+	{
+		return true;
+	}
+	if (object->TryGetScene())
+	{
+		return false;
+	}
+	auto root = object;
+	while (root->Parent())
+	{
+		root = root->Parent();
+	}
+	return std::find(detachedRoots.begin(), detachedRoots.end(), root) != detachedRoots.end();
+}
+
+Result<GameObject::Ptr> ManagedSceneApi::FindGameObject(ResourceId id) const
+{
+	const auto attachedObject = scene.GameObjectById(id);
+	if (attachedObject)
+	{
+		return attachedObject;
+	}
+	Vector<GameObject::Ptr> pending = detachedRoots;
+	while (!pending.empty())
+	{
+		auto object = std::move(pending.back());
+		pending.pop_back();
+		if (!Contains(object))
+		{
+			continue;
+		}
+		if (object->Id() == id)
+		{
+			return Result<GameObject::Ptr>::Success(std::move(object));
+		}
+		for (const auto& child : object->Children())
+		{
+			pending.push_back(child);
+		}
+	}
+	return Result<GameObject::Ptr>::Failure("GameObject is not present in this managed graph");
+}
+
+Result<Component*> ManagedSceneApi::FindComponent(ResourceId id) const
+{
+	const auto attachedComponent = scene.ComponentByPersistentId(id);
+	if (attachedComponent)
+	{
+		return Result<Component*>::Success(scene.GetComponent(attachedComponent.value));
+	}
+	Vector<GameObject::Ptr> pending = detachedRoots;
+	while (!pending.empty())
+	{
+		auto object = std::move(pending.back());
+		pending.pop_back();
+		if (!Contains(object))
+		{
+			continue;
+		}
+		for (auto* component : object->Components())
+		{
+			if (component->PersistentId() == id)
+			{
+				return Result<Component*>::Success(component);
+			}
+		}
+		for (const auto& child : object->Children())
+		{
+			pending.push_back(child);
+		}
+	}
+	return Result<Component*>::Failure("Component is not present in this managed graph");
 }
 } // namespace Ursa::Scripting

@@ -55,7 +55,9 @@ Result<void> ValidateSettings(const TextureImportSettings& settings)
 {
 	if (TextureTypeName(settings.type).empty() || settings.maxDimension == 0 ||
 	    settings.maxDimension > maxTextureImportDimension ||
-	    (settings.type != TextureImportType::Default && settings.sRgb))
+	    (settings.type != TextureImportType::Default && settings.sRgb) ||
+	    (settings.filter != TextureFilterMode::Point && settings.filter != TextureFilterMode::Linear) ||
+	    (settings.wrap != TextureWrapMode::Repeat && settings.wrap != TextureWrapMode::Clamp))
 	{
 		return Result<void>::Failure("Invalid texture import settings");
 	}
@@ -117,6 +119,41 @@ void NormalizeNormalMap(Vector<Ursa::UInt8>& pixels)
 		pixels[offset + 1] = static_cast<Ursa::UInt8>(std::clamp((y * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
 		pixels[offset + 2] = static_cast<Ursa::UInt8>(std::clamp((z * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
 	}
+}
+
+Result<MaterialTexturePtr> FinalizeTexture(UInt32 width, UInt32 height, Vector<UInt8> pixels,
+                                           const TextureImportSettings& settings)
+{
+	Vector<TextureMip> mipmaps;
+	if (settings.generateMipmaps)
+	{
+		Vector<Ursa::UInt8> previous = pixels;
+		Ursa::UInt32 mipWidth = width;
+		Ursa::UInt32 mipHeight = height;
+		while (mipWidth > 1 || mipHeight > 1)
+		{
+			const Ursa::UInt32 nextWidth = mipWidth > 1 ? mipWidth / 2 : 1;
+			const Ursa::UInt32 nextHeight = mipHeight > 1 ? mipHeight / 2 : 1;
+			auto resized = ResizePixels(previous, mipWidth, mipHeight, nextWidth, nextHeight, settings.sRgb);
+			if (!resized)
+			{
+				return Result<MaterialTexturePtr>::Failure(resized.error + " while generating mipmaps");
+			}
+			if (settings.type == TextureImportType::NormalMap)
+			{
+				NormalizeNormalMap(resized.value);
+			}
+			previous = resized.value;
+			mipmaps.push_back({nextWidth, nextHeight, std::move(resized.value)});
+			mipWidth = nextWidth;
+			mipHeight = nextHeight;
+		}
+	}
+	const TextureColorSpace colorSpace = settings.sRgb ? TextureColorSpace::Srgb : TextureColorSpace::Linear;
+	auto materialTexture = MaterialTexture::Create(
+	    width, height, colorSpace, std::move(pixels), std::move(mipmaps),
+	    {settings.filter == TextureFilterMode::Linear, settings.wrap == TextureWrapMode::Repeat});
+	return materialTexture ? materialTexture : Result<MaterialTexturePtr>::Failure(materialTexture.error);
 }
 
 Result<MaterialTexturePtr> DecodeTexture(const VirtualFileSystem& filesystem, const VirtualPath& source,
@@ -192,38 +229,7 @@ Result<MaterialTexturePtr> DecodeTexture(const VirtualFileSystem& filesystem, co
 		NormalizeNormalMap(pixels);
 	}
 
-	Vector<TextureMip> mipmaps;
-	if (settings.generateMipmaps)
-	{
-		Vector<Ursa::UInt8> previous = pixels;
-		Ursa::UInt32 mipWidth = width;
-		Ursa::UInt32 mipHeight = height;
-		while (mipWidth > 1 || mipHeight > 1)
-		{
-			const Ursa::UInt32 nextWidth = mipWidth > 1 ? mipWidth / 2 : 1;
-			const Ursa::UInt32 nextHeight = mipHeight > 1 ? mipHeight / 2 : 1;
-			auto resized = ResizePixels(previous, mipWidth, mipHeight, nextWidth, nextHeight, settings.sRgb);
-			if (!resized)
-			{
-				return Result<MaterialTexturePtr>::Failure(resized.error + " while generating mipmaps at " +
-				                                           source.ToString());
-			}
-			if (settings.type == TextureImportType::NormalMap)
-			{
-				NormalizeNormalMap(resized.value);
-			}
-			previous = resized.value;
-			mipmaps.push_back({nextWidth, nextHeight, std::move(resized.value)});
-			mipWidth = nextWidth;
-			mipHeight = nextHeight;
-		}
-	}
-	const TextureColorSpace colorSpace = settings.sRgb ? TextureColorSpace::Srgb : TextureColorSpace::Linear;
-	auto materialTexture = MaterialTexture::Create(
-	    width, height, colorSpace, std::move(pixels), std::move(mipmaps),
-	    {settings.filter == TextureFilterMode::Linear, settings.wrap == TextureWrapMode::Repeat});
-	return materialTexture ? materialTexture
-	                       : Result<MaterialTexturePtr>::Failure(materialTexture.error + " at " + source.ToString());
+	return FinalizeTexture(width, height, std::move(pixels), settings);
 }
 } // namespace
 
@@ -298,6 +304,35 @@ Result<MaterialTexturePtr> TextureImporter::DecodeSourceImage(const VirtualFileS
 	return DecodeTexture(filesystem, source, previewSettings);
 }
 
+Result<MaterialTexturePtr> TextureImporter::DecodeCandidate(const VirtualFileSystem& filesystem,
+                                                            const VirtualPath& source,
+                                                            const TextureImportSettings& settings)
+{
+	const auto valid = ValidateSettings(settings);
+	if (!valid)
+	{
+		return Result<MaterialTexturePtr>::Failure(valid.error);
+	}
+	auto candidateSettings = settings;
+	candidateSettings.generateMipmaps = false;
+	return DecodeTexture(filesystem, source, candidateSettings);
+}
+
+Result<MaterialTexturePtr> TextureImporter::FinalizeCandidate(const MaterialTexture& candidate,
+                                                              const TextureImportSettings& settings)
+{
+	const auto valid = ValidateSettings(settings);
+	if (!valid)
+	{
+		return Result<MaterialTexturePtr>::Failure(valid.error);
+	}
+	if (candidate.GetColorSpace() != (settings.sRgb ? TextureColorSpace::Srgb : TextureColorSpace::Linear))
+	{
+		return Result<MaterialTexturePtr>::Failure("Texture candidate color space differs from effective settings");
+	}
+	return FinalizeTexture(candidate.GetWidth(), candidate.GetHeight(), candidate.GetPixels(), settings);
+}
+
 Result<TextureImportSettings> TextureImporter::Settings(const AssetDatabase& database, const VirtualPath& source)
 {
 	auto metadata = database.Metadata(source);
@@ -368,7 +403,11 @@ Result<TextureImportResult> TextureImporter::Import(AssetDatabase& database, con
 	const ResourceId guid = metadata.value.guid;
 	if (force || !cached.value.upToDate)
 	{
-		auto decoded = DecodeTexture(database.Filesystem(), source, settings);
+		auto decoded = DecodeCandidate(database.Filesystem(), source, settings);
+		if (decoded)
+		{
+			decoded = FinalizeCandidate(*decoded.value, settings);
+		}
 		if (!decoded)
 		{
 			return Result<TextureImportResult>::Failure(decoded.error);

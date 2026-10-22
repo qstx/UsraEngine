@@ -70,7 +70,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	ImGui::EndDisabled();
 	Icons::SameLine();
-	ImGui::BeginDisabled(readOnly || selection.kind != EditorSelectionKind::Asset || !actions.renameAsset);
+	ImGui::BeginDisabled(readOnly || selection.kind != EditorSelectionKind::Asset || selection.assetLocalFileId ||
+	                     !actions.renameAsset);
 	if (Icons::Button("Rename Selected"))
 	{
 		auto renamed = RenameSelected(model, selection, actions);
@@ -272,9 +273,11 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				ImGui::BeginDisabled(!actions.renameAsset || readOnly);
 				if (Icons::MenuItem("Rename Selected"))
 				{
-					selection.SelectAsset(folder.path);
-					model.SelectAsset(folder.path);
-					renameRequested = true;
+					if (selection.SelectAsset(folder.path))
+					{
+						model.SelectAsset(folder.path);
+						renameRequested = true;
+					}
 				}
 				ImGui::EndDisabled();
 				ImGui::EndPopup();
@@ -285,7 +288,16 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	for (const ProjectBrowserEntry& asset : model.ChildAssets(currentFolder, search))
 	{
 		ImGui::PushID(asset.path.relative.c_str());
-		const bool selected = model.SelectedAsset() == asset.path;
+		bool& expanded = expandedAssets[asset.guid.ToString()];
+		if (!asset.importedObjects.empty())
+		{
+			if (ImGui::ArrowButton("##ImportedObjects", expanded ? ImGuiDir_Down : ImGuiDir_Right))
+			{
+				expanded = !expanded;
+			}
+			ImGui::SameLine();
+		}
+		const bool selected = model.SelectedAsset() == asset.path && !selection.assetLocalFileId;
 		const String label = search.empty() ? asset.name : asset.path.relative;
 		if (Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative), label.c_str(),
 		                      selected, ImGuiSelectableFlags_AllowDoubleClick))
@@ -319,13 +331,43 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				auto opened = actions.openAsset(asset);
 				diagnostic = opened ? String{} : opened.error;
 			}
-			ImGui::BeginDisabled(!actions.renameAsset || readOnly);
+			ImGui::BeginDisabled(!actions.renameAsset || readOnly || selection.kind != EditorSelectionKind::Asset ||
+			                     selection.assetPath != asset.path || selection.assetLocalFileId);
 			if (Icons::MenuItem("Rename Selected"))
 			{
 				renameRequested = true;
 			}
 			ImGui::EndDisabled();
 			ImGui::EndPopup();
+		}
+		if (expanded)
+		{
+			ImGui::Indent();
+			for (const auto& object : asset.importedObjects)
+			{
+				const String localId = ToUrsaString(std::to_string(object.localFileId));
+				ImGui::PushID(localId.c_str());
+				const String objectLabel = object.kind + " " + localId + (object.isMainObject ? " (Main)" : "");
+				if (ImGui::Selectable(objectLabel.c_str(), selection.kind == EditorSelectionKind::Asset &&
+				                                               selection.assetPath == asset.path &&
+				                                               selection.assetLocalFileId == object.localFileId))
+				{
+					if (selection.SelectAsset(asset.path, object.localFileId, object.kind))
+					{
+						model.SelectAsset(asset.path);
+						hierarchy.ClearSelection();
+					}
+				}
+				if (ImGui::BeginDragDropSource())
+				{
+					const AssetReference reference{asset.guid, object.localFileId};
+					ImGui::SetDragDropPayload("URSA_ASSET_REFERENCE", &reference, sizeof(reference));
+					ImGui::TextUnformatted(objectLabel.c_str());
+					ImGui::EndDragDropSource();
+				}
+				ImGui::PopID();
+			}
+			ImGui::Unindent();
 		}
 		ImGui::PopID();
 	}
@@ -338,7 +380,7 @@ Result<void> ProjectBrowserPanel::RenameSelected(const ProjectBrowserModel& mode
                                                  const ProjectBrowserActions& actions)
 {
 	const VirtualPath& source = model.SelectedAsset();
-	if (source.scheme.empty() || !actions.renameAsset)
+	if (source.scheme.empty() || selection.assetLocalFileId || !actions.renameAsset)
 	{
 		return Result<void>::Failure("Select a writable Project asset to rename");
 	}

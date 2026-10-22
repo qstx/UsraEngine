@@ -78,7 +78,8 @@ Result<void> SaveMaterialResource(VirtualFileSystem& filesystem, const VirtualPa
 }
 
 Result<LoadedMaterialResource> LoadMaterialResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
-                                                    const TextureResourceLoader& loadTexture)
+                                                    const TextureResourceLoader& loadTexture,
+                                                    ResourceSession* resources)
 {
 	auto document = ReadJsonResource(filesystem, path, ResourceKind::Material);
 	if (!document)
@@ -95,7 +96,7 @@ Result<LoadedMaterialResource> LoadMaterialResource(const VirtualFileSystem& fil
 	{
 		return Result<LoadedMaterialResource>::Failure(reader.error);
 	}
-	SerializationContext context;
+	SerializationContext context(resources);
 	auto loader = loadTexture;
 	context.Provide(loader);
 	auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);

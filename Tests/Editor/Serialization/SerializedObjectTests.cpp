@@ -1,4 +1,5 @@
 #include <Serialization/SerializedObject.hpp>
+#include <Assets/ImportSettingsDraft.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
@@ -35,12 +36,74 @@ void Done(Result<void> result)
 		throw std::runtime_error(ToStdString(result.error));
 	}
 }
+
+void ImporterAdapter()
+{
+	VirtualFileSystem files;
+	Done(files.MountProvider(projectScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	Done(files.MountProvider(editorLibraryScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	const auto path = Take(VirtualPath::Parse("prj:Example.settings"));
+	Done(files.WriteAtomic(path, {1}));
+	auto database = Take(AssetDatabase::Open(files));
+	Done(database->Refresh());
+	using Json = nlohmann::json;
+	const Json defaults{{"quality", 1}, {"tags", Json::array({"first"})}, {"source", nullptr}};
+	auto draft = Take(ImportSettingsDraft::Open(*database, path, {"test.Settings", 1, {"settings"}}, defaults));
+	const auto metadata = Take(files.Read(Take(VirtualPath::Parse("prj:Example.settings.meta"))));
+	const Json schema{{"quality", {{"Kind", "SignedInteger"}, {"ElementKind", "Unsupported"}, {"TypeName", "int"}}},
+	                  {"tags", {{"Kind", "Array"}, {"ElementKind", "String"}, {"ElementTypeName", "string"}}},
+	                  {"source", {{"Kind", "AssetReference"}, {"ElementKind", "Unsupported"}}}};
+	bool alive = true;
+	const auto capture = [&]() -> Result<Json>
+	{
+		return alive ? Result<Json>::Success({{"Fields", draft.Settings()}, {"FieldTypes", schema}})
+		             : Result<Json>::Failure("Importer target belongs to a closed callback");
+	};
+	auto resources = Take(ResourceSession::Open(files));
+	SerializedTargetAdapter adapter;
+	adapter.capture = capture;
+	adapter.apply = [&](const Json& payload) -> Result<Json>
+	{
+		const auto edited = draft.Edit(payload.at("Fields"));
+		return edited ? capture() : Result<Json>::Failure(edited.error);
+	};
+	adapter.resources = resources.get();
+	auto properties = Take(SerializedObject::Create(adapter));
+	Done(Take(properties->FindProperty("/Fields/quality")).SetValue(2));
+	Done(Take(properties->FindProperty("/Fields/tags")).SetValue(Json::array({"first", "second"})));
+	Done(properties->Apply());
+	Expect(draft.HasModified() && draft.Settings()["quality"] == 2 && draft.Settings()["tags"].size() == 2 &&
+	           Take(files.Read(Take(VirtualPath::Parse("prj:Example.settings.meta")))) == metadata,
+	       "Property Apply wrote importer metadata instead of the settings draft");
+	Done(draft.Revert());
+	Done(properties->Update());
+	Expect(Take(Take(properties->FindProperty("/Fields/quality")).Value()) == 1,
+	       "Revert did not refresh the unified property snapshot");
+	Done(Take(properties->FindProperty("/Fields/quality")).SetValue(3));
+	Done(Take(properties->FindProperty("/Fields/source"))
+	         .SetValue(Json{{"guid", ToStdString(ResourceId::Generate().ToString())}, {"localFileId", UInt64(0)}}));
+	Expect(!properties->Apply() && !draft.HasModified(),
+	       "Invalid asset reference partially applied an importer field transaction");
+	Done(properties->Update());
+	Done(Take(properties->FindProperty("/Fields/quality")).SetValue(4));
+	Done(draft.Edit(Json{{"quality", 5}, {"tags", Json::array({"external"})}, {"source", nullptr}}));
+	Expect(!properties->Apply() && draft.Settings()["quality"] == 5,
+	       "An old property snapshot overwrote a changed importer draft");
+	Done(properties->Update());
+	adapter.apply = {};
+	auto readOnly = Take(SerializedObject::Create(adapter));
+	Done(Take(readOnly->FindProperty("/Fields/quality")).SetValue(6));
+	Expect(!readOnly->Apply() && draft.Settings()["quality"] == 5, "A read-only source adapter accepted writes");
+	alive = false;
+	Expect(!properties->Update() && !readOnly->Apply(), "An expired asset target accepted property operations");
+}
 } // namespace
 
 int main()
 {
 	try
 	{
+		ImporterAdapter();
 		Scripting::ScriptBehaviourComponent component("Demo.Movement");
 		nlohmann::json payload = {
 		    {"FormatVersion", 1u},

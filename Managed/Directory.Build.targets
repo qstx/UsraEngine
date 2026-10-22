@@ -12,6 +12,8 @@
     <UrsaBindingInputs Include="$(UrsaBindingsSourceDir)/**/*.cs;$(UrsaBindingsSourceDir)/**/*.csproj;$(MSBuildThisFileFullPath)"
       Exclude="$(UrsaBindingsSourceDir)/**/bin/**;$(UrsaBindingsSourceDir)/**/obj/**;$(UrsaBindingsSourceDir)/**/Generated/**" />
     <Compile Include="$(UrsaBindingsGeneratedDir)/Managed/$(UrsaBindingModule).g.cs" Link="Generated/$(UrsaBindingModule).g.cs" />
+    <Compile Include="$(UrsaBindingsGeneratedDir)/Managed/Import.g.cs" Link="Generated/Import.g.cs"
+      Condition="'$(MSBuildProjectName)' == 'Ursa.Runtime'" />
   </ItemGroup>
   <Target Name="UrsaGenerateBindings" BeforeTargets="CoreCompile" Condition="'$(UrsaUsesBindings)' == 'true'"
     Inputs="@(UrsaBindingInputs)" Outputs="$(UrsaBindingsGeneratedDir)/Generated.stamp">

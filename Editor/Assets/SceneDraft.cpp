@@ -128,7 +128,7 @@ Result<GameObject::Ptr> SceneDraft::InstantiateModel(ResourceId modelGuid, const
                                                      bool initializeAnimation)
 {
 	if (!modelGuid || !modelDocument.is_object() || modelDocument.value("format", std::string{}) != "UrsaModel" ||
-	    modelDocument.value("version", Ursa::UInt32{0}) != 1 || !modelDocument.contains("nodes") ||
+	    modelDocument.value("version", Ursa::UInt32{0}) != 2 || !modelDocument.contains("nodes") ||
 	    !modelDocument["nodes"].is_array())
 	{
 		return Result<GameObject::Ptr>::Failure("Cannot instantiate an invalid imported model document");
@@ -276,21 +276,27 @@ Result<GameObject::Ptr> SceneDraft::InstantiateModel(ResourceId modelGuid, const
 					}
 					renderer = added.value;
 				}
-				std::shared_ptr<MaterialInstance> material;
+				Vector<std::shared_ptr<MaterialInstance>> materials;
 				const std::string bindingKey = std::to_string(meshLocalFileId);
-				if (modelDocument.contains("meshMaterialBindings") &&
-				    modelDocument["meshMaterialBindings"].contains(bindingKey) &&
-				    !modelDocument["meshMaterialBindings"][bindingKey].is_null())
+				if (modelDocument.at("meshMaterialBindings").contains(bindingKey))
 				{
-					auto loaded = resources.LoadMaterial(
-					    modelGuid, modelDocument["meshMaterialBindings"][bindingKey].get<UInt64>());
-					if (!loaded)
+					for (const auto& slot : modelDocument.at("meshMaterialBindings").at(bindingKey))
 					{
-						return Result<GameObject::Ptr>::Failure(loaded.error);
+						const auto materialId = slot.get<UInt64>();
+						if (!materialId)
+						{
+							materials.push_back(nullptr);
+							continue;
+						}
+						auto loaded = resources.LoadMaterial(modelGuid, materialId);
+						if (!loaded)
+						{
+							return Result<GameObject::Ptr>::Failure(loaded.error);
+						}
+						materials.push_back(std::move(loaded.value));
 					}
-					material = std::move(loaded.value);
 				}
-				auto assigned = renderer->SetSharedMaterial(std::move(material));
+				auto assigned = renderer->SetSharedMaterials(std::move(materials));
 				if (!assigned)
 				{
 					return Result<GameObject::Ptr>::Failure(assigned.error);

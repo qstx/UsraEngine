@@ -212,6 +212,10 @@ nlohmann::json ReadArtifact(const VirtualFileSystem& filesystem, const VirtualPa
 		Expect(bytes.value.size() >= 48, "Truncated Mesh artifact");
 		return nlohmann::json::from_cbor(bytes.value.begin() + 48, bytes.value.end()).at("data");
 	}
+	if (PathFromUrsaString(path.relative).extension() == ".ursamat")
+	{
+		return nlohmann::json::parse(bytes.value.begin(), bytes.value.end());
+	}
 	return nlohmann::json::from_cbor(bytes.value.begin(), bytes.value.end());
 }
 
@@ -242,7 +246,7 @@ void TestProvidedFbx(const std::filesystem::path& root)
 	auto imported = ModelImporter::Import(*database.value, source, ModelImportSettings{});
 	Expect(static_cast<bool>(imported), imported ? "" : ToStdString(imported.error).c_str());
 	const auto model = ReadArtifact(filesystem, imported.value.artifactPath);
-	Expect(model.value("format", std::string{}) == "UrsaModel" && model.value("version", 0) == 1,
+	Expect(model.value("format", std::string{}) == "UrsaModel" && model.value("version", 0) == 2,
 	       "FBX importer did not write the versioned UrsaModel document");
 	Expect(model.contains("nodes") && model["nodes"].is_array() && !model["nodes"].empty() &&
 	           model.contains("meshLocalFileIds") && model["meshLocalFileIds"].is_array() &&
@@ -260,7 +264,7 @@ void TestProvidedFbx(const std::filesystem::path& root)
 	       "FBX import did not reuse its stable imported sub-assets");
 	for (const ImportedArtifactLocation& subAsset : imported.value.subAssets)
 	{
-		if (subAsset.localFileId == 0)
+		if (subAsset.localFileId == imported.value.mainObjectLocalFileId)
 		{
 			continue;
 		}
@@ -392,7 +396,7 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	auto meshPath = database.value->Resolve(imported.value.guid, meshId);
 	Expect(static_cast<bool>(meshPath), "Imported OBJ mesh did not resolve as a sub-asset");
 	const auto mesh = ReadArtifact(filesystem, meshPath.value);
-	Expect(model["meshMaterialBindings"][std::to_string(meshId)] == materialId && mesh["vertexCount"] >= 3 &&
+	Expect(model["meshMaterialBindings"][std::to_string(meshId)][0] == materialId && mesh["vertexCount"] >= 3 &&
 	           mesh["indices"].get_binary().size() == 12,
 	       "OBJ mesh did not preserve its material assignment and triangle geometry");
 	AssetDatabase* assetDatabase = database.value.get();

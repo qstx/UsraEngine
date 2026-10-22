@@ -10,6 +10,13 @@ namespace Ursa::Scripting::Bindings
 {
 namespace
 {
+ManagedSceneApi& RenderApi(BindingCall& call)
+{
+	auto& api = RuntimeServices::SceneApi(call);
+	api.RequireRendering();
+	return api;
+}
+
 Ursa::Rendering::RenderContextToken ReadToken(const RenderingServices::Token& token)
 {
 	return {token.F_sessionId, token.F_frameId, token.F_index, token.F_generation};
@@ -76,7 +83,7 @@ const Ursa::Rendering::CameraData& RenderingServices::FindCamera(ManagedSceneApi
 
 Result<RenderingServices::Token> RenderingServices::Begin(BindingCall& call, UInt64 frameId, Float32 aspect)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	if (api.activeRenderToken || !frameId || !std::isfinite(aspect) || aspect <= 0)
 	{
 		return Result<Token>::Failure("Render begin requires a closed frame, a frame ID and a positive finite aspect");
@@ -130,7 +137,7 @@ Result<void> RenderingServices::Abort(BindingCall& call, const Token& token)
 
 Result<void> RenderingServices::Finish(BindingCall& call, const Token& token, bool abort)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	ValidateActive(api, token);
 	String error;
 	if (api.renderExecutor)
@@ -163,14 +170,14 @@ Result<void> RenderingServices::Finish(BindingCall& call, const Token& token, bo
 
 Result<void> RenderingServices::Submit(BindingCall& call, const Token& token)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	ValidateActive(api, token);
 	return api.renderExecutor ? api.renderExecutor->Submit() : Result<void>{};
 }
 
 Result<DataView> RenderingServices::Cameras(BindingCall& call, const Token& token)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	ValidateActive(api, token);
 	return Result<DataView>::Success(WriteArray<CameraFrame>(
 	    call.arena, api.renderScene.Cameras(), [&](const auto& value) { return WriteCamera(call, api, value); }));
@@ -179,7 +186,7 @@ Result<DataView> RenderingServices::Cameras(BindingCall& call, const Token& toke
 Result<RenderingServices::CameraFrame> RenderingServices::SetupCamera(BindingCall& call, const Token& token,
                                                                       const Utf8View& identity)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	ValidateActive(api, token);
 	const auto& camera = FindCamera(api, identity);
 	if (api.renderExecutor)
@@ -193,7 +200,7 @@ Result<RenderingServices::CameraFrame> RenderingServices::SetupCamera(BindingCal
 Result<RenderingServices::RenderResult> RenderingServices::Cull(BindingCall& call, const Token& token,
                                                                 const Utf8View& identity)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	ValidateActive(api, token);
 	const auto& camera = FindCamera(api, identity);
 	if (!api.activeRenderCamera.empty() && api.activeRenderCamera != camera.identity.ToString())
@@ -209,7 +216,7 @@ Result<RenderingServices::RenderResult> RenderingServices::CreateRendererList(Bi
                                                                               const Drawing& drawing,
                                                                               const Filtering& filtering)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	ValidateActive(api, token);
 	if (drawing.F_Sorting > UInt32(Ursa::Rendering::SortingCriteria::CommonTransparent))
 	{
@@ -252,7 +259,7 @@ Result<RenderingServices::RenderResult> RenderingServices::CreateRendererList(Bi
 
 Result<void> RenderingServices::EnqueueBatch(BindingCall& call, const Token& token, const DataView& batch)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	ValidateActive(api, token);
 	const auto result = api.ExecuteRenderBatch(static_cast<const UInt8*>(batch.data), Size(batch.length));
 	if (result)
@@ -265,7 +272,7 @@ Result<void> RenderingServices::EnqueueBatch(BindingCall& call, const Token& tok
 Result<RenderingServices::Handle> RenderingServices::CreateRenderTexture(BindingCall& call,
                                                                          const TextureDescription& descriptor)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	if (!api.device)
 	{
 		return Result<Handle>::Failure("RenderTexture creation requires an active RHI device");
@@ -280,7 +287,7 @@ Result<RenderingServices::Handle> RenderingServices::CreateRenderTexture(Binding
 
 Result<void> RenderingServices::ReleaseRenderTexture(BindingCall& call, const Handle& texture)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	TakeBindingResult(api.ResolveRenderTexture(ReadManagedHandle(texture)));
 	CompleteBindingResult(api.handles->Invalidate(ReadManagedHandle(texture)));
 	api.ownedRenderTextures.erase(texture.F_index);
@@ -289,7 +296,7 @@ Result<void> RenderingServices::ReleaseRenderTexture(BindingCall& call, const Ha
 
 Result<DataView> RenderingServices::ReadRenderTexture(BindingCall& call, const Handle& texture)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	if (api.activeRenderToken || !api.device)
 	{
 		return Result<DataView>::Failure("RenderTexture readback requires a device and a finished render context");
@@ -302,7 +309,7 @@ Result<DataView> RenderingServices::ReadRenderTexture(BindingCall& call, const H
 Result<RenderingServices::Handle> RenderingServices::CreateGraphicsBuffer(BindingCall& call, UInt32 target,
                                                                           UInt32 count, UInt32 stride)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	if (!api.device)
 	{
 		return Result<Handle>::Failure("GraphicsBuffer creation requires an active RHI device");
@@ -315,7 +322,7 @@ Result<RenderingServices::Handle> RenderingServices::CreateGraphicsBuffer(Bindin
 
 Result<void> RenderingServices::ReleaseGraphicsBuffer(BindingCall& call, const Handle& buffer)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	TakeBindingResult(api.ResolveGraphicsBuffer(ReadManagedHandle(buffer)));
 	CompleteBindingResult(api.handles->Invalidate(ReadManagedHandle(buffer)));
 	api.ownedGraphicsBuffers.erase(buffer.F_index);
@@ -325,7 +332,7 @@ Result<void> RenderingServices::ReleaseGraphicsBuffer(BindingCall& call, const H
 Result<DataView> RenderingServices::ReadGraphicsBuffer(BindingCall& call, const Handle& buffer, UInt64 offset,
                                                        UInt64 size)
 {
-	auto& api = RuntimeServices::SceneApi(call);
+	auto& api = RenderApi(call);
 	if (api.activeRenderToken || !api.device || offset > std::numeric_limits<Size>::max() ||
 	    size > std::numeric_limits<Size>::max())
 	{

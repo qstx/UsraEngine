@@ -14,6 +14,8 @@ internal sealed class ScriptableAssetGraph : IDisposable
 	private readonly List<ScriptableObject> owned = new();
 	private readonly List<Action> releaseLeases = new();
 	private bool disposed;
+	internal AssetReference Root { get; private set; }
+	internal IEnumerable<ScriptableObject> Instances => instances.Values;
 
 	internal static ScriptableAssetGraph Load(IReadOnlyList<ScriptableAssetData> data, Func<ScriptableAssetData, Type> resolveType)
 	{
@@ -32,6 +34,7 @@ internal sealed class ScriptableAssetGraph : IDisposable
 		ScriptableObjectRegistry.RequireThread();
 		if (data.Count > 4096) throw new InvalidOperationException("ScriptableObject graph exceeds its asset budget.");
 		var graph = new ScriptableAssetGraph();
+		if (data.Count != 0) graph.Root = data[0].Reference;
 		try
 		{
 			// Establish every asset identity before restoring references, including cycles.

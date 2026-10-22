@@ -23,3 +23,26 @@ internal struct EditorExtensionInfo
 	public string Target;
 	public string Title;
 }
+
+[WireValue]
+public struct Rect
+{
+	public float X;
+	public float Y;
+	public float Width;
+	public float Height;
+	public Rect(float x, float y, float width, float height) { X = x; Y = y; Width = width; Height = height; }
+}
+
+[WireValue]
+internal enum EditorPreviewPhase : uint { Query, Settings, Draw, Release, Inspector }
+
+[WireValue]
+internal struct EditorPreviewResult
+{
+	public bool Success;
+	public bool HasPreview;
+	public bool ConstantRepaint;
+	public string Info;
+	public string Diagnostic;
+}

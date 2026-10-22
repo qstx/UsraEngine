@@ -1,6 +1,7 @@
 #include <ResourceFixtures.hpp>
 #include <Core/Types.hpp>
 #include <Assets/MaterialDraft.hpp>
+#include <Assets/NativeAssetInspector.hpp>
 #include <Assets/MaterialPreview.hpp>
 #include <Rendering/Scene/RenderScene.hpp>
 #include <Rendering/Pipeline/NativeForwardPipeline.hpp>
@@ -165,6 +166,39 @@ int main()
 		done(readback->Read(0, pixels.data(), pixels.size()));
 		const Ursa::Size center = (32 * 64 + 32) * 4;
 		Expect(pixels[center] > 30 || pixels[center + 1] > 30, "Material 3D preview did not render the cube");
+		auto sourceInspector =
+		    Take(Editor::NativeAssetInspector::Open(*workspace, Take(VirtualPath::Parse("prj:first.ursamat")),
+		                                            ResourceKind::Material, nullptr, documents.get()));
+		Expect(sourceInspector->OwnsDocument() && documents->Current()->Id() == secondId,
+		       "Selecting another material reused the active material document");
+		const auto untouchedSecond = bytes(secondPath);
+		auto sourceProperties = Take(Editor::SerializedObject::Create(sourceInspector->Properties()));
+		done(Take(sourceProperties->FindProperty("/Fields/_BaseColor")).SetValue({0.25, 0.5, 0.75, 1.0}));
+		done(sourceProperties->Apply());
+		sourceInspector->Document().MarkDirty();
+		Expect(bytes(firstPath) == firstBytes && bytes(secondPath) == untouchedSecond && !documents->Current()->Dirty(),
+		       "Source material fields wrote files or dirtied another document before Save");
+		done(sourceInspector->Save());
+		auto sourceReopened = Take(Editor::NativeAssetInspector::Open(
+		    *workspace, Take(VirtualPath::Parse("prj:first.ursamat")), ResourceKind::Material));
+		Expect(sourceReopened->Document().Id() == firstId &&
+		           sourceReopened->Document().Payload<Editor::MaterialDraft>()->Material().Parameters().baseColor.red ==
+		               0.25f &&
+		           bytes(secondPath) == untouchedSecond,
+		       "Isolated material source Save lost the target identity or changed the other material");
+		auto sharedInspector =
+		    Take(Editor::NativeAssetInspector::Open(*workspace, Take(VirtualPath::Parse("prj:second.ursamat")),
+		                                            ResourceKind::Material, nullptr, documents.get()));
+		Expect(!sharedInspector->OwnsDocument() && &sharedInspector->Document() == documents->Current(),
+		       "The selected material source forked the already open draft");
+		auto sharedProperties = Take(Editor::SerializedObject::Create(sharedInspector->Properties()));
+		done(Take(sharedProperties->FindProperty("/Fields/_Roughness")).SetValue(0.6));
+		done(sharedProperties->Apply());
+		sharedInspector->Document().MarkDirty();
+		done(sharedInspector->Save());
+		Expect(documents->Current()->Payload<Editor::MaterialDraft>()->Material().Parameters().roughness == 0.6f &&
+		           !documents->Current()->Dirty(),
+		       "Shared material source Save diverged from its open document");
 		done(device->WaitIdle());
 		preview.reset();
 		gui.reset();

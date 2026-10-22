@@ -33,6 +33,23 @@ Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 	const String previousFolder = currentFolder;
 	const VirtualPath previousSelection = selectedAsset;
 	Map<String, ResourceKind> kindsByPath;
+	Map<String, ResourceKind> importedKinds;
+	Map<String, Vector<ImportedArtifactRecord>> importedObjects;
+	if (const auto* database = workspace.Database())
+	{
+		for (const auto& artifact : database->ImportedArtifacts())
+		{
+			importedObjects[artifact.guid.ToString()].push_back(artifact);
+			if (artifact.isMainObject)
+			{
+				auto kind = ResourceKindForPath(artifact.path);
+				if (kind)
+				{
+					importedKinds[artifact.guid.ToString()] = kind.value;
+				}
+			}
+		}
+	}
 	for (const ResourceEntry& resource : workspace.Resources())
 	{
 		if (resource.location.path.scheme == projectResourceScheme)
@@ -50,6 +67,11 @@ Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 		entry.name = FileName(asset.path.relative);
 		entry.folder = asset.metadata.folder;
 		entry.importer = asset.metadata.importer;
+		const auto objects = importedObjects.find(entry.guid.ToString());
+		if (objects != importedObjects.end())
+		{
+			entry.importedObjects = objects->second;
+		}
 		const auto kind = kindsByPath.find(asset.path.relative);
 		if (kind != kindsByPath.end())
 		{
@@ -57,8 +79,13 @@ Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 		}
 		else if (!entry.folder)
 		{
+			const auto imported = importedKinds.find(entry.guid.ToString());
 			auto inferred = ResourceKindForPath(asset.path);
-			if (inferred)
+			if (imported != importedKinds.end())
+			{
+				entry.kind = imported->second;
+			}
+			else if (inferred)
 			{
 				entry.kind = inferred.value;
 			}

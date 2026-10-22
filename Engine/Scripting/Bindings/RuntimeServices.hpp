@@ -24,6 +24,7 @@ struct RuntimeServices
 	static Result<bool> GetActive(BindingCall& call, const Handle& handle);
 	static Result<void> SetActive(BindingCall& call, const Handle& handle, bool active);
 	static Result<Handle> GetParent(BindingCall& call, const Handle& handle);
+	static Result<DataView> GetChildren(BindingCall& call, const Handle& handle);
 	static Result<void> SetParent(BindingCall& call, const Handle& handle, const Handle& parent);
 	static Result<void> DestroyGameObject(BindingCall& call, const Handle& handle);
 	static Result<Int32> GetLayer(BindingCall& call, const Handle& handle);

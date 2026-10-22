@@ -68,6 +68,8 @@ struct Table
 	Int32 (*NativeResourceBindings_GetComputeThreadGroupSize)(void*, const Wire::Value_Ursa_NativeAssetReference*, Int32, Wire::Value_Ursa_ComputeThreadGroupSize*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_GetMaterialBindings)(void*, const Wire::Value_Ursa_NativeHandle*, UInt32, UInt32, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_GetMeshBinding)(void*, const Wire::Value_Ursa_NativeHandle*, UInt32, Wire::Value_Ursa_NativeHandle_*, BindingOutcome*) = nullptr;
+	Int32 (*NativeResourceBindings_GetTextureInfo)(void*, const Wire::Value_Ursa_NativeHandle*, Wire::Value_Ursa_Texture2DInfo*, BindingOutcome*) = nullptr;
+	Int32 (*NativeResourceBindings_GetTexturePixels)(void*, const Wire::Value_Ursa_NativeHandle*, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_IsValid)(void*, const Wire::Value_Ursa_NativeHandle*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_LoadTexture)(void*, const Wire::Value_Ursa_NativeAssetReference*, Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_SetMaterialBindings)(void*, const Wire::Value_Ursa_NativeHandle*, const DataView*, UInt32, UInt32, BindingOutcome*) = nullptr;
@@ -80,6 +82,7 @@ struct Table
 	Int32 (*NativeRuntimeBindings_GetActive)(void*, const Wire::Value_Ursa_NativeHandle*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRuntimeBindings_GetCameraProjection)(void*, const Wire::Value_Ursa_NativeHandle*, Wire::Value_Ursa_CameraProjection*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRuntimeBindings_GetCameraRenderingSettings)(void*, const Wire::Value_Ursa_NativeHandle*, Wire::Value_Ursa_CameraRenderingSettings*, BindingOutcome*) = nullptr;
+	Int32 (*NativeRuntimeBindings_GetChildren)(void*, const Wire::Value_Ursa_NativeHandle*, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRuntimeBindings_GetComponentEnabled)(void*, const Wire::Value_Ursa_NativeHandle*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRuntimeBindings_GetComponentOwner)(void*, const Wire::Value_Ursa_NativeHandle*, Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRuntimeBindings_GetComponentPersistentId)(void*, const Wire::Value_Ursa_NativeHandle*, Utf8View*, BindingOutcome*) = nullptr;
@@ -1008,8 +1011,8 @@ inline Int32 NativeMeshBindings_SetVertices(void* context, const Wire::Value_Urs
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:92
-#line 92 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:96
+#line 96 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_FindComputeKernel(void* context, const Wire::Value_Ursa_NativeAssetReference* p_reference, const Utf8View* p_name, Int32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1026,8 +1029,8 @@ inline Int32 NativeResourceBindings_FindComputeKernel(void* context, const Wire:
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:94
-#line 94 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:98
+#line 98 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_GetComputeThreadGroupSize(void* context, const Wire::Value_Ursa_NativeAssetReference* p_reference, Int32 p_kernel, Wire::Value_Ursa_ComputeThreadGroupSize* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1043,8 +1046,8 @@ inline Int32 NativeResourceBindings_GetComputeThreadGroupSize(void* context, con
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:88
-#line 88 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:92
+#line 92 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_GetMaterialBindings(void* context, const Wire::Value_Ursa_NativeHandle* p_component, UInt32 p_instance, UInt32 p_first, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1063,8 +1066,8 @@ inline Int32 NativeResourceBindings_GetMaterialBindings(void* context, const Wir
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:84
-#line 84 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:88
+#line 88 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_GetMeshBinding(void* context, const Wire::Value_Ursa_NativeHandle* p_component, UInt32 p_instance, Wire::Value_Ursa_NativeHandle_* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1083,6 +1086,41 @@ inline Int32 NativeResourceBindings_GetMeshBinding(void* context, const Wire::Va
 #line 1 "Runtime.generated.hpp"
 // Contract: Ursa.Runtime/Resources.bindings.cs:82
 #line 82 "Ursa.Runtime/Resources.bindings.cs"
+inline Int32 NativeResourceBindings_GetTextureInfo(void* context, const Wire::Value_Ursa_NativeHandle* p_texture, Wire::Value_Ursa_Texture2DInfo* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!p_texture) throw std::runtime_error("Null binding parameter: texture");
+		Check_Wire_72d28399c87ede76(*p_texture);
+		call.context.CheckHandle(p_texture, sizeof(*p_texture), 3);
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<Wire::Value_Ursa_Texture2DInfo> (*)(BindingCall&, const Wire::Value_Ursa_NativeHandle&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::ResourceServices::GetTextureInfo), TargetSignature>, "Native binding target signature mismatch: Ursa.NativeResourceBindings.GetTextureInfo");
+		*result = TakeBindingResult(::Ursa::Scripting::Bindings::ResourceServices::GetTextureInfo(call, *p_texture));
+		Check_Wire_6c05691152a6e167(*result);
+	});
+}
+#line 1 "Runtime.generated.hpp"
+// Contract: Ursa.Runtime/Resources.bindings.cs:84
+#line 84 "Ursa.Runtime/Resources.bindings.cs"
+inline Int32 NativeResourceBindings_GetTexturePixels(void* context, const Wire::Value_Ursa_NativeHandle* p_texture, DataView* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!p_texture) throw std::runtime_error("Null binding parameter: texture");
+		Check_Wire_72d28399c87ede76(*p_texture);
+		call.context.CheckHandle(p_texture, sizeof(*p_texture), 3);
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<DataView> (*)(BindingCall&, const Wire::Value_Ursa_NativeHandle&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::ResourceServices::GetTexturePixels), TargetSignature>, "Native binding target signature mismatch: Ursa.NativeResourceBindings.GetTexturePixels");
+		*result = TakeBindingResult(::Ursa::Scripting::Bindings::ResourceServices::GetTexturePixels(call, *p_texture));
+		CheckOwned_Wire_0dd50d3c9bea593d(*result, call.arena);
+		Check_Wire_0dd50d3c9bea593d(*result);
+	});
+}
+#line 1 "Runtime.generated.hpp"
+// Contract: Ursa.Runtime/Resources.bindings.cs:86
+#line 86 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_IsValid(void* context, const Wire::Value_Ursa_NativeHandle* p_resource, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1113,8 +1151,8 @@ inline Int32 NativeResourceBindings_LoadTexture(void* context, const Wire::Value
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:90
-#line 90 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:94
+#line 94 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_SetMaterialBindings(void* context, const Wire::Value_Ursa_NativeHandle* p_component, const DataView* p_materials, UInt32 p_shared, UInt32 p_first, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1132,8 +1170,8 @@ inline Int32 NativeResourceBindings_SetMaterialBindings(void* context, const Wir
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:86
-#line 86 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:90
+#line 90 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_SetMeshBinding(void* context, const Wire::Value_Ursa_NativeHandle* p_component, const Wire::Value_Ursa_NativeHandle_* p_mesh, UInt32 p_instance, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1150,8 +1188,8 @@ inline Int32 NativeResourceBindings_SetMeshBinding(void* context, const Wire::Va
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:53
-#line 53 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:55
+#line 55 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_AddBehaviour(void* context, const Wire::Value_Ursa_NativeHandle* p_owner, const Utf8View* p_typeName, UInt64 p_token, Wire::Value_Ursa_NativeHandle* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1170,8 +1208,8 @@ inline Int32 NativeRuntimeBindings_AddBehaviour(void* context, const Wire::Value
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:37
-#line 37 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:39
+#line 39 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_AddComponent(void* context, const Wire::Value_Ursa_NativeHandle* p_owner, const Utf8View* p_typeId, Wire::Value_Ursa_NativeHandle* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1205,8 +1243,8 @@ inline Int32 NativeRuntimeBindings_CreateGameObject(void* context, const Utf8Vie
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:30
-#line 30 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:32
+#line 32 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_CreatePrimitive(void* context, Int32 p_type, Wire::Value_Ursa_NativeHandle* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1220,8 +1258,8 @@ inline Int32 NativeRuntimeBindings_CreatePrimitive(void* context, Int32 p_type, 
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:24
-#line 24 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:26
+#line 26 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_DestroyGameObject(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1252,8 +1290,8 @@ inline Int32 NativeRuntimeBindings_GetActive(void* context, const Wire::Value_Ur
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:68
-#line 68 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:70
+#line 70 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetCameraProjection(void* context, const Wire::Value_Ursa_NativeHandle* p_camera, Wire::Value_Ursa_CameraProjection* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1269,8 +1307,8 @@ inline Int32 NativeRuntimeBindings_GetCameraProjection(void* context, const Wire
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:72
-#line 72 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:74
+#line 74 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetCameraRenderingSettings(void* context, const Wire::Value_Ursa_NativeHandle* p_camera, Wire::Value_Ursa_CameraRenderingSettings* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1286,8 +1324,26 @@ inline Int32 NativeRuntimeBindings_GetCameraRenderingSettings(void* context, con
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:45
-#line 45 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:22
+#line 22 "Ursa.Runtime/NativeRuntime.bindings.cs"
+inline Int32 NativeRuntimeBindings_GetChildren(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, DataView* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!p_handle) throw std::runtime_error("Null binding parameter: handle");
+		Check_Wire_72d28399c87ede76(*p_handle);
+		call.context.CheckHandle(p_handle, sizeof(*p_handle), 1);
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<DataView> (*)(BindingCall&, const Wire::Value_Ursa_NativeHandle&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::RuntimeServices::GetChildren), TargetSignature>, "Native binding target signature mismatch: Ursa.NativeRuntimeBindings.GetChildren");
+		*result = TakeBindingResult(::Ursa::Scripting::Bindings::RuntimeServices::GetChildren(call, *p_handle));
+		CheckOwned_Wire_16c806ee9cbf244f(*result, call.arena);
+		Check_Wire_16c806ee9cbf244f(*result);
+	});
+}
+#line 1 "Runtime.generated.hpp"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:47
+#line 47 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetComponentEnabled(void* context, const Wire::Value_Ursa_NativeHandle* p_component, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1303,8 +1359,8 @@ inline Int32 NativeRuntimeBindings_GetComponentEnabled(void* context, const Wire
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:43
-#line 43 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:45
+#line 45 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetComponentOwner(void* context, const Wire::Value_Ursa_NativeHandle* p_component, Wire::Value_Ursa_NativeHandle* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1320,8 +1376,8 @@ inline Int32 NativeRuntimeBindings_GetComponentOwner(void* context, const Wire::
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:55
-#line 55 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:57
+#line 57 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetComponentPersistentId(void* context, const Wire::Value_Ursa_NativeHandle* p_component, Utf8View* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1338,8 +1394,8 @@ inline Int32 NativeRuntimeBindings_GetComponentPersistentId(void* context, const
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:41
-#line 41 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:43
+#line 43 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetComponentType(void* context, const Wire::Value_Ursa_NativeHandle* p_component, Utf8View* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1356,8 +1412,8 @@ inline Int32 NativeRuntimeBindings_GetComponentType(void* context, const Wire::V
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:39
-#line 39 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:41
+#line 41 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetComponents(void* context, const Wire::Value_Ursa_NativeHandle* p_owner, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1374,8 +1430,8 @@ inline Int32 NativeRuntimeBindings_GetComponents(void* context, const Wire::Valu
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:32
-#line 32 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:34
+#line 34 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetGameObjectPersistentId(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, Utf8View* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1392,8 +1448,8 @@ inline Int32 NativeRuntimeBindings_GetGameObjectPersistentId(void* context, cons
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:77
-#line 77 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:79
+#line 79 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetKey(void* context, UInt32 p_key, UInt32 p_phase, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1408,8 +1464,8 @@ inline Int32 NativeRuntimeBindings_GetKey(void* context, UInt32 p_key, UInt32 p_
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:26
-#line 26 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:28
+#line 28 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetLayer(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, Int32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1425,8 +1481,8 @@ inline Int32 NativeRuntimeBindings_GetLayer(void* context, const Wire::Value_Urs
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:60
-#line 60 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:62
+#line 62 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetLocalTransform(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, Wire::Value_Ursa_LocalTransformValue* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1477,8 +1533,8 @@ inline Int32 NativeRuntimeBindings_GetParent(void* context, const Wire::Value_Ur
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:79
-#line 79 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:81
+#line 81 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetTime(void* context, Wire::Value_Ursa_TimeState* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1491,8 +1547,8 @@ inline Int32 NativeRuntimeBindings_GetTime(void* context, Wire::Value_Ursa_TimeS
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:64
-#line 64 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:66
+#line 66 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_GetWorldPosition(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, Wire::Value_Ursa_Vector3* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1508,8 +1564,8 @@ inline Int32 NativeRuntimeBindings_GetWorldPosition(void* context, const Wire::V
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:49
-#line 49 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:51
+#line 51 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_IsComponentActive(void* context, const Wire::Value_Ursa_NativeHandle* p_component, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1525,8 +1581,8 @@ inline Int32 NativeRuntimeBindings_IsComponentActive(void* context, const Wire::
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:85
-#line 85 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:87
+#line 87 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_ReadFile(void* context, const Utf8View* p_path, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1542,8 +1598,8 @@ inline Int32 NativeRuntimeBindings_ReadFile(void* context, const Utf8View* p_pat
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:51
-#line 51 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:53
+#line 53 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_RemoveComponent(void* context, const Wire::Value_Ursa_NativeHandle* p_component, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1557,8 +1613,8 @@ inline Int32 NativeRuntimeBindings_RemoveComponent(void* context, const Wire::Va
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:83
-#line 83 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:85
+#line 85 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_ReportHostMessage(void* context, UInt32 p_level, const Utf8View* p_message, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1572,8 +1628,8 @@ inline Int32 NativeRuntimeBindings_ReportHostMessage(void* context, UInt32 p_lev
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:57
-#line 57 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:59
+#line 59 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_ResolveComponentPersistentId(void* context, const Utf8View* p_id, Wire::Value_Ursa_NativeHandle* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1588,8 +1644,8 @@ inline Int32 NativeRuntimeBindings_ResolveComponentPersistentId(void* context, c
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:34
-#line 34 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:36
+#line 36 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_ResolveGameObjectPersistentId(void* context, const Utf8View* p_id, Wire::Value_Ursa_NativeHandle* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1620,8 +1676,8 @@ inline Int32 NativeRuntimeBindings_SetActive(void* context, const Wire::Value_Ur
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:70
-#line 70 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:72
+#line 72 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_SetCameraProjection(void* context, const Wire::Value_Ursa_NativeHandle* p_camera, const Wire::Value_Ursa_CameraProjection* p_value, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1637,8 +1693,8 @@ inline Int32 NativeRuntimeBindings_SetCameraProjection(void* context, const Wire
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:74
-#line 74 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:76
+#line 76 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_SetCameraRenderingSettings(void* context, const Wire::Value_Ursa_NativeHandle* p_camera, const Wire::Value_Ursa_CameraRenderingSettings* p_value, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1654,8 +1710,8 @@ inline Int32 NativeRuntimeBindings_SetCameraRenderingSettings(void* context, con
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:47
-#line 47 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:49
+#line 49 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_SetComponentEnabled(void* context, const Wire::Value_Ursa_NativeHandle* p_component, UInt32 p_enabled, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1670,8 +1726,8 @@ inline Int32 NativeRuntimeBindings_SetComponentEnabled(void* context, const Wire
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:28
-#line 28 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:30
+#line 30 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_SetLayer(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, Int32 p_layer, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1686,8 +1742,8 @@ inline Int32 NativeRuntimeBindings_SetLayer(void* context, const Wire::Value_Urs
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:62
-#line 62 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:64
+#line 64 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_SetLocalTransform(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, const Wire::Value_Ursa_LocalTransformValue* p_value, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1720,8 +1776,8 @@ inline Int32 NativeRuntimeBindings_SetName(void* context, const Wire::Value_Ursa
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:22
-#line 22 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:24
+#line 24 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_SetParent(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, const Wire::Value_Ursa_NativeHandle* p_parent, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1737,8 +1793,8 @@ inline Int32 NativeRuntimeBindings_SetParent(void* context, const Wire::Value_Ur
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:89
-#line 89 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:91
+#line 91 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_SetWindowTitle(void* context, const Utf8View* p_title, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1751,8 +1807,8 @@ inline Int32 NativeRuntimeBindings_SetWindowTitle(void* context, const Utf8View*
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:66
-#line 66 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:68
+#line 68 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_SetWorldPosition(void* context, const Wire::Value_Ursa_NativeHandle* p_handle, const Wire::Value_Ursa_Vector3* p_value, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1768,8 +1824,8 @@ inline Int32 NativeRuntimeBindings_SetWorldPosition(void* context, const Wire::V
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:87
-#line 87 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:89
+#line 89 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_WriteFile(void* context, const Utf8View* p_path, const DataView* p_bytes, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1784,8 +1840,8 @@ inline Int32 NativeRuntimeBindings_WriteFile(void* context, const Utf8View* p_pa
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:81
-#line 81 "Ursa.Runtime/NativeRuntime.bindings.cs"
+// Contract: Ursa.Runtime/NativeRuntime.bindings.cs:83
+#line 83 "Ursa.Runtime/NativeRuntime.bindings.cs"
 inline Int32 NativeRuntimeBindings_WriteLog(void* context, UInt32 p_level, const Utf8View* p_message, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1944,6 +2000,8 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeResourceBindings_GetComputeThreadGroupSize,
 		&NativeResourceBindings_GetMaterialBindings,
 		&NativeResourceBindings_GetMeshBinding,
+		&NativeResourceBindings_GetTextureInfo,
+		&NativeResourceBindings_GetTexturePixels,
 		&NativeResourceBindings_IsValid,
 		&NativeResourceBindings_LoadTexture,
 		&NativeResourceBindings_SetMaterialBindings,
@@ -1956,6 +2014,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeRuntimeBindings_GetActive,
 		&NativeRuntimeBindings_GetCameraProjection,
 		&NativeRuntimeBindings_GetCameraRenderingSettings,
+		&NativeRuntimeBindings_GetChildren,
 		&NativeRuntimeBindings_GetComponentEnabled,
 		&NativeRuntimeBindings_GetComponentOwner,
 		&NativeRuntimeBindings_GetComponentPersistentId,
@@ -1993,7 +2052,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeSerializationBindings_SnapshotMaterial,
 		&NativeSerializationBindings_SnapshotMesh,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 104, &table, &ValidateBindingContext, {0x11, 0xec, 0x22, 0xbb, 0xe3, 0xea, 0xe5, 0x83, 0x57, 0x8c, 0x8c, 0x39, 0xb4, 0x98, 0x06, 0x66, 0x0a, 0x2d, 0xef, 0x42, 0xaf, 0x2f, 0x4e, 0x0b, 0xac, 0x75, 0xc7, 0xcf, 0xb4, 0x22, 0x9a, 0x8a}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 107, &table, &ValidateBindingContext, {0xfd, 0x0f, 0xe3, 0x32, 0x55, 0x59, 0x28, 0x3c, 0x0b, 0xc0, 0x81, 0x7c, 0x33, 0x8b, 0xd1, 0x05, 0x07, 0x18, 0x2d, 0xd0, 0x83, 0x3c, 0x56, 0xab, 0x63, 0xf2, 0xb5, 0x6b, 0x4b, 0xbc, 0x7b, 0x35}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Runtime

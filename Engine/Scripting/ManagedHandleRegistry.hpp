@@ -17,7 +17,8 @@ enum class ManagedHandleKind : UInt32
 	Mesh = 4,
 	Material = 5,
 	RenderTexture = 6,
-	GraphicsBuffer = 7
+	GraphicsBuffer = 7,
+	Texture2D = 8
 };
 
 struct ManagedHandle

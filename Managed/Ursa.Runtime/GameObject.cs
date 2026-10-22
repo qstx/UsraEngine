@@ -68,6 +68,25 @@ public sealed class GameObject
 	}
 
 	public void Destroy() => EngineApi.DestroyGameObject(handle);
+	public GameObject[] GetChildren()
+	{
+		NativeHandle[] children = NativeRuntimeBindings.GetChildren(handle);
+		var result = new GameObject[children.Length];
+		for (int index = 0; index < children.Length; ++index) result[index] = FromHandle(children[index]);
+		return result;
+	}
+	public T[] GetComponentsInChildren<T>(bool includeInactive = false) where T : Component
+	{
+		var found = new List<T>();
+		void Visit(GameObject node)
+		{
+			if (!includeInactive && !node.ActiveInHierarchy) return;
+			found.AddRange(node.GetComponents<T>());
+			foreach (GameObject child in node.GetChildren()) Visit(child);
+		}
+		Visit(this);
+		return found.ToArray();
+	}
 
 	public Transform Transform => transform ??= new Transform(handle);
 

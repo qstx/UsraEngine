@@ -99,9 +99,18 @@ int main()
 		Text(sources, Path("prj:Other.txt"), "unrelated");
 		auto workspace = Take(ProjectWorkspace::FromFilesystem({}, sources));
 		Done(workspace->InitializeBuiltinAssets());
+		UInt32 projectImporterCalls = 0;
+		ProjectAssetImporter nativeImporter;
+		Done(workspace->Importer().Register(".txt",
+		                                    [&](AssetDatabase& database, const VirtualPath& path, bool force)
+		                                    {
+			                                    ++projectImporterCalls;
+			                                    return nativeImporter.Import(database, path, force);
+		                                    }));
 		AssetImportOptions options;
 		options.buildScripts = false;
 		auto first = Take(AssetImportPipeline::Prepare(*workspace, options));
+		Expect(projectImporterCalls == 2, "Project import pipeline bypassed the workspace importer service");
 		Expect(Take(first.runtimeFiles.Read(Path("ursa:Icons/Editor/EditorIcons.png"))) ==
 		               Take(sources.Read(Path("ursa:Icons/Editor/EditorIcons.png"))) &&
 		           Take(first.runtimeFiles.Exists(Path("ursa:Icons/Editor/EditorIcons.json"))) &&

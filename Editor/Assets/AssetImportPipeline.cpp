@@ -1,5 +1,6 @@
 #include <Assets/AssetImportPipeline.hpp>
 #include <Assets/ScriptBuildService.hpp>
+#include <Assets/ManagedImportRequirements.hpp>
 #include <Vfs/RuntimeMountProfile.hpp>
 #include <Vfs/BuildResourceManifest.hpp>
 #include <Core/StringInterop.hpp>
@@ -267,9 +268,10 @@ void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& op
 	auto& files = workspace.Index().Filesystem();
 	const auto frameworkRoot = std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path().parent_path() /
 	                           ToStdString(options.configuration);
-	if (!files.IsMounted("framework"))
+	const String frameworkScheme = EngineFrameworkScheme(options.configuration);
+	if (!files.IsMounted(frameworkScheme))
 	{
-		Done(files.Mount("framework", frameworkRoot, MountAccess::ReadOnly));
+		Done(files.Mount(frameworkScheme, frameworkRoot, MountAccess::ReadOnly));
 	}
 	Vector<String> bootstrap{
 	    "Ursa.ManagedHost.dll", "Ursa.ManagedHost.deps.json", "Ursa.ManagedHost.runtimeconfig.json",
@@ -280,7 +282,7 @@ void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& op
 	}
 	for (const auto& name : bootstrap)
 	{
-		const auto source = Path("framework:" + name);
+		const auto source = Path(frameworkScheme + ":" + name);
 		const auto bytes = Take(files.Read(source));
 		const auto blob = StoreBlob(files, bytes, ".managed");
 		AddEntry(snapshot, files, Path("ursa:Managed/" + name), blob);
@@ -400,23 +402,23 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			    !asset.metadata.folder && PathFromUrsaString(asset.path.relative).extension() == ".ursaasset";
 		}
 		Vector<ScriptTypeRecord> scriptTypes;
-		if (hasScriptableAssets)
+		if (!options.bootstrapOnly)
 		{
 #if defined(URSA_ENABLE_DOTNET)
-			const auto frameworkRoot =
-			    std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path().parent_path() /
-			    ToStdString(options.configuration);
-			auto service = Take(ScriptBuildService::Open(
-			    files, *workspace.Database(), std::filesystem::u8path(URSA_DOTNET_EXECUTABLE_PATH),
-			    frameworkRoot / "Ursa.Runtime.dll", frameworkRoot / "Ursa.Editor.dll",
-			    std::filesystem::u8path(URSA_DOTNET_CATALOG_GENERATOR_PATH),
-			    std::filesystem::u8path(URSA_DOTNET_REFERENCE_PACK_PATH)));
-			Take(service->GenerateProjects());
-			scriptTypes = service->ScriptTypes();
+			scriptTypes = Take(workspace.PrepareManagedImports(options.configuration, options.buildScripts));
+			assets = workspace.BuiltinDatabase()->Assets();
+			const auto refreshedAssets = workspace.Database()->Assets();
+			assets.insert(assets.end(), refreshedAssets.begin(), refreshedAssets.end());
 #else
-			return Result<AssetImportReport>::Failure("ScriptableAsset content requires the .NET script type catalog");
+			Done(CheckNativeImportCapability(*workspace.Database()));
+			if (hasScriptableAssets)
+			{
+				return Result<AssetImportReport>::Failure(
+				    "ScriptableAsset content requires the .NET script type catalog");
+			}
 #endif
 		}
+
 		Vector<RuntimeContentInput> settingsInputs;
 		if (!options.bootstrapOnly && files.IsMounted(projectSettingsScheme))
 		{
@@ -443,6 +445,7 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 		std::stable_sort(assets.begin(), assets.end(), [](const auto& left, const auto& right)
 		                 { return IsShader(left.path) && !IsShader(right.path); });
 		AssetImportReport report;
+		report.rules = workspace.ImportRuleDescriptions();
 		report.snapshot.configuration = options.configuration;
 		report.snapshot.profile = options.profile;
 		if (options.bootstrapOnly)
@@ -461,13 +464,9 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			                            asset.path.relative.rfind("Fonts/Editor/", 0) == 0 ||
 			                            asset.path.relative.rfind("Icons/Editor/", 0) == 0));
 		                  }));
-		ProjectAssetImporter importer;
-		if (hasScriptableAssets)
-		{
-			Done(importer.RegisterScriptableAssets(std::move(scriptTypes)));
-		}
+		auto& importer = workspace.Importer();
 		Vector<std::pair<AssetDatabase*, VirtualPath>> importedSources;
-		Json catalog{{"format", "UrsaAssetCatalog"}, {"version", 1u}, {"assets", Json::array()}};
+		Json catalog{{"format", "UrsaAssetCatalog"}, {"version", 2u}, {"assets", Json::array()}};
 		UInt64 processed = 0;
 		for (const auto& asset : assets)
 		{
@@ -515,7 +514,8 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 					    "Runtime content outside requested scope is not ready: " + asset.path.ToString() +
 					    "; run a full project import first");
 				}
-				imported = {asset.metadata.guid, current.artifacts, current.dependencies, true};
+				imported = {asset.metadata.guid,          current.artifacts, current.dependencies, true, {},
+				            current.mainObjectLocalFileId};
 			}
 			report.importedAssets += imported.cacheHit ? 0 : 1;
 			importedSources.push_back({database, asset.path});
@@ -527,12 +527,18 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			for (const auto& artifact : imported.artifacts)
 			{
 				String relative = asset.path.relative;
-				if (artifact.localFileId == 0)
+				if (artifact.localFileId == imported.mainObjectLocalFileId)
 				{
-					const char* extension = artifact.kind == "Shader"    ? ".ursashaderasset"
-					                        : artifact.kind == "Model"   ? ".ursamodel"
-					                        : artifact.kind == "Texture" ? ".ursatex"
-					                                                     : nullptr;
+					const char* extension = artifact.kind == "Shader"     ? ".ursashaderasset"
+					                        : artifact.kind == "Model"    ? ".ursamodel"
+					                        : artifact.kind == "Texture"  ? ".ursatex"
+					                        : artifact.kind == "Mesh"     ? ".ursamesh"
+					                        : artifact.kind == "Material" ? ".ursamat"
+					                        : artifact.kind == "Prefab"   ? ".ursaprefab"
+					                        : artifact.kind == "Scene"    ? ".ursascene"
+					                        : artifact.kind == "ScriptableObject" || artifact.kind == "ScriptableAsset"
+					                            ? ".ursaasset"
+					                            : nullptr;
 					if (extension)
 					{
 						auto output = PathFromUrsaString(relative);
@@ -550,6 +556,7 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 				AddEntry(report.snapshot, files, logical, artifact.path);
 				catalog["assets"].push_back({{"guid", ToStdString(imported.guid.ToString())},
 				                             {"localFileId", artifact.localFileId},
+				                             {"isMainObject", artifact.localFileId == imported.mainObjectLocalFileId},
 				                             {"kind", ToStdString(artifact.kind)},
 				                             {"path", ToStdString(logical.ToString())}});
 			}

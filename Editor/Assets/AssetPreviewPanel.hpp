@@ -3,6 +3,7 @@
 #include <Assets/AssetPreviewContent.hpp>
 #include <Assets/AssetPreviewTexture.hpp>
 #include <Assets/MaterialPreview.hpp>
+#include <Assets/AssetPreviewExtension.hpp>
 #include <Scene/ViewportLayout.hpp>
 
 namespace Ursa::Editor
@@ -20,7 +21,7 @@ public:
 
 	bool Supported() const
 	{
-		return state.Target().Supported();
+		return state.Target().Supported() || hasSubAssets;
 	}
 
 	Float32 ReservedHeight() const;
@@ -31,10 +32,20 @@ public:
 	}
 
 	void Expand();
+	void ConfigureExtension(const String& id, AssetPreviewExtension::Callback callback,
+	                        const ManagedEditorContext& context);
+
+	void SetExtensionResolver(std::function<void(ManagedEditorContext&)> resolver)
+	{
+		extensionResolver = std::move(resolver);
+	}
+
 	void Draw(ProjectWorkspace& workspace, ComponentRegistry& registry,
 	          const AssetPreviewTextureInput* textureInput = nullptr, Float32 maximumHeight = 1200);
 	Result<void> RenderPending(Float64 deltaSeconds, const EditorRenderViewport& render);
 	void Reload(bool pipelineChanged = false);
+	Result<void> CloseExtension();
+	std::optional<Result<bool>> DrawExtensionInspector(const String& id, ManagedEditorContext& context);
 
 	const AssetPreviewState& State() const
 	{
@@ -71,6 +82,11 @@ public:
 		return renderCount;
 	}
 
+	Float64 ViewingTime() const
+	{
+		return extensionPreview ? extensionTime : clock.Time();
+	}
+
 	AssetPreviewContent* Content() const
 	{
 		return content.get();
@@ -80,6 +96,8 @@ private:
 	Result<void> ReleaseImages();
 	void ResetView();
 	void DrawControls(ProjectWorkspace& workspace);
+	void DrawSubAssets(ProjectWorkspace& workspace);
+	void PrepareResourceExtension(ProjectWorkspace& workspace, const String& kind);
 	void SaveSettings();
 	Result<void> LoadContent(ProjectWorkspace& workspace, ComponentRegistry& registry,
 	                         const AssetPreviewTextureInput* textureInput);
@@ -92,6 +110,20 @@ private:
 	AssetPreviewClock clock;
 	std::unique_ptr<AssetPreviewContent> content;
 	std::unique_ptr<AssetPreviewContent> candidate;
+	std::shared_ptr<AssetPreviewExtension> extension;
+	std::function<void(ManagedEditorContext&)> extensionResolver;
+	std::unique_ptr<ResourceSession> extensionResources;
+	std::unique_ptr<ComponentLoadContext> extensionLoadContext;
+	String extensionResourceKey;
+	String extensionDiagnostic;
+	String extensionInfo;
+	ViewportRect extensionOutput;
+	bool extensionPreview = false;
+	bool extensionConstantRepaint = false;
+	bool extensionDrawPending = false;
+	bool extensionWasVisible = false;
+	bool resetExtension = false;
+	Float64 extensionTime = 0;
 	std::unique_ptr<MaterialPreview> front;
 	std::unique_ptr<MaterialPreview> back;
 	Rhi::TexturePtr texture;
@@ -110,6 +142,9 @@ private:
 	ResourceId sourceGuid;
 	ResourceId cameraIdentity = ResourceId::Generate();
 	UInt64 subAssetId = 0;
+	UInt64 selectedObjectId = 0;
+	String subAssetKind;
+	bool hasSubAssets = false;
 	bool expanded = true;
 	Float32 height = 280;
 	Float32 resizeStartHeight = 0;

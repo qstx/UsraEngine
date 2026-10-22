@@ -109,6 +109,19 @@ String EngineBuildConfiguration()
 	return URSA_BUILD_CONFIGURATION;
 }
 
+String EngineFrameworkScheme(const String& configuration)
+{
+	String scheme = "framework" + configuration;
+	for (char& character : scheme)
+	{
+		if (character >= 'A' && character <= 'Z')
+		{
+			character = static_cast<char>(character - 'A' + 'a');
+		}
+	}
+	return scheme;
+}
+
 std::filesystem::path EngineFrameworkDirectory()
 {
 	return std::filesystem::u8path(URSA_ENGINE_FRAMEWORK_DIR);

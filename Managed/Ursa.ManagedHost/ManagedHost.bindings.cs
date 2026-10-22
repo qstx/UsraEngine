@@ -8,6 +8,34 @@ internal static partial class ManagedHostBindings
 	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.InitializeFramework")]
 	internal static partial void InitializeFramework();
 
+	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.CloseOwnerEndpoint")]
+	internal static partial void CloseOwnerEndpoint();
+
+	[ManagedCallback("Ursa.ManagedHost.ScriptSessions.BeginImportInvocation")]
+	internal static partial void BeginImportInvocation([BindingSession] ulong session, ulong generation, ulong invocation, ImportBindingCapability capability);
+
+	[ManagedCallback("Ursa.ManagedHost.ScriptSessions.EndImportInvocation")]
+	internal static partial void EndImportInvocation([BindingSession] ulong session, ulong generation, ulong invocation);
+
+	[ManagedCallback("Ursa.ManagedHost.ImportCallbacks.CreateScriptableObject")]
+	internal static partial ulong CreateImportScriptableObject([BindingSession] ulong session, string typeName);
+	[ManagedCallback("Ursa.ManagedHost.ImportCallbacks.SerializeScriptableObject")]
+	internal static partial ImportObjectArchive SerializeImportScriptableObject([BindingSession] ulong session, ulong instance);
+	[ManagedCallback("Ursa.ManagedHost.ImportCallbacks.DeserializeScriptableObject")]
+	internal static partial void DeserializeImportScriptableObject([BindingSession] ulong session, ulong instance, ImportObjectArchive archive);
+	[ManagedCallback("Ursa.ManagedHost.ImportCallbacks.GetReferences")]
+	internal static partial ImportReferenceInfo[] GetImportReferences([BindingSession] ulong session);
+	[ManagedCallback("Ursa.ManagedHost.ImportCallbacks.AssignReferences")]
+	internal static partial void AssignImportReferences([BindingSession] ulong session, ImportReferenceAssignment[] assignments);
+	[ManagedCallback("Ursa.ManagedHost.ScriptSessions.PrepareImportExtensions")]
+	internal static partial ScriptedImporterInfo[] PrepareScriptedImporters([BindingSession] ulong session, string[] nativeExtensions);
+	[ManagedCallback("Ursa.ManagedHost.ScriptSessions.InvokeScriptedImporter")]
+	internal static partial void InvokeScriptedImporter([BindingSession] ulong session, string identity);
+	[ManagedCallback("Ursa.ManagedHost.ScriptSessions.DescribeAssetPostprocessors")]
+	internal static partial AssetPostprocessorInfo[] DescribeAssetPostprocessors([BindingSession] ulong session);
+	[ManagedCallback("Ursa.ManagedHost.ScriptSessions.InvokeAssetPostprocessor")]
+	internal static partial void InvokeAssetPostprocessor([BindingSession] ulong session, string identity);
+
 	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.CreateBehaviour")]
 	internal static partial ulong CreateBehaviour(string typeName, Ursa.NativeHandle owner);
 
@@ -31,6 +59,9 @@ internal static partial class ManagedHostBindings
 
 	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.CreateScriptSession")]
 	internal static partial ulong CreateScriptSession(bool editor);
+
+	[ManagedCallback("Ursa.ManagedHost.ScriptSessions.CreateImport")]
+	internal static partial ulong CreateImportSession();
 
 	[ManagedCallback("Ursa.ManagedHost.ScriptSessions.Select")]
 	internal static partial void SelectScriptSession([BindingSession] ulong session);
@@ -67,10 +98,21 @@ internal static partial class ManagedHostBindings
 
 	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.InvokeEditorExtension")]
 	internal static partial bool InvokeEditorExtension([BindingSession] ulong session, string extension, EditorBindingCapability capability);
+
+	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.InvokeEditorPreview")]
+	internal static partial EditorPreviewResult InvokeEditorPreview([BindingSession] ulong session, string extension, ulong instance,
+		EditorPreviewPhase phase, Rect rect, EditorBindingCapability capability);
 }
 
 [SerializedArchive]
 internal struct BehaviourFieldArchive
+{
+	public uint Version;
+	public string Json;
+}
+
+[SerializedArchive]
+internal struct ImportObjectArchive
 {
 	public uint Version;
 	public string Json;

@@ -18,7 +18,7 @@ public static class EditorContext
 		_ = EditorApi.Generation;
 		return new(NativeEditorBindings.ResolveReference(kind, string.Empty, NativeAssetReference.From(asset)));
 	}
-	public static void Save() { _ = EditorApi.Generation; NativeEditorBindings.Save(); }
-	public static void MarkDirty() { _ = EditorApi.Generation; NativeEditorBindings.MarkDirty(); }
+	public static void Save() { _ = EditorApi.Generation; InspectorTargetScope.SynchronizeCurrent(); NativeEditorBindings.Save(); }
+	public static void MarkDirty() { _ = EditorApi.Generation; InspectorTargetScope.SynchronizeCurrent(); NativeEditorBindings.MarkDirty(); }
 	public static void OpenAsset(string virtualPath) { _ = EditorApi.Generation; NativeEditorBindings.OpenAsset(virtualPath); }
 }

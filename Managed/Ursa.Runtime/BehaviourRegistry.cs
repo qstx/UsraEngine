@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 
 namespace Ursa;
 
@@ -8,9 +9,11 @@ internal readonly record struct ScriptIdentity(string Id, uint Version, string S
 
 internal static class BehaviourRegistry
 {
-	private static readonly Dictionary<ulong, Behaviour> instances = new();
-	private static ulong nextToken = 1;
-	private static readonly Dictionary<ulong, ulong> instanceSessions = new();
+	[ThreadStatic] private static Dictionary<ulong, Behaviour>? ownerInstances;
+	[ThreadStatic] private static Dictionary<ulong, ulong>? ownerInstanceSessions;
+	private static Dictionary<ulong, Behaviour> instances => ownerInstances ??= new();
+	private static Dictionary<ulong, ulong> instanceSessions => ownerInstanceSessions ??= new();
+	private static long nextToken;
 	[ThreadStatic] internal static ulong currentSession;
 	[ThreadStatic] internal static Func<string, Type?>? typeResolver;
 	[ThreadStatic] internal static Func<IEnumerable<Assembly>>? assemblyResolver;
@@ -64,7 +67,7 @@ internal static class BehaviourRegistry
 		{
 			throw new ArgumentNullException(nameof(behaviour));
 		}
-		ulong token = nextToken++;
+		ulong token = checked((ulong)Interlocked.Increment(ref nextToken));
 		if (token == 0 || !instances.TryAdd(token, behaviour))
 		{
 			throw new InvalidOperationException("Managed Behaviour instance token space is exhausted.");

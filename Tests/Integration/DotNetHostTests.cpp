@@ -55,7 +55,11 @@ int main(int argumentCount, char** arguments)
 	const auto root = std::filesystem::u8path(argumentCount > 2 ? arguments[2] : "dotnet_host_smoke");
 	try
 	{
-		Expect(argumentCount == 3, "Managed host smoke test requires managed output and writable cache directories");
+		Expect(argumentCount == 3 ||
+		           (argumentCount == 4 && (std::string(arguments[3]) == "--import-only" ||
+		                                   std::string(arguments[3]) == "--importer-registration-only" ||
+		                                   std::string(arguments[3]) == "--editor-only")),
+		       "Managed host test requires managed output, writable cache and optional --import-only");
 		const auto managedOutput = std::filesystem::u8path(arguments[1]);
 		const auto packageRoot = root / "package";
 		const auto userRoot = root / "user";
@@ -136,6 +140,31 @@ int main(int argumentCount, char** arguments)
 		     {"Group", "Game"},
 		     {"ClrTypeName", "Ursa.SessionFixtures.ManagedRenderComponentProbe, Ursa.SessionFixtures"},
 		     {"LegacyIdentity", true}});
+		for (const auto& type : Vector<std::pair<String, String>>{
+		         {"ImportProbeAsset", "test.import-probe"},
+		         {"ImportChildAsset", "test.import-child"},
+		         {"GeneratedFormatAsset",
+		          "auto:11111111-1111-4111-8111-111111111111:Ursa.Examples.GeneratedFormatAsset"}})
+		{
+			catalog["Scripts"].push_back(
+			    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+			     {"LocalFileId", ++fixtureTypeId + 3},
+			     {"Kind", "ScriptableObject"},
+			     {"ScriptType", ToStdString(type.second)},
+			     {"Version", 1u},
+			     {"Group", "Game"},
+			     {"ClrTypeName",
+			      ToStdString((type.first == "GeneratedFormatAsset" ? "Ursa.Examples." : "Ursa.SessionFixtures.") +
+			                  type.first + ", Ursa.SessionFixtures")}});
+		}
+		catalog["Scripts"].push_back(
+		    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+		     {"LocalFileId", 11u},
+		     {"Kind", "Behaviour"},
+		     {"ScriptType", "test.generated-reader"},
+		     {"Version", 1u},
+		     {"Group", "Game"},
+		     {"ClrTypeName", "Ursa.SessionFixtures.GeneratedFormatReader, Ursa.SessionFixtures"}});
 		const auto catalogBytes = JsonBytes(catalog);
 		nlohmann::json content{{"Version", 2u},
 		                       {"RequiredBindings", Bindings::ScriptBindingRequirements(false)},
@@ -262,6 +291,26 @@ int main(int argumentCount, char** arguments)
 		Expect(host->IsInitialized() && logLevels == std::vector<UInt32>({1, 2}) && messages.size() == 2 &&
 		           messages.front() == u8"Ursa 托管运行时已初始化" && messages.back().empty(),
 		       "Native-to-managed initialization or UTF-8/empty-data callback failed");
+		if (argumentCount == 4)
+		{
+#if defined(URSA_DOTNET_TEST_EDITOR)
+			if (std::string(arguments[3]) == "--editor-only")
+			{
+				TestEditorExtensions(*host, filesystem, root);
+			}
+			else if (std::string(arguments[3]) == "--importer-registration-only")
+			{
+				TestManagedImporterRegistration(*host, filesystem, sessionContentPath);
+			}
+			else
+#endif
+			{
+				TestManagedImportSession(*host, filesystem, files, sessionContentPath);
+			}
+			Done(host->CloseEndpoint());
+			std::cout << "Managed Import session passed without a window or GPU\n";
+			return 0;
+		}
 		ManagedScriptRuntime scriptRuntime(scene, *host, sceneApi);
 		const String probeType = "ProtocolBehaviour, Ursa.ManagedHost.ProtocolTests";
 		auto scriptedObject = Take(scene.CreateGameObject("Mixed"));
@@ -368,6 +417,7 @@ int main(int argumentCount, char** arguments)
 #if defined(URSA_DOTNET_TEST_EDITOR)
 		TestEditorExtensions(*host, filesystem, root);
 #endif
+		TestManagedImportSession(*host, filesystem, files, sessionContentPath);
 		Scene missingDependencyScene;
 		ManagedSceneApi missingDependencyApi(missingDependencyScene);
 		const UInt64 missingDependencyDomain = Take(host->CreateScriptSession(false, &missingDependencyApi));

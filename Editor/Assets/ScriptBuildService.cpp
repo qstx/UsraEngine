@@ -370,7 +370,9 @@ Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input
 			const std::string group = item["Group"].get<std::string>();
 			const std::string kind = item.value("Kind", std::string{"Behaviour"});
 			if (!guid || !sourcePath || scriptType.empty() || localFileId == 0 ||
-			    (group != "Game" && group != "Editor") || (kind != "Behaviour" && kind != "ScriptableObject") ||
+			    (group != "Game" && group != "Editor") ||
+			    (kind != "Behaviour" && kind != "ScriptableObject" &&
+			     !((kind == "ScriptedImporter" || kind == "AssetPostprocessor") && group == "Editor")) ||
 			    !typeIds.insert(scriptType).second || !localFileIds.insert(localFileId).second)
 			{
 				return Result<void>::Failure("ScriptCatalog contains a duplicate or invalid stable script identity");
@@ -444,7 +446,10 @@ Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input
 			    {guid.value, scriptType, item["Version"].get<Ursa::UInt32>(), localFileId,
 			     ToUrsaString(item["ClrTypeName"].get<std::string>()), sourcePath.value,
 			     group == "Editor" ? ScriptAssemblyGroup::Editor : ScriptAssemblyGroup::Game, std::move(fields),
-			     kind == "ScriptableObject" ? ScriptTypeKind::ScriptableObject : ScriptTypeKind::Behaviour,
+			     kind == "AssetPostprocessor" ? ScriptTypeKind::AssetPostprocessor
+			     : kind == "ScriptedImporter" ? ScriptTypeKind::ScriptedImporter
+			     : kind == "ScriptableObject" ? ScriptTypeKind::ScriptableObject
+			                                  : ScriptTypeKind::Behaviour,
 			     item.value("IsRenderPipeline", false), ToUrsaString(item.value("CreateAssetMenuName", std::string{})),
 			     ToUrsaString(item.value("CreateAssetFileName", std::string{})),
 			     item.value("CreateAssetMenuOrder", Int32{0})});

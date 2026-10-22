@@ -81,12 +81,17 @@ Result<MeshPtr> ResourceSession::LoadMesh(ResourceId guid, UInt64 localFileId)
 		{
 			return Result<MeshPtr>::Failure(loaded.error);
 		}
-		if (localFileId != loaded.value.localFileId || loaded.value.id != guid)
+		if ((localFileId != 0 && localFileId != loaded.value.localFileId) || loaded.value.id != guid)
 		{
 			return Result<MeshPtr>::Failure("Independent Mesh GUID or local-file-ID mismatch");
 		}
-		geometry[key] = loaded.value.mesh;
-		return Result<MeshPtr>::Success(loaded.value.mesh);
+		const String canonicalKey = guid.ToString() + ":" + String(std::to_string(loaded.value.localFileId).c_str());
+		const auto canonical = geometry.find(canonicalKey);
+		const auto mesh =
+		    canonical != geometry.end() && canonical->second->IsValid() ? canonical->second : loaded.value.mesh;
+		geometry[canonicalKey] = mesh;
+		geometry[key] = mesh;
+		return Result<MeshPtr>::Success(mesh);
 	}
 	return Result<MeshPtr>::Failure("Mesh resource has an unsupported format at " + path.value.ToString());
 }

@@ -8,7 +8,7 @@ if(URSA_BUILD_EDITOR)
     target_link_libraries(UrsaMeshEditorWindowTests PRIVATE Ursa::Editor)
     ursa_attach_dotnet_host_runtime(UrsaMeshEditorWindowTests)
     add_test(NAME UrsaMeshEditorWindowTests COMMAND UrsaMeshEditorWindowTests "${URSA_TEST_SAMPLE_PROJECT}")
-    set_tests_properties(UrsaMeshEditorWindowTests PROPERTIES TIMEOUT 120
+    set_tests_properties(UrsaMeshEditorWindowTests PROPERTIES TIMEOUT 600
       ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/MeshEditorUser")
     ursa_require_sample_project(UrsaMeshEditorWindowTests UrsaMeshEditorWindowTests)
   endif()

@@ -2,6 +2,7 @@
 #include <Serialization/AssetReference.hpp>
 #include <Assets/ModelImportView.hpp>
 #include <Assets/ProjectAssetImporter.hpp>
+#include <Assets/AssetImporterInspector.hpp>
 #include <Assets/SceneDraft.hpp>
 
 #include <Core/StringInterop.hpp>
@@ -107,7 +108,7 @@ Result<void> ModelImportView::RefreshImportedDocument(const VirtualFileSystem& f
 		return Result<void>::Failure(loaded.error);
 	}
 	if (loaded.value.value("format", std::string{}) != "UrsaModel" ||
-	    loaded.value.value("version", Ursa::UInt32{0}) != 1 || !loaded.value.contains("nodes") ||
+	    loaded.value.value("version", Ursa::UInt32{0}) != 2 || !loaded.value.contains("nodes") ||
 	    !loaded.value["nodes"].is_array())
 	{
 		return Result<void>::Failure("Imported model artifact has an unsupported document at " +
@@ -118,9 +119,9 @@ Result<void> ModelImportView::RefreshImportedDocument(const VirtualFileSystem& f
 	return {};
 }
 
-Result<void> ModelImportView::Reimport(AssetDatabase& database, bool cachedOnly)
+Result<void> ModelImportView::Reimport(AssetDatabase& database, ProjectAssetImporter& importer, bool cachedOnly)
 {
-	if (!cachedOnly)
+	if (!cachedOnly && !settingsInspector)
 	{
 		auto savedSettings = ModelImporter::SetSettings(database, sourcePath, settings);
 		if (!savedSettings)
@@ -130,28 +131,32 @@ Result<void> ModelImportView::Reimport(AssetDatabase& database, bool cachedOnly)
 		}
 	}
 	auto result = cachedOnly ? ProjectAssetImporter::LoadCurrent(database, sourcePath)
-	                         : ProjectAssetImporter{}.Import(database, sourcePath, true);
+	                         : importer.Import(database, sourcePath, true);
 	if (!result)
 	{
 		diagnostic = result.error;
 		return Result<void>::Failure(diagnostic);
 	}
-	const auto root = std::find_if(result.value.artifacts.begin(), result.value.artifacts.end(),
-	                               [](const auto& artifact) { return artifact.localFileId == 0; });
+	const auto root =
+	    std::find_if(result.value.artifacts.begin(), result.value.artifacts.end(),
+	                 [&](const auto& artifact) { return artifact.localFileId == result.value.mainObjectLocalFileId; });
 	if (root == result.value.artifacts.end())
 	{
 		return Result<void>::Failure("Model importer produced no root artifact");
 	}
-	imported = {result.value.guid,      root->path,
-	            result.value.artifacts, result.value.dependencies,
-	            result.value.cacheHit,  result.value.diagnostics};
+	imported = {result.value.guid,
+	            root->path,
+	            result.value.artifacts,
+	            result.value.dependencies,
+	            result.value.cacheHit,
+	            result.value.diagnostics,
+	            result.value.mainObjectLocalFileId};
 	auto refreshed = RefreshImportedDocument(database.Filesystem());
 	if (!refreshed)
 	{
 		diagnostic = refreshed.error;
 		return refreshed;
 	}
-	dirty = false;
 	diagnostic.clear();
 	return {};
 }
@@ -166,64 +171,69 @@ Result<void> ModelImportView::Instantiate(SceneDraft& draft) const
 	return instantiated ? Result<void>{} : Result<void>::Failure(instantiated.error);
 }
 
-Result<void> ModelImportView::Draw(AssetDatabase& database, bool canReimport,
-                                   const std::function<Result<void>()>& instantiate,
-                                   const std::function<void(const VirtualPath&)>& requestImport)
+Result<std::shared_ptr<AssetImporterInspector>> ModelImportView::SettingsInspector(AssetDatabase& database)
 {
-	ImGui::Begin("Model Import");
+	if (!settingsInspector)
+	{
+		auto opened = AssetImporterInspector::Open(database, sourcePath);
+		if (!opened)
+		{
+			return opened;
+		}
+		settingsInspector = std::move(opened.value);
+	}
+	return Result<std::shared_ptr<AssetImporterInspector>>::Success(settingsInspector);
+}
+
+bool ModelImportView::HasModifiedSettings() const
+{
+	return settingsInspector && settingsInspector->HasModified();
+}
+
+Result<void> ModelImportView::Draw(AssetDatabase& database, ProjectAssetImporter& importer, bool canReimport,
+                                   const std::function<Result<void>()>& instantiate,
+                                   const std::function<void(const VirtualPath&)>& requestImport,
+                                   ProjectWorkspace* workspace, const AssetImporterInspector::CustomDraw& custom,
+                                   bool embedded)
+{
+	if (!embedded)
+	{
+		ImGui::Begin("Model Import");
+	}
 	ImGui::TextUnformatted(AssetDisplayPath(sourcePath).c_str());
 	ImGui::TextDisabled("Source stays in Assets; imported model data is cached in Library.");
-	float scaleFactor = settings.scaleFactor;
-	if (ImGui::DragFloat("Scale Factor", &scaleFactor, 0.01f, 0.001f, 10000.0f, "%.3f"))
+	auto target = SettingsInspector(database);
+	if (!target)
 	{
-		settings.scaleFactor = scaleFactor;
-		dirty = true;
-	}
-	if (ImGui::Checkbox("Generate Normals", &settings.generateNormals))
-	{
-		dirty = true;
-	}
-	if (ImGui::Checkbox("Generate Tangents", &settings.generateTangents))
-	{
-		dirty = true;
-	}
-	if (ImGui::Checkbox("Flip UVs", &settings.flipUvs))
-	{
-		dirty = true;
-	}
-	if (ImGui::Checkbox("Import Materials", &settings.importMaterials))
-	{
-		dirty = true;
-	}
-	ImGui::BeginDisabled(!settings.importMaterials);
-	if (ImGui::Checkbox("Import Textures", &settings.importTextures))
-	{
-		dirty = true;
-	}
-	ImGui::EndDisabled();
-	static constexpr const char* influenceOptions[] = {"1", "2", "3", "4"};
-	int influenceCount = static_cast<int>(settings.maxBoneInfluences) - 1;
-	if (ImGui::Combo("Max Bone Influences", &influenceCount, influenceOptions, 4))
-	{
-		settings.maxBoneInfluences = static_cast<Ursa::UInt32>(influenceCount + 1);
-		dirty = true;
-	}
-	ImGui::BeginDisabled(!canReimport || (!dirty && hasImported));
-	const bool reimport = Icons::Button("Reimport");
-	ImGui::EndDisabled();
-	if (reimport)
-	{
-		auto result = requestImport ? ModelImporter::SetSettings(database, sourcePath, settings) : Reimport(database);
-		if (result && requestImport)
+		if (!embedded)
 		{
-			requestImport(sourcePath);
-			dirty = false;
+			ImGui::End();
 		}
-
-		if (!result)
-		{
-			diagnostic = result.error;
-		}
+		return Result<void>::Failure(target.error);
+	}
+	auto drawn = target.value->DrawDefault(
+	    [&](const VirtualPath& path)
+	    {
+		    const auto saved = ModelImporter::Settings(database, sourcePath);
+		    if (!saved)
+		    {
+			    diagnostic = saved.error;
+			    return;
+		    }
+		    settings = saved.value;
+		    if (requestImport)
+		    {
+			    requestImport(path);
+		    }
+		    else
+		    {
+			    Reimport(database, importer);
+		    }
+	    },
+	    canReimport, workspace, custom);
+	if (!drawn)
+	{
+		diagnostic = drawn.error;
 	}
 	if (hasImported)
 	{
@@ -251,7 +261,7 @@ Result<void> ModelImportView::Draw(AssetDatabase& database, bool canReimport,
 		{
 			for (const ImportedArtifactLocation& subAsset : imported.subAssets)
 			{
-				if (subAsset.localFileId == 0)
+				if (subAsset.localFileId == imported.mainObjectLocalFileId)
 				{
 					continue;
 				}
@@ -291,7 +301,10 @@ Result<void> ModelImportView::Draw(AssetDatabase& database, bool canReimport,
 	{
 		ImGui::TextWrapped("%s", diagnostic.c_str());
 	}
-	ImGui::End();
+	if (!embedded)
+	{
+		ImGui::End();
+	}
 	return {};
 }
 } // namespace Ursa::Editor

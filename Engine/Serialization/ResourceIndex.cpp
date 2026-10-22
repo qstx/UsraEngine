@@ -37,6 +37,8 @@ Result<void> ResourceIndex::Rebuild()
 {
 	Map<String, ResourceLocation> candidate;
 	Map<String, VirtualPath> candidateCatalog;
+	Map<String, UInt64> candidateMainObjects;
+	Set<String> catalogGuids;
 	bool catalogRead = false;
 	for (const String& scheme : filesystem.Schemes())
 	{
@@ -67,7 +69,7 @@ Result<void> ResourceIndex::Rebuild()
 				{
 					const nlohmann::json document = nlohmann::json::parse(ToStdString(text.value));
 					if (!document.is_object() || document.value("format", std::string{}) != "UrsaAssetCatalog" ||
-					    document.value("version", UInt32{0}) != 1 || !document.contains("assets") ||
+					    document.value("version", UInt32{0}) != 2 || !document.contains("assets") ||
 					    !document["assets"].is_array())
 					{
 						return Result<void>::Failure("Runtime asset catalog has an unsupported schema at " +
@@ -77,6 +79,7 @@ Result<void> ResourceIndex::Rebuild()
 					{
 						if (!asset.is_object() || !asset.contains("guid") || !asset["guid"].is_string() ||
 						    !asset.contains("localFileId") || !asset["localFileId"].is_number_unsigned() ||
+						    !asset.contains("isMainObject") || !asset["isMainObject"].is_boolean() ||
 						    !asset.contains("kind") || !asset["kind"].is_string() || !asset.contains("path") ||
 						    !asset["path"].is_string())
 						{
@@ -96,8 +99,22 @@ Result<void> ResourceIndex::Rebuild()
 							return Result<void>::Failure("Runtime asset catalog target is missing: " +
 							                             path.value.ToString());
 						}
-						const String key = guid.value.ToString() + ":" +
-						                   ToUrsaString(std::to_string(asset["localFileId"].get<UInt64>()));
+						const auto localId = asset["localFileId"].get<UInt64>();
+						const auto guidKey = guid.value.ToString();
+						catalogGuids.insert(guidKey);
+						if (asset["isMainObject"].get<bool>())
+						{
+							if (!candidateMainObjects.emplace(guidKey, localId).second)
+							{
+								return Result<void>::Failure("Multiple main objects for asset " + guidKey);
+							}
+						}
+						else if (localId == 0)
+						{
+							return Result<void>::Failure("Zero local file ID is reserved for the main object: " +
+							                             guidKey);
+						}
+						const String key = guidKey + ":" + ToUrsaString(std::to_string(localId));
 						if (!candidateCatalog.emplace(key, std::move(path.value)).second)
 						{
 							return Result<void>::Failure(
@@ -166,6 +183,22 @@ Result<void> ResourceIndex::Rebuild()
 			{
 				return Result<void>::Failure("Cannot parse resource metadata at " + entry.path.ToString() + ": " +
 				                             ToUrsaString(error.what()));
+			}
+		}
+	}
+	for (const auto& guid : catalogGuids)
+	{
+		const auto main = candidateMainObjects.find(guid);
+		if (main == candidateMainObjects.end())
+		{
+			return Result<void>::Failure("Missing main object for asset " + guid);
+		}
+		if (main->second != 0)
+		{
+			const auto path = candidateCatalog.find(guid + ":" + ToUrsaString(std::to_string(main->second)));
+			if (path == candidateCatalog.end() || !candidateCatalog.emplace(guid + ":0", path->second).second)
+			{
+				return Result<void>::Failure("Invalid main object alias for asset " + guid);
 			}
 		}
 	}

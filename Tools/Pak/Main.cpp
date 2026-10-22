@@ -286,6 +286,7 @@ Result<void> AddRootCatalogEntries(const VirtualFileSystem& filesystem, const St
 			const String key = guid.value.ToString() + ":0";
 			catalogEntries[key] = {{"guid", ToStdString(guid.value.ToString())},
 			                       {"localFileId", 0},
+			                       {"isMainObject", true},
 			                       {"kind", ToStdString(assetPath.value.FileName())},
 			                       {"path", ToStdString(assetPath.value.ToString())}};
 		}
@@ -668,15 +669,20 @@ int main(int argc, char** argv)
 				}
 				const String catalogKey =
 				    artifact.guid.ToString() + ":" + ToUrsaString(std::to_string(artifact.localFileId));
+				if (artifact.isMainObject && artifact.localFileId != 0)
+				{
+					catalogEntries.erase(artifact.guid.ToString() + ":0");
+				}
 				catalogEntries[catalogKey] = {{"guid", ToStdString(artifact.guid.ToString())},
 				                              {"localFileId", artifact.localFileId},
+				                              {"isMainObject", artifact.isMainObject},
 				                              {"kind", ToStdString(artifact.kind)},
 				                              {"path", ToStdString(cookedPath.value.ToString())}};
 			}
 		}
 	}
 #endif
-	Json catalog = {{"format", "UrsaAssetCatalog"}, {"version", 1}, {"assets", Json::array()}};
+	Json catalog = {{"format", "UrsaAssetCatalog"}, {"version", 2}, {"assets", Json::array()}};
 	for (const auto& entry : catalogEntries)
 	{
 		catalog["assets"].push_back(entry.second);

@@ -9,6 +9,11 @@ using System.Text.Json.Serialization;
 
 namespace Ursa;
 
+internal interface ISerializedExtensionTarget
+{
+	void RequireSerializedAccess();
+}
+
 [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
 public sealed class SerializeFieldAttribute : Attribute
 {
@@ -131,6 +136,8 @@ public static class ScriptFieldSchema
 		}
 		Type scriptType = behaviour.GetType();
 		if (behaviour is ScriptableObject asset) asset.RequireValid();
+		if (behaviour is Component component) component.RequireSerializedAccess();
+		if (behaviour is ISerializedExtensionTarget extension) extension.RequireSerializedAccess();
 		ScriptIdentity identity = BehaviourRegistry.IdentityFor(scriptType);
 		var payload = new Payload { ScriptType = identity.Id, Version = identity.Version,
 			SourceGuid = identity.SourceGuid, LocalFileId = identity.LocalFileId };
@@ -182,6 +189,8 @@ public static class ScriptFieldSchema
 		                 throw new InvalidOperationException("Script component payload is empty.");
 		Type scriptType = behaviour.GetType();
 		if (behaviour is ScriptableObject asset) asset.RequireValid();
+		if (behaviour is Component component) component.RequireSerializedAccess();
+		if (behaviour is ISerializedExtensionTarget extension) extension.RequireSerializedAccess();
 		ScriptIdentity identity = BehaviourRegistry.IdentityFor(scriptType);
 		if (payload.FormatVersion != 1 || payload.ScriptType != identity.Id ||
 		    payload.Version != identity.Version)
@@ -291,10 +300,10 @@ public static class ScriptFieldSchema
 		{
 			throw new ArgumentNullException(nameof(scriptType));
 		}
-		if ((!typeof(Behaviour).IsAssignableFrom(scriptType) && !typeof(ScriptableObject).IsAssignableFrom(scriptType)) ||
+		if ((!typeof(Behaviour).IsAssignableFrom(scriptType) && !typeof(ScriptableObject).IsAssignableFrom(scriptType) && !typeof(ISerializedExtensionTarget).IsAssignableFrom(scriptType)) ||
 		    scriptType.IsAbstract || scriptType.ContainsGenericParameters)
 		{
-			throw new ArgumentException("Script field schema requires a concrete Behaviour or ScriptableObject type.", nameof(scriptType));
+			throw new ArgumentException("Script field schema requires a concrete Behaviour, ScriptableObject or serialized Editor extension type.", nameof(scriptType));
 		}
 
 		var fields = new List<ScriptFieldDescriptor>();
@@ -576,6 +585,13 @@ public static class ScriptFieldSchema
 
 	private static JsonElement SerializeReference(object value, ScriptSerializedFieldKind kind)
 	{
+		if (ImportExecution.TrySerializeReference(value, out JsonElement importBinding))
+		{
+			return JsonSerializer.SerializeToElement(new Dictionary<string, ReferencePayload>
+			{
+				["$ursaReference"] = new() { Kind = value is ScriptableObject ? "ScriptableObject" : value is Texture ? "Texture" : value is Mesh ? "Mesh" : "Material", Resource = importBinding }
+			}, jsonOptions);
+		}
 		if (value is Shader or ComputeShader)
 		{
 			AssetReference identity = value is Shader shader ? shader.Reference : ((ComputeShader)value).Reference;
@@ -689,6 +705,8 @@ public static class ScriptFieldSchema
 				{
 					return null;
 				}
+				if (reference.Resource is JsonElement candidate && candidate.TryGetProperty("kind", out var candidateKind) && candidateKind.GetString() == "import")
+					return ImportExecution.ResolveReference(candidate, elementType!);
 				if (reference.Kind is "Mesh" or "Material")
 				{
 					if (reference.Resource == null) throw new InvalidOperationException("Resource reference is missing its binding.");
@@ -708,7 +726,7 @@ public static class ScriptFieldSchema
 					if (reference.Resource == null) throw new InvalidOperationException("Texture reference is missing its identity.");
 					var identity = new AssetReference(reference.Resource.Value.GetProperty("guid").GetString()!,
 						reference.Resource.Value.GetProperty("localFileId").GetUInt64());
-					return elementType == typeof(TextureAsset) ? TextureAsset.Load(identity) : Texture.Load(identity);
+					return elementType == typeof(TextureAsset) ? TextureAsset.Load(identity) : elementType == typeof(Texture2D) ? Texture2D.Load(identity) : Texture.Load(identity);
 				}
 				if (reference.Kind is "Shader" or "ComputeShader")
 				{
@@ -773,6 +791,7 @@ public static class ScriptFieldSchema
 	{
 		void Validate(object? item)
 		{
+			if (ImportExecution.TrySerializeReference(item, out _)) return;
 			if (item is GameObject or Component)
 				throw new InvalidOperationException($"Persistent asset field '{descriptor.Name}' cannot reference a scene instance.");
 			if (item is ScriptableObject asset && !asset.IsPersistent)

@@ -246,18 +246,18 @@ Result<void> EditorApplication::EnsureManagedHost()
 	files.dependencies = {path("ursa:Ursa.ManagedHost.deps.json"), path("ursa:Ursa.Runtime.dll"),
 	                      path("ursa:Ursa.Editor.dll"), path("ursa:Ursa.Rendering.dll"),
 	                      path("ursa:Ursa.Bindings.dll")};
-	auto started = host.value->Start(workspace->ContentFiles(), files,
-	                                 [](UInt32 level, const String& message)
-	                                 {
-		                                 if (level >= static_cast<UInt32>(LogLevel::Error))
-		                                 {
-			                                 URSA_LOG_ERROR("Script", message);
-		                                 }
-		                                 else
-		                                 {
-			                                 URSA_LOG_INFO("Script", message);
-		                                 }
-	                                 });
+	auto started = host.value->Connect(workspace->ContentFiles(), files,
+	                                   [](UInt32 level, const String& message)
+	                                   {
+		                                   if (level >= static_cast<UInt32>(LogLevel::Error))
+		                                   {
+			                                   URSA_LOG_ERROR("Script", message);
+		                                   }
+		                                   else
+		                                   {
+			                                   URSA_LOG_INFO("Script", message);
+		                                   }
+	                                   });
 	if (!started)
 	{
 		return started;
@@ -267,6 +267,189 @@ Result<void> EditorApplication::EnsureManagedHost()
 #else
 	return Result<void>::Failure("This build does not enable .NET scripting");
 #endif
+}
+
+Result<bool> EditorApplication::DrawAssetExtension(ManagedEditorContext& context)
+{
+	if (!context.openAsset)
+	{
+		context.openAsset = [this](const VirtualPath& path)
+		{
+			pendingManagedAsset = path;
+			return Result<void>{};
+		};
+	}
+	const String target =
+	    context.importerInspector ? "importer:" + context.importerInspector->Identity() : context.targetIdentity;
+	const auto found =
+	    std::find_if(managedExtensions.begin(), managedExtensions.end(), [&](const auto& extension)
+	                 { return extension.kind == ManagedExtensionKind::Inspector && extension.target == target; });
+	if (found == managedExtensions.end())
+	{
+		return Result<bool>::Success(false);
+	}
+#if defined(URSA_ENABLE_DOTNET)
+	if (!managedHost || !editingScriptSession || managedHost->IsSessionFaulted())
+	{
+		return Result<bool>::Failure("The registered asset Inspector's editing session is unavailable");
+	}
+	ConfigureAssetPreview(context);
+	if (assetPreview)
+	{
+		const auto drawn = assetPreview->DrawExtensionInspector(found->id, context);
+		if (drawn)
+		{
+			return *drawn;
+		}
+	}
+	const auto invoked = InvokeManagedEditorExtension(*managedHost, editingScriptSession, found->id, context);
+	return invoked ? Result<bool>::Success(true) : Result<bool>::Failure(invoked.error);
+#else
+	return Result<bool>::Failure("The registered asset Inspector requires .NET support");
+#endif
+}
+
+void EditorApplication::ConfigureAssetPreview(ManagedEditorContext& context)
+{
+#if defined(URSA_ENABLE_DOTNET)
+	if (!assetPreview || !managedHost || !editingScriptSession || managedHost->IsSessionFaulted())
+	{
+		return;
+	}
+	const String target =
+	    context.importerInspector ? "importer:" + context.importerInspector->Identity() : context.targetIdentity;
+	const auto found = std::find_if(managedExtensions.begin(), managedExtensions.end(), [&](const auto& item)
+	                                { return item.kind == ManagedExtensionKind::Inspector && item.target == target; });
+	if (found == managedExtensions.end())
+	{
+		return;
+	}
+	const std::weak_ptr<Scripting::DotNetHost> weakHost = managedHost;
+	const auto session = editingScriptSession;
+	const auto id = found->id;
+	assetPreview->ConfigureExtension(
+	    id,
+	    [weakHost, session, id](UInt64 instance, Scripting::ManagedPreviewPhase phase, const ViewportRect& rect,
+	                            ManagedEditorContext& previewContext)
+	    {
+		    const auto host = weakHost.lock();
+		    return host ? InvokeManagedEditorPreview(*host, session, id, instance, phase, rect, previewContext)
+		                : Result<Scripting::ManagedPreviewResult>::Failure("Preview script environment is closed");
+	    },
+	    context);
+#else
+	(void)context;
+#endif
+}
+
+bool EditorApplication::BeforeImporterSelection(const EditorSelectionContext& next)
+{
+	const auto dirtyPath = assetInspectorPanel.HasModifiedSource() ? assetInspectorPanel.ModifiedSourcePath()
+	                       : assetImporterInspector && assetImporterInspector->HasModified()
+	                           ? assetImporterInspector->SourcePath()
+	                           : VirtualPath{};
+	if (dirtyPath.scheme.empty() || (next.kind == EditorSelectionKind::Asset && next.assetPath == dirtyPath &&
+	                                 next.assetLocalFileId == selectionContext.assetLocalFileId))
+	{
+		return true;
+	}
+	if (!pendingImporterSelection)
+	{
+		importerSelectionPopup = true;
+	}
+	pendingImporterSelection = next;
+	pendingSourceAsset = assetInspectorPanel.HasModifiedSource();
+	projectBrowser.SelectAsset(dirtyPath);
+	hierarchy.ClearSelection();
+	return false;
+}
+
+void EditorApplication::DrawImporterSelectionPrompt()
+{
+	if (importerSelectionPopup)
+	{
+		ImGui::OpenPopup(pendingSourceAsset ? "Unsaved Asset" : "Unapplied Import Settings");
+		importerSelectionPopup = false;
+	}
+	if (!pendingImporterSelection)
+	{
+		return;
+	}
+	const auto request = [this](const VirtualPath& path) { RequestAssetImport(path, true); };
+	const bool canSave = !play.Active() && !AssetWorkPending() && !ScriptWorkPending();
+	const auto resolution = pendingSourceAsset ? assetInspectorPanel.DrawSourceSelectionPrompt(request, canSave)
+	                                           : assetImporterInspector->DrawSelectionPrompt(request, canSave);
+	if (resolution == ImporterSelectionResult::Cancelled)
+	{
+		pendingImporterSelection.reset();
+		pendingSourceAsset = false;
+		pendingImporterOpen = {};
+		exitAfterInspectorPrompt = false;
+	}
+	const bool accept = resolution == ImporterSelectionResult::Accepted;
+	if (accept && pendingImporterSelection)
+	{
+		const auto next = std::move(*pendingImporterSelection);
+		pendingImporterSelection.reset();
+		pendingSourceAsset = false;
+		assetImporterInspector.reset();
+		if (next.kind == EditorSelectionKind::Asset)
+		{
+			selectionContext.SelectAsset(next.assetPath, next.assetLocalFileId, next.assetKind);
+			projectBrowser.SelectAsset(next.assetPath);
+		}
+		else if (next.kind == EditorSelectionKind::GameObject)
+		{
+			selectionContext.SelectGameObject(next.documentId, next.objectId);
+			if (documents && documents->Current() && documents->Current()->Id() == next.documentId)
+			{
+				if (const auto draft = documents->Current()->Payload<SceneDraft>())
+				{
+					if (draft->Kind() == ResourceKind::Prefab && draft->GetPrefabAsset())
+					{
+						Vector<GameObject::Ptr> pending{draft->GetPrefabAsset()->Root()};
+						while (!pending.empty())
+						{
+							auto object = std::move(pending.back());
+							pending.pop_back();
+							if (object->Id() == next.objectId)
+							{
+								hierarchy.Select(*draft->GetPrefabAsset(), object);
+								break;
+							}
+							for (const auto& child : object->Children())
+							{
+								pending.push_back(child);
+							}
+						}
+					}
+					else if (const auto object = draft->GetScene().GameObjectById(next.objectId))
+					{
+						hierarchy.Select(draft->GetScene(), object.value);
+					}
+				}
+			}
+		}
+		else
+		{
+			selectionContext.Clear();
+		}
+		if (!pendingImporterOpen.scheme.empty())
+		{
+			pendingManagedAsset = std::move(pendingImporterOpen);
+			pendingImporterOpen = {};
+		}
+		if (exitAfterInspectorPrompt)
+		{
+			exitAfterInspectorPrompt = false;
+			exitRequested = true;
+			const auto closing = documents->RequestClose();
+			if (!closing)
+			{
+				workspaceError = closing.error;
+			}
+		}
+	}
 }
 
 Result<void> EditorApplication::ReloadEditorScripts()
@@ -454,6 +637,15 @@ Result<void> EditorApplication::ReloadEditorScripts()
 		return registered;
 	}
 	const UInt64 previous = editingScriptSession;
+	if (assetPreview)
+	{
+		const auto closed = assetPreview->CloseExtension();
+		if (!closed)
+		{
+			abandon();
+			return closed;
+		}
+	}
 	auto previousServices = std::move(editingScriptServices);
 	editingScriptSession = candidate.value;
 	if (assetPreview)
@@ -487,6 +679,23 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 	if (!workspace || !documents || !project || play.Active())
 	{
 		return Result<void>::Failure("Asset opening requires Stop mode and an open project");
+	}
+	if (assetInspectorPanel.HasModifiedSource())
+	{
+		auto next = selectionContext;
+		next.beforeChange = {};
+		next.SelectAsset(path);
+		pendingImporterSelection = std::move(next);
+		pendingSourceAsset = true;
+		pendingImporterOpen = path;
+		importerSelectionPopup = true;
+		return {};
+	}
+	if (assetImporterInspector && assetImporterInspector->HasModified() &&
+	    path != assetImporterInspector->SourcePath() && !selectionContext.SelectAsset(path))
+	{
+		pendingImporterOpen = path;
+		return {};
 	}
 	auto kind = ResourceKindForPath(path);
 	if (path.scheme == projectResourceScheme &&
@@ -536,7 +745,7 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 			textureImportView->Close(*gui);
 		}
 		textureImportView = std::move(view.value);
-		auto preview = textureImportView->Reimport(*workspace->Database(), device, *gui, true);
+		auto preview = textureImportView->Reimport(*workspace->Database(), workspace->Importer(), device, *gui, true);
 		if (!preview)
 		{
 			RequestAssetImport(path);
@@ -556,7 +765,7 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 			return Result<void>::Failure(view.error);
 		}
 		modelImportView = std::move(view.value);
-		auto preview = modelImportView->Reimport(*workspace->Database(), true);
+		auto preview = modelImportView->Reimport(*workspace->Database(), workspace->Importer(), true);
 		if (!preview)
 		{
 			RequestAssetImport(path);
@@ -572,6 +781,19 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 		}
 		shaderImportView = std::move(view.value);
 		return {};
+	}
+	else if (path.scheme == projectResourceScheme && workspace->Database())
+	{
+		const auto metadata = workspace->Database()->Metadata(path);
+		const auto importer = workspace->ImportRuleDescriptions()->FindImporter(
+		    PathToUrsaString(PathFromUrsaString(path.relative).extension()));
+		if ((metadata && metadata.value.importer.find("script:") == 0) || (importer && importer.value->scriptType))
+		{
+			projectBrowser.SelectAsset(path);
+			selectionContext.SelectAsset(path);
+			showInspectorPanel = true;
+			return {};
+		}
 	}
 	if (!opened)
 	{
@@ -691,6 +913,14 @@ Result<void> EditorApplication::OnStart()
 
 Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, const std::filesystem::path& package)
 {
+	if (assetInspectorPanel.HasModifiedSource())
+	{
+		return Result<void>::Failure("Save or discard source asset edits before opening another project");
+	}
+	if (assetImporterInspector && assetImporterInspector->HasModified())
+	{
+		return Result<void>::Failure("Apply or Revert the current importer settings before changing projects");
+	}
 	if (scriptIdeJob.valid() || scriptEditorJob.valid())
 	{
 		return Result<void>::Failure("Wait for the script IDE request before changing projects");
@@ -769,6 +999,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 		{
 			return Result<void>::Failure(prepared.error);
 		}
+		openedWorkspace->SetImportRuleDescriptions(prepared.value.rules);
 		auto assigned = openedWorkspace->SetRuntimeContentView(prepared.value.runtimeFiles);
 		if (!assigned)
 		{
@@ -814,6 +1045,7 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 		{
 			return Result<void>::Failure(prepared.error);
 		}
+		openedWorkspace->SetImportRuleDescriptions(prepared.value.rules);
 		auto assigned = openedWorkspace->SetRuntimeContentView(prepared.value.runtimeFiles);
 		if (!assigned)
 		{
@@ -834,6 +1066,9 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	}
 	textureImportView.reset();
 	modelImportView.reset();
+	assetImporterInspector.reset();
+	pendingImporterSelection.reset();
+	assetInspectorPanel.Reset();
 	shaderImportView.reset();
 #if defined(URSA_ENABLE_DOTNET)
 	if (managedHost && editingScriptSession)
@@ -888,7 +1123,9 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	}
 	hierarchy.ClearSelection();
 	displayedSceneId = {};
-	selectionContext.Clear();
+	selectionContext.Clear(true);
+	selectionContext.beforeChange = [this](const EditorSelectionContext& next)
+	{ return BeforeImporterSelection(next); };
 	projectBrowser = ProjectBrowserModel{};
 	projectBrowserPanel.Reset();
 	auto browserRefreshed = projectBrowser.Refresh(*workspace);
@@ -1046,26 +1283,45 @@ void EditorApplication::DrawMainMenuBar()
 		EditorDocument* current = documents ? documents->Current() : nullptr;
 		if (Icons::BeginMenu("File"))
 		{
-			ImGui::BeginDisabled(!documents || !current || play.Active());
+			ImGui::BeginDisabled(!documents || (!current && !assetInspectorPanel.HasModifiedSource()) || play.Active());
 			if (Icons::MenuItem("Save", "Ctrl+S"))
 			{
-				auto saved = documents->SaveCurrent();
+				const auto sourceSaved = assetInspectorPanel.SaveSelectedSource(selectionContext);
+				auto saved = !sourceSaved        ? Result<void>::Failure(sourceSaved.error)
+				             : sourceSaved.value ? Result<void>{}
+				                                 : documents->SaveCurrent();
 				workspaceError = saved ? String{} : saved.error;
 				if (saved)
 				{
 					RequestAssetImport();
 				}
 			}
+			ImGui::BeginDisabled(!current);
 			if (Icons::MenuItem("Close Document"))
 			{
 				auto closed = documents->RequestClose();
 				workspaceError = closed ? String{} : closed.error;
 			}
 			ImGui::EndDisabled();
+			ImGui::EndDisabled();
 			ImGui::Separator();
 			if (Icons::MenuItem("Exit"))
 			{
-				exitRequested = true;
+				if (assetInspectorPanel.HasModifiedSource())
+				{
+					exitAfterInspectorPrompt = true;
+					EditorSelectionContext next;
+					BeforeImporterSelection(next);
+				}
+				else
+				{
+					exitRequested = true;
+					const auto closing = documents->RequestClose();
+					if (!closing)
+					{
+						workspaceError = closing.error;
+					}
+				}
 			}
 			DrawManagedMenus("File");
 			ImGui::EndMenu();
@@ -1492,8 +1748,12 @@ Result<void> EditorApplication::OpenProjectBrowserAsset(const ProjectBrowserEntr
 	{
 		return Result<void>::Failure("Project asset cannot be opened in the current workspace");
 	}
+	if (!selectionContext.SelectAsset(asset.path))
+	{
+		pendingImporterOpen = asset.path;
+		return {};
+	}
 	projectBrowser.SelectAsset(asset.path);
-	selectionContext.SelectAsset(asset.path);
 	if (PathFromUrsaString(asset.path.relative).extension() == ".cs")
 	{
 		return OpenCSharpProject(asset.path);
@@ -1548,7 +1808,7 @@ Result<void> EditorApplication::OpenProjectBrowserAsset(const ProjectBrowserEntr
 			textureImportView->Close(*gui);
 		}
 		textureImportView = std::move(opened.value);
-		auto preview = textureImportView->Reimport(*workspace->Database(), device, *gui, true);
+		auto preview = textureImportView->Reimport(*workspace->Database(), workspace->Importer(), device, *gui, true);
 		if (!preview)
 		{
 			RequestAssetImport(asset.path);
@@ -1565,7 +1825,7 @@ Result<void> EditorApplication::OpenProjectBrowserAsset(const ProjectBrowserEntr
 			return Result<void>::Failure(opened.error);
 		}
 		modelImportView = std::move(opened.value);
-		auto preview = modelImportView->Reimport(*workspace->Database(), true);
+		auto preview = modelImportView->Reimport(*workspace->Database(), workspace->Importer(), true);
 		if (!preview)
 		{
 			RequestAssetImport(asset.path);
@@ -1797,7 +2057,7 @@ Result<void> EditorApplication::ApplyGraphicsSettings(AssetReference pipeline)
 		String label = "Default Forward";
 		if (pipeline.guid)
 		{
-			auto path = workspace->Database()->Resolve(pipeline.guid, 0);
+			auto path = workspace->Database()->SourcePath(pipeline.guid);
 			label = path ? path.value.ToString() : pipeline.guid.ToString();
 		}
 		return Result<void>::Failure("Render pipeline candidate " + label + " failed: " + configured.error);
@@ -1948,7 +2208,7 @@ void EditorApplication::DrawGraphicsSettings()
 		                ToUrsaString(std::to_string(graphicsSettingsCandidate.localFileId));
 		if (workspace->Database())
 		{
-			auto path = workspace->Database()->Resolve(graphicsSettingsCandidate.guid, 0);
+			auto path = workspace->Database()->SourcePath(graphicsSettingsCandidate.guid);
 			if (path)
 			{
 				selectedLabel = path.value.FileName();
@@ -2745,45 +3005,6 @@ Result<void> EditorApplication::OnGui()
 		ImGui::EndChild();
 		ImGui::End();
 	}
-	if (textureImportView && workspace && workspace->Database())
-	{
-		auto drawn =
-		    textureImportView->Draw(*workspace->Database(), device, *gui, !play.Active() && !assetImportJob.valid(),
-		                            [this](const VirtualPath& path) { RequestAssetImport(path, true); });
-		if (!drawn)
-		{
-			inspectorError = drawn.error;
-		}
-	}
-	if (modelImportView && workspace && workspace->Database())
-	{
-		std::function<Result<void>()> instantiate;
-		if (!play.Active() && documents && documents->Current() &&
-		    (documents->Current()->Kind() == ResourceKind::Scene ||
-		     documents->Current()->Kind() == ResourceKind::Prefab))
-		{
-			auto draft = documents->Current()->Payload<SceneDraft>();
-			if (draft)
-			{
-				instantiate = [this, draft]
-				{
-					auto added = modelImportView->Instantiate(*draft);
-					if (added && documents && documents->Current())
-					{
-						documents->Current()->MarkDirty();
-					}
-					return added;
-				};
-			}
-		}
-		auto drawn =
-		    modelImportView->Draw(*workspace->Database(), !play.Active() && !assetImportJob.valid(), instantiate,
-		                          [this](const VirtualPath& path) { RequestAssetImport(path, true); });
-		if (!drawn)
-		{
-			inspectorError = drawn.error;
-		}
-	}
 	if (showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset && documents &&
 	    documents->Current() && documents->Current()->Kind() == ResourceKind::Texture)
 	{
@@ -2909,8 +3130,12 @@ Result<void> EditorApplication::OnGui()
 	}
 	if (workspace)
 	{
+		auto* selectedDocument = assetInspectorPanel.SelectedDocument(selectionContext);
+		assetPreview->SetExtensionResolver([this](ManagedEditorContext& context) { ConfigureAssetPreview(context); });
 		auto prepared = assetPreview->Prepare(*workspace, projectBrowser, selectionContext,
-		                                      documents ? documents->Current() : nullptr,
+		                                      selectedDocument ? selectedDocument
+		                                      : documents      ? documents->Current()
+		                                                       : nullptr,
 		                                      ProjectSettingsKey(workspace->ProjectRoot()));
 		if (!prepared)
 		{
@@ -2950,6 +3175,121 @@ Result<void> EditorApplication::OnGui()
 		    {
 			    const auto* entry = projectBrowser.Find(selectionContext.assetPath);
 			    auto* document = documents ? documents->Current() : nullptr;
+			    if (entry && !entry->folder && workspace->Database())
+			    {
+				    const auto descriptions = workspace->ImportRuleDescriptions();
+				    const auto descriptor = descriptions->FindImporter(
+				        PathToUrsaString(PathFromUrsaString(entry->path.relative).extension()));
+				    const bool hasImporter =
+				        descriptor && (descriptor.value->scriptType || descriptor.value->identity == "ursa.Texture" ||
+				                       descriptor.value->identity == "ursa.Model");
+				    if (hasImporter)
+				    {
+					    if (!assetImporterInspector || assetImporterInspector->SourcePath() != entry->path ||
+					        assetImporterInspector->Reference().guid != entry->guid)
+					    {
+						    if (assetImporterInspector)
+						    {
+							    const auto retained = assetImporterInspector->SaveRecovery();
+							    if (!retained)
+							    {
+								    inspectorError = retained.error;
+								    return;
+							    }
+						    }
+						    const auto opened = AssetImporterInspector::Open(*workspace, entry->path);
+						    if (!opened)
+						    {
+							    inspectorError = opened.error;
+							    ImGui::TextWrapped("%s", inspectorError.c_str());
+							    return;
+						    }
+						    assetImporterInspector = opened.value;
+					    }
+					    const auto request = [this](const VirtualPath& path) { RequestAssetImport(path, true); };
+					    const auto custom = [this](ManagedEditorContext& context)
+					    { return DrawAssetExtension(context); };
+					    const bool canApply = !play.Active() && !AssetWorkPending() && !ScriptWorkPending();
+					    Result<void> drawn;
+					    if (descriptor.value->identity == "ursa.Texture")
+					    {
+						    if (!textureImportView || textureImportView->SourcePath() != entry->path)
+						    {
+							    const auto settings = TextureImporter::Settings(*workspace->Database(), entry->path);
+							    auto view = settings
+							                    ? TextureImportView::Open(entry->path, settings.value)
+							                    : Result<std::unique_ptr<TextureImportView>>::Failure(settings.error);
+							    if (!view)
+							    {
+								    inspectorError = view.error;
+								    return;
+							    }
+							    if (textureImportView)
+							    {
+								    textureImportView->Close(*gui);
+							    }
+							    textureImportView = std::move(view.value);
+							    textureImportView->Reimport(*workspace->Database(), workspace->Importer(), device, *gui,
+							                                true);
+						    }
+						    textureImportView->SetSettingsInspector(assetImporterInspector);
+						    drawn = textureImportView->Draw(*workspace->Database(), workspace->Importer(), device, *gui,
+						                                    canApply, request, workspace.get(), custom, true);
+					    }
+					    else if (descriptor.value->identity == "ursa.Model")
+					    {
+						    if (!modelImportView || modelImportView->SourcePath() != entry->path)
+						    {
+							    const auto settings = ModelImporter::Settings(*workspace->Database(), entry->path);
+							    auto view = settings
+							                    ? ModelImportView::Open(entry->path, settings.value)
+							                    : Result<std::unique_ptr<ModelImportView>>::Failure(settings.error);
+							    if (!view)
+							    {
+								    inspectorError = view.error;
+								    return;
+							    }
+							    modelImportView = std::move(view.value);
+							    modelImportView->Reimport(*workspace->Database(), workspace->Importer(), true);
+						    }
+						    modelImportView->SetSettingsInspector(assetImporterInspector);
+						    std::function<Result<void>()> instantiate;
+						    if (!play.Active() && document &&
+						        (document->Kind() == ResourceKind::Scene || document->Kind() == ResourceKind::Prefab))
+						    {
+							    const auto draft = document->Payload<SceneDraft>();
+							    if (draft)
+							    {
+								    instantiate = [this, draft, document]
+								    {
+									    auto added = modelImportView->Instantiate(*draft);
+									    if (added)
+									    {
+										    document->MarkDirty();
+									    }
+									    return added;
+								    };
+							    }
+						    }
+						    drawn = modelImportView->Draw(*workspace->Database(), workspace->Importer(), canApply,
+						                                  instantiate, request, workspace.get(), custom, true);
+					    }
+					    else
+					    {
+						    const auto rendered =
+						        assetImporterInspector->DrawDefault(request, canApply, workspace.get(), custom);
+						    if (!rendered)
+						    {
+							    drawn = Result<void>::Failure(rendered.error);
+						    }
+					    }
+					    if (!drawn)
+					    {
+						    inspectorError = drawn.error;
+					    }
+					    return;
+				    }
+			    }
 			    if (!entry || !document || entry->guid != document->Id() || entry->path != document->Path())
 			    {
 				    return;
@@ -2972,7 +3312,26 @@ Result<void> EditorApplication::OnGui()
 					    inspectorError = result.error;
 				    }
 			    }
-		    });
+		    },
+		    [this](ManagedEditorContext& context)
+		    {
+			    context.canEditTarget = context.canEditTarget && !play.Active();
+			    return DrawAssetExtension(context);
+		    },
+		    &project->components,
+		    [this](EditorDocument& document, EditorDocuments& owner) -> std::optional<Result<bool>>
+		    {
+			    const auto draft = document.Payload<MaterialDraft>();
+			    const auto shader = draft ? draft->Material().Shader() : nullptr;
+			    if (!shader || shader->customEditor.empty() || !project->materialInspectors.Find(shader->customEditor))
+			    {
+				    return std::nullopt;
+			    }
+			    ImGuiInspectorUI ui;
+			    MaterialInspectorContext context{document, *draft, owner.Session()};
+			    return project->materialInspectors.Draw(shader->customEditor, context, ui);
+		    },
+		    documents.get());
 	}
 	consolePanel.Draw(showConsolePanel, inspectorError,
 	                  [this](const LogRecord& record) -> Result<void>
@@ -3077,6 +3436,7 @@ Result<void> EditorApplication::OnGui()
 		                             ? Result<void>::Failure("Log entry has no navigable resource or object context")
 		                             : resourceResult;
 	                  });
+	DrawImporterSelectionPrompt();
 	if (documents)
 	{
 		documents->DrawUnsavedPrompt();
@@ -3201,6 +3561,31 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 				continue;
 			}
 			String target = extension.target;
+			if (target.find("asset:") == 0 || target.find("importer:") == 0)
+			{
+				bool exposed = target == "asset:ursa.Prefab" || target == "asset:ursa.Material" ||
+				               target == "asset:ursa.Mesh" || target == "asset:ursa.Texture" ||
+				               target == "importer:ursa.Texture" || target == "importer:ursa.Model";
+				for (const auto& scriptType : scriptBuildService->ScriptTypes())
+				{
+					if (scriptType.kind == ScriptTypeKind::ScriptableObject &&
+					    scriptType.group == ScriptAssemblyGroup::Game)
+					{
+						exposed |= target == "asset:" + scriptType.scriptType;
+					}
+					if (scriptType.kind == ScriptTypeKind::ScriptedImporter)
+					{
+						exposed |= target == "importer:script:" + scriptType.sourceGuid.ToString() + ":" +
+						                         ToUrsaString(std::to_string(scriptType.localFileId));
+					}
+				}
+				if (!exposed)
+				{
+					return Result<void>::Failure("Custom Inspector target is not an exposed asset or importer: " +
+					                             target);
+				}
+				continue;
+			}
 			bool matchedScript = false;
 			for (const auto& scriptType : scriptBuildService->ScriptTypes())
 			{
@@ -3421,6 +3806,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		}
 		else
 		{
+			workspace->SetImportRuleDescriptions(prepared.value.rules);
 			auto assigned = workspace->SetRuntimeContentView(prepared.value.runtimeFiles);
 			if (!assigned)
 			{
@@ -3512,6 +3898,13 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	{
 		window->PollEvents();
 		frameCapture.PollWindowCapture();
+		if (window->ShouldClose() && assetInspectorPanel.HasModifiedSource())
+		{
+			exitAfterInspectorPrompt = true;
+			EditorSelectionContext next;
+			BeforeImporterSelection(next);
+			window->CancelClose();
+		}
 		if (window->ShouldClose() && documents && documents->Current() && documents->Current()->Dirty() &&
 		    !exitRequested)
 		{
@@ -3539,7 +3932,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		{
 			break;
 		}
-		if (window->FramebufferWidth() == 0 || window->FramebufferHeight() == 0)
+		if (window->Minimized() || window->FramebufferWidth() == 0 || window->FramebufferHeight() == 0)
 		{
 			if (assetPreview)
 			{
@@ -3642,11 +4035,19 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		{
 			if (assetPreview)
 			{
-				result = assetPreview->RenderPending(
-				    deltaSeconds,
-				    [this](Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
-				           std::optional<Rendering::CameraType> filter, std::optional<Rendering::CameraData> camera)
-				    { return RenderManagedViewport(scene, target, filter, std::move(camera)); });
+				// A GUI callback may minimize the window after recording this frame's Preview commands.
+				if (window->Minimized() || window->FramebufferWidth() == 0 || window->FramebufferHeight() == 0)
+				{
+					result = assetPreview->BeginFrame();
+				}
+				if (result)
+				{
+					result = assetPreview->RenderPending(
+					    deltaSeconds,
+					    [this](Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+					           std::optional<Rendering::CameraType> filter, std::optional<Rendering::CameraData> camera)
+					    { return RenderManagedViewport(scene, target, filter, std::move(camera)); });
+				}
 			}
 			URSA_PROFILE_SCOPE("Editor.EndFrame");
 			if (result)
@@ -3703,6 +4104,18 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 #endif
 	scriptBuildService.reset();
 	scriptAssetDatabase.reset();
+	if (assetImporterInspector)
+	{
+		const auto retained = assetImporterInspector->SaveRecovery();
+		if (!retained)
+		{
+			URSA_LOG_ERROR("Importer", retained.error);
+		}
+	}
+	assetImporterInspector.reset();
+	pendingImporterSelection.reset();
+	assetInspectorPanel.Reset();
+	selectionContext.beforeChange = {};
 	documents.reset();
 	workspace.reset();
 	projectBrowser = ProjectBrowserModel{};
@@ -3854,6 +4267,16 @@ void EditorApplication::FinishAssetJobs()
 			}
 			if (ready)
 			{
+				if (assetImporterInspector)
+				{
+					const auto retained = assetImporterInspector->SaveRecovery();
+					if (!retained)
+					{
+						inspectorError = retained.error;
+					}
+					assetImporterInspector.reset();
+				}
+				workspace->SetImportRuleDescriptions(result.value.rules);
 				ready = workspace->SetRuntimeContentView(result.value.runtimeFiles);
 			}
 			if (ready)
@@ -3901,11 +4324,11 @@ void EditorApplication::FinishAssetJobs()
 			workspace->Refresh();
 			if (textureImportView)
 			{
-				textureImportView->Reimport(*workspace->Database(), device, *gui, true);
+				textureImportView->Reimport(*workspace->Database(), workspace->Importer(), device, *gui, true);
 			}
 			if (modelImportView)
 			{
-				modelImportView->Reimport(*workspace->Database(), true);
+				modelImportView->Reimport(*workspace->Database(), workspace->Importer(), true);
 			}
 			if (shaderImportView)
 			{

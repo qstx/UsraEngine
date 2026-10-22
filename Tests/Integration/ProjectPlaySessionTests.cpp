@@ -195,6 +195,34 @@ int main()
 			                         std::to_string(controller->SerializedPayload() == unsavedPayload) +
 			                         ", roots=" + std::to_string(draft->GetScene().RootGameObjects().size()) + ")");
 		}
+		services->runtime.reset();
+		Done(host->CloseScriptSession(services->session));
+		services->session = 0;
+		services->sceneApi.reset();
+		services->title.clear();
+		payload["Fields"]["smokeGameplay"] = false;
+		controller->SetSerializedPayload(ToUrsaString(payload.dump()));
+		const auto normalPayload = controller->SerializedPayload();
+		Done(play.Start(*draft, sceneId, registry, *resources, setup));
+		FrameInput keyboard;
+		keyboard.keys[Size(Key::P)] = true;
+		Done(play.Tick(delta, nullptr, keyboard));
+		auto* playingController = play.GetScene()->RootGameObjects().front()->FindComponent<ScriptBehaviourComponent>();
+		std::cout << "Normal Snake input state: controller=" << (playingController != nullptr)
+		          << " enabled=" << (playingController && playingController->IsEnabled())
+		          << " title=" << ToStdString(services->title) << '\n';
+		Expect(playingController && playingController->IsEnabled() && services->title.find("Paused") != String::npos,
+		       "Normal Snake Play lost its frame input, Time context or keyboard pause event");
+		Done(play.Tick(delta, nullptr, {}));
+		Done(play.Tick(delta, nullptr, keyboard));
+		Expect(playingController->IsEnabled() && services->title.find("Paused") == String::npos,
+		       "Normal Snake Play could not resume from keyboard input");
+		play.Stop();
+		Expect(controller->SerializedPayload() == normalPayload, "Keyboard Play changed the author scene payload");
+		services->runtime.reset();
+		Done(host->CloseScriptSession(services->session));
+		services->session = 0;
+		services->sceneApi.reset();
 		services.reset();
 		host.reset();
 		std::cout << "Managed Snake Play mode lifecycle and edit Scene restoration passed.\n";

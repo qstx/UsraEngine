@@ -67,6 +67,7 @@ int main(int argumentCount, char** arguments)
 		const auto root = std::filesystem::temp_directory_path() /
 		                  ("ScriptIdentityTests-" + ToStdString(ResourceId::Generate().ToString()));
 		std::filesystem::create_directories(root / "Assets");
+		std::filesystem::create_directories(root / "Assets" / "Editor");
 		std::filesystem::create_directories(root / "Library");
 		VirtualFileSystem filesystem;
 		Done(filesystem.Mount(projectScheme, root / "Assets", MountAccess::ReadWrite));
@@ -78,6 +79,13 @@ int main(int argumentCount, char** arguments)
 		Write(filesystem, "prj:Settings.cs",
 		      "[Ursa.CreateAssetMenu(MenuName=\"Test/Settings\")] "
 		      "public sealed class Settings : Ursa.ScriptableObject { public int value = 5; }");
+		Write(filesystem, "prj:Editor/FormatImporter.cs",
+		      "using Ursa.Editor; [ScriptedImporter(2, \"ursatestformat\")] "
+		      "public sealed class FormatImporter : ScriptedImporter { public override void "
+		      "OnImportAsset(AssetImportContext context) {} }");
+		Write(filesystem, "prj:Editor/TextureRules.cs",
+		      "public sealed class TextureRules : Ursa.Editor.AssetPostprocessor { public override void "
+		      "OnPreprocessTexture() {} }");
 		auto database = Take(AssetDatabase::Open(filesystem));
 		const auto openService = [&]()
 		{
@@ -91,6 +99,12 @@ int main(int argumentCount, char** arguments)
 		const auto legacy = Find(*service, "Old.Mover, Ursa.Game");
 		const auto plain = Find(*service, "Plain, Ursa.Game");
 		const auto settings = Find(*service, "Settings, Ursa.Game");
+		const auto importer = Find(*service, "FormatImporter, Ursa.EditorScripts");
+		const auto processor = Find(*service, "TextureRules, Ursa.EditorScripts");
+		Expect(processor.kind == ScriptTypeKind::AssetPostprocessor && processor.group == ScriptAssemblyGroup::Editor,
+		       "AssetPostprocessor was not discovered as a stable Editor type");
+		Expect(importer.kind == ScriptTypeKind::ScriptedImporter && importer.group == ScriptAssemblyGroup::Editor,
+		       "ScriptedImporter was not discovered as a stable Editor type");
 		Expect(legacy.scriptType == "legacy.mover" && legacy.version == 2 &&
 		           settings.kind == ScriptTypeKind::ScriptableObject &&
 		           settings.createAssetMenuName == "Test/Settings" &&
@@ -102,6 +116,15 @@ int main(int argumentCount, char** arguments)
 		       "Repeated type discovery changed script metadata");
 
 		Done(database->Move(Path("prj:Mover.cs"), Path("prj:RenamedMover.cs")));
+		Done(database->Move(Path("prj:Editor/FormatImporter.cs"), Path("prj:Editor/RenamedFormat.cs")));
+		Done(database->Move(Path("prj:Editor/TextureRules.cs"), Path("prj:Editor/RenamedRules.cs")));
+		Write(filesystem, "prj:Editor/RenamedRules.cs",
+		      "public sealed class RenamedRules : Ursa.Editor.AssetPostprocessor { public override uint GetVersion() "
+		      "=> 4; public override void OnPreprocessTexture() {} }");
+		Write(filesystem, "prj:Editor/RenamedFormat.cs",
+		      "using Ursa.Editor; [ScriptedImporter(3, \"ursatestformat\")] "
+		      "public sealed class RenamedFormatImporter : ScriptedImporter { public override void "
+		      "OnImportAsset(AssetImportContext context) {} }");
 		Write(filesystem, "prj:RenamedMover.cs",
 		      "namespace New; public sealed class RenamedMover : Ursa.Behaviour { public int value = 7; }");
 		Write(filesystem, "prj:Plain.cs", "namespace New; public sealed class RenamedPlain : Ursa.Behaviour {}");
@@ -112,6 +135,18 @@ int main(int argumentCount, char** arguments)
 		const auto renamed = Find(*service, "New.RenamedMover, Ursa.Game");
 		const auto renamedPlain = Find(*service, "New.RenamedPlain, Ursa.Game");
 		const auto renamedSettings = Find(*service, "RenamedSettings, Ursa.Game");
+		const auto renamedImporter = Find(*service, "RenamedFormatImporter, Ursa.EditorScripts");
+		const auto renamedProcessor = Find(*service, "RenamedRules, Ursa.EditorScripts");
+		Expect(renamedProcessor.sourceGuid == processor.sourceGuid &&
+		           renamedProcessor.localFileId == processor.localFileId &&
+		           renamedProcessor.scriptType == processor.scriptType &&
+		           renamedProcessor.kind == ScriptTypeKind::AssetPostprocessor,
+		       "Postprocessor rename or rule version changed its stable script identity");
+		Expect(renamedImporter.sourceGuid == importer.sourceGuid &&
+		           renamedImporter.localFileId == importer.localFileId &&
+		           renamedImporter.scriptType == importer.scriptType &&
+		           renamedImporter.kind == ScriptTypeKind::ScriptedImporter,
+		       "Importer class/file rename or importer version changed the stable script identity");
 		Expect(renamed.scriptType == legacy.scriptType && renamed.sourceGuid == legacy.sourceGuid &&
 		           renamed.localFileId == legacy.localFileId && renamed.version == legacy.version &&
 		           renamedPlain.scriptType == plain.scriptType && renamedPlain.localFileId == plain.localFileId &&

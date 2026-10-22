@@ -8,4 +8,5 @@ internal interface IEditorExtensionSession : IDisposable
 	EditorExtensionInfo[] Describe();
 
 	bool Invoke(string id);
+	EditorPreviewResult Preview(string id, ulong instance, EditorPreviewPhase phase, Rect rect);
 }

@@ -1,6 +1,7 @@
 #include <Ui/EditorIcons.hpp>
 #include <Assets/TextureImportView.hpp>
 #include <Assets/ProjectAssetImporter.hpp>
+#include <Assets/AssetImporterInspector.hpp>
 #include <Serialization/TextureResource.hpp>
 
 #include <Core/StringInterop.hpp>
@@ -30,7 +31,8 @@ Result<std::unique_ptr<TextureImportView>> TextureImportView::Open(VirtualPath s
 	    std::unique_ptr<TextureImportView>(new TextureImportView(std::move(source), sourceSettings)));
 }
 
-Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr, ImGuiBridge&, bool cachedOnly)
+Result<void> TextureImportView::Reimport(AssetDatabase& database, ProjectAssetImporter& importer, Rhi::DevicePtr,
+                                         ImGuiBridge&, bool cachedOnly)
 {
 	auto sourceResult = TextureImporter::DecodeSourceImage(database.Filesystem(), sourcePath);
 	if (!sourceResult)
@@ -38,7 +40,7 @@ Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr
 		diagnostic = sourceResult.error;
 		return Result<void>::Failure(diagnostic);
 	}
-	if (!cachedOnly)
+	if (!cachedOnly && !settingsInspector)
 	{
 		auto savedSettings = TextureImporter::SetSettings(database, sourcePath, settings);
 		if (!savedSettings)
@@ -48,7 +50,7 @@ Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr
 		}
 	}
 	auto importedAsset = cachedOnly ? ProjectAssetImporter::LoadCurrent(database, sourcePath)
-	                                : ProjectAssetImporter{}.Import(database, sourcePath, true);
+	                                : importer.Import(database, sourcePath, true);
 	if (!importedAsset)
 	{
 		diagnostic = importedAsset.error;
@@ -71,79 +73,73 @@ Result<void> TextureImportView::Reimport(AssetDatabase& database, Rhi::DevicePtr
 	sourceTexture = std::move(sourceResult.value);
 	imported = std::move(importedResult.value);
 	hasImported = true;
-	dirty = false;
 	diagnostic.clear();
 	return {};
 }
 
-Result<void> TextureImportView::Draw(AssetDatabase& database, Rhi::DevicePtr device, ImGuiBridge& gui, bool canReimport,
-                                     const std::function<void(const VirtualPath&)>& requestImport)
+Result<std::shared_ptr<AssetImporterInspector>> TextureImportView::SettingsInspector(AssetDatabase& database)
 {
-	ImGui::Begin("Texture Import");
+	if (!settingsInspector)
+	{
+		auto opened = AssetImporterInspector::Open(database, sourcePath);
+		if (!opened)
+		{
+			return opened;
+		}
+		settingsInspector = std::move(opened.value);
+	}
+	return Result<std::shared_ptr<AssetImporterInspector>>::Success(settingsInspector);
+}
+
+bool TextureImportView::HasModifiedSettings() const
+{
+	return settingsInspector && settingsInspector->HasModified();
+}
+
+Result<void> TextureImportView::Draw(AssetDatabase& database, ProjectAssetImporter& importer, Rhi::DevicePtr device,
+                                     ImGuiBridge& gui, bool canReimport,
+                                     const std::function<void(const VirtualPath&)>& requestImport,
+                                     ProjectWorkspace* workspace, const AssetImporterInspector::CustomDraw& custom,
+                                     bool embedded)
+{
+	if (!embedded)
+	{
+		ImGui::Begin("Texture Import");
+	}
 	ImGui::TextUnformatted(AssetDisplayPath(sourcePath).c_str());
 	ImGui::TextDisabled("Source remains unchanged; imported data is cached in Library.");
-	static constexpr const char* typeNames[] = {"Default", "Normal Map", "Linear Data"};
-	int type = static_cast<int>(settings.type);
-	if (ImGui::Combo("Texture Type", &type, typeNames, 3))
+	auto target = SettingsInspector(database);
+	if (!target)
 	{
-		settings.type = static_cast<TextureImportType>(type);
-		if (settings.type != TextureImportType::Default)
+		if (!embedded)
 		{
-			settings.sRgb = false;
+			ImGui::End();
 		}
-		dirty = true;
+		return Result<void>::Failure(target.error);
 	}
-	ImGui::BeginDisabled(settings.type != TextureImportType::Default);
-	if (ImGui::Checkbox("sRGB (Color Texture)", &settings.sRgb))
+	auto drawn = target.value->DrawDefault(
+	    [&](const VirtualPath& path)
+	    {
+		    const auto saved = TextureImporter::Settings(database, sourcePath);
+		    if (!saved)
+		    {
+			    diagnostic = saved.error;
+			    return;
+		    }
+		    settings = saved.value;
+		    if (requestImport)
+		    {
+			    requestImport(path);
+		    }
+		    else
+		    {
+			    Reimport(database, importer, device, gui);
+		    }
+	    },
+	    canReimport, workspace, custom);
+	if (!drawn)
 	{
-		dirty = true;
-	}
-	ImGui::EndDisabled();
-	if (ImGui::Checkbox("Alpha", &settings.alpha))
-	{
-		dirty = true;
-	}
-	if (ImGui::Checkbox("Generate Mipmaps", &settings.generateMipmaps))
-	{
-		dirty = true;
-	}
-	static constexpr const char* filterNames[] = {"Point", "Linear"};
-	int filter = settings.filter == TextureFilterMode::Point ? 0 : 1;
-	if (ImGui::Combo("Filter Mode", &filter, filterNames, 2))
-	{
-		settings.filter = filter == 0 ? TextureFilterMode::Point : TextureFilterMode::Linear;
-		dirty = true;
-	}
-	static constexpr const char* wrapNames[] = {"Repeat", "Clamp"};
-	int wrap = settings.wrap == TextureWrapMode::Repeat ? 0 : 1;
-	if (ImGui::Combo("Wrap Mode", &wrap, wrapNames, 2))
-	{
-		settings.wrap = wrap == 0 ? TextureWrapMode::Repeat : TextureWrapMode::Clamp;
-		dirty = true;
-	}
-	int maxDimension = static_cast<int>(settings.maxDimension);
-	if (ImGui::InputInt("Max Size", &maxDimension))
-	{
-		settings.maxDimension = maxDimension > 0 ? static_cast<Ursa::UInt32>(maxDimension) : 0;
-		dirty = true;
-	}
-	ImGui::BeginDisabled(!canReimport || (!dirty && hasImported));
-	const bool reimport = Icons::Button("Reimport");
-	ImGui::EndDisabled();
-	if (reimport)
-	{
-		auto result = requestImport ? TextureImporter::SetSettings(database, sourcePath, settings)
-		                            : Reimport(database, std::move(device), gui);
-		if (result && requestImport)
-		{
-			requestImport(sourcePath);
-			dirty = false;
-		}
-
-		if (!result)
-		{
-			diagnostic = result.error;
-		}
+		diagnostic = drawn.error;
 	}
 	if (hasImported)
 	{
@@ -156,7 +152,10 @@ Result<void> TextureImportView::Draw(AssetDatabase& database, Rhi::DevicePtr dev
 	{
 		ImGui::TextWrapped("%s", diagnostic.c_str());
 	}
-	ImGui::End();
+	if (!embedded)
+	{
+		ImGui::End();
+	}
 	return {};
 }
 

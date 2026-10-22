@@ -17,6 +17,7 @@ BindingHostAccess RuntimeServices::HostApi(BindingCall& call)
 Result<bool> RuntimeServices::GetKey(BindingCall& call, UInt32 key, UInt32 phase)
 {
 	const auto& api = SceneApi(call);
+	api.RequireGameExecution();
 	if (!api.frameContext || key >= FrameInput::keyCount || phase > 2)
 	{
 		return Result<bool>::Failure("Input requires an active frame, supported key and phase");
@@ -34,6 +35,7 @@ Result<bool> RuntimeServices::GetKey(BindingCall& call, UInt32 key, UInt32 phase
 
 Result<Wire::Value_Ursa_TimeState> RuntimeServices::GetTime(BindingCall& call)
 {
+	SceneApi(call).RequireGameExecution();
 	const auto* frame = SceneApi(call).frameContext;
 	if (!frame)
 	{
@@ -62,6 +64,10 @@ Result<void> RuntimeServices::ReportHostMessage(BindingCall& call, UInt32 level,
 
 Result<DataView> RuntimeServices::ReadFile(BindingCall& call, const Utf8View& path)
 {
+	if (auto* api = dynamic_cast<ManagedSceneApi*>(&call.context))
+	{
+		api->RequireGameExecution();
+	}
 	if (path.length == 0 || path.length > 4096)
 	{
 		return Result<DataView>::Failure("Invalid VFS path length");
@@ -77,6 +83,10 @@ Result<DataView> RuntimeServices::ReadFile(BindingCall& call, const Utf8View& pa
 
 Result<void> RuntimeServices::WriteFile(BindingCall& call, const Utf8View& path, const DataView& bytes)
 {
+	if (auto* api = dynamic_cast<ManagedSceneApi*>(&call.context))
+	{
+		api->RequireGameExecution();
+	}
 	if (path.length == 0 || path.length > 4096 || bytes.length > 256ull * 1024 * 1024)
 	{
 		return Result<void>::Failure("VFS path or file exceeds the transfer budget");
@@ -98,6 +108,7 @@ Result<void> RuntimeServices::SetWindowTitle(BindingCall& call, const Utf8View& 
 		return Result<void>::Failure("Window title exceeds 1024 UTF-8 bytes");
 	}
 	auto& api = SceneApi(call);
+	api.RequireGameExecution();
 	const auto text = ReadString(title);
 	if (text.find('\0') != String::npos || !api.setWindowTitle)
 	{

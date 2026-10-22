@@ -186,7 +186,7 @@ Result<VirtualPath> ResourceSession::ResolveAssetPath(ResourceId guid, Ursa::UIn
 	if (assetPathResolver)
 	{
 		auto resolved = assetPathResolver(guid, localFileId);
-		if (resolved)
+		if (resolved || strictArtifactReads)
 		{
 			return resolved;
 		}
@@ -296,8 +296,8 @@ Result<std::shared_ptr<MaterialInstance>> ResourceSession::LoadMaterial(Resource
 		    "Resource " + key + " is not a material: " + location.value.path.ToString());
 	}
 
-	auto loaded = LoadMaterialResource(index.Filesystem(), location.value.path,
-	                                   [this](ResourceId textureId) { return LoadTexture(textureId); });
+	auto loaded = LoadMaterialResource(
+	    index.Filesystem(), location.value.path, [this](ResourceId textureId) { return LoadTexture(textureId); }, this);
 	if (!loaded)
 	{
 		return Result<std::shared_ptr<MaterialInstance>>::Failure(loaded.error);
@@ -359,23 +359,14 @@ Result<std::shared_ptr<MaterialInstance>> ResourceSession::LoadMaterial(Resource
 	{
 		return Result<std::shared_ptr<MaterialInstance>>::Failure(path.error);
 	}
-	auto document = ReadCborArtifact(index.Filesystem(), path.value);
-	if (!document)
+	auto loaded = LoadMaterialResource(
+	    index.Filesystem(), path.value, [this](ResourceId texture) { return LoadTexture(texture); }, this);
+	if (!loaded || loaded.value.id != guid)
 	{
-		return Result<std::shared_ptr<MaterialInstance>>::Failure(document.error);
+		return Result<std::shared_ptr<MaterialInstance>>::Failure(
+		    loaded ? "Material artifact owner GUID differs from its catalog" : loaded.error);
 	}
-	auto reader = ArchiveFromJson(document.value);
-	if (!reader)
-	{
-		return Result<std::shared_ptr<MaterialInstance>>::Failure(path.value.ToString() + ": " + reader.error);
-	}
-	SerializationContext context(this);
-	auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
-	auto loaded = material->Deserialize(reader.value, context);
-	if (!loaded)
-	{
-		return Result<std::shared_ptr<MaterialInstance>>::Failure(path.value.ToString() + ": " + loaded.error);
-	}
+	auto material = std::move(loaded.value.material);
 	if (material->IsShaderBacked())
 	{
 		auto shader = LoadShader(material->ShaderId());
@@ -594,6 +585,14 @@ Result<std::shared_ptr<const Shader::ShaderAsset>> ResourceSession::LoadShaderIn
 	if (cached != shaders.end())
 	{
 		return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(cached->second);
+	}
+	if (strictArtifactReads && (id == Shader::BuiltinUnlitShaderId() || id == Shader::BuiltinPbrShaderId()))
+	{
+		auto builtin = std::make_shared<const Shader::ShaderAsset>(id == Shader::BuiltinUnlitShaderId()
+		                                                               ? Shader::CreateBuiltinUnlitShaderAsset()
+		                                                               : Shader::CreateBuiltinPbrShaderAsset());
+		shaders.emplace(key, builtin);
+		return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(std::move(builtin));
 	}
 	auto location = ResolveResource(id);
 	if (!location)

@@ -77,7 +77,7 @@ Result<SerializationServices::Handle> SerializationServices::RestoreMesh(Binding
 {
 	auto& api = RuntimeServices::SceneApi(call);
 	const auto reader = ReadReference(archive);
-	SerializationContext fallback(api.resources);
+	SerializationContext fallback(api.Resources());
 	const auto value = TakeBindingResult(ReadMeshBinding(reader, "value", RestoreContext(fallback)));
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMesh(value))));
 }
@@ -86,7 +86,7 @@ Result<SerializationServices::Handle> SerializationServices::RestoreMaterial(Bin
 {
 	auto& api = RuntimeServices::SceneApi(call);
 	const auto reader = ReadReference(archive);
-	SerializationContext fallback(api.resources);
+	SerializationContext fallback(api.Resources());
 	const auto value = TakeBindingResult(ReadMaterialBinding(reader, "value", RestoreContext(fallback)));
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMaterial(value))));
 }
@@ -95,12 +95,12 @@ Result<Wire::Value_Ursa_ScriptableAssetGraphArchive>
 SerializationServices::LoadScriptableAssetGraph(BindingCall& call, const Wire::Value_Ursa_NativeAssetReference& root)
 {
 	auto& api = RuntimeServices::SceneApi(call);
-	if (!api.resources)
+	if (!api.Resources())
 	{
 		return Result<Wire::Value_Ursa_ScriptableAssetGraphArchive>::Failure(
 		    "ScriptableAsset loading requires a ResourceSession");
 	}
-	const auto graph = TakeBindingResult(Ursa::LoadScriptableAssetGraph(*api.resources, ReadAssetValue(root)));
+	const auto graph = TakeBindingResult(Ursa::LoadScriptableAssetGraph(*api.Resources(), ReadAssetValue(root)));
 	auto json = nlohmann::json::array();
 	for (const auto& asset : graph.assets)
 	{

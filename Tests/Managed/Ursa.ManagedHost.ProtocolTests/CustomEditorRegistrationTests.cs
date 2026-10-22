@@ -9,6 +9,21 @@ internal static class CustomEditorRegistrationTests
 	// No identity attribute: registration must use the current session's type catalog.
 	public sealed class CatalogBehaviour : Behaviour { }
 	public sealed class GenericBehaviour<T> : Behaviour { }
+	public class CatalogAsset : ScriptableObject { }
+	public class DerivedAsset : CatalogAsset { }
+	public sealed class DeepAsset : DerivedAsset { }
+	public sealed class AssetInspector : Inspector { public override void OnInspectorGUI() { } }
+	public sealed class DerivedInspector : Inspector { public override void OnInspectorGUI() { } }
+	public sealed class ExactInspector : Inspector { public override void OnInspectorGUI() { } }
+
+	[CustomEditor(typeof(Material))]
+	public sealed class MaterialInspector : Inspector { public override void OnInspectorGUI() { } }
+	[CustomEditor(typeof(GameObject))]
+	public sealed class PrefabInspector : Inspector { public override void OnInspectorGUI() { } }
+	[CustomEditor(typeof(TextureImporter))]
+	public sealed class ImporterInspector : Inspector { public override void OnInspectorGUI() { } }
+	[CustomEditor(typeof(CatalogAsset))]
+	public sealed class SourceAssetInspector : Inspector { public override void OnInspectorGUI() { } }
 
 	[CustomEditor(typeof(CatalogBehaviour))]
 	public sealed class BehaviourInspector : Inspector
@@ -27,6 +42,18 @@ internal static class CustomEditorRegistrationTests
 		ExpectRejected(() => new CustomEditorAttribute(null!), "Null CustomEditor target was accepted.");
 		ExpectRejected(() => new CustomEditorAttribute(typeof(string)), "Non-component CustomEditor target was accepted.");
 		ExpectRejected(() => new CustomEditorAttribute(typeof(GenericBehaviour<>)), "Open generic CustomEditor target was accepted.");
+		var broad = new InspectorRegistration(typeof(AssetInspector), new(typeof(CatalogAsset), true));
+		var near = new InspectorRegistration(typeof(DerivedInspector), new(typeof(DerivedAsset), true));
+		var exact = new InspectorRegistration(typeof(ExactInspector), new(typeof(DeepAsset)));
+		foreach (var registrations in new[] { new[] { broad, near, exact }, new[] { exact, near, broad } })
+			if (InspectorTargetMatching.Select(typeof(DeepAsset), registrations) != typeof(ExactInspector))
+				throw new InvalidOperationException("Exact asset Inspector did not win independently of discovery order.");
+		if (InspectorTargetMatching.Select(typeof(DeepAsset), new[] { broad, near }) != typeof(DerivedInspector) ||
+			InspectorTargetMatching.Select(typeof(DeepAsset), new[] { new InspectorRegistration(typeof(ExactInspector), new(typeof(CatalogAsset))) }) != null)
+			throw new InvalidOperationException("Child Inspector selection ignored distance or opt-in.");
+		try { InspectorTargetMatching.Select(typeof(DeepAsset), new[] { broad, new InspectorRegistration(typeof(ExactInspector), new(typeof(CatalogAsset), true)) });
+			throw new Exception("Ambiguous asset Inspectors were accepted."); }
+		catch (InvalidOperationException) { }
 		if (typeof(Inspector).Assembly.GetType("Ursa.Editor.CustomInspectorAttribute") != null)
 			throw new InvalidOperationException("The removed string-based Inspector attribute is still exposed.");
 
@@ -40,11 +67,12 @@ internal static class CustomEditorRegistrationTests
 			foreach (string stableId in new[] { "test.catalog-first", "test.catalog-reloaded" })
 			{
 				BehaviourRegistry.identityResolver = type => type == typeof(CatalogBehaviour)
-					? new ScriptIdentity(stableId, 1) : throw new InvalidOperationException("Unexpected catalog lookup.");
+					? new ScriptIdentity(stableId, 1) : type == typeof(CatalogAsset) ? new ScriptIdentity("test.catalog-asset", 1) : throw new InvalidOperationException("Unexpected catalog lookup.");
 				using var session = Create();
 				EditorExtensionInfo[] descriptors = session.Describe();
-				if (descriptors.Length != 2 || !descriptors.Any(item => item.Target == stableId && item.Id == "inspector:" + stableId) ||
-					!descriptors.Any(item => item.Target == "ursa.Camera" && item.Id == "inspector:ursa.Camera"))
+				if (descriptors.Length != 6 || !descriptors.Any(item => item.Target == stableId && item.Id == "inspector:" + stableId) ||
+					!descriptors.Any(item => item.Target == "ursa.Camera" && item.Id == "inspector:ursa.Camera") ||
+					!new[] { "asset:ursa.Material", "asset:ursa.Prefab", "asset:test.catalog-asset", "importer:ursa.Texture" }.All(target => descriptors.Any(item => item.Target == target)))
 					throw new InvalidOperationException("Typed Inspectors did not resolve current script and native component identities.");
 			}
 

@@ -210,6 +210,9 @@ protected:
 						}
 						Done(opened);
 						switchedProject = true;
+						// Opening the second project performs a separate cold bootstrap; give its
+						// first frame its own bounded deadline after that synchronous work finishes.
+						deadline = std::chrono::steady_clock::now() + std::chrono::seconds(90);
 					}
 				}
 				if (mode == 3)

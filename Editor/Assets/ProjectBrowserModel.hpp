@@ -14,6 +14,7 @@ struct ProjectBrowserEntry
 	bool folder = false;
 	std::optional<ResourceKind> kind;
 	String importer;
+	Vector<ImportedArtifactRecord> importedObjects;
 };
 
 class ProjectBrowserModel final

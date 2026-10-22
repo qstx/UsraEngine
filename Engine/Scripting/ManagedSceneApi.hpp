@@ -24,7 +24,7 @@ struct SerializationServices;
 struct RenderingServices;
 } // namespace Bindings
 
-class ManagedSceneApi final : public Bindings::BindingContext
+class ManagedSceneApi : public Bindings::BindingContext
 {
 public:
 	using ManagedRenderTexture = Rendering::RenderTextureResource;
@@ -35,6 +35,67 @@ public:
 
 	~ManagedSceneApi() override;
 	UInt64 SessionIdentity() const override;
+	Result<std::shared_ptr<void>> CandidateResource(const ManagedHandle& handle) const;
+
+	virtual void RequireGameExecution() const
+	{
+		Require(0);
+	}
+
+	virtual void RequireResourceAccess() const
+	{
+		Require(0);
+	}
+
+	virtual void RequireRendering() const
+	{
+		Require(0);
+	}
+
+	virtual void RequireSceneMutation() const
+	{
+		Require(0);
+	}
+
+	virtual bool PersistentResourcesReadOnly() const
+	{
+		return false;
+	}
+
+	virtual bool LocalResourceReferencesReadOnly() const
+	{
+		return false;
+	}
+
+	virtual bool CpuBuiltinShaders() const
+	{
+		return false;
+	}
+
+	void RequireWritableResource(const ManagedHandle& handle) const;
+
+	void SetResourceSession(ResourceSession* value)
+	{
+		Require(0);
+		resources = value;
+	}
+
+	void SetResourceProvider(std::function<ResourceSession*()> provider)
+	{
+		Require(0);
+		resourceProvider = std::move(provider);
+	}
+
+	ResourceSession* Resources()
+	{
+		RequireResourceAccess();
+		if (!resources && resourceProvider)
+		{
+			resources = resourceProvider();
+		}
+		return resources;
+	}
+
 	void CheckHandle(const void* value, Size size, UInt32 kind) const override;
 
 	Result<void> BindHostServices(void* token)
@@ -48,20 +109,34 @@ public:
 	}
 
 	Result<ManagedHandle> Register(const GameObject::Ptr& object);
+	Result<GameObject::Ptr> CreateObject(String name);
 
 	Result<ManagedHandle> RegisterComponent(Component* component);
+	Result<ManagedHandle> RegisterMaterial(const std::shared_ptr<MaterialInstance>& material, bool writable = false);
+	Result<ManagedHandle> RegisterMesh(const MeshPtr& mesh, bool writable = false);
+	Result<ManagedHandle> RegisterTexture(const MaterialTexturePtr& texture);
 
-	const FrameContext* SetFrameContext(const FrameContext* context)
+	Result<MeshPtr> ReadMesh(const ManagedHandle& handle) const
 	{
-		const FrameContext* previous = frameContext;
-		frameContext = context;
-		return previous;
+		RequireResourceAccess();
+		return ResolveMesh(handle);
 	}
 
-	void SetBehaviourRuntime(ManagedBehaviourRuntime* runtime)
+	Result<std::shared_ptr<MaterialInstance>> ReadMaterial(const ManagedHandle& handle) const
 	{
-		behaviourRuntime = runtime;
+		RequireResourceAccess();
+		return ResolveMaterial(handle);
 	}
+
+	Result<MaterialTexturePtr> ReadTexture(const ManagedHandle& handle) const;
+	void SetDetachedRoots(Vector<GameObject::Ptr> roots);
+	Result<GameObject::Ptr> FindGameObject(ResourceId id) const;
+	Result<Component*> FindComponent(ResourceId id) const;
+
+	const FrameContext* SetFrameContext(const FrameContext* context);
+
+	void SetBehaviourRuntime(ManagedBehaviourRuntime* runtime);
+	GameObject::Ptr SetLifecycleOwner(GameObject::Ptr owner);
 
 	void SetRenderDevice(Rhi::DevicePtr selectedDevice);
 	void SetRenderOutput(std::shared_ptr<ManagedRenderTexture> output,
@@ -88,12 +163,9 @@ private:
 	Result<GameObject::Ptr> Resolve(const ManagedHandle& handle) const;
 
 	Result<ManagedHandle> RegisterComponent(Component* component, const GameObject::Ptr& owner);
+	bool Contains(const GameObject::Ptr& object) const;
 
 	Result<Component*> ResolveComponent(const ManagedHandle& handle) const;
-
-	Result<ManagedHandle> RegisterMesh(const MeshPtr& mesh);
-
-	Result<ManagedHandle> RegisterMaterial(const std::shared_ptr<MaterialInstance>& material);
 
 	Result<MeshPtr> ResolveMesh(const ManagedHandle& handle) const;
 
@@ -108,6 +180,7 @@ private:
 	UnorderedMap<UInt32, MeshPtr> ownedMeshes;
 	UnorderedMap<UInt32, std::shared_ptr<MaterialInstance>> ownedMaterials;
 	UnorderedMap<UInt32, MaterialTexturePtr> ownedTextures;
+	Set<UInt32> readOnlyResources;
 	UnorderedMap<UInt32, std::shared_ptr<ManagedRenderTexture>> ownedRenderTextures;
 	UnorderedMap<UInt32, std::shared_ptr<ManagedGraphicsBuffer>> ownedGraphicsBuffers;
 	Scene& scene;
@@ -115,10 +188,12 @@ private:
 	std::unique_ptr<ManagedHandleRegistry> handles;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> objects;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> componentOwners;
-	UnorderedMap<UInt32, ComponentId> componentIdentities;
+	UnorderedMap<UInt32, ResourceId> componentIdentities;
+	Vector<GameObject::Ptr> detachedRoots;
 	ComponentRegistry componentTypes;
 	const FrameContext* frameContext = nullptr;
 	ResourceSession* resources = nullptr;
+	std::function<ResourceSession*()> resourceProvider;
 	Rhi::DevicePtr device;
 	std::unique_ptr<Rendering::RenderCommandExecutor> renderExecutor;
 	std::shared_ptr<ManagedRenderTexture> renderOutput;
@@ -137,5 +212,6 @@ private:
 	Vector<Vector<UInt8>> renderBatches;
 	Vector<Vector<std::shared_ptr<void>>> renderBatchResources;
 	UInt64 acceptedRenderBatchCount = 0;
+	GameObject::Ptr lifecycleOwner;
 };
 } // namespace Ursa::Scripting

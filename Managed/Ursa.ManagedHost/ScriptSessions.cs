@@ -10,6 +10,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using Ursa;
 using Ursa.Bindings;
 
@@ -81,8 +82,11 @@ internal static class ScriptSessions
 		internal readonly ProjectContext context;
 		internal BindingSnapshot bindings;
 		internal IEditorExtensionSession? extensions;
+		internal IImportExtensionSession? importExtensions;
+		internal bool importing;
 		internal string preparedReload = string.Empty;
 		internal readonly Dictionary<string, ScriptIdentity> identities = new(StringComparer.Ordinal);
+		internal readonly HashSet<Type> runtimeTypes = new();
 
 		internal Session(ulong id, bool editor)
 		{
@@ -96,25 +100,54 @@ internal static class ScriptSessions
 		.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
 		.Select(path => Path.GetFileNameWithoutExtension(path)).Where(name => name.StartsWith("System.", StringComparison.Ordinal) ||
 			name.StartsWith("Microsoft.", StringComparison.Ordinal) || name is "System" or "mscorlib" or "netstandard"), StringComparer.OrdinalIgnoreCase);
-	private static readonly Dictionary<ulong, Session> sessions = new();
-	private static ulong nextId = 1;
-	private static int ownerThread;
-	private static bool faulted;
-	private static ProjectContext? legacyContext;
-	internal static Assembly? sharedEditorAssembly;
+	[ThreadStatic] private static Dictionary<ulong, Session>? ownerSessions;
+	private static Dictionary<ulong, Session> sessions => ownerSessions ??= new();
+	private static long nextId;
+	[ThreadStatic] private static int ownerThread;
+	private static volatile bool faulted;
+	[ThreadStatic] private static ProjectContext? legacyContext;
+	internal static readonly object editorAssemblyGate = new();
+	internal static volatile Assembly? sharedEditorAssembly;
+	internal static string sharedEditorFingerprint = string.Empty;
 
 	internal static void RequireThread()
 	{
+		ScriptableObjectRegistry.RequireThread();
 		if (ownerThread == 0) ownerThread = Environment.CurrentManagedThreadId;
 		if (ownerThread != Environment.CurrentManagedThreadId) throw new InvalidOperationException("Script sessions require the host main thread.");
+	}
+
+	internal static void BeginImportInvocation(ulong session, ulong generation, ulong invocation, ImportBindingCapability capability)
+	{
+		RequireThread();
+		if (ImportExecution.Active) throw new InvalidOperationException("Synchronous import reentry is forbidden.");
+		Select(session);
+		if (!sessions[session].importing) throw new InvalidOperationException("Import invocations require an independent Import script session.");
+		ImportExecution.Begin(session, generation, invocation, capability);
+	}
+
+	internal static void EndImportInvocation(ulong session, ulong generation, ulong invocation)
+	{
+		RequireThread();
+		try { ImportExecution.End(session, generation, invocation); }
+		finally { if (sessions.TryGetValue(session, out var owned)) owned.importExtensions?.EndInvocation(); }
+	}
+
+	internal static void RequireImport(ulong session)
+	{
+		RequireThread();
+		ImportExecution.RequireActive();
+		if (ImportExecution.Current.Session != session || !sessions.TryGetValue(session, out var owned) || !owned.importing)
+			throw new InvalidOperationException("Callback requires its independent Import script session.");
 	}
 
 	internal static ulong Create(bool editor)
 	{
 		RequireThread();
+		if (ImportExecution.Active) throw new InvalidOperationException("Import callbacks cannot create script sessions.");
 		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
 		if (faulted) throw new InvalidOperationException("A project context did not unload. Restart before creating another script session.");
-		ulong id = nextId++;
+		ulong id = checked((ulong)Interlocked.Increment(ref nextId));
 		ulong previous = BehaviourRegistry.currentSession;
 		var candidate = new Session(id, editor);
 		try
@@ -133,9 +166,22 @@ internal static class ScriptSessions
 		return id;
 	}
 
+	internal static ulong CreateImport()
+	{
+		ulong id = Create(true);
+		sessions[id].importing = true;
+		return id;
+	}
+
 	internal static void Select(ulong id)
 	{
 		RequireThread();
+		if (ImportExecution.Active)
+		{
+			if (ImportExecution.Current.Session != id) throw new InvalidOperationException("Import callbacks cannot switch script sessions.");
+			BindingRegistry.RequireCurrent();
+			return;
+		}
 		if (!sessions.TryGetValue(id, out Session? session)) throw new InvalidOperationException("Script session is closed or unknown.");
 		BindingRegistry.Restore(session.bindings);
 		Ursa.Rendering.RenderPipelineManager.SelectSession(id);
@@ -195,7 +241,12 @@ internal static class ScriptSessions
 			throw new InvalidOperationException("Game sessions cannot load Editor assemblies.");
 		if (name == "Ursa.Runtime" || name == "Ursa.Rendering" || name == "Ursa.ManagedHost" || frameworkNames.Contains(name))
 			throw new InvalidOperationException("Project content cannot replace shared host or framework assemblies.");
-		if (!context.images.TryAdd(name, bytes)) throw new InvalidOperationException($"Duplicate project assembly '{name}'.");
+		if (context.images.TryGetValue(name, out byte[]? previous))
+		{
+			if (!previous.AsSpan().SequenceEqual(bytes)) throw new InvalidOperationException($"Project assembly '{name}' changed within a loaded session.");
+			return;
+		}
+		context.images.Add(name, bytes);
 		// Validate separately so dependencies may be registered in any manifest order.
 		if (BehaviourRegistry.currentSession == 0)
 		{
@@ -243,7 +294,9 @@ internal static class ScriptSessions
 				byte[] pdb = EngineApi.ReadFile(pdbPath.GetString()!);
 				if (Fingerprint(pdb) != record.GetProperty("PdbFingerprint").GetString()) throw new InvalidOperationException("PDB content fingerprint differs.");
 				ScriptDebugSymbols.Validate(image, pdb);
-				session.context.symbols.Add(expectedName, pdb);
+				if (session.context.symbols.TryGetValue(expectedName, out byte[]? previousSymbols) && !previousSymbols.AsSpan().SequenceEqual(pdb))
+					throw new InvalidOperationException($"Project symbols '{expectedName}' changed within a loaded session.");
+				session.context.symbols[expectedName] = pdb;
 			}
 		}
 		string catalogPath = root.GetProperty("TypeCatalog").GetString() ?? throw new InvalidOperationException("Script catalog path is empty.");
@@ -251,21 +304,33 @@ internal static class ScriptSessions
 		if (Fingerprint(catalogBytes) != root.GetProperty("CatalogFingerprint").GetString()) throw new InvalidOperationException("Script catalog content fingerprint differs.");
 		using JsonDocument catalog = JsonDocument.Parse(catalogBytes);
 		if (catalog.RootElement.GetProperty("Version").GetUInt32() != 1) throw new InvalidOperationException("Unsupported script catalog version.");
-		var stableIds = new HashSet<string>(StringComparer.Ordinal);
-		var localIds = new HashSet<string>(StringComparer.Ordinal);
+		var stableIds = new HashSet<string>(session.identities.Values.Select(value => value.Id), StringComparer.Ordinal);
+		var localIds = new HashSet<string>(session.identities.Values.Select(value => value.SourceGuid + ":" + value.LocalFileId), StringComparer.Ordinal);
 		foreach (JsonElement record in catalog.RootElement.GetProperty("Scripts").EnumerateArray())
 		{
-			if (record.GetProperty("Group").GetString() != "Game") continue;
+			string recordGroup = record.GetProperty("Group").GetString()!;
+			if (recordGroup == "Editor" && (!session.context.editor || root.GetProperty("Group").GetString() != "Editor")) continue;
+			if (recordGroup is not ("Game" or "Editor")) throw new InvalidOperationException("Invalid script catalog assembly group.");
 			string typeName = record.GetProperty("ClrTypeName").GetString()!;
 			Type type = session.context.ResolveType(typeName) ?? throw new InvalidOperationException($"Script type is missing: {typeName}");
 			string kind = record.TryGetProperty("Kind", out JsonElement kindValue) ? kindValue.GetString()! : "Behaviour";
-			if ((kind != "Behaviour" && kind != "ScriptableObject") || type.IsAbstract || type.ContainsGenericParameters ||
-			    !(kind == "Behaviour" ? typeof(Behaviour).IsAssignableFrom(type) : typeof(ScriptableObject).IsAssignableFrom(type)))
+			bool supported = kind == "Behaviour" ? typeof(Behaviour).IsAssignableFrom(type) :
+				kind == "ScriptableObject" ? typeof(ScriptableObject).IsAssignableFrom(type) :
+				(kind is "ScriptedImporter" or "AssetPostprocessor") && recordGroup == "Editor" && sharedEditorAssembly != null &&
+				sharedEditorAssembly.GetType("Ursa.Editor." + kind, throwOnError: true)!.IsAssignableFrom(type);
+			if (!supported || type.IsAbstract || type.ContainsGenericParameters)
 				throw new InvalidOperationException($"Script catalog type kind differs: {typeName}.");
 			string stableId = record.GetProperty("ScriptType").GetString()!;
 			uint version = record.GetProperty("Version").GetUInt32();
 			string source = record.GetProperty("SourceGuid").GetString()!;
 			ulong localId = record.GetProperty("LocalFileId").GetUInt64();
+			if (recordGroup == "Game") session.runtimeTypes.Add(type);
+			if (session.identities.TryGetValue(type.FullName!, out var existing))
+			{
+				if (existing.Id != stableId || existing.Version != version || existing.SourceGuid != source || existing.LocalFileId != localId)
+					throw new InvalidOperationException($"Script identity changed within a loaded session: {typeName}");
+				continue;
+			}
 			if (string.IsNullOrWhiteSpace(stableId) || version == 0 || !Guid.TryParse(source, out _) || localId == 0 ||
 			    !stableIds.Add(stableId) || !localIds.Add(source + ":" + localId))
 				throw new InvalidOperationException("Invalid or duplicate script asset identity.");
@@ -277,8 +342,57 @@ internal static class ScriptSessions
 		Validate(id);
 	}
 
+	internal static void RequirePublishableImportType(ulong id, Type type)
+	{
+		RequireImport(id);
+		if (!sessions[id].runtimeTypes.Contains(type))
+			throw new InvalidOperationException($"Import output type '{type.FullName}' is not in the Game type catalog; Editor types cannot be published.");
+	}
+
+	internal static ScriptedImporterInfo[] PrepareImportExtensions(ulong id, string[] nativeExtensions)
+	{
+		RequireThread();
+		if (ImportExecution.Active) throw new InvalidOperationException("Import registration cannot change during an invocation.");
+		Select(id);
+		Session session = sessions[id];
+		if (!session.importing || sharedEditorAssembly == null) throw new InvalidOperationException("Importer discovery requires an independent Import session and the shared Editor API.");
+		if (session.importExtensions != null) throw new InvalidOperationException("Import registrations are already frozen for this session.");
+		Type registry = sharedEditorAssembly.GetType("Ursa.Editor.ImportRegistry", throwOnError: true)!;
+		MethodInfo factory = registry.GetMethod("Create", BindingFlags.Static | BindingFlags.NonPublic)!;
+		session.importExtensions = (IImportExtensionSession)factory.Invoke(null, new object[] { session.context.assemblies.Values.ToArray(), nativeExtensions })!;
+		return session.importExtensions.DescribeImporters();
+	}
+
+	internal static void InvokeScriptedImporter(ulong id, string identity)
+	{
+		RequireImport(id);
+		(sessions[id].importExtensions ?? throw new InvalidOperationException("Import registrations have not been prepared.")).ImportAsset(identity);
+	}
+
+	internal static AssetPostprocessorInfo[] DescribeAssetPostprocessors(ulong id)
+	{
+		RequireThread();
+		if (ImportExecution.Active) throw new InvalidOperationException("Cannot discover postprocessors during an import invocation.");
+		Select(id);
+		return (sessions[id].importExtensions ?? throw new InvalidOperationException("Import registrations have not been prepared.")).DescribePostprocessors();
+	}
+
+	internal static void InvokeAssetPostprocessor(ulong id, string identity)
+	{
+		RequireImport(id);
+		(sessions[id].importExtensions ?? throw new InvalidOperationException("Import registrations have not been prepared.")).ProcessAsset(identity);
+	}
+
+	private static void RequireInteractiveSession(ulong id)
+	{
+		RequireThread();
+		if (ImportExecution.Active || (sessions.TryGetValue(id, out var session) && session.importing))
+			throw new InvalidOperationException("Independent Import sessions cannot perform GUI, Play or rendering operations.");
+	}
+
 	internal static void PrepareExtensions(ulong id)
 	{
+		RequireInteractiveSession(id);
 		Select(id);
 		Session session = sessions[id];
 		if (!session.context.editor || sharedEditorAssembly == null) throw new InvalidOperationException("Editor extensions require the shared Editor API.");
@@ -296,13 +410,24 @@ internal static class ScriptSessions
 
 	internal static bool InvokeExtension(ulong id, string extension)
 	{
+		RequireInteractiveSession(id);
 		RequireThread();
 		if (BehaviourRegistry.currentSession != id) throw new InvalidOperationException("Editor callback requires its selected script session.");
 		return sessions[id].extensions?.Invoke(extension) ?? false;
 	}
 
+	internal static EditorPreviewResult InvokePreview(ulong id, string extension, ulong instance, EditorPreviewPhase phase, Rect rect)
+	{
+		RequireInteractiveSession(id);
+		RequireThread();
+		if (BehaviourRegistry.currentSession != id) throw new InvalidOperationException("Preview requires its selected script session.");
+		return sessions[id].extensions?.Preview(extension, instance, phase, rect)
+			?? throw new InvalidOperationException("Editor extensions have not been prepared.");
+	}
+
 	internal static void PrepareReload(ulong id, string snapshots)
 	{
+		RequireInteractiveSession(id);
 		Select(id);
 		Session session = sessions[id];
 		if (!session.context.editor) throw new InvalidOperationException("Editing snapshots require an editing session.");
@@ -350,6 +475,8 @@ internal static class ScriptSessions
 
 	internal static void TransferAssets(ulong source, ulong candidate)
 	{
+		RequireInteractiveSession(source);
+		RequireInteractiveSession(candidate);
 		RequireThread();
 		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
 		if (source == candidate || !sessions.TryGetValue(source, out var oldSession) ||
@@ -410,6 +537,7 @@ internal static class ScriptSessions
 
 	internal static void ConfigurePipeline(ulong id, AssetReference? reference)
 	{
+		RequireInteractiveSession(id);
 		Select(id);
 		Ursa.Rendering.RenderPipelineAsset? asset = reference.HasValue
 			? ScriptableObject.Load<Ursa.Rendering.RenderPipelineAsset>(reference.Value) : null;
@@ -419,6 +547,7 @@ internal static class ScriptSessions
 
 	internal static void RenderScene(ulong id, float aspect)
 	{
+		RequireInteractiveSession(id);
 		Select(id);
 		Ursa.Rendering.RenderPipelineManager.RenderScene(aspect);
 	}
@@ -457,6 +586,8 @@ internal static class ScriptSessions
 			Console.Error.WriteLine($"ScriptableObject session cleanup failed: {error}");
 		session.extensions?.Dispose();
 		session.extensions = null;
+		session.importExtensions?.Dispose();
+		session.importExtensions = null;
 		sessions.Remove(id);
 		BehaviourRegistry.ReleaseSession(id);
 		BehaviourRegistry.typeResolver = null;
@@ -469,6 +600,7 @@ internal static class ScriptSessions
 		session.context.images.Clear();
 		session.context.symbols.Clear();
 		session.identities.Clear();
+		session.runtimeTypes.Clear();
 		var weak = new WeakReference(session.context);
 		session.context.Unload();
 		return weak;
@@ -477,6 +609,12 @@ internal static class ScriptSessions
 	internal static bool Close(ulong id)
 	{
 		RequireThread();
+		if (ImportExecution.Active)
+		{
+			ImportScopeValue active = ImportExecution.Current;
+			if (active.Session != id) throw new InvalidOperationException("Import callbacks cannot close another script session.");
+			ImportExecution.End(active.Session, active.Generation, active.Invocation);
+		}
 		Ursa.Rendering.RenderPipelineManager.RequireSessionBoundary();
 		if (!sessions.ContainsKey(id)) throw new InvalidOperationException("Script session is already closed.");
 		WeakReference weak = Release(id);
@@ -488,5 +626,39 @@ internal static class ScriptSessions
 		}
 		if (weak.IsAlive) faulted = true;
 		return !weak.IsAlive;
+	}
+
+	internal static void CloseOwnerSessions()
+	{
+		RequireThread();
+		List<Exception>? errors = null;
+		if (ImportExecution.Active)
+		{
+			ImportScopeValue active = ImportExecution.Current;
+			try { ImportExecution.End(active.Session, active.Generation, active.Invocation); }
+			catch (Exception error) { (errors ??= new()).Add(error); }
+		}
+		foreach (ulong id in sessions.Keys.ToArray())
+		{
+			try
+			{
+				if (!Close(id)) throw new InvalidOperationException("An owned script session did not unload.");
+			}
+			catch (Exception error) { (errors ??= new()).Add(error); }
+		}
+		Ursa.Rendering.RenderPipelineManager.ReleaseSession(0);
+		foreach (Exception error in ScriptableObjectRegistry.ClearSession(0)) (errors ??= new()).Add(error);
+		BehaviourRegistry.ReleaseSession(0);
+		BehaviourRegistry.typeResolver = null;
+		BehaviourRegistry.assemblyResolver = null;
+		BehaviourRegistry.identityResolver = null;
+		BehaviourRegistry.currentSession = 0;
+		ScriptableObjectRegistry.SelectSession(0);
+		legacyContext?.assemblies.Clear();
+		legacyContext?.images.Clear();
+		legacyContext?.symbols.Clear();
+		legacyContext?.Unload();
+		legacyContext = null;
+		if (errors != null) throw new AggregateException("Owned script session cleanup failed.", errors);
 	}
 }

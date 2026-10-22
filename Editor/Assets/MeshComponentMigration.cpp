@@ -119,7 +119,8 @@ Json ModelMaterial(const Json& reference, ResourceSession& resources)
 		throw std::runtime_error("Reimport models with the current importer before Mesh migration");
 	}
 	const auto binding = model.at("meshMaterialBindings").at(key);
-	return binding.is_null() ? Json(nullptr) : External({mesh.guid, binding.get<UInt64>()});
+	return binding.empty() || binding.at(0).get<UInt64>() == 0 ? Json(nullptr)
+	                                                           : External({mesh.guid, binding.at(0).get<UInt64>()});
 }
 
 void RewriteFieldTypes(Json& value)

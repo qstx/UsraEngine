@@ -18,6 +18,8 @@ internal static partial class NativeRuntimeBindings
 	internal static partial void SetActive([HandleKind(1)] NativeHandle handle, bool active);
 	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::GetParent")]
 	internal static partial NativeHandle GetParent([HandleKind(1)] NativeHandle handle);
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::GetChildren")]
+	internal static partial NativeHandle[] GetChildren([HandleKind(1)] NativeHandle handle);
 	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::SetParent")]
 	internal static partial void SetParent([HandleKind(1)] NativeHandle handle, NativeHandle parent);
 	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::DestroyGameObject")]

@@ -45,41 +45,46 @@ SubMesh SectionValue(const Wire::Value_Ursa_SubMesh& value)
 }
 } // namespace
 
-MeshPtr MeshServices::Resolve(BindingCall& call, const Handle& mesh)
+MeshPtr MeshServices::Resolve(BindingCall& call, const Handle& mesh, bool writable)
 {
-	return TakeBindingResult(RuntimeServices::SceneApi(call).ResolveMesh(ReadManagedHandle(mesh)));
+	auto& api = RuntimeServices::SceneApi(call);
+	if (writable)
+	{
+		api.RequireWritableResource(ReadManagedHandle(mesh));
+	}
+	return TakeBindingResult(api.ResolveMesh(ReadManagedHandle(mesh)));
 }
 
 Result<MeshServices::Handle> MeshServices::Create(BindingCall& call)
 {
 	auto& api = RuntimeServices::SceneApi(call);
 	return Result<Handle>::Success(
-	    WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMesh(TakeBindingResult(Mesh::Create())))));
+	    WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMesh(TakeBindingResult(Mesh::Create()), true))));
 }
 
 Result<MeshServices::Handle> MeshServices::Load(BindingCall& call, const Utf8View& guid, UInt64 localFileId)
 {
 	auto& api = RuntimeServices::SceneApi(call);
-	if (!api.resources)
+	if (!api.Resources())
 	{
 		return Result<Handle>::Failure("Mesh loading requires a ResourceSession");
 	}
 	const auto id = TakeBindingResult(ResourceId::Parse(ReadString(guid)));
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(
-	    TakeBindingResult(api.RegisterMesh(TakeBindingResult(api.resources->LoadMesh(id, localFileId))))));
+	    TakeBindingResult(api.RegisterMesh(TakeBindingResult(api.Resources()->LoadMesh(id, localFileId))))));
 }
 
 Result<MeshServices::Handle> MeshServices::Clone(BindingCall& call, const Handle& mesh)
 {
 	auto& api = RuntimeServices::SceneApi(call);
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(
-	    TakeBindingResult(api.RegisterMesh(TakeBindingResult(Resolve(call, mesh)->Clone())))));
+	    TakeBindingResult(api.RegisterMesh(TakeBindingResult(Resolve(call, mesh)->Clone()), true))));
 }
 
 Result<void> MeshServices::Destroy(BindingCall& call, const Handle& mesh)
 {
 	auto& api = RuntimeServices::SceneApi(call);
-	CompleteBindingResult(Resolve(call, mesh)->Destroy());
+	CompleteBindingResult(Resolve(call, mesh, true)->Destroy());
 	CompleteBindingResult(api.handles->Invalidate(ReadManagedHandle(mesh)));
 	api.ownedMeshes.erase(mesh.F_index);
 	return {};
@@ -121,7 +126,7 @@ Result<MeshServices::Data> MeshServices::GetData(BindingCall& call, const Handle
 
 Result<void> MeshServices::SetData(BindingCall& call, const Handle& mesh, const Data& data)
 {
-	auto target = Resolve(call, mesh);
+	auto target = Resolve(call, mesh, true);
 	MeshData value;
 	const auto previous = target->Snapshot();
 	if (previous)
@@ -145,32 +150,32 @@ Result<void> MeshServices::SetData(BindingCall& call, const Handle& mesh, const 
 
 Result<void> MeshServices::SetVertices(BindingCall& call, const Handle& mesh, const DataView& values)
 {
-	return Resolve(call, mesh)->SetVertices(Vector3Values(values));
+	return Resolve(call, mesh, true)->SetVertices(Vector3Values(values));
 }
 
 Result<void> MeshServices::SetNormals(BindingCall& call, const Handle& mesh, const DataView& values)
 {
-	return Resolve(call, mesh)->SetNormals(Vector3Values(values));
+	return Resolve(call, mesh, true)->SetNormals(Vector3Values(values));
 }
 
 Result<void> MeshServices::SetUv0(BindingCall& call, const Handle& mesh, const DataView& values)
 {
-	return Resolve(call, mesh)->SetUv0(Vector2Values(values));
+	return Resolve(call, mesh, true)->SetUv0(Vector2Values(values));
 }
 
 Result<void> MeshServices::SetColors(BindingCall& call, const Handle& mesh, const DataView& values)
 {
-	return Resolve(call, mesh)->SetColors(ColorValues(values));
+	return Resolve(call, mesh, true)->SetColors(ColorValues(values));
 }
 
 Result<void> MeshServices::SetTangents(BindingCall& call, const Handle& mesh, const DataView& values)
 {
-	return Resolve(call, mesh)->SetTangents(Vector4Values(values));
+	return Resolve(call, mesh, true)->SetTangents(Vector4Values(values));
 }
 
 Result<void> MeshServices::SetIndices(BindingCall& call, const Handle& mesh, const DataView& values)
 {
-	return Resolve(call, mesh)->SetIndices(Indices(values));
+	return Resolve(call, mesh, true)->SetIndices(Indices(values));
 }
 
 Result<void> MeshServices::SetSubMeshCount(BindingCall& call, const Handle& mesh, Int32 count)
@@ -179,7 +184,7 @@ Result<void> MeshServices::SetSubMeshCount(BindingCall& call, const Handle& mesh
 	{
 		return Result<void>::Failure("SubMesh count cannot be negative");
 	}
-	return Resolve(call, mesh)->SetSubMeshCount(Size(count));
+	return Resolve(call, mesh, true)->SetSubMeshCount(Size(count));
 }
 
 Result<void> MeshServices::SetSubMesh(BindingCall& call, const Handle& mesh, Int32 index, const Section& value)
@@ -188,7 +193,7 @@ Result<void> MeshServices::SetSubMesh(BindingCall& call, const Handle& mesh, Int
 	{
 		return Result<void>::Failure("SubMesh index cannot be negative");
 	}
-	return Resolve(call, mesh)->SetSubMesh(Size(index), SectionValue(value));
+	return Resolve(call, mesh, true)->SetSubMesh(Size(index), SectionValue(value));
 }
 
 Result<DataView> MeshServices::GetTriangles(BindingCall& call, const Handle& mesh, Int32 index)
@@ -207,21 +212,21 @@ Result<void> MeshServices::SetTriangles(BindingCall& call, const Handle& mesh, I
 	{
 		return Result<void>::Failure("SubMesh index cannot be negative");
 	}
-	return Resolve(call, mesh)->SetTriangles(Size(index), Indices(values));
+	return Resolve(call, mesh, true)->SetTriangles(Size(index), Indices(values));
 }
 
 Result<void> MeshServices::Clear(BindingCall& call, const Handle& mesh)
 {
-	return Resolve(call, mesh)->Clear();
+	return Resolve(call, mesh, true)->Clear();
 }
 
 Result<void> MeshServices::RecalculateNormals(BindingCall& call, const Handle& mesh)
 {
-	return Resolve(call, mesh)->RecalculateNormals();
+	return Resolve(call, mesh, true)->RecalculateNormals();
 }
 
 Result<void> MeshServices::RecalculateBounds(BindingCall& call, const Handle& mesh)
 {
-	return Resolve(call, mesh)->RecalculateBounds();
+	return Resolve(call, mesh, true)->RecalculateBounds();
 }
 } // namespace Ursa::Scripting::Bindings

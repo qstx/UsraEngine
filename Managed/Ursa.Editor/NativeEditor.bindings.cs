@@ -6,6 +6,50 @@ namespace Ursa.Editor;
 [NativeHeader("Scripting/Bindings/EditorServices.hpp")]
 internal static partial class NativeEditorBindings
 {
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::CreatePreviewUtility")]
+	internal static partial ulong CreatePreviewUtility();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DestroyPreviewUtility")]
+	internal static partial void DestroyPreviewUtility(ulong utility);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::BeginPreview")]
+	internal static partial void BeginPreview(ulong utility, Rect rect);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetPreviewCamera")]
+	internal static partial void SetPreviewCamera(ulong utility, PreviewCamera camera);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetPreviewLighting")]
+	internal static partial void SetPreviewLighting(ulong utility, Color ambient, float ambientIntensity, Color light, float lightIntensity, Quaternion rotation);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::PreviewDrawMesh")]
+	internal static partial void PreviewDrawMesh(ulong utility, [HandleKind(4)] NativeHandle mesh, [HandleKind(5)] NativeHandle material, Vector3 position, Quaternion rotation, Vector3 scale);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::PreviewInstantiatePrefab")]
+	internal static partial void PreviewInstantiatePrefab(ulong utility, string guid, ulong localFileId);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::EndPreview")]
+	internal static partial void EndPreview(ulong utility);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DrawPreviewTexture")]
+	internal static partial void DrawPreviewTexture(Rect rect, [HandleKind(3)] NativeHandle texture);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DrawPreviewPixels")]
+	internal static partial void DrawPreviewPixels(Rect rect, uint width, uint height, Color[] pixels, bool linear);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetPreviewInput")]
+	internal static partial PreviewInput GetPreviewInput();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetRuntimeCapability")]
+	internal static partial EditorBindingCapability GetRuntimeCapability();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetTargetHandle")]
+	internal static partial NativeHandle GetTargetHandle();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetComponentPayload")]
+	internal static partial string GetComponentPayload([HandleKind(2)] NativeHandle component);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ApplyComponentFields")]
+	internal static partial bool ApplyComponentFields([HandleKind(2)] NativeHandle component, string fields);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetTargetPayload")]
+	internal static partial string GetTargetPayload();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ApplyTargetFields")]
+	internal static partial bool ApplyTargetFields(string fields);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetImporterInfo")]
+	internal static partial EditorImporterInfo? GetImporterInfo();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::HasModifiedImporterSettings")]
+	internal static partial bool HasModifiedImporterSettings();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ApplyImporterSettings")]
+	internal static partial bool ApplyImporterSettings();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::RevertImporterSettings")]
+	internal static partial void RevertImporterSettings();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DrawImporterApplyRevert")]
+	internal static partial void DrawImporterApplyRevert();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetScope")]
 	internal static partial EditorScopeValue GetScope();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetSelection")]

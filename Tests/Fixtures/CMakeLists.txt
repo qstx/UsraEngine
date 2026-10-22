@@ -10,14 +10,16 @@ if(TARGET UrsaAssetImport)
     "-DCONFIGURATION=$<CONFIG>" "-DGLSLC=${URSA_GLSLC_EXECUTABLE}"
     "-DSHADER_SOURCES=${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/PrepareTestContent.cmake")
-  set_tests_properties(UrsaTestContentPrepare PROPERTIES FIXTURES_SETUP UrsaTestContent)
+  set_tests_properties(UrsaTestContentPrepare PROPERTIES FIXTURES_SETUP UrsaTestContent
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/TestContentUser/$<CONFIG>")
   if(NOT URSA_PROJECT_DIR STREQUAL "")
 
     add_test(NAME UrsaTestSamplePrepare COMMAND "${CMAKE_COMMAND}"
       "-DSOURCE=${URSA_PROJECT_DIR}/Assets" "-DPROJECT=${URSA_TEST_SAMPLE_PROJECT}"
       "-DIMPORTER=$<TARGET_FILE:UrsaAssetImport>" "-DCONFIGURATION=$<CONFIG>"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/PrepareSampleProject.cmake")
-    set_tests_properties(UrsaTestSamplePrepare PROPERTIES FIXTURES_SETUP UrsaTestSample)
+    set_tests_properties(UrsaTestSamplePrepare PROPERTIES FIXTURES_SETUP UrsaTestSample
+      ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/TestSampleUser/$<CONFIG>")
   endif()
 endif()
 ursa_finalize_test_directory()

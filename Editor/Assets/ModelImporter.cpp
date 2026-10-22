@@ -1,4 +1,5 @@
 #include <Assets/ModelImporter.hpp>
+#include <Assets/AssetImportRules.hpp>
 
 #include <Assets/TextureImporter.hpp>
 #include <Core/StringInterop.hpp>
@@ -32,7 +33,7 @@ namespace
 {
 using Json = nlohmann::json;
 
-constexpr Ursa::UInt32 modelImporterVersion = 5;
+constexpr Ursa::UInt32 modelImporterVersion = ModelImporter::Version;
 const String modelImporterId = "ursa.Model";
 
 String Lowered(String value)
@@ -60,32 +61,7 @@ bool IsSupportedModel(const VirtualPath& path)
 
 Ursa::UInt64 StableLocalFileId(const String& key)
 {
-	Ursa::UInt64 value = 14695981039346656037ull;
-	for (unsigned char character : key)
-	{
-		value = (value ^ character) * 1099511628211ull;
-	}
-	return value == 0 ? 1 : value;
-}
-
-void AppendUint32(Vector<Ursa::UInt8>& output, Ursa::UInt32 value)
-{
-	for (Ursa::UInt32 byte = 0; byte < 4; ++byte)
-	{
-		output.push_back(static_cast<Ursa::UInt8>(value >> (byte * 8)));
-	}
-}
-
-Vector<Ursa::UInt8> EncodeJson(const Json& value)
-{
-	const std::vector<Ursa::UInt8> encoded = Json::to_cbor(value);
-	Vector<Ursa::UInt8> result;
-	result.reserve(encoded.size());
-	for (Ursa::UInt8 byte : encoded)
-	{
-		result.push_back(byte);
-	}
-	return result;
+	return StableImportObjectId(modelImporterId, key).value;
 }
 
 Json Vector3Json(const aiVector3D& value)
@@ -335,25 +311,6 @@ private:
 	String lastError;
 };
 
-Result<Vector<Ursa::UInt8>> EncodeScene(const Json& document)
-{
-	try
-	{
-		const auto bytes = Json::to_cbor(document);
-		Vector<Ursa::UInt8> result;
-		result.reserve(bytes.size());
-		for (Ursa::UInt8 byte : bytes)
-		{
-			result.push_back(byte);
-		}
-		return Result<Vector<Ursa::UInt8>>::Success(std::move(result));
-	}
-	catch (const std::exception& error)
-	{
-		return Result<Vector<Ursa::UInt8>>::Failure(ToUrsaString(error.what()));
-	}
-}
-
 Result<Vector<String>> ReadModelDiagnostics(const VirtualFileSystem& filesystem, const VirtualPath& modelPath)
 {
 	auto bytes = filesystem.Read(modelPath);
@@ -481,7 +438,8 @@ void AddUnsupportedMaterialDiagnostics(const aiMaterial& material, const String&
 Result<ResourceId> MaterialTextureId(const aiScene& scene, aiMaterial& material, aiTextureType textureType,
                                      const char* slot, ResourceId modelGuid, AssetDatabase& database,
                                      VfsIOSystem& ioSystem, Vector<VirtualPath>& dependencies,
-                                     Vector<ImportedArtifact>& artifacts, Map<String, Ursa::UInt64>& embeddedIds)
+                                     ModelImportCandidate& candidate, Map<String, Ursa::UInt64>& embeddedIds,
+                                     const ModelImporter::TextureDependency& textureDependency)
 {
 	if (material.GetTextureCount(textureType) == 0)
 	{
@@ -556,28 +514,14 @@ Result<ResourceId> MaterialTextureId(const aiScene& scene, aiMaterial& material,
 		{
 			return Result<ResourceId>::Failure(texture.error);
 		}
-		VirtualFileSystem staging;
-		auto memory = std::make_shared<MemoryFileProvider>();
-		auto mounted = staging.MountProvider(projectScheme, memory, MountAccess::ReadWrite);
-		auto texturePathInMemory = VirtualPath::Parse("prj:Embedded.ursatex");
-		if (!mounted || !texturePathInMemory)
-		{
-			return Result<ResourceId>::Failure(!mounted ? mounted.error : texturePathInMemory.error);
-		}
-		auto saved = SaveTextureResource(staging, texturePathInMemory.value, modelGuid, *texture.value);
-		if (!saved)
-		{
-			return Result<ResourceId>::Failure(saved.error);
-		}
-		auto bytes = staging.Read(texturePathInMemory.value);
-		if (!bytes)
-		{
-			return Result<ResourceId>::Failure(bytes.error);
-		}
 		const String localKey = String("texture:") + path;
-		const Ursa::UInt64 localFileId = StableLocalFileId(localKey);
+		const UInt64 localFileId = StableLocalFileId(localKey);
+		if (!candidate.textures.emplace(localFileId, std::move(texture.value)).second)
+		{
+			return Result<ResourceId>::Failure("Embedded texture output identity collision");
+		}
+		candidate.outputKeys[localFileId] = localKey;
 		embeddedIds.emplace(path, localFileId);
-		artifacts.push_back({localFileId, "Texture", std::move(bytes.value)});
 		return Result<ResourceId>::Success(modelGuid);
 	}
 
@@ -611,6 +555,15 @@ Result<ResourceId> MaterialTextureId(const aiScene& scene, aiMaterial& material,
 			textureSettings.value.sRgb = false;
 		}
 	}
+	if (textureDependency)
+	{
+		auto dependency = textureDependency(resolved.value, textureSettings.value);
+		if (dependency)
+		{
+			dependencies.push_back(resolved.value);
+		}
+		return dependency;
+	}
 	auto imported = TextureImporter::Import(database, resolved.value, textureSettings.value);
 	if (!imported)
 	{
@@ -620,16 +573,19 @@ Result<ResourceId> MaterialTextureId(const aiScene& scene, aiMaterial& material,
 	return Result<ResourceId>::Success(imported.value.guid);
 }
 
-Result<Json> ConvertMaterial(aiScene const& scene, Ursa::UInt32 index, ResourceId modelGuid, AssetDatabase& database,
-                             VfsIOSystem& ioSystem, Vector<VirtualPath>& dependencies,
-                             Vector<ImportedArtifact>& artifacts, Map<String, Ursa::UInt64>& embeddedIds,
-                             const Map<Ursa::UInt32, Ursa::UInt64>& materialIds, bool importTextures,
-                             Vector<String>& diagnostics)
+Result<ModelCandidateMaterial> ConvertMaterial(aiScene const& scene, Ursa::UInt32 index, ResourceId modelGuid,
+                                               AssetDatabase& database, VfsIOSystem& ioSystem,
+                                               Vector<VirtualPath>& dependencies, ModelImportCandidate& candidate,
+                                               Map<String, Ursa::UInt64>& embeddedIds,
+                                               const Map<Ursa::UInt32, Ursa::UInt64>& materialIds, bool importTextures,
+                                               Vector<String>& diagnostics,
+                                               const ModelImporter::TextureDependency& textureDependency)
 {
 	aiMaterial* material = scene.mMaterials[index];
 	if (!material)
 	{
-		return Result<Json>::Failure("Assimp returned a null material at index " + ToUrsaString(std::to_string(index)));
+		return Result<ModelCandidateMaterial>::Failure("Assimp returned a null material at index " +
+		                                               ToUrsaString(std::to_string(index)));
 	}
 	const String name = MaterialName(*material, index);
 	AddUnsupportedMaterialDiagnostics(*material, name, diagnostics);
@@ -647,23 +603,27 @@ Result<Json> ConvertMaterial(aiScene const& scene, Ursa::UInt32 index, ResourceI
 	material->Get(AI_MATKEY_METALLIC_FACTOR, metallic);
 	material->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness);
 	material->Get(AI_MATKEY_OPACITY, opacity);
-	Json textures = Json::object();
+	Map<MaterialTextureSlot, AssetReference> textures;
 	const aiTextureType types[] = {aiTextureType_BASE_COLOR,        aiTextureType_DIFFUSE,
 	                               aiTextureType_NORMALS,           aiTextureType_METALNESS,
 	                               aiTextureType_DIFFUSE_ROUGHNESS, aiTextureType_AMBIENT_OCCLUSION,
 	                               aiTextureType_EMISSIVE};
 	const char* slots[] = {"baseColor",         "baseColor", "normal",  "metallicRoughness",
 	                       "metallicRoughness", "occlusion", "emissive"};
+	const MaterialTextureSlot materialSlots[] = {
+	    MaterialTextureSlot::BaseColor,         MaterialTextureSlot::BaseColor,         MaterialTextureSlot::Normal,
+	    MaterialTextureSlot::MetallicRoughness, MaterialTextureSlot::MetallicRoughness, MaterialTextureSlot::Occlusion,
+	    MaterialTextureSlot::Emissive};
 	for (Ursa::Size slotIndex = 0; importTextures && slotIndex < std::size(types); ++slotIndex)
 	{
 		const aiTextureType type = types[slotIndex];
 		const String slot = slots[slotIndex];
-		if (textures.contains(ToStdString(slot)) || material->GetTextureCount(type) == 0)
+		if (textures.find(materialSlots[slotIndex]) != textures.end() || material->GetTextureCount(type) == 0)
 		{
 			continue;
 		}
 		auto texture = MaterialTextureId(scene, *material, type, slots[slotIndex], modelGuid, database, ioSystem,
-		                                 dependencies, artifacts, embeddedIds);
+		                                 dependencies, candidate, embeddedIds, textureDependency);
 		if (texture)
 		{
 			Ursa::UInt64 localTextureId = 0;
@@ -677,42 +637,35 @@ Result<Json> ConvertMaterial(aiScene const& scene, Ursa::UInt32 index, ResourceI
 					localTextureId = found->second;
 				}
 			}
-			textures[ToStdString(slot)] = AssetReferenceToJson({texture.value, localTextureId});
+			textures[materialSlots[slotIndex]] = {texture.value, localTextureId};
 		}
 		else if (texture.error != "No texture assigned")
 		{
-			return Result<Json>::Failure("Material " + name + " texture " + slot + ": " + texture.error);
+			return Result<ModelCandidateMaterial>::Failure("Material " + name + " texture " + slot + ": " +
+			                                               texture.error);
 		}
 	}
-	MaterialInstance importedMaterial(MaterialType::PbrMetallicRoughness);
-	auto setBaseColor = importedMaterial.SetBaseColor({baseColor.r, baseColor.g, baseColor.b, baseColor.a});
-	auto setMetallic = importedMaterial.SetMetallic(metallic);
-	auto setRoughness = importedMaterial.SetRoughness(roughness);
-	auto setEmissive = importedMaterial.SetEmissive({emissive.r, emissive.g, emissive.b, 1.0f});
-	auto setAlphaMode = importedMaterial.SetAlphaMode(opacity < 0.999f ? AlphaMode::Blend : AlphaMode::Opaque);
-	auto setShader = importedMaterial.SetShader(Shader::BuiltinPbrShaderId());
+	auto importedMaterial = std::make_shared<MaterialInstance>(MaterialType::PbrMetallicRoughness);
+	auto setBaseColor = importedMaterial->SetBaseColor({baseColor.r, baseColor.g, baseColor.b, baseColor.a});
+	auto setMetallic = importedMaterial->SetMetallic(metallic);
+	auto setRoughness = importedMaterial->SetRoughness(roughness);
+	auto setEmissive = importedMaterial->SetEmissive({emissive.r, emissive.g, emissive.b, 1.0f});
+	auto setAlphaMode = importedMaterial->SetAlphaMode(opacity < 0.999f ? AlphaMode::Blend : AlphaMode::Opaque);
+	auto setShader = importedMaterial->SetShader(Shader::BuiltinPbrShaderId());
 	if (!setBaseColor || !setMetallic || !setRoughness || !setEmissive || !setAlphaMode || !setShader)
 	{
-		return Result<Json>::Failure("Cannot map source material " + name + " to the built-in PBR Shader");
+		return Result<ModelCandidateMaterial>::Failure("Cannot map source material " + name +
+		                                               " to the built-in PBR Shader");
 	}
-	ArchiveWriter writer;
-	auto serialized = importedMaterial.Serialize(writer);
-	if (!serialized)
+	auto bound = importedMaterial->BindAssetIdentity({modelGuid, localFileId});
+	if (!bound)
 	{
-		return Result<Json>::Failure("Cannot serialize imported material " + name + ": " + serialized.error);
+		return Result<ModelCandidateMaterial>::Failure(bound.error);
 	}
-	auto materialDocument = ArchiveToJson(writer);
-	if (!materialDocument)
-	{
-		return Result<Json>::Failure(materialDocument.error);
-	}
-	materialDocument.value["textures"] = std::move(textures);
-	Json record = {{"localFileId", localFileId},
-	               {"kind", "Material"},
-	               {"name", ToStdString(name)},
-	               {"material", std::move(materialDocument.value)}};
-	return Result<Json>::Success(std::move(record));
+	return Result<ModelCandidateMaterial>::Success(
+	    {localFileId, name, std::move(importedMaterial), std::move(textures)});
 }
+
 } // namespace
 
 Result<Vector<ModelSkinInfluence>> ModelImporter::NormalizeSkinInfluences(Ursa::UInt32 vertexCount,
@@ -885,8 +838,8 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 	{
 		return Result<ModelImportResult>::Failure(dependencies.error);
 	}
-	auto cache = database.CheckImport(source, modelImporterId, modelImporterVersion, "model-v5", serializedSettings,
-	                                  dependencies.value);
+	auto cache = database.CheckImport(source, modelImporterId, modelImporterVersion, ModelImporter::ContentTarget,
+	                                  serializedSettings, dependencies.value);
 	if (!force && cache && cache.value.upToDate)
 	{
 		auto artifactPath = database.Resolve(guid, 0);
@@ -900,8 +853,59 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 			return Result<ModelImportResult>::Failure(diagnostics.error);
 		}
 		return Result<ModelImportResult>::Success({guid, std::move(artifactPath.value), cache.value.artifacts,
-		                                           std::move(dependencies.value), true, std::move(diagnostics.value)});
+		                                           std::move(dependencies.value), true, std::move(diagnostics.value),
+		                                           cache.value.mainObjectLocalFileId});
 	}
+
+	auto prepared = BuildCandidate(database, source, settings);
+	if (!prepared)
+	{
+		return Result<ModelImportResult>::Failure(prepared.error);
+	}
+	auto encoded = prepared.value.Encode();
+	if (!encoded)
+	{
+		return Result<ModelImportResult>::Failure(encoded.error);
+	}
+	auto published = database.PublishImport(source, modelImporterId, modelImporterVersion, ModelImporter::ContentTarget,
+	                                        serializedSettings, prepared.value.dependencies, encoded.value,
+	                                        prepared.value.mainObjectLocalFileId);
+	if (!published)
+	{
+		return Result<ModelImportResult>::Failure(published.error);
+	}
+	auto artifactPath = database.Resolve(guid);
+	auto status = database.CurrentImport(source);
+	if (!artifactPath || !status || !status.value.upToDate)
+	{
+		return Result<ModelImportResult>::Failure(!artifactPath ? artifactPath.error
+		                                          : !status     ? status.error
+		                                                        : String("Model publication is not current"));
+	}
+	return Result<ModelImportResult>::Success(
+	    {guid, std::move(artifactPath.value), std::move(status.value.artifacts), std::move(prepared.value.dependencies),
+	     false, std::move(prepared.value.diagnostics), prepared.value.mainObjectLocalFileId});
+}
+
+Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& database, const VirtualPath& source,
+                                                           const ModelImportSettings& settings,
+                                                           const TextureDependency& textureDependency)
+{
+	if (!IsSupportedModel(source) || !std::isfinite(settings.scaleFactor) || settings.scaleFactor <= 0 ||
+	    settings.scaleFactor > 10000 || settings.maxBoneInfluences == 0 || settings.maxBoneInfluences > 4)
+	{
+		return Result<ModelImportCandidate>::Failure("Invalid model source or candidate settings");
+	}
+	auto metadata = database.Metadata(source);
+	if (!metadata)
+	{
+		return Result<ModelImportCandidate>::Failure(metadata.error);
+	}
+	const auto guid = metadata.value.guid;
+	ModelImportCandidate candidate;
+	candidate.guid = guid;
+	candidate.mainObjectLocalFileId = StableLocalFileId("main");
+	candidate.outputKeys[candidate.mainObjectLocalFileId] = "main";
 
 	Assimp::Importer importer;
 	auto* ioSystem = new VfsIOSystem(database.Filesystem(), source);
@@ -927,7 +931,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 	{
 		const String diagnostic =
 		    ioSystem->LastError().empty() ? ToUrsaString(importer.GetErrorString()) : ioSystem->LastError();
-		return Result<ModelImportResult>::Failure("Cannot import " + source.ToString() + ": " + diagnostic);
+		return Result<ModelImportCandidate>::Failure("Cannot import " + source.ToString() + ": " + diagnostic);
 	}
 	Map<const aiNode*, Ursa::UInt64> nodeIdsByPointer;
 	Map<const aiNode*, String> nodePathsByPointer;
@@ -941,6 +945,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		const String name = ToUrsaString(node.mName.C_Str());
 		const String nodePath = parentPath + "/" + name + "[" + ToUrsaString(std::to_string(childIndex)) + "]";
 		const Ursa::UInt64 localFileId = StableLocalFileId("node:" + nodePath);
+		candidate.outputKeys[localFileId] = "node:" + nodePath;
 		if (!uniqueNodeIds.insert(localFileId).second)
 		{
 			return Result<void>::Failure("Model node local-file-ID collision at " + nodePath);
@@ -964,15 +969,16 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 	auto indexedNodes = indexNodes(indexNodes, *scene->mRootNode, String{}, 0, aiMatrix4x4());
 	if (!indexedNodes)
 	{
-		return Result<ModelImportResult>::Failure(indexedNodes.error + " at " + source.ToString());
+		return Result<ModelImportCandidate>::Failure(indexedNodes.error + " at " + source.ToString());
 	}
 	Vector<VirtualPath> importedDependencies = ioSystem->Dependencies();
-	Vector<ImportedArtifact> artifacts;
+
 	Map<String, Ursa::UInt64> embeddedIds;
 	Map<Ursa::UInt32, Ursa::UInt64> materialIds;
 	Vector<Ursa::UInt64> allMaterialIds;
 	Vector<String> diagnostics;
 	const Ursa::UInt64 skeletonLocalFileId = StableLocalFileId("skeleton:root");
+	candidate.outputKeys[skeletonLocalFileId] = "skeleton:root";
 	Map<String, const aiBone*> bonesByName;
 	Map<String, const aiNode*> boneNodesByName;
 	Set<const aiNode*> requiredJointNodes;
@@ -982,28 +988,28 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		const aiMesh* mesh = scene->mMeshes[meshIndex];
 		if (!mesh)
 		{
-			return Result<ModelImportResult>::Failure("Assimp returned a null mesh at index " +
-			                                          ToUrsaString(std::to_string(meshIndex)));
+			return Result<ModelImportCandidate>::Failure("Assimp returned a null mesh at index " +
+			                                             ToUrsaString(std::to_string(meshIndex)));
 		}
 		for (Ursa::UInt32 boneIndex = 0; boneIndex < mesh->mNumBones; ++boneIndex)
 		{
 			const aiBone* bone = mesh->mBones[boneIndex];
 			if (!bone)
 			{
-				return Result<ModelImportResult>::Failure("Assimp returned a null bone at mesh " +
-				                                          ToUrsaString(std::to_string(meshIndex)));
+				return Result<ModelImportCandidate>::Failure("Assimp returned a null bone at mesh " +
+				                                             ToUrsaString(std::to_string(meshIndex)));
 			}
 			const String name = ToUrsaString(bone->mName.C_Str());
 			const auto nodeMatches = nodesByName.find(name);
 			if (nodeMatches == nodesByName.end() || nodeMatches->second.empty())
 			{
-				return Result<ModelImportResult>::Failure("Skin bone '" + name + "' has no matching model node at " +
-				                                          source.ToString());
+				return Result<ModelImportCandidate>::Failure("Skin bone '" + name + "' has no matching model node at " +
+				                                             source.ToString());
 			}
 			if (nodeMatches->second.size() != 1)
 			{
-				return Result<ModelImportResult>::Failure("Skin bone '" + name + "' matches multiple model nodes at " +
-				                                          source.ToString());
+				return Result<ModelImportCandidate>::Failure("Skin bone '" + name +
+				                                             "' matches multiple model nodes at " + source.ToString());
 			}
 			const aiNode* boneNode = nodeMatches->second[0];
 			const auto previous = bonesByName.find(name);
@@ -1032,23 +1038,23 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		const aiAnimation* animation = scene->mAnimations[animationIndex];
 		if (!animation)
 		{
-			return Result<ModelImportResult>::Failure("Assimp returned a null animation at index " +
-			                                          ToUrsaString(std::to_string(animationIndex)));
+			return Result<ModelImportCandidate>::Failure("Assimp returned a null animation at index " +
+			                                             ToUrsaString(std::to_string(animationIndex)));
 		}
 		for (Ursa::UInt32 channelIndex = 0; channelIndex < animation->mNumChannels; ++channelIndex)
 		{
 			const aiNodeAnim* channel = animation->mChannels[channelIndex];
 			if (!channel)
 			{
-				return Result<ModelImportResult>::Failure("Animation contains a null node channel at " +
-				                                          source.ToString());
+				return Result<ModelImportCandidate>::Failure("Animation contains a null node channel at " +
+				                                             source.ToString());
 			}
 			const String nodeName = ToUrsaString(channel->mNodeName.C_Str());
 			const auto nodeMatches = nodesByName.find(nodeName);
 			if (nodeMatches == nodesByName.end() || nodeMatches->second.size() != 1)
 			{
-				return Result<ModelImportResult>::Failure("Animation node '" + nodeName +
-				                                          "' is missing or ambiguous at " + source.ToString());
+				return Result<ModelImportCandidate>::Failure("Animation node '" + nodeName +
+				                                             "' is missing or ambiguous at " + source.ToString());
 			}
 			for (const aiNode* jointNode = nodeMatches->second[0]; jointNode; jointNode = jointNode->mParent)
 			{
@@ -1109,42 +1115,64 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		                         {"version", 1},
 		                         {"localFileId", skeletonLocalFileId},
 		                         {"joints", std::move(skeletonJoints)}};
-		auto encodedSkeleton = EncodeScene(skeletonDocument);
-		if (!encodedSkeleton)
+		auto skeleton = MakeShared<ModelSkeleton>(Memory::MemoryTag::Assets);
+		skeleton->modelGuid = guid;
+		skeleton->localFileId = skeletonLocalFileId;
+		for (const auto& joint : skeletonDocument["joints"])
 		{
-			return Result<ModelImportResult>::Failure(encodedSkeleton.error);
+			SkeletonJoint value;
+			value.nodeLocalFileId = joint["nodeLocalFileId"].get<UInt64>();
+			value.parentJointIndex = joint["parentJointIndex"].is_null() ? -1 : joint["parentJointIndex"].get<Int32>();
+			value.name = ToUrsaString(joint["name"].get<std::string>());
+			const auto& local = joint["bindLocalTransform"];
+			value.bindLocalTransform.position = {local["position"][0], local["position"][1], local["position"][2]};
+			value.bindLocalTransform.rotation = {local["rotation"][0], local["rotation"][1], local["rotation"][2],
+			                                     local["rotation"][3]};
+			value.bindLocalTransform.scale = {local["scale"][0], local["scale"][1], local["scale"][2]};
+			for (int row = 0; row < 4; ++row)
+			{
+				for (int column = 0; column < 4; ++column)
+				{
+					value.inverseBindMatrix.At(row, column) =
+					    joint["inverseBindMatrix"][row * 4 + column].get<Float32>();
+				}
+			}
+			skeleton->joints.push_back(std::move(value));
 		}
-		artifacts.push_back({skeletonLocalFileId, "Skeleton", std::move(encodedSkeleton.value)});
+		candidate.skeletons.emplace(skeletonLocalFileId, std::move(skeleton));
+		candidate.archives.emplace(skeletonLocalFileId, ModelCandidateArchive{"Skeleton", std::move(skeletonDocument)});
 	}
 	for (Ursa::UInt32 index = 0; index < scene->mNumMaterials; ++index)
 	{
 		const String name = MaterialName(*scene->mMaterials[index], index);
 		const Ursa::UInt64 localFileId =
 		    StableLocalFileId("material:" + ToUrsaString(std::to_string(index)) + ":" + name);
+		candidate.outputKeys[localFileId] = "material:" + ToUrsaString(std::to_string(index)) + ":" + name;
 		if (std::find(allMaterialIds.begin(), allMaterialIds.end(), localFileId) != allMaterialIds.end())
 		{
-			return Result<ModelImportResult>::Failure("Model material local-file-ID collision at " + source.ToString());
+			return Result<ModelImportCandidate>::Failure("Model material local-file-ID collision at " +
+			                                             source.ToString());
 		}
 		materialIds.emplace(index, localFileId);
 		allMaterialIds.push_back(localFileId);
 	}
 
-	Json materials = Json::array();
 	if (settings.importMaterials)
 	{
 		for (Ursa::UInt32 index = 0; index < scene->mNumMaterials; ++index)
 		{
-			auto material = ConvertMaterial(*scene, index, guid, database, *ioSystem, importedDependencies, artifacts,
-			                                embeddedIds, materialIds, settings.importTextures, diagnostics);
+			auto material =
+			    ConvertMaterial(*scene, index, guid, database, *ioSystem, importedDependencies, candidate, embeddedIds,
+			                    materialIds, settings.importTextures, diagnostics, textureDependency);
 			if (!material)
 			{
-				return Result<ModelImportResult>::Failure(material.error + " at " + source.ToString());
+				return Result<ModelImportCandidate>::Failure(material.error + " at " + source.ToString());
 			}
-			materials.push_back(material.value);
+			candidate.materials.emplace(material.value.localFileId, std::move(material.value));
 		}
 	}
 
-	Json meshMaterialBindings = Json::object();
+	Map<UInt64, Vector<UInt64>> meshMaterialBindings;
 	Vector<Ursa::UInt64> meshIds(scene->mNumMeshes);
 	Map<Ursa::UInt32, Ursa::UInt64> meshIdMap;
 	for (Ursa::UInt32 index = 0; index < scene->mNumMeshes; ++index)
@@ -1153,12 +1181,13 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		const String name = mesh && mesh->mName.length > 0 ? ToUrsaString(mesh->mName.C_Str())
 		                                                   : "Mesh" + ToUrsaString(std::to_string(index));
 		const Ursa::UInt64 localFileId = StableLocalFileId("mesh:" + ToUrsaString(std::to_string(index)) + ":" + name);
+		candidate.outputKeys[localFileId] = "mesh:" + ToUrsaString(std::to_string(index)) + ":" + name;
 		meshIds[index] = localFileId;
 		meshIdMap.emplace(index, localFileId);
 		if (!mesh)
 		{
-			return Result<ModelImportResult>::Failure("Assimp returned a null mesh at index " +
-			                                          ToUrsaString(std::to_string(index)));
+			return Result<ModelImportCandidate>::Failure("Assimp returned a null mesh at index " +
+			                                             ToUrsaString(std::to_string(index)));
 		}
 		Json materialLocalId = nullptr;
 		if (settings.importMaterials && mesh->mMaterialIndex < scene->mNumMaterials)
@@ -1166,13 +1195,13 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 			materialLocalId = materialIds.at(mesh->mMaterialIndex);
 		}
 		auto data = GeometryData(*mesh);
-		meshMaterialBindings[std::to_string(localFileId)] = materialLocalId;
+		meshMaterialBindings[localFileId] = {materialLocalId};
 		if (mesh->mNumBones != 0)
 		{
 			if (bonesByName.empty())
 			{
-				return Result<ModelImportResult>::Failure("Skinned mesh has no imported skeleton at " +
-				                                          source.ToString());
+				return Result<ModelImportCandidate>::Failure("Skinned mesh has no imported skeleton at " +
+				                                             source.ToString());
 			}
 			Vector<RawSkinInfluence> rawInfluences;
 			for (Ursa::UInt32 boneIndex = 0; boneIndex < mesh->mNumBones; ++boneIndex)
@@ -1180,20 +1209,21 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 				const aiBone* bone = mesh->mBones[boneIndex];
 				if (!bone || (bone->mNumWeights != 0 && !bone->mWeights))
 				{
-					return Result<ModelImportResult>::Failure("Skinned mesh contains malformed bone data at " +
-					                                          source.ToString());
+					return Result<ModelImportCandidate>::Failure("Skinned mesh contains malformed bone data at " +
+					                                             source.ToString());
 				}
 				const String boneName = ToUrsaString(bone->mName.C_Str());
 				const auto boneNode = boneNodesByName.find(boneName);
 				if (boneNode == boneNodesByName.end())
 				{
-					return Result<ModelImportResult>::Failure("Skin bone " + boneName + " is absent from the skeleton");
+					return Result<ModelImportCandidate>::Failure("Skin bone " + boneName +
+					                                             " is absent from the skeleton");
 				}
 				const auto joint = jointIndicesByNode.find(boneNode->second);
 				if (joint == jointIndicesByNode.end() || joint->second > std::numeric_limits<Ursa::UInt16>::max())
 				{
-					return Result<ModelImportResult>::Failure("Skin bone index exceeds the supported range: " +
-					                                          boneName);
+					return Result<ModelImportCandidate>::Failure("Skin bone index exceeds the supported range: " +
+					                                             boneName);
 				}
 				for (Ursa::UInt32 weightIndex = 0; weightIndex < bone->mNumWeights; ++weightIndex)
 				{
@@ -1206,14 +1236,10 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 			    NormalizeSkinInfluences(mesh->mNumVertices, rawInfluences, settings.maxBoneInfluences);
 			if (!normalizedInfluences)
 			{
-				return Result<ModelImportResult>::Failure(normalizedInfluences.error + " at " + source.ToString());
+				return Result<ModelImportCandidate>::Failure(normalizedInfluences.error + " at " + source.ToString());
 			}
-			auto skeleton = MakeShared<ModelSkeleton>(Memory::MemoryTag::Assets);
-			skeleton->modelGuid = guid;
-			skeleton->localFileId = skeletonLocalFileId;
-			skeleton->joints.resize(jointIndicesByNode.size());
 			data.skeletonReference = {guid, skeletonLocalFileId};
-			data.skeleton = std::move(skeleton);
+			data.skeleton = candidate.skeletons.at(skeletonLocalFileId);
 			for (const auto& influence : normalizedInfluences.value)
 			{
 				data.skinInfluences.push_back({influence.jointIndices, influence.weights});
@@ -1222,14 +1248,17 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		auto geometry = Mesh::Create(std::move(data));
 		if (!geometry)
 		{
-			return Result<ModelImportResult>::Failure(geometry.error + " at " + source.ToString());
+			return Result<ModelImportCandidate>::Failure(geometry.error + " at " + source.ToString());
 		}
-		auto encodedMesh = EncodeMeshResource(guid, *geometry.value, localFileId);
-		if (!encodedMesh)
+		auto bound = geometry.value->BindAssetIdentity({guid, localFileId});
+		if (!bound)
 		{
-			return Result<ModelImportResult>::Failure(encodedMesh.error);
+			return Result<ModelImportCandidate>::Failure(bound.error);
 		}
-		artifacts.push_back({localFileId, "Mesh", std::move(encodedMesh.value)});
+		if (!candidate.meshes.emplace(localFileId, std::move(geometry.value)).second)
+		{
+			return Result<ModelImportCandidate>::Failure("Mesh output identity collision");
+		}
 	}
 	Vector<Ursa::UInt64> animationClipIds;
 	for (Ursa::UInt32 animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex)
@@ -1237,13 +1266,14 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		const aiAnimation* animation = scene->mAnimations[animationIndex];
 		if (!animation)
 		{
-			return Result<ModelImportResult>::Failure("Assimp returned a null animation at index " +
-			                                          ToUrsaString(std::to_string(animationIndex)));
+			return Result<ModelImportCandidate>::Failure("Assimp returned a null animation at index " +
+			                                             ToUrsaString(std::to_string(animationIndex)));
 		}
 		const String name = animation->mName.length > 0 ? ToUrsaString(animation->mName.C_Str())
 		                                                : "Animation" + ToUrsaString(std::to_string(animationIndex));
 		const Ursa::UInt64 localFileId =
 		    StableLocalFileId("animation:" + ToUrsaString(std::to_string(animationIndex)) + ":" + name);
+		candidate.outputKeys[localFileId] = "animation:" + ToUrsaString(std::to_string(animationIndex)) + ":" + name;
 		const Ursa::Float64 ticksPerSecond = animation->mTicksPerSecond > 0.0 ? animation->mTicksPerSecond : 25.0;
 		Ursa::Float64 durationTicks = animation->mDuration;
 		Json channels = Json::array();
@@ -1257,14 +1287,14 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 			const aiNodeAnim* channel = animation->mChannels[channelIndex];
 			if (!channel)
 			{
-				return Result<ModelImportResult>::Failure("Animation " + name + " contains a null node channel");
+				return Result<ModelImportCandidate>::Failure("Animation " + name + " contains a null node channel");
 			}
 			const String nodeName = ToUrsaString(channel->mNodeName.C_Str());
 			const auto matchingNodes = nodesByName.find(nodeName);
 			if (matchingNodes == nodesByName.end() || matchingNodes->second.size() != 1)
 			{
-				return Result<ModelImportResult>::Failure("Animation " + name + " node '" + nodeName +
-				                                          "' is missing or ambiguous at " + source.ToString());
+				return Result<ModelImportCandidate>::Failure("Animation " + name + " node '" + nodeName +
+				                                             "' is missing or ambiguous at " + source.ToString());
 			}
 			Json positionKeys = Json::array();
 			for (Ursa::UInt32 keyIndex = 0; keyIndex < channel->mNumPositionKeys; ++keyIndex)
@@ -1273,7 +1303,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 				if (!std::isfinite(key.mTime) || !std::isfinite(key.mValue.x) || !std::isfinite(key.mValue.y) ||
 				    !std::isfinite(key.mValue.z))
 				{
-					return Result<ModelImportResult>::Failure("Animation " + name + " has an invalid position key");
+					return Result<ModelImportCandidate>::Failure("Animation " + name + " has an invalid position key");
 				}
 				durationTicks = (std::max)(durationTicks, key.mTime);
 				positionKeys.push_back({key.mTime / ticksPerSecond, Vector3Json(key.mValue)});
@@ -1285,7 +1315,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 				if (!std::isfinite(key.mTime) || !std::isfinite(key.mValue.x) || !std::isfinite(key.mValue.y) ||
 				    !std::isfinite(key.mValue.z) || !std::isfinite(key.mValue.w))
 				{
-					return Result<ModelImportResult>::Failure("Animation " + name + " has an invalid rotation key");
+					return Result<ModelImportCandidate>::Failure("Animation " + name + " has an invalid rotation key");
 				}
 				durationTicks = (std::max)(durationTicks, key.mTime);
 				rotationKeys.push_back(
@@ -1298,7 +1328,7 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 				if (!std::isfinite(key.mTime) || !std::isfinite(key.mValue.x) || !std::isfinite(key.mValue.y) ||
 				    !std::isfinite(key.mValue.z))
 				{
-					return Result<ModelImportResult>::Failure("Animation " + name + " has an invalid scale key");
+					return Result<ModelImportCandidate>::Failure("Animation " + name + " has an invalid scale key");
 				}
 				durationTicks = (std::max)(durationTicks, key.mTime);
 				scaleKeys.push_back({key.mTime / ticksPerSecond, Vector3Json(key.mValue)});
@@ -1310,169 +1340,69 @@ Result<ModelImportResult> ModelImporter::Import(AssetDatabase& database, const V
 		}
 		if (!std::isfinite(durationTicks) || durationTicks < 0.0)
 		{
-			return Result<ModelImportResult>::Failure("Animation " + name + " has an invalid duration");
+			return Result<ModelImportCandidate>::Failure("Animation " + name + " has an invalid duration");
 		}
 		const Ursa::Float64 durationSeconds = durationTicks / ticksPerSecond;
 		Json clipDocument = {{"format", "UrsaAnimationClip"},      {"version", 1},
 		                     {"localFileId", localFileId},         {"name", ToStdString(name)},
 		                     {"durationSeconds", durationSeconds}, {"ticksPerSecond", ticksPerSecond},
 		                     {"channels", std::move(channels)}};
-		auto encodedClip = EncodeScene(clipDocument);
-		if (!encodedClip)
-		{
-			return Result<ModelImportResult>::Failure(encodedClip.error);
-		}
 		animationClipIds.push_back(localFileId);
-		artifacts.push_back({localFileId, "AnimationClip", std::move(encodedClip.value)});
-	}
-	Json nodes = Json::array();
-	Vector<ImportedArtifact> nodeArtifacts;
-	auto visitNode = [&](auto&& self, const aiNode& node, Ursa::UInt64 parentId) -> Result<Ursa::UInt64>
-	{
-		const String name = ToUrsaString(node.mName.C_Str());
-		const String nodePath = nodePathsByPointer.at(&node);
-		const Ursa::UInt64 localFileId = nodeIdsByPointer.at(&node);
-		Json attachedMeshes = Json::array();
-		for (Ursa::UInt32 index = 0; index < node.mNumMeshes; ++index)
+		if (!candidate.archives.emplace(localFileId, ModelCandidateArchive{"AnimationClip", std::move(clipDocument)})
+		         .second)
 		{
-			const Ursa::UInt32 meshIndex = node.mMeshes[index];
-			if (meshIndex >= scene->mNumMeshes)
-			{
-				return Result<Ursa::UInt64>::Failure("Model node references an invalid mesh index at " + nodePath);
-			}
-			attachedMeshes.push_back(meshIdMap.at(meshIndex));
+			return Result<ModelImportCandidate>::Failure("Animation output identity collision");
 		}
-		Json attachedChildren = Json::array();
+	}
+	auto visitNode = [&](auto&& self, const aiNode& node, UInt64 parentId) -> Result<UInt64>
+	{
+		ModelCandidateNode value;
+		value.name = ToUrsaString(node.mName.C_Str());
+		value.localFileId = nodeIdsByPointer.at(&node);
+		value.parentLocalFileId = parentId;
 		aiVector3D scale;
 		aiQuaternion rotation;
 		aiVector3D position;
 		node.mTransformation.Decompose(scale, rotation, position);
-		Json localTransform = {{"position", {position.x, position.y, position.z}},
-		                       {"rotation", {rotation.x, rotation.y, rotation.z, rotation.w}},
-		                       {"scale", {scale.x, scale.y, scale.z}}};
-		Json nodeDocument = {{"localFileId", localFileId},
-		                     {"parentLocalFileId", parentId},
-		                     {"name", ToStdString(name)},
-		                     {"transform", MatrixJson(node.mTransformation)},
-		                     {"localTransform", std::move(localTransform)},
-		                     {"meshLocalFileIds", attachedMeshes},
-		                     {"children", attachedChildren}};
-		for (Ursa::UInt32 index = 0; index < node.mNumChildren; ++index)
+		value.transform.position = {position.x, position.y, position.z};
+		value.transform.rotation = {rotation.x, rotation.y, rotation.z, rotation.w};
+		value.transform.scale = {scale.x, scale.y, scale.z};
+		for (UInt32 index = 0; index < node.mNumMeshes; ++index)
 		{
-			auto childId = self(self, *node.mChildren[index], localFileId);
-			if (!childId)
+			const auto mesh = meshIdMap.find(node.mMeshes[index]);
+			if (mesh == meshIdMap.end())
 			{
-				return childId;
+				return Result<UInt64>::Failure("Model node refers to an invalid Mesh");
 			}
-			nodeDocument["children"].push_back(childId.value);
+			value.meshes.push_back(mesh->second);
 		}
-		auto encodedNode = EncodeScene(nodeDocument);
-		if (!encodedNode)
+		for (UInt32 index = 0; index < node.mNumChildren; ++index)
 		{
-			return Result<Ursa::UInt64>::Failure(encodedNode.error);
+			auto child = self(self, *node.mChildren[index], value.localFileId);
+			if (!child)
+			{
+				return child;
+			}
+			value.children.push_back(child.value);
 		}
-		nodeArtifacts.push_back({localFileId, "ModelNode", std::move(encodedNode.value)});
-		nodes.push_back(std::move(nodeDocument));
-		return Result<Ursa::UInt64>::Success(localFileId);
+		const auto id = value.localFileId;
+		candidate.nodes.push_back(std::move(value));
+		return Result<UInt64>::Success(id);
 	};
 	auto rootId = visitNode(visitNode, *scene->mRootNode, 0);
 	if (!rootId)
 	{
-		return Result<ModelImportResult>::Failure(rootId.error);
+		return Result<ModelImportCandidate>::Failure(rootId.error);
 	}
-	Json modelDocument = {{"format", "UrsaModel"},
-	                      {"version", 1},
-	                      {"guid", ToStdString(guid.ToString())},
-	                      {"rootNodeLocalFileId", rootId.value},
-	                      {"nodes", std::move(nodes)},
-	                      {"meshLocalFileIds", Json::array()},
-	                      {"materialLocalFileIds", Json::array()},
-	                      {"skeletonLocalFileIds", Json::array()},
-	                      {"animationClipLocalFileIds", Json::array()},
-	                      {"dependencies", Json::array()},
-	                      {"diagnostics", Json::array()}};
-	modelDocument["meshMaterialBindings"] = std::move(meshMaterialBindings);
-	for (Ursa::UInt64 id : meshIds)
-	{
-		modelDocument["meshLocalFileIds"].push_back(id);
-	}
-	if (hasSkeleton)
-	{
-		modelDocument["skeletonLocalFileIds"].push_back(skeletonLocalFileId);
-	}
-	for (Ursa::UInt64 id : animationClipIds)
-	{
-		modelDocument["animationClipLocalFileIds"].push_back(id);
-	}
-	if (settings.importMaterials)
-	{
-		for (Ursa::UInt64 id : allMaterialIds)
-		{
-			modelDocument["materialLocalFileIds"].push_back(id);
-		}
-		modelDocument["materials"] = std::move(materials);
-	}
-	for (const String& diagnostic : diagnostics)
-	{
-		modelDocument["diagnostics"].push_back(ToStdString(diagnostic));
-	}
-	for (const VirtualPath& dependency : importedDependencies)
-	{
-		modelDocument["dependencies"].push_back(ToStdString(dependency.ToString()));
-	}
-	auto encodedModel = EncodeScene(modelDocument);
-	if (!encodedModel)
-	{
-		return Result<ModelImportResult>::Failure(encodedModel.error);
-	}
-	Vector<ImportedArtifact> allArtifacts;
-	allArtifacts.push_back({0, "Model", std::move(encodedModel.value)});
-	for (ImportedArtifact& artifact : artifacts)
-	{
-		allArtifacts.push_back(std::move(artifact));
-	}
-	for (ImportedArtifact& artifact : nodeArtifacts)
-	{
-		allArtifacts.push_back(std::move(artifact));
-	}
-	for (Ursa::UInt32 index = 0; index < scene->mNumMeshes; ++index)
-	{
-		if (meshIds[index] == 0)
-		{
-			return Result<ModelImportResult>::Failure("Model mesh has an empty local file ID at " + source.ToString());
-		}
-	}
-	if (settings.importMaterials)
-	{
-		for (const Json& materialRecord : modelDocument["materials"])
-		{
-			auto encodedMaterial = EncodeScene(materialRecord["material"]);
-			if (!encodedMaterial)
-			{
-				return Result<ModelImportResult>::Failure(encodedMaterial.error);
-			}
-			allArtifacts.push_back(
-			    {materialRecord["localFileId"].get<Ursa::UInt64>(), "Material", std::move(encodedMaterial.value)});
-		}
-	}
-	auto published = database.PublishImport(source, modelImporterId, modelImporterVersion, "model-v5",
-	                                        serializedSettings, importedDependencies, allArtifacts);
-	if (!published)
-	{
-		return Result<ModelImportResult>::Failure(published.error);
-	}
-	auto artifactPath = database.Resolve(guid, 0);
-	if (!artifactPath)
-	{
-		return Result<ModelImportResult>::Failure(artifactPath.error);
-	}
-	auto status = database.CheckImport(source, modelImporterId, modelImporterVersion, "model-v5", serializedSettings,
-	                                   importedDependencies);
-	if (!status)
-	{
-		return Result<ModelImportResult>::Failure(status.error);
-	}
-	return Result<ModelImportResult>::Success({guid, std::move(artifactPath.value), std::move(status.value.artifacts),
-	                                           std::move(importedDependencies), false, std::move(diagnostics)});
+	candidate.rootNodeLocalFileId = rootId.value;
+	candidate.meshOrder = std::move(meshIds);
+	candidate.animationOrder = std::move(animationClipIds);
+	candidate.meshMaterialBindings = std::move(meshMaterialBindings);
+	candidate.dependencies = std::move(importedDependencies);
+	candidate.diagnostics = std::move(diagnostics);
+	auto valid = candidate.Validate();
+	return valid ? Result<ModelImportCandidate>::Success(std::move(candidate))
+	             : Result<ModelImportCandidate>::Failure(valid.error);
 }
+
 } // namespace Ursa::Editor

@@ -1,6 +1,9 @@
 #pragma once
 
 #include <Assets/AssetDatabase.hpp>
+#include <Assets/ModelImportCandidate.hpp>
+#include <Assets/TextureImporter.hpp>
+#include <functional>
 
 namespace Ursa::Editor
 {
@@ -27,6 +30,7 @@ struct ModelImportResult
 	Vector<VirtualPath> dependencies;
 	bool cacheHit = false;
 	Vector<String> diagnostics;
+	UInt64 mainObjectLocalFileId = 0;
 };
 
 struct RawSkinInfluence
@@ -45,6 +49,14 @@ struct ModelSkinInfluence
 class ModelImporter final
 {
 public:
+	using TextureDependency = std::function<Result<ResourceId>(const VirtualPath&, const TextureImportSettings&)>;
+	inline static constexpr UInt32 Version = 8;
+	inline static constexpr const char* ContentTarget = "model-v8";
+
+	static Result<ModelImportCandidate> BuildCandidate(AssetDatabase& database, const VirtualPath& source,
+	                                                   const ModelImportSettings& settings,
+	                                                   const TextureDependency& textureDependency = {});
+
 	static Result<Vector<ModelSkinInfluence>> NormalizeSkinInfluences(Ursa::UInt32 vertexCount,
 	                                                                  const Vector<RawSkinInfluence>& influences,
 	                                                                  Ursa::UInt32 maximumInfluences);

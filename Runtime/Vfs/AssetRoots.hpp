@@ -30,6 +30,8 @@ Result<std::filesystem::path> ResolveEngineSourceRoot(const std::filesystem::pat
 
 String EngineBuildConfiguration();
 
+String EngineFrameworkScheme(const String& configuration);
+
 std::filesystem::path EngineFrameworkDirectory();
 
 // Mounts resolveEngineAssetRoots() read-only under the conventional engine

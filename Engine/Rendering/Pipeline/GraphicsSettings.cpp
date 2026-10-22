@@ -123,11 +123,31 @@ Result<void> ValidatePipelineAsset(const VirtualFileSystem& files, const Resourc
 	{
 		return Result<void>::Failure("Missing Graphics pipeline " + reference.guid.ToString() + ": " + path.error);
 	}
-	if (PathFromUrsaString(path.value.relative).extension() != ".ursaasset")
+	const auto load = [&]() -> Result<ScriptableAsset>
 	{
-		return Result<void>::Failure("Graphics selection is not a RenderPipelineAsset: " + path.value.ToString());
-	}
-	auto asset = LoadScriptableAssetSource(files, path.value, reference.guid);
+		auto size = files.Size(path.value);
+		if (!size || size.value > 16ull * 1024 * 1024)
+		{
+			return Result<ScriptableAsset>::Failure("Graphics pipeline asset is missing or exceeds its size budget");
+		}
+		auto bytes = files.Read(path.value);
+		if (!bytes)
+		{
+			return Result<ScriptableAsset>::Failure(bytes.error);
+		}
+		auto imported = DecodeScriptableAssetArtifact(bytes.value);
+		if (imported)
+		{
+			return imported;
+		}
+		if (PathFromUrsaString(path.value.relative).extension() == ".ursaasset")
+		{
+			return LoadScriptableAssetSource(files, path.value, reference.guid);
+		}
+		return Result<ScriptableAsset>::Failure("Graphics selection is not a RenderPipelineAsset: " +
+		                                        path.value.ToString());
+	};
+	auto asset = load();
 	if (!asset)
 	{
 		return Result<void>::Failure(asset.error);
@@ -135,10 +155,10 @@ Result<void> ValidatePipelineAsset(const VirtualFileSystem& files, const Resourc
 	const auto type = std::find_if(types.begin(), types.end(),
 	                               [&](const auto& record) { return record.scriptType == asset.value.TypeId(); });
 	const auto& payload = asset.value.Payload();
-	if (asset.value.LocalFileId() != reference.localFileId || type == types.end() || !type->isRenderPipeline ||
-	    type->kind != ScriptTypeKind::ScriptableObject || type->group != ScriptAssemblyGroup::Game ||
-	    type->version != asset.value.TypeVersion() || !payload.contains("SourceGuid") ||
-	    !payload["SourceGuid"].is_string() || !payload.contains("LocalFileId") ||
+	if (asset.value.SourceGuid() != reference.guid || asset.value.LocalFileId() != reference.localFileId ||
+	    type == types.end() || !type->isRenderPipeline || type->kind != ScriptTypeKind::ScriptableObject ||
+	    type->group != ScriptAssemblyGroup::Game || type->version != asset.value.TypeVersion() ||
+	    !payload.contains("SourceGuid") || !payload["SourceGuid"].is_string() || !payload.contains("LocalFileId") ||
 	    !payload["LocalFileId"].is_number_unsigned() ||
 	    payload["SourceGuid"].get<std::string>() != ToStdString(type->sourceGuid.ToString()) ||
 	    payload["LocalFileId"].get<UInt64>() != type->localFileId)

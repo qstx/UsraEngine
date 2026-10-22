@@ -2,6 +2,8 @@
 
 本文说明当前可选的 C# 宿主如何配置、构建，以及宿主启动失败时如何定位问题。
 
+导入会话中的 Mesh、Material 和 Texture2D CPU 候选 API、生命周期及无 GPU 验证见 [脚本资源导入扩展](ScriptedAssetImporters.md#import-cpu-资源-api)。候选 Texture2D 创建仅用于活动 Import 调用。
+
 ## 支持范围
 
 - 当前宿主仅支持 Windows x64。

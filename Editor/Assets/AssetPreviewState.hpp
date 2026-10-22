@@ -25,6 +25,7 @@ struct AssetPreviewTarget
 	UInt64 pipelineVersion = 0;
 	ResourceId projectSession;
 	const EditorDocument* draft = nullptr;
+	bool custom = false;
 
 	bool Supported() const;
 	bool SameIdentity(const AssetPreviewTarget& other) const;
@@ -42,6 +43,11 @@ public:
 	bool Complete(UInt64 generation, const String& importVersion = {});
 	bool Fail(UInt64 generation, String message);
 	void Invalidate();
+
+	void RequestRepaint()
+	{
+		needsRender = target.Supported();
+	}
 
 	const AssetPreviewTarget& Target() const
 	{

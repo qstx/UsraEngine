@@ -51,9 +51,12 @@ void TestPipelineAssetReload(DotNetHost& host, VirtualFileSystem& filesystem, co
 void TestManagedForward(DotNetHost& host, const VirtualPath& content);
 void TestDocumentedCustomPipeline(DotNetHost& host, const VirtualPath& content);
 void TestForwardCameraRegions(DotNetHost& host, const VirtualPath& content);
+void TestManagedImportSession(DotNetHost& host, VirtualFileSystem& filesystem, const ManagedHostFiles& files,
+                              const VirtualPath& content);
 void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSystem& filesystem,
                                                 const VirtualPath& contentPath);
 #if defined(URSA_DOTNET_TEST_EDITOR)
+void TestManagedImporterRegistration(DotNetHost& host, VirtualFileSystem& filesystem, const VirtualPath& content);
 void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std::filesystem::path& root);
 #endif
 } // namespace Ursa::Test

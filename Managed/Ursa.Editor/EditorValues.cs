@@ -50,11 +50,11 @@ public sealed class EditorDocument
 
 public sealed class EditorAsset
 {
-	internal EditorAsset(EditorAssetValue value) { Reference = new(value.Reference); Path = value.Path; Name = value.Name; }
+	internal EditorAsset(EditorAssetValue value) { Reference = new(value.Reference); Path = value.Path; Name = value.Name; IsSubAsset = value.IsSubAsset; }
 	public EditorReference Reference { get; }
 	public string Path { get; }
 	public string Name { get; }
-	public bool IsSubAsset => Reference.AssetReference?.LocalFileId is > 0;
+	public bool IsSubAsset { get; }
 }
 
 [WireValue]
@@ -64,6 +64,15 @@ internal struct EditorScopeValue
 	public ulong Session;
 	public ulong Revision;
 	public bool HasTarget;
+}
+
+[WireValue]
+internal struct EditorImporterInfo
+{
+	public string Path;
+	public string Identity;
+	public string ClrTypeName;
+	public NativeAssetReference Reference;
 }
 
 [WireValue]
@@ -98,6 +107,7 @@ internal struct EditorAssetValue
 	public EditorReferenceValue Reference;
 	public string Path;
 	public string Name;
+	public bool IsSubAsset;
 }
 
 [WireValue]

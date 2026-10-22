@@ -263,11 +263,12 @@ void TestAssetDescriptions()
 	const auto guid = Take(database->Metadata(source)).guid;
 	Expect(
 	    static_cast<bool>(database->PublishImport(source, "TypedEditorFixture", 1, "test", nlohmann::json::object(), {},
-	                                              {{0, "Model", {1}},
+	                                              {{19, "Model", {1}},
 	                                               {7, "Mesh", {2}},
 	                                               {8, "Material", {3}},
 	                                               {9, "Texture", {4}},
-	                                               {10, "ScriptableObject", {5}}})),
+	                                               {10, "ScriptableObject", {5}}},
+	                                              19)),
 	    "Asset description import setup failed");
 	ManagedEditorContext context;
 	context.workspace = workspace.get();
@@ -282,6 +283,8 @@ void TestAssetDescriptions()
 	for (UInt64 index = 0; index < assets.value.length; ++index)
 	{
 		const auto& reference = descriptions[index].F_Reference;
+		Expect((descriptions[index].F_IsSubAsset != 0) == (reference.F_Asset.F_value.F_LocalFileId != 19),
+		       "Nonzero main resource was classified as a sub-asset");
 		Expect(reference.F_Scope == invocation.Generation() && reference.F_Asset.present &&
 		           B::ReadString(reference.F_Asset.F_value.F_Guid) == guid.ToString(),
 		       "Asset identity or callback scope changed");
@@ -299,6 +302,66 @@ void TestAssetDescriptions()
 	Expect(selected->F_Reference.F_Kind == K::V_Material && selected->F_Reference.F_Asset.F_value.F_LocalFileId == 8 &&
 	           B::ReadString(selected->F_Name) == "Material sub-asset",
 	       "Selected sub-asset lost its kind or local file ID");
+}
+
+void TestAssetPropertyContext()
+{
+	using Json = nlohmann::json;
+	Json draft{{"Fields", {{"quality", 1}}},
+	           {"FieldTypes",
+	            {{"quality", {{"Kind", "SignedInteger"}, {"ElementKind", "Unsupported"}, {"TypeName", "int"}}}}}};
+	auto unrelated = Take(EditorDocument::Create(
+	    ResourceKind::Material, ResourceId::Generate(), Take(VirtualPath::Parse("prj:Unrelated.ursamat")),
+	    [](VirtualFileSystem&, const VirtualPath&, ResourceId) { return Result<void>{}; }));
+	ManagedEditorContext context;
+	context.document = unrelated.get();
+	context.targetUsesDocument = false;
+	bool alive = true;
+	context.validateTarget = [&]
+	{ return alive ? Result<void>{} : Result<void>::Failure("Asset Inspector target was replaced"); };
+	SerializedTargetAdapter adapter;
+	adapter.capture = [&] { return Result<Json>::Success(draft); };
+	adapter.apply = [&](const Json& payload)
+	{
+		draft = payload;
+		return Result<Json>::Success(draft);
+	};
+	context.serializedTarget = adapter;
+	Bindings::EditorInvocation invocation(context, 73);
+	auto* token = invocation.Token();
+	B::BindingArena inputs;
+	const auto path = inputs.StringValue("/Fields/quality");
+	const auto document = Call<B::Wire::Value_Ursa_Editor_EditorDocumentValue_>(
+	    [&](auto* value, auto* outcome) { return E::NativeEditorBindings_GetDocument(token, value, outcome); });
+	Expect(document && !document.value.present, "Importer properties exposed an unrelated active document");
+	Value changed;
+	changed.F_Type = P::V_Integer;
+	changed.F_Integer = 2;
+	Expect(static_cast<bool>(CallVoid(
+	           [&](auto* outcome) { return E::NativeEditorBindings_SetProperty(token, 1, &path, &changed, outcome); })),
+	       "Asset property control did not accept a typed value");
+	const auto applied = Call<UInt32>([&](auto* value, auto* outcome)
+	                                  { return E::NativeEditorBindings_ApplyProperties(token, 1, value, outcome); });
+	Expect(applied && applied.value && draft["Fields"]["quality"] == 2 && !unrelated->Dirty(),
+	       "Applying an importer draft dirtied the unrelated active document");
+	Expect(!CallVoid([&](auto* outcome) { return E::NativeEditorBindings_Save(token, outcome); }) &&
+	           !CallVoid([&](auto* outcome) { return E::NativeEditorBindings_MarkDirty(token, outcome); }) &&
+	           !unrelated->Dirty(),
+	       "Importer context saved or dirtied the unrelated active document");
+	UInt32 saves = 0;
+	context.saveTarget = [&]
+	{
+		++saves;
+		return Result<void>{};
+	};
+	Expect(static_cast<bool>(CallVoid([&](auto* outcome) { return E::NativeEditorBindings_Save(token, outcome); })) &&
+	           saves == 1,
+	       "Writable asset Inspector did not route its explicit save to the owning asset");
+	alive = false;
+	Expect(!Call<Bindings::EditorServices::PropertyState>(
+	           [&](auto* value, auto* outcome)
+	           { return E::NativeEditorBindings_GetProperty(token, 1, &path, value, outcome); }),
+	       "A replaced asset target accepted its old callback's property access");
 }
 
 void TestGuiContextKind()
@@ -330,6 +393,7 @@ int main()
 	{
 		TestProperties();
 		TestAssetDescriptions();
+		TestAssetPropertyContext();
 		TestGuiContextKind();
 		std::cout << "Typed Editor property, reference, transaction and lifetime checks passed.\n";
 		return 0;

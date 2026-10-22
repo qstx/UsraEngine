@@ -82,6 +82,34 @@ public sealed class AcceptancePipeline : RenderPipeline
 }
 )";
 
+constexpr const char* previewSource = R"(
+using Ursa;
+using Ursa.Editor;
+[CustomEditor(typeof(Material))]
+public sealed class AcceptanceMaterialEditor : Inspector
+{
+    private PreviewRenderUtility? preview;
+    private Mesh? mesh;
+    public override void OnEnable()
+    {
+        preview = new PreviewRenderUtility();
+        mesh = Mesh.Create();
+        mesh.SetData(new MeshData { Positions = new[] { new Vector3(-.5f, -.5f, 0), new Vector3(.5f, -.5f, 0), new Vector3(0, .5f, 0) },
+            Indices = new uint[] { 0, 1, 2 }, SubMeshes = new[] { new SubMesh(0, 3) } });
+    }
+    public override void OnDisable() { mesh?.Destroy(); mesh = null; preview?.Cleanup(); preview = null; }
+    public override bool HasPreviewGUI() => true;
+    public override bool RequiresConstantRepaint() => true;
+    public override string GetInfoString() => "Managed Preview through active SRP";
+    public override void OnPreviewGUI(Rect rect)
+    {
+        preview!.BeginPreview(rect);
+        preview.DrawMesh(mesh!, (Material)Target);
+        preview.EndPreview();
+    }
+}
+)";
+
 class AcceptanceEditor final : public EditorApplication
 {
 public:
@@ -182,7 +210,7 @@ protected:
 					auto* inspector = ImGui::FindWindowByName("Inspector");
 					Expect(inspector != nullptr, "Created asset Inspector was not visible");
 					ImGui::FocusWindow(inspector);
-					ImGui::ActivateItemByID(ImHashStr("##Value", 0, ImHashStr("enabled", 0, inspector->ID)));
+					ImGui::ActivateItemByID(ImHashStr("enabled", 0, ImHashStr("/Fields/enabled", 0, inspector->ID)));
 					Next();
 					break;
 				}
@@ -243,6 +271,8 @@ protected:
 					}
 					SetStartupWindow("Material Preview");
 					previewPipelineVersion = InspectorPreview()->State().DisplayedTarget().pipelineVersion;
+					Expect(InspectorPreview()->State().Target().custom,
+					       "Active SRP did not use the registered managed Preview provider");
 					Expect(InspectorPreview()->ImageRect().width > 0 && InspectorPreview()->ImageRect().height > 0,
 					       "Inspector Preview has no image region");
 					Capture("04Preview.png");
@@ -252,6 +282,14 @@ protected:
 				case 13:
 					if (!RunningScene())
 					{
+						if (settledFrames == 4)
+						{
+							std::cout << "Waiting for Play: document="
+							          << Documents()->Current()->Path().ToString().c_str()
+							          << " prompt=" << Documents()->PromptPending()
+							          << " scriptWork=" << ScriptWorkPending() << '\n'
+							          << std::flush;
+						}
 						return {};
 					}
 					FocusPanel("Game");
@@ -309,7 +347,7 @@ protected:
 #if defined(_WIN32)
 					minimizedOwner = this;
 					minimizedRenderCount = InspectorPreview()->RenderCount();
-					minimizedTime = InspectorPreview()->Clock().Time();
+					minimizedTime = InspectorPreview()->ViewingTime();
 					restoreWindow = glfwGetWin32Window(static_cast<GLFWwindow*>(Detail::WindowAccess::Native(*window)));
 					restoreTimer = SetTimer(restoreWindow, 0, 300, RestorePreviewWindow);
 					Expect(restoreTimer != 0, "Cannot schedule preview minimize/restore test");
@@ -439,7 +477,7 @@ private:
 			auto& owner = *minimizedOwner;
 			owner.restoreTimer = 0;
 			owner.minimizedVerified = owner.InspectorPreview()->RenderCount() == owner.minimizedRenderCount &&
-			                          owner.InspectorPreview()->Clock().Time() == owner.minimizedTime;
+			                          owner.InspectorPreview()->ViewingTime() == owner.minimizedTime;
 			owner.window->Restore();
 			// Let the restored size reach GLFW before hiding this acceptance window.
 			// Hiding from the timer can leave a zero framebuffer and strand WaitEvents.
@@ -609,6 +647,8 @@ int main(int count, char** arguments)
 		std::filesystem::copy(std::filesystem::u8path(arguments[1]) / "Assets", root / "Assets",
 		                      std::filesystem::copy_options::recursive);
 		std::ofstream(root / "Assets/AcceptancePipeline.cs") << pipelineSource;
+		std::filesystem::create_directories(root / "Assets/Editor");
+		std::ofstream(root / "Assets/Editor/AcceptanceMaterialEditor.cs") << previewSource;
 		std::cout << "SRP evidence: " << root << '\n';
 		AcceptanceEditor editor(root);
 		Done(editor.OpenProject(root));

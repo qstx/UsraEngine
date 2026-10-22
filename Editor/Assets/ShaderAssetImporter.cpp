@@ -18,6 +18,14 @@ namespace
 {
 Result<void> ConfigureStaging(Shader::ShaderCompilerTools& tools, VirtualFileSystem& files)
 {
+	const auto providers = files.Providers();
+	const auto writable = std::find_if(providers.begin(), providers.end(),
+	                                   [](const auto& provider) { return provider.scheme == editorLibraryScheme; });
+	if (writable != providers.end() && writable->provider->DirectoryRoot().empty())
+	{
+		// In-memory candidates use the compiler's private temporary host directory.
+		return {};
+	}
 	auto roots = files.Roots(editorLibraryScheme);
 	if (!roots || roots.value.empty())
 	{

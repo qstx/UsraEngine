@@ -57,8 +57,11 @@ public class Material : RenderResource
 		return reference.HasValue ? TextureAsset.Load(reference.Value.ToManaged()) : null;
 	}
 
-	public void SetTexture(MaterialTextureSlot slot, TextureAsset? texture) => NativeMaterialBindings.SetTexture(Handle, slot,
-		texture is null ? null : NativeAssetReference.From(texture.Reference));
+	public void SetTexture(MaterialTextureSlot slot, Texture? texture)
+	{
+		if (ImportExecution.Active) { SetImportTexture(slot, string.Empty, texture); return; }
+		NativeMaterialBindings.SetTexture(Handle, slot, texture is null ? null : NativeAssetReference.From(texture.Reference));
+	}
 
 	public float GetFloat(string name) => NativeMaterialBindings.GetFloat(Handle, name);
 	public int GetInt(string name) => NativeMaterialBindings.GetInt(Handle, name);
@@ -75,8 +78,27 @@ public class Material : RenderResource
 	public void SetInt(string name, int value) => NativeMaterialBindings.SetInt(Handle, name, value);
 	public void SetColor(string name, Color value) => NativeMaterialBindings.SetColor(Handle, name, value);
 	public void SetVector(string name, Vector4 value) => NativeMaterialBindings.SetVector(Handle, name, value);
-	public void SetTexture(string name, TextureAsset? texture) => NativeMaterialBindings.SetTextureProperty(Handle, name,
-		texture is null ? null : NativeAssetReference.From(texture.Reference));
+	public void SetTexture(string name, Texture? texture)
+	{
+		ArgumentException.ThrowIfNullOrEmpty(name);
+		if (ImportExecution.Active) { SetImportTexture(default, name ?? throw new ArgumentNullException(nameof(name)), texture); return; }
+		NativeMaterialBindings.SetTextureProperty(Handle, name, texture is null ? null : NativeAssetReference.From(texture.Reference));
+	}
+
+	private void SetImportTexture(MaterialTextureSlot slot, string name, Texture? texture)
+	{
+		NativeHandle candidate = default;
+		NativeAssetReference? reference = null;
+		if (texture != null)
+		{
+			if (string.IsNullOrEmpty(texture.Reference.Guid))
+			{
+				candidate = texture.Handle;
+			}
+			else reference = NativeAssetReference.From(texture.Reference);
+		}
+		NativeImportBindings.SetMaterialTexture(Handle, candidate, reference, slot, name);
+	}
 
 	public void RemovePropertyOverride(string name) => NativeMaterialBindings.RemovePropertyOverride(Handle, name);
 

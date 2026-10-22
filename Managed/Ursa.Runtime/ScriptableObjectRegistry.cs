@@ -1,28 +1,71 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Ursa;
 
 internal static class ScriptableObjectRegistry
 {
-	private static readonly Dictionary<ulong, Dictionary<ulong, ScriptableObject>> sessions = new();
-	private static readonly HashSet<ulong> closingSessions = new();
-	private static readonly Dictionary<ulong, Dictionary<AssetReference, ScriptableObject>> persistentAssets = new();
+	[ThreadStatic] private static Dictionary<ulong, Dictionary<ulong, ScriptableObject>>? ownerSessions;
+	[ThreadStatic] private static HashSet<ulong>? ownerClosingSessions;
+	[ThreadStatic] private static Dictionary<ulong, Dictionary<AssetReference, ScriptableObject>>? ownerPersistentAssets;
+	private static Dictionary<ulong, Dictionary<ulong, ScriptableObject>> sessions => ownerSessions ??= new();
+	private static HashSet<ulong> closingSessions => ownerClosingSessions ??= new();
+	private static Dictionary<ulong, Dictionary<AssetReference, ScriptableObject>> persistentAssets => ownerPersistentAssets ??= new();
 	private sealed class AssetLease
 	{
 		internal int count;
 		internal bool owned;
 	}
-	private static readonly Dictionary<ulong, Dictionary<AssetReference, AssetLease>> assetLeases = new();
-	private static readonly Dictionary<ulong, Dictionary<AssetReference, ScriptableAssetGraph>> loadedGraphs = new();
-	internal static Func<AssetReference, IReadOnlyList<ScriptableAssetData>>? graphLoader;
-	private static ulong currentSession;
-	private static ulong nextInstanceId = 1;
-	private static int ownerThread;
+	[ThreadStatic] private static Dictionary<ulong, Dictionary<AssetReference, AssetLease>>? ownerAssetLeases;
+	[ThreadStatic] private static Dictionary<ulong, Dictionary<AssetReference, ScriptableAssetGraph>>? ownerLoadedGraphs;
+	private static Dictionary<ulong, Dictionary<AssetReference, AssetLease>> assetLeases => ownerAssetLeases ??= new();
+	private static Dictionary<ulong, Dictionary<AssetReference, ScriptableAssetGraph>> loadedGraphs => ownerLoadedGraphs ??= new();
+	[ThreadStatic] internal static Func<AssetReference, IReadOnlyList<ScriptableAssetData>>? graphLoader;
+	[ThreadStatic] private static ulong currentSession;
+	[ThreadStatic] internal static bool SnapshotOnly;
+	private static long nextSnapshotSession;
+	internal static IDisposable BeginEditorSnapshot()
+	{
+		RequireThread();
+		if (SnapshotOnly) throw new InvalidOperationException("Editor object snapshots cannot be nested.");
+		ulong previous = currentSession;
+		var previousLoader = graphLoader;
+		ulong temporary = checked((ulong)Interlocked.Increment(ref nextSnapshotSession)) | (1ul << 63);
+		currentSession = temporary;
+		SnapshotOnly = true;
+		return new EditorSnapshotLease(previous, temporary, previousLoader);
+	}
+	private sealed class EditorSnapshotLease(ulong previous, ulong temporary,
+		Func<AssetReference, IReadOnlyList<ScriptableAssetData>>? previousLoader) : IDisposable
+	{
+		private readonly int thread = Environment.CurrentManagedThreadId;
+		private bool disposed;
+		public void Dispose()
+		{
+			if (disposed) return;
+			if (thread != Environment.CurrentManagedThreadId || currentSession != temporary)
+				throw new InvalidOperationException("Editor object snapshot requires its owning callback.");
+			disposed = true;
+			try
+			{
+				var errors = ClearSession(temporary);
+				if (errors.Count != 0) throw new AggregateException("Editor object snapshot cleanup failed.", errors);
+			}
+			finally { SnapshotOnly = false; currentSession = previous; graphLoader = previousLoader; }
+		}
+	}
+	private static long nextInstanceId;
+	[ThreadStatic] private static int ownerThread;
 
 	internal static void RequireThread()
 	{
-		if (ownerThread == 0) ownerThread = Environment.CurrentManagedThreadId;
+		if (ownerThread == 0)
+		{
+			if (Ursa.Bindings.Generated.RuntimeModule.Context == 0)
+				throw new InvalidOperationException("ScriptableObject APIs require an initialized host owner thread.");
+			ownerThread = Environment.CurrentManagedThreadId;
+		}
 		if (ownerThread != Environment.CurrentManagedThreadId)
 			throw new InvalidOperationException("ScriptableObject APIs require the host main thread.");
 	}
@@ -34,22 +77,31 @@ internal static class ScriptableObjectRegistry
 		if (session == 0) graphLoader = null;
 	}
 
-	internal static bool IsCurrentSession(ulong session) => currentSession == session;
+	internal static bool IsCurrentSession(ulong session) => ownerThread != 0 && currentSession == session &&
+		Ursa.Bindings.Generated.RuntimeModule.Context != 0;
 
 	internal static (ulong InstanceId, ulong SessionId) Register(ScriptableObject instance)
 	{
 		RequireThread();
 		if (closingSessions.Contains(currentSession))
 			throw new InvalidOperationException("Cannot create a ScriptableObject while its session is closing.");
-		if (nextInstanceId == 0) throw new InvalidOperationException("ScriptableObject identity space is exhausted.");
 		if (!sessions.TryGetValue(currentSession, out Dictionary<ulong, ScriptableObject>? objects))
 		{
 			objects = new Dictionary<ulong, ScriptableObject>();
 			sessions.Add(currentSession, objects);
 		}
-		ulong id = nextInstanceId++;
+		ulong id = checked((ulong)Interlocked.Increment(ref nextInstanceId));
 		objects.Add(id, instance);
 		return (id, currentSession);
+	}
+
+	internal static ScriptableObject RequireInstance(ulong id)
+	{
+		RequireThread();
+		if (!sessions.TryGetValue(currentSession, out var objects) || !objects.TryGetValue(id, out var value))
+			throw new InvalidOperationException("ScriptableObject belongs to another or completed session.");
+		value.RequireValid();
+		return value;
 	}
 
 	internal static void Unregister(ulong session, ulong id)
@@ -105,6 +157,8 @@ internal static class ScriptableObjectRegistry
 	internal static ScriptableObject? FindAsset(AssetReference reference)
 	{
 		RequireThread();
+		if (reference.LocalFileId == 0 && loadedGraphs.TryGetValue(currentSession, out var roots) && roots.TryGetValue(reference, out var graph))
+			return graph.Get(graph.Root);
 		if (persistentAssets.TryGetValue(currentSession, out var assets) && assets.TryGetValue(reference, out var instance))
 		{
 			instance.RequireValid();
@@ -131,7 +185,7 @@ internal static class ScriptableObjectRegistry
 		ScriptableObject root;
 		try
 		{
-			root = graph.Get(reference);
+			root = graph.Get(reference.LocalFileId == 0 ? graph.Root : reference);
 			if (!expectedType.IsInstanceOfType(root)) throw new InvalidOperationException("Loaded asset type differs from its field.");
 			if (!loadedGraphs.TryGetValue(currentSession, out var roots))
 			{
@@ -139,6 +193,7 @@ internal static class ScriptableObjectRegistry
 				loadedGraphs.Add(currentSession, roots);
 			}
 			roots.Add(reference, graph);
+			ImportExecution.RecordReadOnlyAssets(graph.Instances);
 			return root;
 		}
 		catch

@@ -14,6 +14,7 @@ ManagedSceneApi& RuntimeServices::SceneApi(BindingCall& call)
 	{
 		throw std::runtime_error("This Runtime binding requires an active Scene");
 	}
+	api->RequireResourceAccess();
 	return *api;
 }
 
@@ -24,7 +25,8 @@ Result<RuntimeServices::Handle> RuntimeServices::CreateGameObject(BindingCall& c
 		return Result<Handle>::Failure("GameObject name exceeds 256 UTF-8 bytes");
 	}
 	auto& api = SceneApi(call);
-	auto object = TakeBindingResult(api.scene.CreateGameObject(ReadString(name)));
+	api.RequireSceneMutation();
+	auto object = TakeBindingResult(api.CreateObject(ReadString(name)));
 	auto handle = api.Register(object);
 	if (!handle)
 	{
@@ -48,19 +50,21 @@ Result<void> RuntimeServices::SetName(BindingCall& call, const Handle& handle, c
 		return Result<void>::Failure("GameObject name exceeds 256 UTF-8 bytes");
 	}
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
 	return TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->SetName(ReadString(name));
 }
 
 Result<bool> RuntimeServices::GetActive(BindingCall& call, const Handle& handle)
 {
 	auto& api = SceneApi(call);
-	return api.scene.ActiveSelf(TakeBindingResult(api.Resolve(ReadManagedHandle(handle))));
+	return TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->ActiveSelf();
 }
 
 Result<void> RuntimeServices::SetActive(BindingCall& call, const Handle& handle, bool active)
 {
 	auto& api = SceneApi(call);
-	return api.scene.SetActive(TakeBindingResult(api.Resolve(ReadManagedHandle(handle))), active);
+	api.RequireSceneMutation();
+	return TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->SetActive(active);
 }
 
 Result<RuntimeServices::Handle> RuntimeServices::GetParent(BindingCall& call, const Handle& handle)
@@ -74,6 +78,7 @@ Result<RuntimeServices::Handle> RuntimeServices::GetParent(BindingCall& call, co
 Result<void> RuntimeServices::SetParent(BindingCall& call, const Handle& handle, const Handle& parent)
 {
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
 	const auto object = TakeBindingResult(api.Resolve(ReadManagedHandle(handle)));
 	GameObject::Ptr parentObject;
 	if (parent.F_sessionId != 0)
@@ -84,13 +89,26 @@ Result<void> RuntimeServices::SetParent(BindingCall& call, const Handle& handle,
 	{
 		return Result<void>::Failure("Null parent requires an empty handle");
 	}
-	return api.scene.SetParent(object, std::move(parentObject));
+	return object->SetParent(std::move(parentObject));
+}
+
+Result<DataView> RuntimeServices::GetChildren(BindingCall& call, const Handle& handle)
+{
+	auto& api = SceneApi(call);
+	const auto children = TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->Children();
+	auto* values = static_cast<Handle*>(call.arena.Allocate(children.size(), sizeof(Handle)));
+	for (Size index = 0; index < children.size(); ++index)
+	{
+		values[index] = WriteManagedHandle<Handle>(TakeBindingResult(api.Register(children[index])));
+	}
+	return Result<DataView>::Success({values, children.size(), 1, 0});
 }
 
 Result<void> RuntimeServices::DestroyGameObject(BindingCall& call, const Handle& handle)
 {
 	auto& api = SceneApi(call);
-	return api.scene.DestroyGameObject(TakeBindingResult(api.Resolve(ReadManagedHandle(handle))));
+	api.RequireSceneMutation();
+	return TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->Destroy();
 }
 
 Result<Int32> RuntimeServices::GetLayer(BindingCall& call, const Handle& handle)
@@ -107,17 +125,19 @@ Result<void> RuntimeServices::SetLayer(BindingCall& call, const Handle& handle, 
 		return Result<void>::Failure("GameObject Layer must be between 0 and 31");
 	}
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
 	return TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->SetLayer(UInt32(layer));
 }
 
 Result<RuntimeServices::Handle> RuntimeServices::CreatePrimitive(BindingCall& call, Int32 type)
 {
 	auto& api = SceneApi(call);
-	if (type != 0 || !api.resources)
+	api.RequireSceneMutation();
+	if (type != 0 || !api.Resources())
 	{
 		return Result<Handle>::Failure("Primitive creation requires Cube and a ResourceSession");
 	}
-	auto object = TakeBindingResult(Ursa::CreatePrimitive(api.scene, *api.resources, PrimitiveType::Cube));
+	auto object = TakeBindingResult(Ursa::CreatePrimitive(api.scene, *api.Resources(), PrimitiveType::Cube));
 	auto handle = api.Register(object);
 	if (!handle)
 	{
@@ -130,8 +150,7 @@ Result<RuntimeServices::Handle> RuntimeServices::CreatePrimitive(BindingCall& ca
 Result<Utf8View> RuntimeServices::GetGameObjectPersistentId(BindingCall& call, const Handle& handle)
 {
 	auto& api = SceneApi(call);
-	const auto id =
-	    TakeBindingResult(api.scene.PersistentId(TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))));
+	const auto id = TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->Id();
 	return Result<Utf8View>::Success(call.arena.StringValue(id.ToString()));
 }
 
@@ -139,7 +158,7 @@ Result<RuntimeServices::Handle> RuntimeServices::ResolveGameObjectPersistentId(B
 {
 	auto& api = SceneApi(call);
 	const auto identity = TakeBindingResult(ResourceId::Parse(ReadString(id)));
-	const auto object = TakeBindingResult(api.scene.GameObjectById(identity));
+	const auto object = TakeBindingResult(api.FindGameObject(identity));
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.Register(object))));
 }
 
@@ -147,40 +166,48 @@ Result<RuntimeServices::Handle> RuntimeServices::AddComponent(BindingCall& call,
                                                               const Utf8View& typeId)
 {
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
 	if (typeId.length == 0 || typeId.length > 256)
 	{
 		return Result<Handle>::Failure("Invalid native Component type identity");
 	}
 	const auto object = TakeBindingResult(api.Resolve(ReadManagedHandle(owner)));
 	const auto type = ReadString(typeId);
-	Result<ComponentId> added;
+	Result<Component*> added;
 	if (type == "ursa.Camera")
 	{
-		added = api.scene.AddComponent<CameraComponent>(object);
+		auto value = object->AddComponent<CameraComponent>();
+		added = value ? Result<Component*>::Success(value.value) : Result<Component*>::Failure(value.error);
 	}
 	else if (type == "ursa.MeshFilter")
 	{
-		added = api.scene.AddComponent<MeshFilterComponent>(object);
+		auto value = object->AddComponent<MeshFilterComponent>();
+		added = value ? Result<Component*>::Success(value.value) : Result<Component*>::Failure(value.error);
 	}
 	else if (type == "ursa.MeshRenderer")
 	{
-		added = api.scene.AddComponent<MeshRendererComponent>(object);
+		auto value = object->AddComponent<MeshRendererComponent>();
+		added = value ? Result<Component*>::Success(value.value) : Result<Component*>::Failure(value.error);
 	}
 	else if (type == "ursa.SkinnedMeshRenderer")
 	{
-		added = api.scene.AddComponent<SkinnedMeshRendererComponent>(object);
+		auto value = object->AddComponent<SkinnedMeshRendererComponent>();
+		added = value ? Result<Component*>::Success(value.value) : Result<Component*>::Failure(value.error);
 	}
 	else if (type == "ursa.Animator")
 	{
-		added = api.scene.AddComponent<AnimatorComponent>(object);
+		auto value = object->AddComponent<AnimatorComponent>();
+		added = value ? Result<Component*>::Success(value.value) : Result<Component*>::Failure(value.error);
 	}
 	else if (type == "ursa.DirectionalLight")
 	{
-		added = api.scene.AddComponent<DirectionalLightComponent>(object);
+		auto value = object->AddComponent<DirectionalLightComponent>();
+		added = value ? Result<Component*>::Success(value.value) : Result<Component*>::Failure(value.error);
 	}
 	else if (type == "ursa.PointLight")
 	{
-		added = api.scene.AddComponent<PointLightComponent>(object);
+		auto value = object->AddComponent<PointLightComponent>();
+		added = value ? Result<Component*>::Success(value.value) : Result<Component*>::Failure(value.error);
 	}
 	else
 	{
@@ -190,10 +217,10 @@ Result<RuntimeServices::Handle> RuntimeServices::AddComponent(BindingCall& call,
 	{
 		return Result<Handle>::Failure(added.error);
 	}
-	auto handle = api.RegisterComponent(api.scene.GetComponent(added.value), object);
+	auto handle = api.RegisterComponent(added.value, object);
 	if (!handle)
 	{
-		api.scene.RemoveComponent(added.value);
+		object->RemoveComponent(added.value);
 		return Result<Handle>::Failure(handle.error);
 	}
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(handle.value));
@@ -203,12 +230,11 @@ Result<DataView> RuntimeServices::GetComponents(BindingCall& call, const Handle&
 {
 	auto& api = SceneApi(call);
 	const auto object = TakeBindingResult(api.Resolve(ReadManagedHandle(owner)));
-	const auto components = TakeBindingResult(api.scene.ComponentsOf(object));
+	const auto components = object->Components();
 	auto* result = static_cast<Handle*>(call.arena.Allocate(components.size(), sizeof(Handle)));
 	for (Size index = 0; index < components.size(); ++index)
 	{
-		result[index] = WriteManagedHandle<Handle>(
-		    TakeBindingResult(api.RegisterComponent(api.scene.GetComponent(components[index]), object)));
+		result[index] = WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterComponent(components[index], object)));
 	}
 	return Result<DataView>::Success({result, components.size(), 1, 0});
 }
@@ -238,39 +264,48 @@ Result<RuntimeServices::Handle> RuntimeServices::GetComponentOwner(BindingCall& 
 {
 	auto& api = SceneApi(call);
 	const auto* value = TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)));
-	const auto owner = TakeBindingResult(api.scene.ComponentOwner(value->Id()));
+	const auto owner = value->GetGameObject();
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.Register(owner))));
 }
 
 Result<bool> RuntimeServices::GetComponentEnabled(BindingCall& call, const Handle& component)
 {
 	auto& api = SceneApi(call);
-	return api.scene.IsComponentEnabled(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)))->Id());
+	return Result<bool>::Success(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)))->IsEnabled());
 }
 
 Result<void> RuntimeServices::SetComponentEnabled(BindingCall& call, const Handle& component, bool enabled)
 {
 	auto& api = SceneApi(call);
-	return api.scene.SetComponentEnabled(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)))->Id(),
-	                                     enabled);
+	api.RequireSceneMutation();
+	return TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)))->SetEnabled(enabled);
 }
 
 Result<bool> RuntimeServices::IsComponentActive(BindingCall& call, const Handle& component)
 {
 	auto& api = SceneApi(call);
-	return api.scene.IsComponentActive(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)))->Id());
+	const auto* value = TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)));
+	if (value->TryGetScene())
+	{
+		return api.scene.IsComponentActive(value->Id());
+	}
+	return Result<bool>::Success(value->IsEnabled() && TakeBindingResult(value->GetGameObject()->ActiveInHierarchy()));
 }
 
 Result<void> RuntimeServices::RemoveComponent(BindingCall& call, const Handle& component)
 {
 	auto& api = SceneApi(call);
-	return api.scene.RemoveComponent(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)))->Id());
+	api.RequireSceneMutation();
+	const auto* value = TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)));
+	return value->GetGameObject()->RemoveComponent(const_cast<Component*>(value));
 }
 
 Result<RuntimeServices::Handle> RuntimeServices::AddBehaviour(BindingCall& call, const Handle& owner,
                                                               const Utf8View& typeName, UInt64 token)
 {
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
+	api.RequireGameExecution();
 	if (!api.behaviourRuntime || typeName.length == 0 || typeName.length > 4096)
 	{
 		return Result<Handle>::Failure("Behaviour creation requires a runtime and valid type identity");
@@ -296,8 +331,7 @@ Result<RuntimeServices::Handle> RuntimeServices::AddBehaviour(BindingCall& call,
 Result<Utf8View> RuntimeServices::GetComponentPersistentId(BindingCall& call, const Handle& component)
 {
 	auto& api = SceneApi(call);
-	const auto id = TakeBindingResult(
-	    api.scene.ComponentPersistentId(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)))->Id()));
+	const auto id = TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)))->PersistentId();
 	return Result<Utf8View>::Success(call.arena.StringValue(id.ToString()));
 }
 
@@ -305,9 +339,7 @@ Result<RuntimeServices::Handle> RuntimeServices::ResolveComponentPersistentId(Bi
 {
 	auto& api = SceneApi(call);
 	const auto identity = TakeBindingResult(ResourceId::Parse(ReadString(id)));
-	const auto component = TakeBindingResult(api.scene.ComponentByPersistentId(identity));
-	const auto owner = TakeBindingResult(api.scene.ComponentOwner(component));
-	return Result<Handle>::Success(
-	    WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterComponent(api.scene.GetComponent(component), owner))));
+	const auto component = TakeBindingResult(api.FindComponent(identity));
+	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterComponent(component))));
 }
 } // namespace Ursa::Scripting::Bindings

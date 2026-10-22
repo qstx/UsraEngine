@@ -78,6 +78,10 @@ internal static partial class NativeResourceBindings
 {
 	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::LoadTexture")]
 	internal static partial NativeHandle LoadTexture(NativeAssetReference reference);
+	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::GetTextureInfo")]
+	internal static partial Texture2DInfo GetTextureInfo([HandleKind(3)] NativeHandle texture);
+	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::GetTexturePixels")]
+	internal static partial Color[] GetTexturePixels([HandleKind(3)] NativeHandle texture);
 	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::IsValid")]
 	internal static partial bool IsValid(NativeHandle resource);
 	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::GetMeshBinding")]

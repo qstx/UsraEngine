@@ -25,22 +25,38 @@ public sealed class EditorWindowMenuAttribute : Attribute
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class CustomEditorAttribute : Attribute
 {
-	public CustomEditorAttribute(Type inspectedType)
+	public CustomEditorAttribute(Type inspectedType, bool editorForChildClasses = false)
 	{
 		ArgumentNullException.ThrowIfNull(inspectedType);
-		if (inspectedType.ContainsGenericParameters || !typeof(Component).IsAssignableFrom(inspectedType))
-			throw new ArgumentException("CustomEditor target must be a closed Component type.", nameof(inspectedType));
+		if (inspectedType.ContainsGenericParameters || !InspectorTargetMatching.Supports(inspectedType))
+			throw new ArgumentException("CustomEditor target must be a closed Component, GameObject, ScriptableObject, resource or AssetImporter type.", nameof(inspectedType));
 		InspectedType = inspectedType;
+		EditorForChildClasses = editorForChildClasses;
 	}
 
 	public Type InspectedType { get; }
+	public bool EditorForChildClasses { get; }
 }
 
 public abstract class Inspector
 {
 	public SerializedObject SerializedObject { get; internal set; } = null!;
+	internal Type TargetType { get; set; } = null!;
+	internal PreviewLifetime PreviewLifetime { get; } = new();
+	private InspectorTargetScope? targetScope;
+	public virtual object Target => (targetScope ??= InspectorTargetScope.Create(TargetType)).Target;
+	internal virtual void SynchronizeTarget() => targetScope?.Synchronize();
+	internal void ReleaseTarget() { targetScope?.Dispose(); targetScope = null; }
 
-	public abstract void OnInspectorGUI();
+	public virtual void OnInspectorGUI() => DrawDefaultInspector();
+	public virtual void OnEnable() { }
+	public virtual void OnDisable() { }
+	public virtual bool HasPreviewGUI() => false;
+	public virtual void OnPreviewSettings() { }
+	public virtual void OnPreviewGUI(Rect rect) { }
+	public virtual void OnInteractivePreviewGUI(Rect rect) => OnPreviewGUI(rect);
+	public virtual string GetInfoString() => string.Empty;
+	public virtual bool RequiresConstantRepaint() => false;
 
 	protected bool DrawDefaultInspector() => SerializedObject.DrawDefaultInspector();
 }
@@ -58,15 +74,20 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 	private readonly Dictionary<string, Action> callbacks = new(StringComparer.Ordinal);
 	private readonly HashSet<string> disabled = new(StringComparer.Ordinal);
 	private readonly List<Inspector> inspectors = new();
+	private readonly Dictionary<string, (Type Inspector, Type Target)> inspectorTypes = new(StringComparer.Ordinal);
+	private readonly Dictionary<ulong, (string Id, Inspector Value)> previews = new();
+	private readonly HashSet<ulong> failedPreviews = new();
 
 	// Called through reflection by the stable host; no project delegate is exported to native code.
 	internal static IEditorExtensionSession Create(Assembly[] assemblies)
+		=> CreateForTypes(assemblies.SelectMany(assembly => assembly.GetTypes()).Distinct().ToArray());
+
+	internal static IEditorExtensionSession CreateForTypes(Type[] types)
 	{
 		var registry = new ExtensionRegistry();
 		try
 		{
-			foreach (Assembly assembly in assemblies)
-			foreach (Type type in assembly.GetTypes())
+			foreach (Type type in types)
 			{
 				foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly))
 				{
@@ -88,20 +109,40 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 					var window = (EditorWindow)Activator.CreateInstance(type)!;
 					registry.Add(new() { Id = "window:" + type.FullName, Kind = EditorExtensionKind.Window, Path = menu.Path, Target = "", Title = window.Title }, window.OnGUI);
 				}
-				if (customEditor != null)
-				{
-					Type inspectedType = customEditor.InspectedType;
-					string target = typeof(Behaviour).IsAssignableFrom(inspectedType)
-						? BehaviourRegistry.IdentityFor(inspectedType).Id : Component.TypeIdFor(inspectedType);
-					var inspector = (Inspector)Activator.CreateInstance(type)!;
-					registry.inspectors.Add(inspector);
-					registry.Add(new() { Id = "inspector:" + target, Kind = EditorExtensionKind.Inspector, Path = "", Target = target, Title = "" },
-						() => { inspector.SerializedObject = new SerializedObject(); inspector.OnInspectorGUI(); });
-				}
 			}
+			registry.AddInspectors(types);
 			return registry;
 		}
 		catch { registry.Dispose(); throw; }
+	}
+
+	private void AddInspectors(Type[] types)
+	{
+		var registrations = types.Where(type => !type.IsAbstract && !type.ContainsGenericParameters && typeof(Inspector).IsAssignableFrom(type))
+			.Select(type => (Inspector: type, Declaration: type.GetCustomAttribute<CustomEditorAttribute>(inherit: false)))
+			.Where(item => item.Declaration != null).Select(item => new InspectorRegistration(item.Inspector, item.Declaration!)).ToArray();
+		var targets = registrations.Select(item => item.Declaration.InspectedType)
+			.Concat(types).Concat(typeof(Component).Assembly.GetTypes()).Concat(new[] { typeof(TextureImporter), typeof(ModelImporter) })
+			.Where(type => !type.IsAbstract && !type.ContainsGenericParameters && InspectorTargetMatching.Supports(type))
+			.Where(type => !typeof(Texture).IsAssignableFrom(type) || type == typeof(Texture2D)).Distinct();
+		foreach (Type actual in targets.OrderBy(type => type.FullName, StringComparer.Ordinal))
+		{
+			Type? selected = InspectorTargetMatching.Select(actual, registrations);
+			if (selected == null) continue;
+			string target = InspectorTargetMatching.Identity(actual);
+			var inspector = (Inspector)Activator.CreateInstance(selected)!;
+			inspector.TargetType = actual;
+			inspectors.Add(inspector);
+			if (!inspectorTypes.TryAdd("inspector:" + target, (selected, actual)))
+				throw new InvalidOperationException($"Duplicate editor target identity '{target}'.");
+			Add(new() { Id = "inspector:" + target, Kind = EditorExtensionKind.Inspector, Path = "", Target = target, Title = "" },
+				() =>
+				{
+					inspector.SerializedObject = new SerializedObject();
+					try { inspector.OnInspectorGUI(); inspector.SynchronizeTarget(); }
+					finally { inspector.ReleaseTarget(); }
+				});
+		}
 	}
 
 	private void Add(EditorExtensionInfo descriptor, Action callback)
@@ -135,8 +176,76 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 		finally { EditorApi.End(); }
 	}
 
+	public EditorPreviewResult Preview(string id, ulong instance, EditorPreviewPhase phase, Rect rect)
+	{
+		if (instance == 0) throw new ArgumentOutOfRangeException(nameof(instance));
+		if (phase != EditorPreviewPhase.Release && failedPreviews.Contains(instance))
+			return new() { Diagnostic = $"Preview '{id}' is disabled for this target after an exception.", Info = string.Empty };
+		try
+		{
+			EditorApi.Begin();
+			if (phase == EditorPreviewPhase.Release)
+			{
+				EditorApi.EnsureRuntimeScope();
+				ReleasePreview(instance);
+				failedPreviews.Remove(instance);
+				return new() { Success = true, Info = string.Empty, Diagnostic = string.Empty };
+			}
+			if (!inspectorTypes.TryGetValue(id, out var types))
+				return new() { Success = true, Info = string.Empty, Diagnostic = string.Empty };
+			if (!previews.TryGetValue(instance, out var entry))
+			{
+				var value = (Inspector)Activator.CreateInstance(types.Inspector)!;
+				value.TargetType = types.Target;
+				entry = (id, value);
+				previews.Add(instance, entry);
+				PreviewLifetime.Current = value.PreviewLifetime;
+				value.SerializedObject = new SerializedObject();
+				EditorApi.EnsureRuntimeScope();
+				value.OnEnable();
+			}
+			if (entry.Id != id) throw new InvalidOperationException("Preview instance cannot change its registered target type.");
+			Inspector inspector = entry.Value;
+			PreviewLifetime.Current = inspector.PreviewLifetime;
+			if (phase != EditorPreviewPhase.Inspector) EditorApi.EnsureRuntimeScope();
+			inspector.SerializedObject = new SerializedObject();
+			try
+			{
+				if (phase == EditorPreviewPhase.Inspector) { inspector.OnInspectorGUI(); inspector.SynchronizeTarget(); }
+				bool hasPreview = inspector.HasPreviewGUI();
+				if (hasPreview && phase == EditorPreviewPhase.Settings) inspector.OnPreviewSettings();
+				if (hasPreview && phase == EditorPreviewPhase.Draw) inspector.OnInteractivePreviewGUI(rect);
+				return new() { Success = true, HasPreview = hasPreview, ConstantRepaint = hasPreview && inspector.RequiresConstantRepaint(),
+					Info = hasPreview ? inspector.GetInfoString() ?? string.Empty : string.Empty, Diagnostic = string.Empty };
+			}
+			finally { inspector.ReleaseTarget(); }
+		}
+		catch (Exception error)
+		{
+			failedPreviews.Add(instance);
+			try { ReleasePreview(instance); } catch (Exception cleanup) { error = new AggregateException(error, cleanup); }
+			return new() { Info = string.Empty, Diagnostic = $"Preview '{id}' ({instance}) failed: {error}" };
+		}
+		finally { PreviewLifetime.Current = null; EditorApi.End(); }
+	}
+
+	private void ReleasePreview(ulong instance)
+	{
+		if (!previews.Remove(instance, out var entry)) return;
+		PreviewLifetime.Current = entry.Value.PreviewLifetime;
+		try { entry.Value.OnDisable(); }
+		finally { entry.Value.PreviewLifetime.Valid = false; entry.Value.ReleaseTarget(); PreviewLifetime.Current = null; }
+	}
+
 	public void Dispose()
 	{
+		foreach (ulong instance in previews.Keys.ToArray())
+		{
+			try { ReleasePreview(instance); }
+			catch (Exception error) { System.Diagnostics.Trace.TraceError($"Preview cleanup failed: {error}"); }
+		}
+		inspectorTypes.Clear();
+		failedPreviews.Clear();
 		callbacks.Clear();
 		descriptors.Clear();
 		inspectors.Clear();

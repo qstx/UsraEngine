@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Assets/AssetDatabase.hpp>
+#include <Assets/ProjectAssetImporter.hpp>
 #include <Serialization/ResourceIndex.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <filesystem>
@@ -8,6 +9,8 @@
 
 namespace Ursa::Editor
 {
+class ManagedImportEnvironment;
+class AssetImportRules;
 // The scheme names are a convention this editor registers: project resources
 // live under "<project>/Assets", engine resources under the read-only mounts.
 inline constexpr const char* projectResourceScheme = projectScheme;
@@ -61,6 +64,20 @@ public:
 
 	ResourceSession::AssetPathResolver AssetResolver() const;
 
+	ProjectAssetImporter& Importer()
+	{
+		return importer;
+	}
+
+	Result<Vector<ScriptTypeDescriptor>> PrepareManagedImports(const String& configuration, bool buildScripts);
+	void InvalidateManagedImports();
+	std::shared_ptr<const AssetImportRules> ImportRuleDescriptions() const;
+
+	void SetImportRuleDescriptions(std::shared_ptr<const AssetImportRules> rules)
+	{
+		importDescriptions = std::move(rules);
+	}
+
 	Result<void> SetRuntimeContentView(const VirtualFileSystem& view);
 
 	const VirtualFileSystem& ContentFiles() const
@@ -101,5 +118,9 @@ private:
 	std::unique_ptr<AssetDatabase> assetDatabase;
 	std::unique_ptr<AssetDatabase> builtinDatabase;
 	std::unique_ptr<VirtualFileSystem> contentFiles;
+	ProjectAssetImporter importer;
+	std::shared_ptr<ManagedImportEnvironment> managedImports;
+	String managedConfiguration;
+	std::shared_ptr<const AssetImportRules> importDescriptions;
 };
 } // namespace Ursa::Editor

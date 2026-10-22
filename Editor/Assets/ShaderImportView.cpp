@@ -1,4 +1,5 @@
 #include <Assets/ShaderImportView.hpp>
+#include <Shader/ShaderAssetResource.hpp>
 #include <Assets/ShaderAssetImporter.hpp>
 
 #include <Core/StringInterop.hpp>
@@ -33,8 +34,33 @@ Result<void> ShaderImportView::Reimport(ProjectWorkspace& workspace, bool force)
 {
 	diagnostic.clear();
 	auto* database = sourcePath.scheme == engineResourceScheme ? workspace.BuiltinDatabase() : workspace.Database();
-	auto imported = database ? ShaderAssetImporter::Import(*database, sourcePath, DefaultShaderCompilerTools(), force)
-	                         : ShaderAssetImporter::Preview(workspace.Index().Filesystem(), sourcePath);
+	const auto load = [&]() -> Result<ShaderAssetImportResult>
+	{
+		if (!database)
+		{
+			return ShaderAssetImporter::Preview(workspace.Index().Filesystem(), sourcePath);
+		}
+		auto result = workspace.Importer().Import(*database, sourcePath, force);
+		if (!result)
+		{
+			return Result<ShaderAssetImportResult>::Failure(result.error);
+		}
+		const auto root =
+		    std::find_if(result.value.artifacts.begin(), result.value.artifacts.end(), [&](const auto& artifact)
+		                 { return artifact.localFileId == result.value.mainObjectLocalFileId; });
+		if (root == result.value.artifacts.end() || root->kind != "Shader")
+		{
+			return Result<ShaderAssetImportResult>::Failure("Shader importer did not produce a Shader main object");
+		}
+		auto shader = Shader::LoadShaderAssetResource(database->Filesystem(), root->path);
+		if (!shader)
+		{
+			return Result<ShaderAssetImportResult>::Failure(shader.error);
+		}
+		return Result<ShaderAssetImportResult>::Success(
+		    {std::move(shader.value), root->path, result.value.dependencies, result.value.cacheHit});
+	};
+	auto imported = load();
 	if (!imported)
 	{
 		diagnostic = imported.error;

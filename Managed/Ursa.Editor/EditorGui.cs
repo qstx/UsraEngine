@@ -4,6 +4,24 @@ namespace Ursa.Editor;
 
 public static class EditorGui
 {
+	public static void DrawTexture(Rect rect, Texture texture)
+	{
+		ArgumentNullException.ThrowIfNull(texture);
+		if (texture is Texture2D { EditorStorage: { } pixels })
+		{
+			pixels.RequireValid();
+			NativeEditorBindings.DrawPreviewPixels(rect, checked((uint)pixels.Width), checked((uint)pixels.Height), pixels.Pixels, pixels.Linear);
+			return;
+		}
+		EditorApi.EnsureRuntimeScope();
+		NativeEditorBindings.DrawPreviewTexture(rect, texture.Handle);
+	}
+	public static void DrawPreviewPixels(Rect rect, int width, int height, Color[] pixels, bool linear = false)
+	{
+		_ = EditorApi.Generation;
+		if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+		NativeEditorBindings.DrawPreviewPixels(rect, checked((uint)width), checked((uint)height), pixels ?? throw new ArgumentNullException(nameof(pixels)), linear);
+	}
 	public static void Text(string text) { _ = EditorApi.Generation; NativeEditorBindings.Text(text); }
 	public static bool Button(string label) { _ = EditorApi.Generation; return NativeEditorBindings.Button(label); }
 	public static void SameLine() { _ = EditorApi.Generation; NativeEditorBindings.SameLine(); }

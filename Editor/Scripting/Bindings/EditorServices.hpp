@@ -3,6 +3,7 @@
 #include <BindingTypes.generated.hpp>
 #include <Scripting/ManagedEditorBridge.hpp>
 #include <Serialization/SerializedObject.hpp>
+#include <Scripting/ManagedSceneApi.hpp>
 
 namespace Ursa::Editor::Bindings
 {
@@ -14,11 +15,15 @@ public:
 	EditorInvocation(ManagedEditorContext& editorContext, UInt64 scriptSession);
 	~EditorInvocation() override;
 	void Require(UInt32 policy) const override;
+	void CheckHandle(const void* value, Size size, UInt32 kind) const override;
 	UInt64 SessionIdentity() const override;
 	UInt64 TransferBudget() const override;
 	void RequireProperties(UInt64 expected) const;
 	ResourceSession& Resources();
 	UInt64 Generation() const;
+	Scripting::ManagedSceneApi& RuntimeApi();
+	Result<bool> SynchronizeRuntimeTarget();
+	void* hostToken = nullptr;
 	ManagedEditorContext& source;
 	std::unique_ptr<SerializedObject> properties;
 	UInt64 revision = 1;
@@ -26,11 +31,16 @@ public:
 	bool changed = false;
 
 private:
+	friend struct EditorServices;
 	UInt64 session;
 	std::weak_ptr<GameObject> targetOwner;
 	ResourceId targetId;
 	bool attachedTarget = false;
 	std::unique_ptr<ResourceSession> fallbackResources;
+	Scene privateScene;
+	std::unique_ptr<Scripting::ManagedSceneApi> runtimeApi;
+	std::shared_ptr<MaterialInstance> runtimeMaterial;
+	nlohmann::json runtimeMaterialBaseline;
 };
 
 struct EditorReferenceData
@@ -47,10 +57,33 @@ struct EditorAssetData
 	EditorReferenceData reference;
 	String path;
 	String name;
+	bool isSubAsset = false;
 };
 
 struct EditorServices
 {
+	using RectValue = B::Wire::Value_Ursa_Rect;
+	static Result<UInt64> CreatePreviewUtility(B::BindingCall& call);
+	static Result<void> DestroyPreviewUtility(B::BindingCall& call, UInt64 utility);
+	static Result<void> BeginPreview(B::BindingCall& call, UInt64 utility, const RectValue& rect);
+	static Result<void> SetPreviewCamera(B::BindingCall& call, UInt64 utility,
+	                                     const B::Wire::Value_Ursa_Editor_PreviewCamera& camera);
+	static Result<void> SetPreviewLighting(B::BindingCall& call, UInt64 utility,
+	                                       const B::Wire::Value_Ursa_Color& ambient, Float32 intensity,
+	                                       const B::Wire::Value_Ursa_Color& light, Float32 lightIntensity,
+	                                       const B::Wire::Value_Ursa_Quaternion& rotation);
+	static Result<void>
+	PreviewDrawMesh(B::BindingCall& call, UInt64 utility, const B::Wire::Value_Ursa_NativeHandle& mesh,
+	                const B::Wire::Value_Ursa_NativeHandle& material, const B::Wire::Value_Ursa_Vector3& position,
+	                const B::Wire::Value_Ursa_Quaternion& rotation, const B::Wire::Value_Ursa_Vector3& scale);
+	static Result<void> PreviewInstantiatePrefab(B::BindingCall& call, UInt64 utility, const B::Utf8View& guid,
+	                                             UInt64 localFileId);
+	static Result<void> EndPreview(B::BindingCall& call, UInt64 utility);
+	static Result<void> DrawPreviewTexture(B::BindingCall& call, const RectValue& rect,
+	                                       const B::Wire::Value_Ursa_NativeHandle& texture);
+	static Result<void> DrawPreviewPixels(B::BindingCall& call, const RectValue& rect, UInt32 width, UInt32 height,
+	                                      const B::DataView& pixels, bool linear);
+	static Result<B::Wire::Value_Ursa_Editor_PreviewInput> GetPreviewInput(B::BindingCall& call);
 	using Reference = B::Wire::Value_Ursa_Editor_EditorReferenceValue;
 	using OptionalReference = B::Wire::Value_Ursa_Editor_EditorReferenceValue_;
 	using OptionalAsset = B::Wire::Value_Ursa_NativeAssetReference_;
@@ -76,6 +109,19 @@ struct EditorServices
 	static void DrawProperty(B::BindingCall& call, const String& path, const String& label);
 
 	static Result<B::Wire::Value_Ursa_Editor_EditorScopeValue> GetScope(B::BindingCall& call);
+	static Result<B::Wire::Value_Ursa_EditorBindingCapability> GetRuntimeCapability(B::BindingCall& call);
+	static Result<B::Wire::Value_Ursa_NativeHandle> GetTargetHandle(B::BindingCall& call);
+	static Result<B::Utf8View> GetComponentPayload(B::BindingCall& call,
+	                                               const B::Wire::Value_Ursa_NativeHandle& component);
+	static Result<bool> ApplyComponentFields(B::BindingCall& call, const B::Wire::Value_Ursa_NativeHandle& component,
+	                                         const B::Utf8View& fields);
+	static Result<B::Utf8View> GetTargetPayload(B::BindingCall& call);
+	static Result<bool> ApplyTargetFields(B::BindingCall& call, const B::Utf8View& fields);
+	static Result<B::Wire::Value_Ursa_Editor_EditorImporterInfo_> GetImporterInfo(B::BindingCall& call);
+	static Result<bool> HasModifiedImporterSettings(B::BindingCall& call);
+	static Result<bool> ApplyImporterSettings(B::BindingCall& call);
+	static Result<void> RevertImporterSettings(B::BindingCall& call);
+	static Result<void> DrawImporterApplyRevert(B::BindingCall& call);
 	static Result<B::DataView> GetSelection(B::BindingCall& call);
 	static Result<OptionalReference> GetTarget(B::BindingCall& call);
 	static Result<B::Wire::Value_Ursa_Editor_EditorDocumentValue_> GetDocument(B::BindingCall& call);

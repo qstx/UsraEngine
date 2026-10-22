@@ -58,7 +58,7 @@ public static class BindingRegistry
 {
 	private static readonly object metadataGate = new();
 	private static readonly Dictionary<ulong, BindingModuleRegistration> providers = new();
-	private static readonly Dictionary<ulong, BindingCallbackRegistration> callbacks = new();
+	private static readonly Dictionary<int, Dictionary<ulong, BindingCallbackRegistration>> callbackOwners = new();
 	private static long epoch = 1;
 	[ThreadStatic] private static BindingSnapshot? current;
 	[ThreadStatic] private static Dictionary<ulong, CallScope>? scopes;
@@ -200,12 +200,22 @@ public static class BindingRegistry
 	}
 
 	public static IDisposable EnterCallScope(BindingModuleReference reference)
+		=> EnterScope(reference, sessionOverride: false);
+
+	// Framework bridges use a temporary native object store while keeping the
+	// current script session and its other modules. Restore the original view on exit.
+	public static IDisposable EnterSessionScope(BindingModuleReference reference)
+		=> EnterScope(reference, sessionOverride: true);
+
+	private static IDisposable EnterScope(BindingModuleReference reference, bool sessionOverride)
 	{
 		BindingModuleRegistration provider = Provider(reference.Id);
-		if (!provider.CallScoped) throw new InvalidOperationException($"Module '{provider.Name}' is session scoped.");
+		if (provider.CallScoped == sessionOverride) throw new InvalidOperationException($"Module '{provider.Name}' has a different scope policy.");
 		BindingSnapshot baseView = Capture();
 		if (baseView.Epoch != Interlocked.Read(ref epoch) || Volatile.Read(ref baseView.Active) == 0)
 			throw new ObjectDisposedException(nameof(BindingSnapshot));
+		if (sessionOverride && !baseView.Entries.Any(entry => entry.Id == reference.Id))
+			throw new InvalidOperationException("A temporary module requires an installed session provider.");
 		foreach (ulong dependency in provider.Dependencies)
 			if (!baseView.Entries.Any(e => e.Id == dependency))
 				throw new InvalidOperationException($"Call-scoped module '{provider.Name}' is missing dependency '{Provider(dependency).Name}'.");
@@ -213,13 +223,13 @@ public static class BindingRegistry
 		scopes ??= new();
 		scopes.TryGetValue(reference.Id, out CallScope? previous);
 		provider.Connect(reference.Descriptor, reference.Context);
-		var scope = new CallScope(provider, reference, baseView, previous);
+		var scope = new CallScope(provider, reference, baseView, previous, sessionOverride);
 		scopes[reference.Id] = scope;
 		return scope;
 	}
 
 	private sealed class CallScope(BindingModuleRegistration provider, BindingModuleReference reference, BindingSnapshot baseView,
-		CallScope? previous) : IDisposable
+		CallScope? previous, bool sessionOverride) : IDisposable
 	{
 		private readonly int ownerThread = Environment.CurrentManagedThreadId;
 		private bool disposed;
@@ -236,7 +246,12 @@ public static class BindingRegistry
 			disposed = true;
 			if (!ReferenceEquals(current, baseView) || previous == null)
 			{
-				provider.Clear();
+				if (sessionOverride && ReferenceEquals(current, baseView))
+				{
+					BindingModuleReference original = baseView.Entries.Single(entry => entry.Id == reference.Id);
+					provider.Connect(original.Descriptor, original.Context);
+				}
+				else provider.Clear();
 				scopes.Remove(reference.Id);
 			}
 			else
@@ -251,6 +266,12 @@ public static class BindingRegistry
 	{
 		lock (metadataGate)
 		{
+			int owner = Environment.CurrentManagedThreadId;
+			if (!callbackOwners.TryGetValue(owner, out var callbacks))
+			{
+				callbacks = new();
+				callbackOwners.Add(owner, callbacks);
+			}
 			var created = new List<ulong>();
 			try
 			{
@@ -276,14 +297,25 @@ public static class BindingRegistry
 		}
 	}
 
+	public static void ShutdownThread()
+	{
+		Invalidate(Capture());
+		lock (metadataGate)
+		{
+			if (callbackOwners.Remove(Environment.CurrentManagedThreadId, out var callbacks))
+				foreach (var registration in callbacks.Values) registration.Dispose();
+		}
+	}
+
 	public static void Shutdown()
 	{
 		Clear();
 		Interlocked.Increment(ref epoch);
 		lock (metadataGate)
 		{
-			foreach (var registration in callbacks.Values) registration.Dispose();
-			callbacks.Clear();
+			foreach (var owner in callbackOwners.Values)
+				foreach (var registration in owner.Values) registration.Dispose();
+			callbackOwners.Clear();
 		}
 	}
 }

@@ -1,4 +1,28 @@
 if(URSA_ENABLE_DOTNET AND URSA_BUILD_EDITOR)
+  ursa_add_test_executable(UrsaManagedAssetImportWorkflowTests ManagedAssetImportWorkflowTests.cpp)
+  target_link_libraries(UrsaManagedAssetImportWorkflowTests PRIVATE Ursa::Editor)
+  target_compile_definitions(UrsaManagedAssetImportWorkflowTests PRIVATE
+    URSA_WORKFLOW_ROOT="${URSA_BINARY_ROOT}/Temp/ManagedAssetWorkflow"
+    URSA_WORKFLOW_EXAMPLES="${URSA_SOURCE_ROOT}/Docs/Examples"
+    URSA_WORKFLOW_ENGINE_ASSETS="${URSA_SOURCE_ROOT}/Assets"
+    URSA_WORKFLOW_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx"
+    URSA_WORKFLOW_CLI="$<TARGET_FILE:UrsaAssetImport>"
+    URSA_WORKFLOW_EDITOR="$<TARGET_FILE:UrsaEditor>"
+    URSA_WORKFLOW_CAPTURE="$<TARGET_FILE:UrsaCapture>"
+    URSA_WORKFLOW_PLAYER="$<TARGET_FILE:UrsaScriptPlayer>"
+    URSA_WORKFLOW_MANAGED_OUTPUT="${URSA_MANAGED_OUTPUT_DIR}"
+    URSA_WORKFLOW_CONFIGURATION="$<CONFIG>")
+  add_dependencies(UrsaManagedAssetImportWorkflowTests UrsaAssetImport UrsaScriptPlayer UrsaEditor UrsaCapture UrsaManagedTestAssemblies)
+  ursa_attach_dotnet_host_runtime(UrsaManagedAssetImportWorkflowTests)
+  add_test(NAME UrsaManagedAssetImportWorkflowTests COMMAND UrsaManagedAssetImportWorkflowTests)
+  set_tests_properties(UrsaManagedAssetImportWorkflowTests PROPERTIES TIMEOUT 600
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/ManagedWorkflowUser")
+  add_test(NAME UrsaGeneratedAssetPlayerWorkflowTests COMMAND UrsaManagedAssetImportWorkflowTests --player)
+  set_tests_properties(UrsaGeneratedAssetPlayerWorkflowTests PROPERTIES TIMEOUT 300
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/GeneratedPlayerUser")
+  add_test(NAME UrsaScriptedImporterInspectorWorkflowTests COMMAND UrsaManagedAssetImportWorkflowTests --inspector)
+  set_tests_properties(UrsaScriptedImporterInspectorWorkflowTests PROPERTIES TIMEOUT 300
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/ScriptedInspectorUser")
   if(NOT URSA_PROJECT_DIR STREQUAL "")
     ursa_add_test_executable(UrsaEditorSrpAcceptanceTests EditorSrpAcceptanceTests.cpp)
     target_sources(UrsaEditorSrpAcceptanceTests PRIVATE CaptureCliAcceptance.cpp)
@@ -24,7 +48,7 @@ if(URSA_ENABLE_DOTNET)
 
   ursa_add_test_executable(UrsaDotNetHostTests DotNetHostTests.cpp)
   target_sources(UrsaDotNetHostTests PRIVATE DotNetHost/Rendering.cpp DotNetHost/PipelineReload.cpp
-    DotNetHost/Serialization.cpp DotNetHost/Editor.cpp DotNetHost/TestSupport.hpp)
+    DotNetHost/Serialization.cpp DotNetHost/Editor.cpp DotNetHost/Import.cpp DotNetHost/TestSupport.hpp)
   target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::DotNetHost UrsaTestFixtures)
   target_compile_definitions(UrsaDotNetHostTests PRIVATE
     URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
@@ -32,8 +56,10 @@ if(URSA_ENABLE_DOTNET)
     URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"
     URSA_TEST_SPIRV_CROSS_EXECUTABLE="${URSA_SPIRV_CROSS_EXECUTABLE}")
   if(TARGET Ursa::Editor)
-    target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::Editor)
-    target_compile_definitions(UrsaDotNetHostTests PRIVATE URSA_DOTNET_TEST_EDITOR=1)
+    target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::Editor Ursa::StbImage)
+    target_compile_definitions(UrsaDotNetHostTests PRIVATE URSA_DOTNET_TEST_EDITOR=1
+      URSA_IMPORT_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx"
+      URSA_IMPORT_EMBEDDED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/embedded_ascii/box_embedded_texture_fragmented.fbx")
   endif()
   add_dependencies(UrsaDotNetHostTests UrsaManagedTestAssemblies)
 
@@ -41,6 +67,18 @@ if(URSA_ENABLE_DOTNET)
     COMMAND UrsaDotNetHostTests
     "${URSA_MANAGED_OUTPUT_DIR}"
     "${URSA_BINARY_ROOT}/temp/DotNetHostSmoke")
+  if(URSA_BUILD_EDITOR)
+    add_test(NAME UrsaManagedImportSessionTests COMMAND UrsaDotNetHostTests
+      "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ManagedImportSession" --import-only)
+    add_test(NAME UrsaManagedImporterInspectorTests COMMAND UrsaDotNetHostTests
+      "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ManagedImporterInspector" --editor-only)
+	add_test(NAME UrsaManagedAssetPreviewCallbacksTests COMMAND UrsaDotNetHostTests
+	  "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ManagedAssetPreview" --editor-only)
+    add_test(NAME UrsaScriptedAssetImporterTests COMMAND UrsaDotNetHostTests
+      "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ScriptedAssetImporter" --importer-registration-only)
+    add_test(NAME UrsaAssetPostprocessorTests COMMAND UrsaDotNetHostTests
+      "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/AssetPostprocessor" --importer-registration-only)
+  endif()
   ursa_attach_dotnet_host_runtime(UrsaDotNetHostTests)
   ursa_require_test_content(UrsaDotNetHostSmoke UrsaDotNetHostTests)
 
@@ -188,7 +226,13 @@ endif()
 
 get_property(integrationTests DIRECTORY PROPERTY TESTS)
 foreach(test IN LISTS integrationTests)
-  if(NOT test STREQUAL "UrsaDotNetHostSmoke" AND NOT test STREQUAL "UrsaManagedProtocolTests")
+  if(NOT test STREQUAL "UrsaDotNetHostSmoke" AND NOT test STREQUAL "UrsaManagedProtocolTests"
+      AND NOT test STREQUAL "UrsaManagedImportSessionTests" AND NOT test STREQUAL "UrsaScriptedAssetImporterTests"
+      AND NOT test STREQUAL "UrsaAssetPostprocessorTests" AND NOT test STREQUAL "UrsaManagedAssetImportWorkflowTests"
+      AND NOT test STREQUAL "UrsaManagedImporterInspectorTests"
+	  AND NOT test STREQUAL "UrsaManagedAssetPreviewCallbacksTests"
+      AND NOT test STREQUAL "UrsaScriptedImporterInspectorWorkflowTests"
+      AND NOT test STREQUAL "UrsaGeneratedAssetPlayerWorkflowTests")
     ursa_require_sample_project(${test} "")
   endif()
 endforeach()

@@ -6,6 +6,10 @@
   </PropertyGroup>
   <ItemGroup>
 	<Compile Include="../../../Docs/Examples/Editor/TypedInspector.cs" Link="TypedInspector.cs" />
+	<Compile Include="../../../Docs/Examples/Editor/DatasetImporter.cs" Link="DatasetImporter.cs" />
+	<Compile Include="../../../Docs/Examples/Editor/GeneratedFormatAssetEditor.cs" Link="GeneratedFormatAssetEditor.cs" />
+	<Compile Include="../../../Docs/Examples/Editor/TextureImportRules.cs" Link="TextureImportRules.cs" />
+	<Compile Include="../../../Docs/Examples/Editor/ModelImportRules.cs" Link="ModelImportRules.cs" />
     <ProjectReference Include="../../../Managed/Ursa.Editor/Ursa.Editor.csproj" />
     <ProjectReference Include="../Ursa.SessionFixtures/Ursa.SessionFixtures.csproj" />
   </ItemGroup>

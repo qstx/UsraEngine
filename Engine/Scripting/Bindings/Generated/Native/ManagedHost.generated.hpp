@@ -7,25 +7,39 @@ namespace Ursa::Scripting::Bindings::ManagedHost
 inline constexpr UInt64 moduleId = 0xc63346392600d9f5ull;
 struct Table
 {
+	Int32 (*ManagedHostBindings_AssignImportReferences)(void*, UInt64, const DataView*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_BeginImportInvocation)(void*, UInt64, UInt64, UInt64, const Wire::Value_Ursa_ImportBindingCapability*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_BindBehaviour)(void*, UInt64, const Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_BindScriptSession)(void*, UInt64, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_CloseOwnerEndpoint)(void*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_CloseScriptSession)(void*, UInt64, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_ConfigureRenderPipeline)(void*, UInt64, const Wire::Value_Ursa_ManagedHost_PipelineAssetReference_*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_CreateBehaviour)(void*, const Utf8View*, const Wire::Value_Ursa_NativeHandle*, UInt64*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_CreateImportScriptableObject)(void*, UInt64, const Utf8View*, UInt64*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_CreateImportSession)(void*, UInt64*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_CreateScriptSession)(void*, UInt32, UInt64*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_DescribeAssetPostprocessors)(void*, UInt64, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_DeserializeBehaviour)(void*, UInt64, const Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_DeserializeImportScriptableObject)(void*, UInt64, UInt64, const Wire::Value_Ursa_ManagedHost_ImportObjectArchive*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_DestroyBehaviour)(void*, UInt64, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_EndImportInvocation)(void*, UInt64, UInt64, UInt64, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_GetImportReferences)(void*, UInt64, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_InitializeFramework)(void*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_InvokeAssetPostprocessor)(void*, UInt64, const Utf8View*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_InvokeBehaviour)(void*, UInt64, UInt32, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_InvokeEditorExtension)(void*, UInt64, const Utf8View*, const Wire::Value_Ursa_EditorBindingCapability*, UInt32*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_InvokeEditorPreview)(void*, UInt64, const Utf8View*, UInt64, UInt32, const Wire::Value_Ursa_Rect*, const Wire::Value_Ursa_EditorBindingCapability*, Wire::Value_Ursa_EditorPreviewResult*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_InvokeScriptedImporter)(void*, UInt64, const Utf8View*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_LoadEditorApi)(void*, const DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_LoadScriptAssembly)(void*, const DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_LoadScriptContent)(void*, UInt64, const Wire::Value_Ursa_ManagedHost_ScriptContentArchive*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_PrepareEditorExtensions)(void*, UInt64, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_PrepareScriptReload)(void*, UInt64, const Wire::Value_Ursa_ManagedHost_ScriptReloadArchive*, Wire::Value_Ursa_ManagedHost_ScriptReloadArchive*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_PrepareScriptedImporters)(void*, UInt64, const DataView*, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_RenderScene)(void*, UInt64, Float32, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_SelectScriptSession)(void*, UInt64, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_SerializeBehaviour)(void*, UInt64, Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_SerializeImportScriptableObject)(void*, UInt64, UInt64, Wire::Value_Ursa_ManagedHost_ImportObjectArchive*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_TransferScriptableAssets)(void*, UInt64, UInt64, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_ValidateScriptSession)(void*, UInt64, BindingOutcome*) = nullptr;
 };
@@ -54,35 +68,77 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		nullptr,
 		nullptr,
 		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 21, &table, &ValidateBindingContext, {0x1f, 0x0b, 0xab, 0xce, 0x59, 0xe5, 0x4d, 0xb9, 0xd5, 0x56, 0xa6, 0x35, 0xd3, 0x94, 0x1e, 0xa9, 0x3f, 0x87, 0x7d, 0xac, 0x8c, 0xf2, 0xbf, 0x67, 0xff, 0x62, 0x3c, 0x8f, 0x73, 0xb6, 0xc4, 0x6b}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 35, &table, &ValidateBindingContext, {0x1b, 0xfa, 0x8a, 0xaa, 0xa2, 0x23, 0xe3, 0xb5, 0x2f, 0x97, 0xe9, 0x36, 0xf3, 0xb1, 0xef, 0x7f, 0x02, 0x84, 0x8d, 0x0e, 0xdc, 0x11, 0x3a, 0x4b, 0x99, 0x92, 0x51, 0x67, 0x71, 0x6c, 0x91, 0xdf}};
 	return descriptor;
 }
 inline Result<CallbackModule<Table>> ConnectCallbacks(const BindingModuleDescriptor* descriptor, void* context)
 {
 	auto result = ConnectCallbackModule<Table>(descriptor, NativeDescriptor(), context);
 	if (!result) return result;
+	if (!result.value.table.ManagedHostBindings_AssignImportReferences) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.AssignImportReferences");
+	if (!result.value.table.ManagedHostBindings_BeginImportInvocation) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.BeginImportInvocation");
 	if (!result.value.table.ManagedHostBindings_BindBehaviour) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.BindBehaviour");
 	if (!result.value.table.ManagedHostBindings_BindScriptSession) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.BindScriptSession");
+	if (!result.value.table.ManagedHostBindings_CloseOwnerEndpoint) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.CloseOwnerEndpoint");
 	if (!result.value.table.ManagedHostBindings_CloseScriptSession) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.CloseScriptSession");
 	if (!result.value.table.ManagedHostBindings_ConfigureRenderPipeline) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.ConfigureRenderPipeline");
 	if (!result.value.table.ManagedHostBindings_CreateBehaviour) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.CreateBehaviour");
+	if (!result.value.table.ManagedHostBindings_CreateImportScriptableObject) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.CreateImportScriptableObject");
+	if (!result.value.table.ManagedHostBindings_CreateImportSession) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.CreateImportSession");
 	if (!result.value.table.ManagedHostBindings_CreateScriptSession) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.CreateScriptSession");
+	if (!result.value.table.ManagedHostBindings_DescribeAssetPostprocessors) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.DescribeAssetPostprocessors");
 	if (!result.value.table.ManagedHostBindings_DeserializeBehaviour) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.DeserializeBehaviour");
+	if (!result.value.table.ManagedHostBindings_DeserializeImportScriptableObject) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.DeserializeImportScriptableObject");
 	if (!result.value.table.ManagedHostBindings_DestroyBehaviour) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.DestroyBehaviour");
+	if (!result.value.table.ManagedHostBindings_EndImportInvocation) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.EndImportInvocation");
+	if (!result.value.table.ManagedHostBindings_GetImportReferences) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.GetImportReferences");
 	if (!result.value.table.ManagedHostBindings_InitializeFramework) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.InitializeFramework");
+	if (!result.value.table.ManagedHostBindings_InvokeAssetPostprocessor) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.InvokeAssetPostprocessor");
 	if (!result.value.table.ManagedHostBindings_InvokeBehaviour) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.InvokeBehaviour");
 	if (!result.value.table.ManagedHostBindings_InvokeEditorExtension) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.InvokeEditorExtension");
+	if (!result.value.table.ManagedHostBindings_InvokeEditorPreview) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.InvokeEditorPreview");
+	if (!result.value.table.ManagedHostBindings_InvokeScriptedImporter) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.InvokeScriptedImporter");
 	if (!result.value.table.ManagedHostBindings_LoadEditorApi) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.LoadEditorApi");
 	if (!result.value.table.ManagedHostBindings_LoadScriptAssembly) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.LoadScriptAssembly");
 	if (!result.value.table.ManagedHostBindings_LoadScriptContent) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.LoadScriptContent");
 	if (!result.value.table.ManagedHostBindings_PrepareEditorExtensions) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.PrepareEditorExtensions");
 	if (!result.value.table.ManagedHostBindings_PrepareScriptReload) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.PrepareScriptReload");
+	if (!result.value.table.ManagedHostBindings_PrepareScriptedImporters) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.PrepareScriptedImporters");
 	if (!result.value.table.ManagedHostBindings_RenderScene) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.RenderScene");
 	if (!result.value.table.ManagedHostBindings_SelectScriptSession) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.SelectScriptSession");
 	if (!result.value.table.ManagedHostBindings_SerializeBehaviour) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.SerializeBehaviour");
+	if (!result.value.table.ManagedHostBindings_SerializeImportScriptableObject) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.SerializeImportScriptableObject");
 	if (!result.value.table.ManagedHostBindings_TransferScriptableAssets) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.TransferScriptableAssets");
 	if (!result.value.table.ManagedHostBindings_ValidateScriptSession) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.ValidateScriptSession");
+	return result;
+}
+inline CallbackResult<void> Call_ManagedHostBindings_AssignImportReferences(const CallbackModule<Table>& module, UInt64 p_session, const DataView& p_assignments)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.AssignImportReferences";
+	result.status = module.table.ManagedHostBindings_AssignImportReferences(module.context, p_session, &p_assignments, &result.outcome);
+	return result;
+}
+inline CallbackResult<void> Call_ManagedHostBindings_BeginImportInvocation(const CallbackModule<Table>& module, UInt64 p_session, UInt64 p_generation, UInt64 p_invocation, const Wire::Value_Ursa_ImportBindingCapability& p_capability)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.BeginImportInvocation";
+	result.status = module.table.ManagedHostBindings_BeginImportInvocation(module.context, p_session, p_generation, p_invocation, &p_capability, &result.outcome);
 	return result;
 }
 inline CallbackResult<void> Call_ManagedHostBindings_BindBehaviour(const CallbackModule<Table>& module, UInt64 p_token, const Wire::Value_Ursa_NativeHandle& p_component)
@@ -97,6 +153,13 @@ inline CallbackResult<void> Call_ManagedHostBindings_BindScriptSession(const Cal
 	CallbackResult<void> result;
 	result.entry = "Ursa.ManagedHost.ManagedHostBindings.BindScriptSession";
 	result.status = module.table.ManagedHostBindings_BindScriptSession(module.context, p_session, &result.outcome);
+	return result;
+}
+inline CallbackResult<void> Call_ManagedHostBindings_CloseOwnerEndpoint(const CallbackModule<Table>& module)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.CloseOwnerEndpoint";
+	result.status = module.table.ManagedHostBindings_CloseOwnerEndpoint(module.context, &result.outcome);
 	return result;
 }
 inline CallbackResult<UInt32> Call_ManagedHostBindings_CloseScriptSession(const CallbackModule<Table>& module, UInt64 p_session)
@@ -120,11 +183,32 @@ inline CallbackResult<UInt64> Call_ManagedHostBindings_CreateBehaviour(const Cal
 	result.status = module.table.ManagedHostBindings_CreateBehaviour(module.context, &p_typeName, &p_owner, &result.value, &result.outcome);
 	return result;
 }
+inline CallbackResult<UInt64> Call_ManagedHostBindings_CreateImportScriptableObject(const CallbackModule<Table>& module, UInt64 p_session, const Utf8View& p_typeName)
+{
+	CallbackResult<UInt64> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.CreateImportScriptableObject";
+	result.status = module.table.ManagedHostBindings_CreateImportScriptableObject(module.context, p_session, &p_typeName, &result.value, &result.outcome);
+	return result;
+}
+inline CallbackResult<UInt64> Call_ManagedHostBindings_CreateImportSession(const CallbackModule<Table>& module)
+{
+	CallbackResult<UInt64> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.CreateImportSession";
+	result.status = module.table.ManagedHostBindings_CreateImportSession(module.context, &result.value, &result.outcome);
+	return result;
+}
 inline CallbackResult<UInt64> Call_ManagedHostBindings_CreateScriptSession(const CallbackModule<Table>& module, UInt32 p_editor)
 {
 	CallbackResult<UInt64> result;
 	result.entry = "Ursa.ManagedHost.ManagedHostBindings.CreateScriptSession";
 	result.status = module.table.ManagedHostBindings_CreateScriptSession(module.context, p_editor, &result.value, &result.outcome);
+	return result;
+}
+inline CallbackResult<DataView> Call_ManagedHostBindings_DescribeAssetPostprocessors(const CallbackModule<Table>& module, UInt64 p_session)
+{
+	CallbackResult<DataView> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.DescribeAssetPostprocessors";
+	result.status = module.table.ManagedHostBindings_DescribeAssetPostprocessors(module.context, p_session, &result.value, &result.outcome);
 	return result;
 }
 inline CallbackResult<void> Call_ManagedHostBindings_DeserializeBehaviour(const CallbackModule<Table>& module, UInt64 p_token, const Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive& p_archive)
@@ -134,6 +218,13 @@ inline CallbackResult<void> Call_ManagedHostBindings_DeserializeBehaviour(const 
 	result.status = module.table.ManagedHostBindings_DeserializeBehaviour(module.context, p_token, &p_archive, &result.outcome);
 	return result;
 }
+inline CallbackResult<void> Call_ManagedHostBindings_DeserializeImportScriptableObject(const CallbackModule<Table>& module, UInt64 p_session, UInt64 p_instance, const Wire::Value_Ursa_ManagedHost_ImportObjectArchive& p_archive)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.DeserializeImportScriptableObject";
+	result.status = module.table.ManagedHostBindings_DeserializeImportScriptableObject(module.context, p_session, p_instance, &p_archive, &result.outcome);
+	return result;
+}
 inline CallbackResult<void> Call_ManagedHostBindings_DestroyBehaviour(const CallbackModule<Table>& module, UInt64 p_token)
 {
 	CallbackResult<void> result;
@@ -141,11 +232,32 @@ inline CallbackResult<void> Call_ManagedHostBindings_DestroyBehaviour(const Call
 	result.status = module.table.ManagedHostBindings_DestroyBehaviour(module.context, p_token, &result.outcome);
 	return result;
 }
+inline CallbackResult<void> Call_ManagedHostBindings_EndImportInvocation(const CallbackModule<Table>& module, UInt64 p_session, UInt64 p_generation, UInt64 p_invocation)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.EndImportInvocation";
+	result.status = module.table.ManagedHostBindings_EndImportInvocation(module.context, p_session, p_generation, p_invocation, &result.outcome);
+	return result;
+}
+inline CallbackResult<DataView> Call_ManagedHostBindings_GetImportReferences(const CallbackModule<Table>& module, UInt64 p_session)
+{
+	CallbackResult<DataView> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.GetImportReferences";
+	result.status = module.table.ManagedHostBindings_GetImportReferences(module.context, p_session, &result.value, &result.outcome);
+	return result;
+}
 inline CallbackResult<void> Call_ManagedHostBindings_InitializeFramework(const CallbackModule<Table>& module)
 {
 	CallbackResult<void> result;
 	result.entry = "Ursa.ManagedHost.ManagedHostBindings.InitializeFramework";
 	result.status = module.table.ManagedHostBindings_InitializeFramework(module.context, &result.outcome);
+	return result;
+}
+inline CallbackResult<void> Call_ManagedHostBindings_InvokeAssetPostprocessor(const CallbackModule<Table>& module, UInt64 p_session, const Utf8View& p_identity)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.InvokeAssetPostprocessor";
+	result.status = module.table.ManagedHostBindings_InvokeAssetPostprocessor(module.context, p_session, &p_identity, &result.outcome);
 	return result;
 }
 inline CallbackResult<void> Call_ManagedHostBindings_InvokeBehaviour(const CallbackModule<Table>& module, UInt64 p_token, UInt32 p_eventId)
@@ -160,6 +272,20 @@ inline CallbackResult<UInt32> Call_ManagedHostBindings_InvokeEditorExtension(con
 	CallbackResult<UInt32> result;
 	result.entry = "Ursa.ManagedHost.ManagedHostBindings.InvokeEditorExtension";
 	result.status = module.table.ManagedHostBindings_InvokeEditorExtension(module.context, p_session, &p_extension, &p_capability, &result.value, &result.outcome);
+	return result;
+}
+inline CallbackResult<Wire::Value_Ursa_EditorPreviewResult> Call_ManagedHostBindings_InvokeEditorPreview(const CallbackModule<Table>& module, UInt64 p_session, const Utf8View& p_extension, UInt64 p_instance, UInt32 p_phase, const Wire::Value_Ursa_Rect& p_rect, const Wire::Value_Ursa_EditorBindingCapability& p_capability)
+{
+	CallbackResult<Wire::Value_Ursa_EditorPreviewResult> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.InvokeEditorPreview";
+	result.status = module.table.ManagedHostBindings_InvokeEditorPreview(module.context, p_session, &p_extension, p_instance, p_phase, &p_rect, &p_capability, &result.value, &result.outcome);
+	return result;
+}
+inline CallbackResult<void> Call_ManagedHostBindings_InvokeScriptedImporter(const CallbackModule<Table>& module, UInt64 p_session, const Utf8View& p_identity)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.InvokeScriptedImporter";
+	result.status = module.table.ManagedHostBindings_InvokeScriptedImporter(module.context, p_session, &p_identity, &result.outcome);
 	return result;
 }
 inline CallbackResult<void> Call_ManagedHostBindings_LoadEditorApi(const CallbackModule<Table>& module, const DataView& p_image)
@@ -197,6 +323,13 @@ inline CallbackResult<Wire::Value_Ursa_ManagedHost_ScriptReloadArchive> Call_Man
 	result.status = module.table.ManagedHostBindings_PrepareScriptReload(module.context, p_session, &p_archive, &result.value, &result.outcome);
 	return result;
 }
+inline CallbackResult<DataView> Call_ManagedHostBindings_PrepareScriptedImporters(const CallbackModule<Table>& module, UInt64 p_session, const DataView& p_nativeExtensions)
+{
+	CallbackResult<DataView> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.PrepareScriptedImporters";
+	result.status = module.table.ManagedHostBindings_PrepareScriptedImporters(module.context, p_session, &p_nativeExtensions, &result.value, &result.outcome);
+	return result;
+}
 inline CallbackResult<void> Call_ManagedHostBindings_RenderScene(const CallbackModule<Table>& module, UInt64 p_session, Float32 p_aspect)
 {
 	CallbackResult<void> result;
@@ -216,6 +349,13 @@ inline CallbackResult<Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive> Call_M
 	CallbackResult<Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive> result;
 	result.entry = "Ursa.ManagedHost.ManagedHostBindings.SerializeBehaviour";
 	result.status = module.table.ManagedHostBindings_SerializeBehaviour(module.context, p_token, &result.value, &result.outcome);
+	return result;
+}
+inline CallbackResult<Wire::Value_Ursa_ManagedHost_ImportObjectArchive> Call_ManagedHostBindings_SerializeImportScriptableObject(const CallbackModule<Table>& module, UInt64 p_session, UInt64 p_instance)
+{
+	CallbackResult<Wire::Value_Ursa_ManagedHost_ImportObjectArchive> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.SerializeImportScriptableObject";
+	result.status = module.table.ManagedHostBindings_SerializeImportScriptableObject(module.context, p_session, p_instance, &result.value, &result.outcome);
 	return result;
 }
 inline CallbackResult<void> Call_ManagedHostBindings_TransferScriptableAssets(const CallbackModule<Table>& module, UInt64 p_source, UInt64 p_candidate)

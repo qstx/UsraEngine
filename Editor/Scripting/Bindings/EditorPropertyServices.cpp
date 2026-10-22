@@ -502,11 +502,19 @@ Result<bool> EditorServices::ApplyProperties(B::BindingCall& call, UInt64 revisi
 	auto& scope = Scope(call);
 	scope.RequireProperties(revision);
 	const bool modified = scope.properties->HasModifiedProperties();
+	if (modified && !scope.source.canEditTarget)
+	{
+		return Result<bool>::Failure("This Editor target is read-only");
+	}
 	B::CompleteBindingResult(scope.properties->Apply());
 	if (modified)
 	{
 		scope.changed = true;
-		if (scope.source.document)
+		if (scope.source.markTargetDirty)
+		{
+			scope.source.markTargetDirty();
+		}
+		else if (scope.source.targetUsesDocument && scope.source.document)
 		{
 			scope.source.document->MarkDirty();
 		}
@@ -551,8 +559,23 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			ImGui::InputScalar(label.c_str(), ImGuiDataType_U64, &value.F_UnsignedInteger);
 			break;
 		case P::V_Float:
-			value.F_Float = B::TakeBindingResult(FloatField(call, caption, value.F_Float));
+		{
+			const auto descriptor = Descriptor(scope, scope.revision, path);
+			if (descriptor.contains("Minimum") && descriptor.contains("Maximum"))
+			{
+				Float32 number = static_cast<Float32>(value.F_Float);
+				if (ImGui::SliderFloat(label.c_str(), &number, descriptor.at("Minimum").get<Float32>(),
+				                       descriptor.at("Maximum").get<Float32>()))
+				{
+					value.F_Float = number;
+				}
+			}
+			else
+			{
+				value.F_Float = B::TakeBindingResult(FloatField(call, caption, value.F_Float));
+			}
 			break;
+		}
 		case P::V_String:
 		{
 			const auto text = value.F_IsNull ? call.arena.StringValue("") : value.F_String;
@@ -619,9 +642,20 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 		}
 		case P::V_Color:
 		{
-			const auto edited = B::TakeBindingResult(ColorField(
-			    call, caption, {value.F_Vector.F_X, value.F_Vector.F_Y, value.F_Vector.F_Z, value.F_Vector.F_W}));
-			value.F_Vector = {edited.F_R, edited.F_G, edited.F_B, edited.F_A};
+			if (Descriptor(scope, scope.revision, path).value("HDR", false))
+			{
+				Float32 color[]{value.F_Vector.F_X, value.F_Vector.F_Y, value.F_Vector.F_Z, value.F_Vector.F_W};
+				if (ImGui::ColorEdit4(label.c_str(), color, ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float))
+				{
+					value.F_Vector = {color[0], color[1], color[2], color[3]};
+				}
+			}
+			else
+			{
+				const auto edited = B::TakeBindingResult(ColorField(
+				    call, caption, {value.F_Vector.F_X, value.F_Vector.F_Y, value.F_Vector.F_Z, value.F_Vector.F_W}));
+				value.F_Vector = {edited.F_R, edited.F_G, edited.F_B, edited.F_A};
+			}
 			break;
 		}
 		case P::V_ObjectReference:
@@ -681,7 +715,13 @@ Result<bool> EditorServices::DrawDefaultInspector(B::BindingCall& call, UInt64 r
 	scope.RequireProperties(revision);
 	for (const auto& path : scope.properties->PropertyPaths())
 	{
-		DrawProperty(call, path, path.substr(String("/Fields/").size()));
+		const auto descriptor = Descriptor(scope, scope.revision, path);
+		if (!descriptor.value("Hidden", false))
+		{
+			DrawProperty(
+			    call, path,
+			    ToUrsaString(descriptor.value("DisplayName", ToStdString(path.substr(String("/Fields/").size())))));
+		}
 	}
 	return ApplyProperties(call, revision);
 }

@@ -24,7 +24,7 @@
         }
     }
 
-脚本组件的 `Type` 在当前编辑会话中解析为类型目录的稳定标识；原生组件通过包装类型声明的标识匹配，例如 `[CustomEditor(typeof(CameraComponent))]`。类型转换在注册时完成，场景和 `.meta` 中的稳定标识不变。目标必须是非开放泛型的组件类型，按确切类型匹配；重复注册或缺少类型标识会报错。旧的字符串属性 `CustomInspector` 已移除。
+脚本组件的 `Type` 在当前编辑会话中解析为类型目录的稳定标识；原生组件通过包装类型声明的标识匹配，例如 `[CustomEditor(typeof(CameraComponent))]`。类型转换在注册时完成，场景和 `.meta` 中的稳定标识不变。目标支持组件、独立 Prefab 的 GameObject、ScriptableObject、Mesh、Material、Texture 及 AssetImporter。注册类型必须闭合；确切类型优先，`CustomEditor(typeof(BaseType), editorForChildClasses: true)` 可匹配派生类型，并选择距离最近的声明；同优先级歧义会使注册失败。缺少稳定类型标识同样报错。旧的字符串属性 `CustomInspector` 已移除。
 
 原生 Camera 可编辑字段包括 `verticalFovRadians`、`nearPlane` 和 `farPlane`。原生字段先在临时组件上验证，再提交到原对象。脚本属性校验类型、数值范围、枚举、引用和数组元素；失败时保留原值。
 
@@ -73,10 +73,45 @@ EditorGui 支持文本、按钮、数字、布尔、字符串、枚举选项、�
 
 Editor API 限主线程，且仅在菜单、窗口或 Inspector 回调内有效。不要把 SerializedObject、SerializedProperty 或布局对象留到下次回调；需要长期保存的工具状态使用普通 C# 数据、属性路径和持久 GUID。
 
-Editor 模块由 `NativeEditor.bindings.cs` 的 36 个具体方法生成，按一次回调安装并在退出时撤销。宿主扩展目录与调用也使用生成的 ManagedHost 回调，普通控件及属性传输不经过 JSON operation/exchange。GUI 控件要求活动 ImGui 帧；菜单中的保存、文档查询不需要 GUI 帧。异常退出会平衡未释放的布局组。
+Editor 模块由 `NativeEditor.bindings.cs` 中的具体方法生成，按一次回调安装并在退出时撤销。宿主扩展目录与调用也使用生成的 ManagedHost 回调，普通控件及属性传输不经过 JSON operation/exchange。GUI 控件要求活动 ImGui 帧；菜单中的保存、文档查询不需要 GUI 帧。异常退出会平衡未释放的布局组。
 
 注册、项目类型、实例与委托属于对应编辑会话。候选重载验证通过后替换注册；失败保留旧环境。异常会记录扩展标识和堆栈并停用该扩展，其余面板继续运行。关闭项目、重载及退出会注销会话注册并检查上下文卸载。
 
 ## 示例与验证
 
 Demo 示例包含移动组件 Inspector、保存菜单和项目概览窗口。[可编译的 Editor 示例](Examples/Editor/TypedInspector.cs) 随 Ursa.EditorFixtures 构建。UrsaEditorBindingsTests 检查生成入口的类型、集合、引用、版本、事务及失效 token；宿主集成测试使用实际 ImGui 帧验证控件绘制、脚本／原生属性 Apply、VFS 保存、线程限制、异常隔离、旧属性句柄及会话注销。完整窗口交互验收单独记录，不能以这些测试代替人工操作证据。
+
+
+## 源 ScriptableObject 属性
+
+`.ursaasset` 默认 Inspector 使用与组件/importer 相同的 `SerializedObject` 服务。`Update`、字段/集合编辑、引用校验和 Apply 构成原子草稿事务；`Save ScriptableObject` 或 `EditorContext.Save()` 才写入源文件并排队导入。保存重新检查源 GUID、源字节和项目写入租约，拒绝外部修改冲突。未知字段保留，当前目录 schema 决定字段类型、枚举值、默认值与旧字段别名。只读包和 Library 导入产物不能通过该服务改写。
+
+资源 `CustomEditor` 可以把 `Inspector.Target` 转为实际的 ScriptableObject 类型，并读取/修改其字段。字段变化在回调结束、`EditorContext.MarkDirty()` 或 `EditorContext.Save()` 时进入同一属性事务；未修改的 Target 字段不会覆盖期间通过 SerializedObject 提交的其他编辑。Target 是当前回调的字段快照，回调结束后失效，不占用运行资产缓存，也不执行游戏实例的 OnEnable/OnDisable/OnDestroy。资源保存不会标记另一个活动 Scene/Prefab 文档 Dirty。
+
+Importer 的类型化 Target 及 Apply/Revert 示例见 [脚本导入与处理器](ScriptedAssetImporters.md)。
+
+
+## 类型化组件、材质和 Prefab
+
+`Inspector.Target` 可转换为注册所匹配的组件、ScriptableObject、Material 或独立 Prefab 的 GameObject；AssetImporterEditor 继续提供 AssetImporter 类型的 Target。组件的 GameObject/Transform 与原生组件属性使用当前回调的对象访问层，脚本字段使用当前序列化快照。`GetComponent<T>()` / `GetComponents<T>()` 可取得同一作用域中的脚本组件，修改其持久字段同样提交到统一属性事务；它们不创建游戏 Behaviour 实例或执行 Awake/Start/Update。
+
+材质 Target 在私有候选上操作，回调成功或显式 Save 时把变化提交到源材质草稿。默认材质字段来自实际 Shader 声明，保留显示名、Range、HDR 和 HideInInspector；清空纹理引用恢复 Shader 默认值，未知覆盖与其他状态保留。已有原生 Shader 自定义面板仍可注册。材质与 Prefab 选中时使用自己的源文档；该资源已打开时复用对应草稿，另一个作者文档保持独立。Save Asset、EditorContext.Save 和 File/Save 使用对应源保存命令。未保存的独立资产草稿切换选择或退出前提供 Save/Discard/Cancel。
+
+回调结束后，临时对象、属性及组件包装失效。被读取的依赖 ScriptableObject 使用独立临时对象缓存，既不污染编辑会话原缓存，也不触发快照的 OnEnable/OnDisable/OnDestroy。通过显式 CreateInstance 创建的对象保留自己的初始化/清理回调。包及只读源不接受字段提交或保存；读取的持久 Mesh/Material 必须先 Clone 才能修改，不能通过资源引用改写其他已发布资产。
+
+
+## 资源 Preview 与生命周期
+
+`Inspector` 的 `OnEnable` / `OnDisable` 配对管理当前所选资源的查看状态。`OnInspectorGUI` 与该目标的 Preview 回调使用同一个实例，因此相机角度、显示模式等普通 C# 字段可以共享。每次回调重新取得 `Target` 和 `SerializedObject`，不能缓存回调包装；持久身份使用 `AssetReference`。Project 展开源文件后可独立选择主对象及子资产，稳定 GUID/local file ID 也用于拖拽引用。导入产物 Inspector 只读，不提供源保存或 importer Apply。
+
+覆写 `HasPreviewGUI()` 返回 true 后，宿主调用 `OnPreviewSettings()` 绘制工具栏，调用 `OnInteractivePreviewGUI(Rect)` 绘制图像。后者默认转发给 `OnPreviewGUI(Rect)`，`GetInfoString()` 提供说明；`RequiresConstantRepaint()` 适用于动画。没有自定义 Preview 时保留材质、纹理、模型、Mesh、Prefab 的默认预览。importer 编辑器的 Target 是 importer，其 Preview 可用已发布资源引用；独立产物的 Target 则是对应资源类型。
+
+`Rect` 使用当前预览图像区域内的逻辑坐标，宿主负责裁剪、窗口 DPI 和 GPU 尺寸。二维图像使用 `EditorGui.DrawTexture(rect, texture)`；`new Texture2D(width, height, linear)` / `SetPixels` 可创建查看用 CPU 图像，或调用 `DrawPreviewPixels`。RGBA 的透明度和线性/sRGB 信息保留。布局控件仅用于属性和 `OnPreviewSettings`，图像回调使用给定 Rect。
+
+三维预览使用 `PreviewRenderUtility`：在 `OnEnable` 创建，在 `OnDisable` 调用 `Cleanup`；每次绘制先 `BeginPreview(rect)`，再 `DrawMesh` 或 `InstantiatePrefab(assetReference)`，最后 `EndPreview()`。`Camera` 的 Position/Target/Up、FieldOfView（角度）及裁剪面可配置，AmbientColor/Intensity、LightColor/Intensity、LightRotation 控制私有灯光。每个 utility 的场景、相机、灯光、实例与作者 Scene/Play Scene 隔离；运行中的 SRP 以 Preview 相机类型绘制，窗口共用既有 Inspector 页脚和渲染调度。当前一次图像回调发布一幅二维图像或一个 utility 结果。
+
+`PreviewInput.Current` 提供图像内 MousePosition、拖动时的 MouseDelta、悬停滚轮 ScrollDelta、Dragging、可见时间 Time 和 DeltaTime。隐藏、折叠、零区域及最小化时停止绘制和时钟，恢复首帧 DeltaTime 为零。输入不传递给 Game/Gizmo；属性或工具栏控件变化会请求重绘，持续重绘不会把当前内容标成过时。临时 Mesh/Material 和 utility 可以跨该 Editor 的 Preview 回调使用；不能跨 Editor 实例、线程或关闭后的环境使用。已发布资源只读，克隆后才可修改。查看操作不保存源文件、不标记作者 Dirty，也不执行游戏生命周期。
+
+同一目标绘制失败时，显示扩展 ID、资源 GUID/local file ID 和异常，保留并标识最后成功图像；切换目标后清空旧图像。失败的 Preview 不静默回退为默认成功结果。重新加载脚本或重新导入可重建该实例。成功脚本重载先完成旧实例 `OnDisable` 再关闭其会话；失败编译继续保留旧环境。关闭项目、切换目标和提交中的选择变化均持有必要资源到渲染结束，并撤销对应图像注册。
+
+完整可编译示例见 [GeneratedFormatAssetEditor](Examples/Editor/GeneratedFormatAssetEditor.cs) 与 [示例 README](Examples/README.md)。无窗口的生命周期/能力测试与真实 GPU、DPI、SRP 窗口测试分别记录在 [验收记录](ScriptedAssetEditorExtensionsAcceptance.md)。

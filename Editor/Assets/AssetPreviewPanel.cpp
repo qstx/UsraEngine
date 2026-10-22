@@ -1,7 +1,10 @@
 #include <Assets/AssetPreviewPanel.hpp>
 #include <Assets/MaterialDraft.hpp>
+#include <Assets/AssetImportRules.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
+#include <Serialization/PrefabAsset.hpp>
 #include <Ui/EditorIcons.hpp>
 #include <imgui.h>
 #include <algorithm>
@@ -58,7 +61,7 @@ Result<void> AssetPreviewPanel::BeginFrame()
 {
 	visible = false;
 	timelineRect = {};
-	if (!retired.empty() || !retiredContents.empty())
+	if (extension || !retired.empty() || !retiredContents.empty())
 	{
 		auto idle = device->WaitIdle();
 		if (!idle)
@@ -71,6 +74,16 @@ Result<void> AssetPreviewPanel::BeginFrame()
 		}
 		retired.clear();
 		retiredContents.clear();
+	}
+	if (resetExtension)
+	{
+		extension.reset();
+		extensionPreview = false;
+		extensionDiagnostic.clear();
+		extensionInfo.clear();
+		extensionDrawPending = false;
+		extensionWasVisible = false;
+		resetExtension = false;
 	}
 	return {};
 }
@@ -135,14 +148,74 @@ Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, const Proje
 	{
 		sourceGuid = entry ? entry->guid : ResourceId{};
 		subAssetId = 0;
+		selectedObjectId = 0;
+		subAssetKind.clear();
+	}
+	if (entry && selectedObjectId != selection.assetLocalFileId)
+	{
+		selectedObjectId = selection.assetLocalFileId;
+		subAssetId = selectedObjectId;
+		subAssetKind.clear();
 	}
 	UInt64 version = workspace.Database() ? workspace.Database()->Revision() : 0;
 	version ^= (workspace.BuiltinDatabase() ? workspace.BuiltinDatabase()->Revision() : 0) << 32;
-	auto selected =
-	    ResolveAssetPreviewTarget(selection, entry, document, version, subAssetId,
-	                              subAssetId ? std::optional<ResourceKind>(ResourceKind::Mesh) : std::nullopt);
+	std::optional<ResourceKind> selectedKind;
+	String artifactKind;
+	hasSubAssets = false;
+	if (entry)
+	{
+		for (const auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
+		{
+			if (!database)
+			{
+				continue;
+			}
+			for (const auto& artifact : database->ImportedArtifacts())
+			{
+				if (artifact.guid != entry->guid)
+				{
+					continue;
+				}
+				if (!artifact.isMainObject)
+				{
+					hasSubAssets = true;
+				}
+				if ((subAssetId && artifact.localFileId == subAssetId) || (!subAssetId && artifact.isMainObject))
+				{
+					artifactKind = artifact.kind;
+					if (subAssetId)
+					{
+						subAssetKind = artifact.kind;
+					}
+				}
+			}
+		}
+	}
+	const auto kind = subAssetId ? subAssetKind : entry && !entry->kind ? artifactKind : String{};
+	if (kind == "Mesh")
+	{
+		selectedKind = ResourceKind::Mesh;
+	}
+	else if (kind == "Material")
+	{
+		selectedKind = ResourceKind::Material;
+	}
+	else if (kind == "Texture")
+	{
+		selectedKind = ResourceKind::Texture;
+	}
+	else if (kind == "Prefab")
+	{
+		selectedKind = ResourceKind::Prefab;
+	}
+	auto selected = ResolveAssetPreviewTarget(selection, entry, document, version, subAssetId, selectedKind);
+	if (subAssetId && (kind == "ScriptableObject" || kind == "ScriptableAsset"))
+	{
+		selected.kind = AssetPreviewKind::None;
+	}
 	selected.projectSession = projectSession;
 	selected.pipelineVersion = pipelineVersion;
+	selected.custom = extension && state.Target().SameIdentity(selected) && extensionPreview;
 	if (selected.draft)
 	{
 		selected.contentVersion ^= selected.draft->Revision() * 0x9e3779b97f4a7c15ULL;
@@ -152,12 +225,22 @@ Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, const Proje
 		}
 	}
 	const bool identityChanged = !state.Target().SameIdentity(selected);
+	const bool contentChanged = state.Target().contentVersion != selected.contentVersion;
 	if (state.Select(std::move(selected)))
 	{
 		loadPending = Supported();
 	}
 	if (identityChanged)
 	{
+		extension.reset();
+		extensionLoadContext.reset();
+		extensionResources.reset();
+		extensionResourceKey.clear();
+		extensionPreview = false;
+		extensionDiagnostic.clear();
+		extensionInfo.clear();
+		extensionTime = 0;
+		extensionWasVisible = false;
 		auto released = ReleaseImages();
 		if (!released)
 		{
@@ -176,7 +259,182 @@ Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, const Proje
 		contentError.clear();
 		cameraIdentity = ResourceId::Generate();
 	}
+	else if (contentChanged && extension)
+	{
+		const auto closed = CloseExtension();
+		if (!closed)
+		{
+			return closed;
+		}
+	}
+	if (entry && extensionResolver)
+	{
+		const auto descriptors = workspace.ImportRuleDescriptions();
+		const auto importer =
+		    descriptors->FindImporter(PathToUrsaString(PathFromUrsaString(entry->path.relative).extension()));
+		const bool importerTarget = !subAssetId && importer &&
+		                            (importer.value->scriptType || importer.value->identity == "ursa.Texture" ||
+		                             importer.value->identity == "ursa.Model");
+		if (!importerTarget)
+		{
+			const auto resourceKind = !artifactKind.empty()                   ? artifactKind
+			                          : entry->kind == ResourceKind::Mesh     ? String("Mesh")
+			                          : entry->kind == ResourceKind::Texture  ? String("Texture")
+			                          : entry->kind == ResourceKind::Material ? String("Material")
+			                          : entry->kind == ResourceKind::Prefab   ? String("Prefab")
+			                                                                  : String("ScriptableObject");
+			PrepareResourceExtension(workspace, resourceKind);
+		}
+	}
 	return {};
+}
+
+void AssetPreviewPanel::PrepareResourceExtension(ProjectWorkspace& workspace, const String& kind)
+{
+	try
+	{
+		const auto& target = state.Target();
+		if (!target.identity.guid)
+		{
+			return;
+		}
+		const auto key = target.identity.guid.ToString() + ":" +
+		                 ToUrsaString(std::to_string(target.identity.localFileId)) + ":" +
+		                 ToUrsaString(std::to_string(target.contentVersion));
+		if (key != extensionResourceKey)
+		{
+			extensionLoadContext.reset();
+			extensionResources = Scripting::Bindings::TakeBindingResult(
+			    ResourceSession::Open(workspace.ContentFiles(), workspace.AssetResolver()));
+			extensionLoadContext = std::make_unique<ComponentLoadContext>(*extensionResources);
+			extensionResourceKey = key;
+		}
+		ManagedEditorContext context;
+		context.workspace = &workspace;
+		context.targetUsesDocument = false;
+		context.canEditTarget = false;
+		context.assetSelection = target.identity;
+		context.selection.loadContext = extensionLoadContext.get();
+		nlohmann::json payload{{"Fields", nlohmann::json::object()}, {"FieldTypes", nlohmann::json::object()}};
+		if (kind == "Mesh")
+		{
+			context.targetIdentity = "asset:ursa.Mesh";
+			context.targetMesh = Scripting::Bindings::TakeBindingResult(
+			    extensionResources->LoadMesh(target.identity.guid, target.identity.localFileId));
+		}
+		else if (kind == "Texture")
+		{
+			context.targetIdentity = "asset:ursa.Texture";
+			context.targetTexture = Scripting::Bindings::TakeBindingResult(
+			    extensionResources->LoadTexture(target.identity.guid, target.identity.localFileId));
+		}
+		else if (kind == "Material")
+		{
+			context.targetIdentity = "asset:ursa.Material";
+			context.targetMaterial = Scripting::Bindings::TakeBindingResult(
+			    extensionResources->LoadMaterial(target.identity.guid, target.identity.localFileId));
+			payload =
+			    Scripting::Bindings::TakeBindingResult(MaterialDraft::DescribeProperties(*context.targetMaterial));
+		}
+		else if (kind == "ScriptableObject" || kind == "ScriptableAsset")
+		{
+			if (!target.identity.localFileId && PathFromUrsaString(target.path.relative).extension() == ".ursaasset")
+			{
+				const auto asset = Scripting::Bindings::TakeBindingResult(
+				    LoadScriptableAssetSource(workspace.Index().Filesystem(), target.path, target.identity.guid));
+				context.assetSelection = AssetReference{asset.SourceGuid(), asset.LocalFileId()};
+				context.targetIdentity = "asset:" + asset.TypeId();
+				payload = asset.Payload();
+			}
+			else
+			{
+				const auto graph = Scripting::Bindings::TakeBindingResult(
+				    LoadScriptableAssetGraph(*extensionResources, target.identity));
+				const auto found = std::find_if(
+				    graph.assets.begin(), graph.assets.end(), [&](const auto& item)
+				    { return item.SourceGuid() == graph.root.guid && item.LocalFileId() == graph.root.localFileId; });
+				if (found == graph.assets.end())
+				{
+					return;
+				}
+				context.assetSelection = graph.root;
+				context.targetIdentity = "asset:" + found->TypeId();
+				payload = found->Payload();
+			}
+		}
+		else if (kind == "Prefab")
+		{
+			ComponentRegistry registry;
+			Scripting::Bindings::CompleteBindingResult(RegisterBuiltinComponents(registry));
+			const auto path = Scripting::Bindings::TakeBindingResult(
+			    extensionResources->ResolveAsset(target.identity.guid, target.identity.localFileId));
+			const auto asset = Scripting::Bindings::TakeBindingResult(LoadPrefabAssetResource(
+			    extensionResources->Index().Filesystem(), path, registry, *extensionLoadContext));
+			context.targetIdentity = "asset:ursa.Prefab";
+			context.selection.object = asset.Root();
+			context.selection.roots = {asset.Root()};
+		}
+		else
+		{
+			return;
+		}
+		SerializedTargetAdapter adapter;
+		adapter.resources = extensionResources.get();
+		adapter.capture = [payload] { return Result<nlohmann::json>::Success(payload); };
+		context.serializedTarget = std::move(adapter);
+		extensionResolver(context);
+	}
+	catch (const std::exception& error)
+	{
+		// Default content loading owns diagnostics when no matching custom extension is available.
+		if (extensionPreview)
+		{
+			extensionDiagnostic = ToUrsaString(error.what());
+		}
+	}
+}
+
+void AssetPreviewPanel::ConfigureExtension(const String& id, AssetPreviewExtension::Callback callback,
+                                           const ManagedEditorContext& context)
+{
+	if (!context.assetSelection || context.assetSelection->guid != state.Target().identity.guid ||
+	    state.Target().identity.localFileId &&
+	        context.assetSelection->localFileId != state.Target().identity.localFileId)
+	{
+		return;
+	}
+	if (!extension || extension->Id() != id)
+	{
+		extension = std::make_shared<AssetPreviewExtension>(id, std::move(callback));
+		extensionDiagnostic.clear();
+	}
+	extension->Bind(context);
+	if (!extensionDiagnostic.empty())
+	{
+		return;
+	}
+	const auto result = extension->Invoke(Scripting::ManagedPreviewPhase::Query);
+	extensionPreview = !result || result.value.hasPreview;
+	if (!result)
+	{
+		extensionDiagnostic = result.error;
+	}
+	else
+	{
+		extensionInfo = result.value.info;
+		extensionConstantRepaint = result.value.constantRepaint;
+	}
+	auto selected = state.Target();
+	selected.custom = extensionPreview;
+	state.Select(std::move(selected));
+	if (extensionPreview)
+	{
+		loadPending = false;
+	}
+	else if (!content && state.Target().Supported())
+	{
+		loadPending = true;
+	}
 }
 
 Float32 AssetPreviewPanel::ReservedHeight() const
@@ -191,6 +449,34 @@ void AssetPreviewPanel::Expand()
 		expanded = true;
 		SaveSettings();
 	}
+}
+
+Result<void> AssetPreviewPanel::CloseExtension()
+{
+	const auto idle = device->WaitIdle();
+	if (!idle)
+	{
+		return idle;
+	}
+	extension.reset();
+	extensionPreview = false;
+	extensionDiagnostic.clear();
+	extensionInfo.clear();
+	extensionDrawPending = false;
+	extensionWasVisible = false;
+	return {};
+}
+
+std::optional<Result<bool>> AssetPreviewPanel::DrawExtensionInspector(const String& id, ManagedEditorContext& context)
+{
+	if (!extension || extension->Id() != id || !context.assetSelection ||
+	    context.assetSelection->guid != state.Target().identity.guid ||
+	    (state.Target().identity.localFileId &&
+	     context.assetSelection->localFileId != state.Target().identity.localFileId))
+	{
+		return std::nullopt;
+	}
+	return extension->DrawInspector(context);
 }
 
 void AssetPreviewPanel::SaveSettings()
@@ -208,6 +494,7 @@ void AssetPreviewPanel::SaveSettings()
 
 void AssetPreviewPanel::Reload(bool pipelineChanged)
 {
+	resetExtension = true;
 	if (pipelineChanged)
 	{
 		++pipelineVersion;
@@ -294,7 +581,47 @@ Camera AssetPreviewPanel::PreviewCamera() const
 	return camera;
 }
 
-void AssetPreviewPanel::DrawControls(ProjectWorkspace& workspace)
+void AssetPreviewPanel::DrawSubAssets(ProjectWorkspace& workspace)
+{
+	if (hasSubAssets || subAssetId)
+	{
+		const String label = subAssetId ? subAssetKind + " " + ToUrsaString(std::to_string(subAssetId))
+		                     : state.Target().kind == AssetPreviewKind::Model ? String("Whole model")
+		                                                                      : String("Main object");
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::BeginCombo("##Subasset", label.c_str()))
+		{
+			if (ImGui::Selectable(state.Target().kind == AssetPreviewKind::Model ? "Whole model" : "Main object",
+			                      !subAssetId))
+			{
+				subAssetId = 0;
+			}
+			for (const auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
+			{
+				if (!database)
+				{
+					continue;
+				}
+				for (const auto& artifact : database->ImportedArtifacts())
+				{
+					if (artifact.guid != sourceGuid || !artifact.localFileId)
+					{
+						continue;
+					}
+					const auto name = artifact.kind + " " + ToUrsaString(std::to_string(artifact.localFileId));
+					if (ImGui::Selectable(name.c_str(), subAssetId == artifact.localFileId))
+					{
+						subAssetId = artifact.localFileId;
+						subAssetKind = artifact.kind;
+					}
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+}
+
+void AssetPreviewPanel::DrawControls(ProjectWorkspace&)
 {
 	auto* active = candidate ? candidate.get() : content.get();
 	if (state.Target().kind == AssetPreviewKind::Material)
@@ -307,38 +634,6 @@ void AssetPreviewPanel::DrawControls(ProjectWorkspace& workspace)
 			state.Invalidate();
 		}
 		Icons::SameLine(110);
-	}
-	if (state.Target().kind == AssetPreviewKind::Model || subAssetId)
-	{
-		const String label = subAssetId ? "Mesh " + ToUrsaString(std::to_string(subAssetId)) : "Whole model";
-		ImGui::SetNextItemWidth(-1);
-		if (ImGui::BeginCombo("##Subasset", label.c_str()))
-		{
-			if (ImGui::Selectable("Whole model", !subAssetId))
-			{
-				subAssetId = 0;
-			}
-			for (const auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
-			{
-				if (!database)
-				{
-					continue;
-				}
-				for (const auto& artifact : database->ImportedArtifacts())
-				{
-					if (artifact.guid != sourceGuid || artifact.kind != "Mesh" || !artifact.localFileId)
-					{
-						continue;
-					}
-					const auto name = "Mesh " + ToUrsaString(std::to_string(artifact.localFileId));
-					if (ImGui::Selectable(name.c_str(), subAssetId == artifact.localFileId))
-					{
-						subAssetId = artifact.localFileId;
-					}
-				}
-			}
-			ImGui::EndCombo();
-		}
 	}
 	if (state.Target().kind == AssetPreviewKind::Texture)
 	{
@@ -559,6 +854,98 @@ void AssetPreviewPanel::Draw(ProjectWorkspace& workspace, ComponentRegistry& reg
 		ImGui::PopID();
 		return;
 	}
+	DrawSubAssets(workspace);
+	if (extensionPreview && extension)
+	{
+		if (extensionDiagnostic.empty())
+		{
+			const auto settings = extension->Invoke(Scripting::ManagedPreviewPhase::Settings);
+			if (!settings)
+			{
+				extensionDiagnostic = settings.error;
+			}
+		}
+		if (!extensionInfo.empty())
+		{
+			ImGui::TextWrapped("%s", extensionInfo.c_str());
+		}
+		if (!extensionDiagnostic.empty())
+		{
+			state.Fail(state.Generation(), extensionDiagnostic);
+			if (state.HasImage())
+			{
+				ImGui::TextWrapped("Last successful preview (content %llu, pipeline %llu)",
+				                   static_cast<unsigned long long>(state.DisplayedTarget().contentVersion),
+				                   static_cast<unsigned long long>(state.DisplayedTarget().pipelineVersion));
+			}
+			ImGui::TextWrapped("%s", extensionDiagnostic.c_str());
+		}
+		const auto pos = ImGui::GetCursorScreenPos();
+		const auto area = ImGui::GetContentRegionAvail();
+		imageRect = {pos.x, pos.y, area.x, area.y};
+		visible = area.x >= 1 && area.y >= 1 && ImGui::IsRectVisible(area);
+		if (visible)
+		{
+			const auto dpi = std::max(.01f, ImGui::GetIO().DisplayFramebufferScale.x);
+			const ViewportSize nextSize{static_cast<UInt32>(std::max(1.f, area.x * dpi)),
+			                            static_cast<UInt32>(std::max(1.f, area.y * dpi))};
+			if (nextSize.width != targetSize.width || nextSize.height != targetSize.height)
+			{
+				targetSize = nextSize;
+				state.Invalidate();
+			}
+			ImGui::InvisibleButton("Image", area,
+			                       ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
+			const auto& io = ImGui::GetIO();
+			const bool hovered = ImGui::IsItemHovered(), dragging = ImGui::IsItemActive();
+			const auto deltaTime = extensionWasVisible ? std::min(.1, Float64(io.DeltaTime)) : 0.;
+			extensionTime += deltaTime;
+			extensionWasVisible = true;
+			extension->SetInput({io.MousePos.x - pos.x, io.MousePos.y - pos.y},
+			                    dragging ? ViewportPoint{io.MouseDelta.x, io.MouseDelta.y} : ViewportPoint{},
+			                    hovered ? io.MouseWheel : 0, dragging, extensionTime, deltaTime);
+			if (dragging || hovered && io.MouseWheel != 0 || extensionConstantRepaint ||
+			    extension->TakeRepaintRequest())
+			{
+				state.RequestRepaint();
+			}
+			if (extensionDiagnostic.empty() && state.NeedsRender())
+			{
+				// Prior rendering may still use the utility's private scene/resources.
+				auto idle = device->WaitIdle();
+				const auto drawn = idle
+				                       ? extension->Invoke(Scripting::ManagedPreviewPhase::Draw, {0, 0, area.x, area.y})
+				                       : Result<Scripting::ManagedPreviewResult>::Failure(idle.error);
+				if (!drawn)
+				{
+					extensionDiagnostic = drawn.error;
+					state.Fail(state.Generation(), drawn.error);
+				}
+				else
+				{
+					extensionDrawPending = true;
+				}
+			}
+			auto* draw = ImGui::GetWindowDrawList();
+			draw->PushClipRect(pos, {pos.x + area.x, pos.y + area.y}, true);
+			draw->AddRectFilled(pos, {pos.x + area.x, pos.y + area.y}, IM_COL32(22, 25, 32, 255));
+			if (state.HasImage())
+			{
+				const auto id = textureId != ImTextureID_Invalid ? textureId
+				                : front                          ? front->ImageId()
+				                                                 : ImTextureID_Invalid;
+				if (id != ImTextureID_Invalid)
+				{
+					const auto& r = extensionOutput;
+					draw->AddImage(id, {pos.x + r.x, pos.y + r.y}, {pos.x + r.x + r.width, pos.y + r.y + r.height});
+				}
+			}
+			draw->PopClipRect();
+		}
+		ImGui::EndChild();
+		ImGui::PopID();
+		return;
+	}
 	if (ImGui::GetContentRegionAvail().x > 0 && ImGui::GetContentRegionAvail().y > ImGui::GetFrameHeightWithSpacing() &&
 	    loadPending)
 	{
@@ -721,6 +1108,105 @@ Result<void> AssetPreviewPanel::UploadTexture()
 
 Result<void> AssetPreviewPanel::RenderPending(Float64 deltaSeconds, const EditorRenderViewport& render)
 {
+	if (extensionPreview)
+	{
+		if (!visible || !expanded)
+		{
+			extensionWasVisible = false;
+			extensionDrawPending = false;
+			return {};
+		}
+		if (!extensionDrawPending || !extension)
+		{
+			return {};
+		}
+		extensionDrawPending = false;
+		const auto renderingGeneration = state.Generation();
+		const auto activeExtension = extension;
+		Result<void> result;
+		if (activeExtension->Image())
+		{
+			ImTextureID nextId = ImTextureID_Invalid;
+			Rhi::TexturePtr nextTexture;
+			Rhi::SamplerPtr nextSampler;
+			result = UploadTexturePreview(device, gui, activeExtension->Image(), nextId, nextTexture, nextSampler);
+			if (result)
+			{
+				if (textureId != ImTextureID_Invalid)
+				{
+					retired.push_back(textureId);
+				}
+				textureId = nextId;
+				texture = std::move(nextTexture);
+				sampler = std::move(nextSampler);
+			}
+		}
+		else if (activeExtension->RenderScene())
+		{
+			auto renderingSurface = std::move(back);
+			if (!renderingSurface)
+			{
+				auto created = MaterialPreview::Create(device, gui);
+				if (!created)
+				{
+					result = Result<void>::Failure(created.error);
+				}
+				else
+				{
+					renderingSurface = std::move(created.value);
+				}
+			}
+			if (result)
+			{
+				const auto output = activeExtension->OutputRect();
+				const auto scaleX = imageRect.width > 0 ? Float32(targetSize.width) / imageRect.width : 1.f;
+				const auto scaleY = imageRect.height > 0 ? Float32(targetSize.height) / imageRect.height : 1.f;
+				result = renderingSurface->Resize(std::max(1u, UInt32(std::round(output.width * scaleX))),
+				                                  std::max(1u, UInt32(std::round(output.height * scaleY))));
+			}
+			if (result)
+			{
+				result = renderingSurface->RenderScene(*activeExtension->RenderScene(), activeExtension->RenderCamera(),
+				                                       render, cameraIdentity);
+			}
+			if (result)
+			{
+				if (state.Generation() != renderingGeneration || extension != activeExtension)
+				{
+					return {};
+				}
+				back = std::move(front);
+				front = std::move(renderingSurface);
+				if (textureId != ImTextureID_Invalid)
+				{
+					retired.push_back(textureId);
+				}
+				textureId = ImTextureID_Invalid;
+				texture.reset();
+				sampler.reset();
+			}
+		}
+		else
+		{
+			result = Result<void>::Failure("Custom Preview did not publish an image or EndPreview result");
+		}
+		if (state.Generation() != renderingGeneration || extension != activeExtension)
+		{
+			return {};
+		}
+		if (result)
+		{
+			extensionOutput = activeExtension->OutputRect();
+			state.Complete(state.Generation());
+			++renderCount;
+		}
+		else
+		{
+			extensionDiagnostic = result.error;
+			state.Fail(state.Generation(), result.error);
+		}
+		return {};
+	}
 	const bool failedContent = !contentError.empty() && !candidate;
 	auto advanced = clock.Advance(deltaSeconds, visible && expanded && !loadPending && !failedContent);
 	if (!advanced)

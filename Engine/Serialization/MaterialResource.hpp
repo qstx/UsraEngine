@@ -10,6 +10,8 @@
 
 namespace Ursa
 {
+class ResourceSession;
+
 using TextureIdResolver = std::function<Result<ResourceId>(MaterialTexturePtr)>;
 using TextureResourceLoader = std::function<Result<MaterialTexturePtr>(ResourceId)>;
 
@@ -23,5 +25,6 @@ Result<void> SaveMaterialResource(VirtualFileSystem& filesystem, const VirtualPa
                                   const MaterialInstance& material, const TextureIdResolver& resolveTexture);
 
 Result<LoadedMaterialResource> LoadMaterialResource(const VirtualFileSystem& filesystem, const VirtualPath& path,
-                                                    const TextureResourceLoader& loadTexture);
+                                                    const TextureResourceLoader& loadTexture,
+                                                    ResourceSession* resources = nullptr);
 } // namespace Ursa

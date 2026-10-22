@@ -5,22 +5,55 @@
 #include <Scripting/ManagedSceneApi.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Rendering/Shader/ComputeKernel.hpp>
+#include <Scripting/Bindings/BindingCollections.hpp>
 
 namespace Ursa::Scripting::Bindings
 {
 Result<ResourceServices::Handle> ResourceServices::LoadTexture(BindingCall& call, const Asset& reference)
 {
 	auto& api = RuntimeServices::SceneApi(call);
-	if (!api.resources)
+	if (!api.Resources())
 	{
 		return Result<Handle>::Failure("Texture loading requires a ResourceSession");
 	}
 	const auto asset = ReadAssetValue(reference);
-	const auto texture = TakeBindingResult(api.resources->LoadTexture(asset.guid, asset.localFileId));
+	const auto texture = TakeBindingResult(api.Resources()->LoadTexture(asset.guid, asset.localFileId));
 	const auto handle =
 	    TakeBindingResult(api.handles->Register(const_cast<MaterialTexture*>(texture.get()), ManagedHandleKind::Asset));
 	api.ownedTextures[handle.index] = texture;
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(handle));
+}
+
+Result<Wire::Value_Ursa_Texture2DInfo> ResourceServices::GetTextureInfo(BindingCall& call, const Handle& texture)
+{
+	auto& api = RuntimeServices::SceneApi(call);
+	TakeBindingResult(api.handles->Resolve(ReadManagedHandle(texture), ManagedHandleKind::Asset));
+	const auto found = api.ownedTextures.find(texture.F_index);
+	if (found == api.ownedTextures.end())
+	{
+		return Result<Wire::Value_Ursa_Texture2DInfo>::Failure("Texture is not loaded in this session");
+	}
+	return Result<Wire::Value_Ursa_Texture2DInfo>::Success(
+	    {found->second->GetWidth(), found->second->GetHeight(),
+	     found->second->GetColorSpace() == TextureColorSpace::Linear});
+}
+
+Result<DataView> ResourceServices::GetTexturePixels(BindingCall& call, const Handle& texture)
+{
+	TakeBindingResult(GetTextureInfo(call, texture));
+	const auto& pixels = RuntimeServices::SceneApi(call).ownedTextures.at(texture.F_index)->GetPixels();
+	if (pixels.size() / 4 > maximumBytes / sizeof(Wire::Value_Ursa_Color))
+	{
+		return Result<DataView>::Failure("Texture pixel transfer exceeds its budget");
+	}
+	Vector<Wire::Value_Ursa_Color> colors;
+	colors.reserve(pixels.size() / 4);
+	for (Size offset = 0; offset < pixels.size(); offset += 4)
+	{
+		colors.push_back({pixels[offset] / 255.0f, pixels[offset + 1] / 255.0f, pixels[offset + 2] / 255.0f,
+		                  pixels[offset + 3] / 255.0f});
+	}
+	return Result<DataView>::Success(call.arena.Array(colors.data(), colors.size()));
 }
 
 Result<bool> ResourceServices::IsValid(BindingCall& call, const Handle& resource)
@@ -83,6 +116,7 @@ Result<void> ResourceServices::SetMeshBinding(BindingCall& call, const Handle& c
                                               bool instance)
 {
 	auto& api = RuntimeServices::SceneApi(call);
+	api.RequireSceneMutation();
 	auto* target = TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component)));
 	MeshPtr value;
 	if (mesh.present)
@@ -139,6 +173,7 @@ Result<void> ResourceServices::SetMaterialBindings(BindingCall& call, const Hand
                                                    const DataView& materials, bool shared, bool first)
 {
 	auto& api = RuntimeServices::SceneApi(call);
+	api.RequireSceneMutation();
 	auto* renderer =
 	    dynamic_cast<RendererComponent*>(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(component))));
 	if (!renderer || materials.length > Mesh::maxSubMeshes || (first && materials.length != 1))
@@ -174,11 +209,11 @@ Result<Int32> ResourceServices::FindComputeKernel(BindingCall& call, const Asset
 {
 	auto& api = RuntimeServices::SceneApi(call);
 	const auto asset = ReadAssetValue(reference);
-	if (!api.resources || asset.localFileId)
+	if (!api.Resources() || asset.localFileId)
 	{
 		return Result<Int32>::Failure("ComputeShader requires a ResourceSession and root Shader reference");
 	}
-	const auto shader = TakeBindingResult(api.resources->LoadShader(asset.guid));
+	const auto shader = TakeBindingResult(api.Resources()->LoadShader(asset.guid));
 	const auto kernel = TakeBindingResult(Rendering::FindComputeKernel(*shader, ReadString(name)));
 	if (kernel > UInt32(std::numeric_limits<Int32>::max()))
 	{
@@ -192,11 +227,11 @@ ResourceServices::GetComputeThreadGroupSize(BindingCall& call, const Asset& refe
 {
 	auto& api = RuntimeServices::SceneApi(call);
 	const auto asset = ReadAssetValue(reference);
-	if (!api.resources || asset.localFileId || kernel < 0)
+	if (!api.Resources() || asset.localFileId || kernel < 0)
 	{
 		return Result<Wire::Value_Ursa_ComputeThreadGroupSize>::Failure("ComputeShader reference or kernel is invalid");
 	}
-	const auto shader = TakeBindingResult(api.resources->LoadShader(asset.guid));
+	const auto shader = TakeBindingResult(api.Resources()->LoadShader(asset.guid));
 	const auto* selected = TakeBindingResult(Rendering::ComputeKernelAt(*shader, UInt32(kernel)));
 	return Result<Wire::Value_Ursa_ComputeThreadGroupSize>::Success(
 	    {selected->threadGroupSize[0], selected->threadGroupSize[1], selected->threadGroupSize[2]});

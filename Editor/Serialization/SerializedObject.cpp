@@ -299,7 +299,7 @@ Result<void> ValidateValue(const Json& value, const String& kind, const String& 
 	return Result<void>::Failure("Unsupported serialized script field type " + kind);
 }
 
-Result<void> ValidateLiveReferences(const Json& value, const Json& descriptor, const Component& target,
+Result<void> ValidateLiveReferences(const Json& value, const Json& descriptor, const Component* target,
                                     ResourceSession* resources, ComponentLoadContext* referenceContext)
 {
 	const std::string kind = descriptor.value("Kind", std::string{});
@@ -414,15 +414,19 @@ Result<void> ValidateLiveReferences(const Json& value, const Json& descriptor, c
 	{
 		return {};
 	}
-	auto owner = target.GetGameObject();
+	if (!target)
+	{
+		return Result<void>::Failure("A standalone asset cannot reference a Scene object without its owning graph");
+	}
+	auto owner = target->GetGameObject();
 	if (!owner)
 	{
 		return {};
 	}
 	Vector<GameObject::Ptr> pending;
-	if (target.TryGetScene())
+	if (target->TryGetScene())
 	{
-		pending = target.TryGetScene()->RootGameObjects();
+		pending = target->TryGetScene()->RootGameObjects();
 	}
 	else
 	{
@@ -486,6 +490,28 @@ Result<void> ValidateLiveReferences(const Json& value, const Json& descriptor, c
 }
 
 } // namespace
+
+Result<std::unique_ptr<SerializedObject>> SerializedObject::Create(SerializedTargetAdapter adapter)
+{
+	if (!adapter.capture)
+	{
+		return Result<std::unique_ptr<SerializedObject>>::Failure("Serialized asset target requires a capture service");
+	}
+	auto payload = adapter.capture();
+	if (!payload || !payload.value.is_object() || !payload.value.contains("Fields") ||
+	    !payload.value["Fields"].is_object() || !payload.value.contains("FieldTypes") ||
+	    !payload.value["FieldTypes"].is_object())
+	{
+		return Result<std::unique_ptr<SerializedObject>>::Failure(
+		    payload ? "Serialized target requires typed Fields and FieldTypes" : payload.error);
+	}
+	auto result = std::unique_ptr<SerializedObject>(new SerializedObject(std::move(payload.value)));
+	result->captureCurrent = std::move(adapter.capture);
+	result->adapterApply = std::move(adapter.apply);
+	result->adapterReference = std::move(adapter.validateReference);
+	result->resources = adapter.resources;
+	return Result<std::unique_ptr<SerializedObject>>::Success(std::move(result));
+}
 
 Result<std::unique_ptr<SerializedObject>> SerializedObject::Create(Scripting::ScriptBehaviourComponent& target,
                                                                    ResourceSession* resources)
@@ -754,13 +780,85 @@ Result<void> SerializedObject::ValidateCandidate(const Json& candidate) const
 		{
 			return Result<void>::Failure("Invalid value for script field " + field + ": " + valid.error);
 		}
-		auto referenced = ValidateLiveReferences(fieldValue, descriptor, target, resources, referenceContext);
+		auto referenced = adapterReference
+		                      ? adapterReference(fieldValue, descriptor)
+		                      : ValidateLiveReferences(fieldValue, descriptor, target, resources, referenceContext);
 		if (!referenced)
 		{
 			return Result<void>::Failure("Invalid reference for field " + field + ": " + referenced.error);
 		}
 	}
 	return {};
+}
+
+Result<bool> SerializedObject::ApplyFields(const Json& fields)
+{
+	if (!fields.is_object())
+	{
+		return Result<bool>::Failure("Serialized target fields must be an object");
+	}
+	const auto previous = pendingPayload;
+	const auto modified = modifiedProperties;
+	for (const auto& field : fields.items())
+	{
+		if (!pendingPayload.at("FieldTypes").contains(field.key()) ||
+		    !pendingPayload.at("Fields").contains(field.key()))
+		{
+			pendingPayload = previous;
+			modifiedProperties = modified;
+			return Result<bool>::Failure("Serialized target field is not in its current schema: " +
+			                             ToUrsaString(field.key()));
+		}
+		if (pendingPayload["Fields"][field.key()] == field.value())
+		{
+			continue;
+		}
+		String escaped;
+		for (char value : field.key())
+		{
+			escaped += value == '~' ? String("~0") : value == '/' ? String("~1") : String(1, value);
+		}
+		const auto edited = SetPropertyValue("/Fields/" + escaped, field.value());
+		if (!edited)
+		{
+			pendingPayload = previous;
+			modifiedProperties = modified;
+			return Result<bool>::Failure(edited.error);
+		}
+	}
+	const bool changed = HasModifiedProperties();
+	const auto applied = Apply();
+	if (!applied)
+	{
+		pendingPayload = previous;
+		modifiedProperties = modified;
+		return Result<bool>::Failure(applied.error);
+	}
+	return Result<bool>::Success(changed);
+}
+
+Result<void> SerializedObject::ValidateAll() const
+{
+	if (captureCurrent)
+	{
+		const auto current = captureCurrent();
+		if (!current || current.value != originalPayload)
+		{
+			return Result<void>::Failure(current ? "Serialized target changed since Update" : current.error);
+		}
+	}
+	SerializedObject validation = *this;
+	validation.modifiedProperties.clear();
+	for (const auto& path : PropertyPaths())
+	{
+		const auto name = FieldName(path);
+		if (!pendingPayload.at("FieldTypes").contains(ToStdString(name)))
+		{
+			continue;
+		}
+		validation.modifiedProperties[path] = pendingPayload.at("Fields").at(ToStdString(name));
+	}
+	return validation.ValidateCandidate(pendingPayload);
 }
 
 Result<void> SerializedObject::Apply()
@@ -783,7 +881,16 @@ Result<void> SerializedObject::Apply()
 	{
 		return valid;
 	}
-	if (nativeApply)
+	if (adapterApply)
+	{
+		auto applied = adapterApply(pendingPayload);
+		if (!applied)
+		{
+			return Result<void>::Failure(applied.error);
+		}
+		pendingPayload = std::move(applied.value);
+	}
+	else if (nativeApply)
 	{
 		auto applied = nativeApply(pendingPayload["Fields"]);
 		if (!applied)
@@ -794,7 +901,11 @@ Result<void> SerializedObject::Apply()
 	}
 	else
 	{
-		auto& script = static_cast<Scripting::ScriptBehaviourComponent&>(target);
+		if (!target)
+		{
+			return Result<void>::Failure("This serialized asset is read-only; edit its source or importer");
+		}
+		auto& script = static_cast<Scripting::ScriptBehaviourComponent&>(*target);
 		auto applied = script.ApplySerializedPayload(ToUrsaString(pendingPayload.dump()), resources);
 		if (!applied)
 		{

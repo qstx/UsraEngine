@@ -4,6 +4,7 @@
 #include <Assets/AssetDatabase.hpp>
 #include <Assets/TextureImporter.hpp>
 #include <Assets/TextureImportView.hpp>
+#include <Assets/ProjectAssetImporter.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Serialization/TextureResource.hpp>
@@ -125,13 +126,14 @@ void TestImportSettingsCacheAndFailure(const std::filesystem::path& root)
 	auto gui = ImGuiBridge::Create(device.value);
 	Expect(static_cast<bool>(gui), "Cannot create the texture importer ImGui bridge");
 	auto view = TextureImportView::Open(Path("prj:Logo.png"), changed);
+	ProjectAssetImporter importer;
 	Expect(static_cast<bool>(view), "Cannot open the texture import Inspector view");
-	Expect(static_cast<bool>(view.value->Reimport(*database.value, device.value, *gui.value)) &&
+	Expect(static_cast<bool>(view.value->Reimport(*database.value, importer, device.value, *gui.value)) &&
 	           view.value->HasPreview(),
 	       "Texture import Inspector did not upload a preview");
 	Expect(static_cast<bool>(gui.value->BeginFrame(1.0f / 60.0f, 640, 480)),
 	       "Cannot begin an ImGui frame for texture import settings");
-	Expect(static_cast<bool>(view.value->Draw(*database.value, device.value, *gui.value, false)),
+	Expect(static_cast<bool>(view.value->Draw(*database.value, importer, device.value, *gui.value, false)),
 	       "Texture import Inspector did not draw its settings and preview");
 	Expect(static_cast<bool>(gui.value->EndFrame()), "Cannot end the texture import Inspector frame");
 	AssetDatabase* assetDatabase = database.value.get();
@@ -157,7 +159,7 @@ void TestImportSettingsCacheAndFailure(const std::filesystem::path& root)
 	const VirtualPath source = Path("prj:Logo.png");
 	Expect(static_cast<bool>(filesystem.WriteAtomic(source, {1, 2, 3, 4})), "Cannot corrupt the PNG fixture");
 	Expect(!TextureImporter::Import(*database.value, source, changed), "Invalid image source was accepted");
-	Expect(!view.value->Reimport(*database.value, device.value, *gui.value) && view.value->HasPreview(),
+	Expect(!view.value->Reimport(*database.value, importer, device.value, *gui.value) && view.value->HasPreview(),
 	       "Failed Inspector reimport discarded the last successful preview");
 	auto retained = database.value->Resolve(imageGuid, 0);
 	Expect(retained && retained.value == reimported.value.artifactPath &&

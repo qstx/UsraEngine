@@ -11,9 +11,14 @@
 
 namespace Ursa::Scripting::Bindings
 {
-std::shared_ptr<MaterialInstance> MaterialServices::Resolve(BindingCall& call, const Handle& material)
+std::shared_ptr<MaterialInstance> MaterialServices::Resolve(BindingCall& call, const Handle& material, bool writable)
 {
-	return TakeBindingResult(RuntimeServices::SceneApi(call).ResolveMaterial(ReadManagedHandle(material)));
+	auto& api = RuntimeServices::SceneApi(call);
+	if (writable)
+	{
+		api.RequireWritableResource(ReadManagedHandle(material));
+	}
+	return TakeBindingResult(api.ResolveMaterial(ReadManagedHandle(material)));
 }
 
 std::shared_ptr<const Shader::ShaderAsset>
@@ -21,9 +26,9 @@ MaterialServices::ShaderFor(BindingCall& call, const std::shared_ptr<MaterialIns
 {
 	auto shader = material->Shader();
 	auto& api = RuntimeServices::SceneApi(call);
-	if (!shader && api.resources)
+	if (!shader && api.Resources())
 	{
-		shader = TakeBindingResult(api.resources->LoadShader(material->ShaderId()));
+		shader = TakeBindingResult(api.Resources()->LoadShader(material->ShaderId()));
 	}
 	if (!shader)
 	{
@@ -41,7 +46,7 @@ MaterialPropertyValue MaterialServices::Property(BindingCall& call, const Handle
 Result<void> MaterialServices::SetProperty(BindingCall& call, const Handle& material, const Utf8View& name,
                                            MaterialPropertyValue value)
 {
-	auto target = Resolve(call, material);
+	auto target = Resolve(call, material, true);
 	return target->SetPropertyValue(ReadString(name), *ShaderFor(call, target), std::move(value));
 }
 
@@ -56,37 +61,38 @@ Result<MaterialServices::Handle> MaterialServices::Create(BindingCall& call, Int
 	                                             type == 0 ? MaterialType::Unlit : MaterialType::PbrMetallicRoughness);
 	const auto shaderId = type == 0 ? Shader::BuiltinUnlitShaderId() : Shader::BuiltinPbrShaderId();
 	CompleteBindingResult(material->MigrateLegacyToShader(shaderId));
-	auto shader = api.resources ? TakeBindingResult(api.resources->LoadShader(shaderId))
-	                            : MakeShared<const Shader::ShaderAsset>(
-	                                  Memory::MemoryTag::Assets, type == 0 ? Shader::CreateBuiltinUnlitShaderAsset()
-	                                                                       : Shader::CreateBuiltinPbrShaderAsset());
+	auto shader = !api.CpuBuiltinShaders() && api.Resources()
+	                  ? TakeBindingResult(api.Resources()->LoadShader(shaderId))
+	                  : MakeShared<const Shader::ShaderAsset>(Memory::MemoryTag::Assets,
+	                                                          type == 0 ? Shader::CreateBuiltinUnlitShaderAsset()
+	                                                                    : Shader::CreateBuiltinPbrShaderAsset());
 	CompleteBindingResult(material->SetShaderAsset(std::move(shader)));
-	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMaterial(material))));
+	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMaterial(material, true))));
 }
 
 Result<MaterialServices::Handle> MaterialServices::Load(BindingCall& call, const Asset& reference)
 {
 	auto& api = RuntimeServices::SceneApi(call);
-	if (!api.resources)
+	if (!api.Resources())
 	{
 		return Result<Handle>::Failure("Material loading requires a ResourceSession");
 	}
 	const auto asset = ReadAssetValue(reference);
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(
-	    api.RegisterMaterial(TakeBindingResult(api.resources->LoadMaterial(asset.guid, asset.localFileId))))));
+	    api.RegisterMaterial(TakeBindingResult(api.Resources()->LoadMaterial(asset.guid, asset.localFileId))))));
 }
 
 Result<MaterialServices::Handle> MaterialServices::Clone(BindingCall& call, const Handle& material)
 {
 	auto& api = RuntimeServices::SceneApi(call);
 	return Result<Handle>::Success(
-	    WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMaterial(Resolve(call, material)->Clone()))));
+	    WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMaterial(Resolve(call, material)->Clone(), true))));
 }
 
 Result<void> MaterialServices::Destroy(BindingCall& call, const Handle& material)
 {
 	auto& api = RuntimeServices::SceneApi(call);
-	CompleteBindingResult(Resolve(call, material)->Destroy());
+	CompleteBindingResult(Resolve(call, material, true)->Destroy());
 	CompleteBindingResult(api.handles->Invalidate(ReadManagedHandle(material)));
 	api.ownedMaterials.erase(material.F_index);
 	return {};
@@ -111,32 +117,32 @@ Result<Wire::Value_Ursa_MaterialParametersValue> MaterialServices::GetParameters
 
 Result<void> MaterialServices::SetBaseColor(BindingCall& call, const Handle& material, const ColorValue& value)
 {
-	return Resolve(call, material)->SetBaseColor(ReadColor(value));
+	return Resolve(call, material, true)->SetBaseColor(ReadColor(value));
 }
 
 Result<void> MaterialServices::SetEmissive(BindingCall& call, const Handle& material, const ColorValue& value)
 {
-	return Resolve(call, material)->SetEmissive(ReadColor(value));
+	return Resolve(call, material, true)->SetEmissive(ReadColor(value));
 }
 
 Result<void> MaterialServices::SetMetallic(BindingCall& call, const Handle& material, Float32 value)
 {
-	return Resolve(call, material)->SetMetallic(value);
+	return Resolve(call, material, true)->SetMetallic(value);
 }
 
 Result<void> MaterialServices::SetRoughness(BindingCall& call, const Handle& material, Float32 value)
 {
-	return Resolve(call, material)->SetRoughness(value);
+	return Resolve(call, material, true)->SetRoughness(value);
 }
 
 Result<void> MaterialServices::SetNormalScale(BindingCall& call, const Handle& material, Float32 value)
 {
-	return Resolve(call, material)->SetNormalScale(value);
+	return Resolve(call, material, true)->SetNormalScale(value);
 }
 
 Result<void> MaterialServices::SetOcclusionStrength(BindingCall& call, const Handle& material, Float32 value)
 {
-	return Resolve(call, material)->SetOcclusionStrength(value);
+	return Resolve(call, material, true)->SetOcclusionStrength(value);
 }
 
 Result<void> MaterialServices::SetAlphaMode(BindingCall& call, const Handle& material, Int32 value)
@@ -145,13 +151,13 @@ Result<void> MaterialServices::SetAlphaMode(BindingCall& call, const Handle& mat
 	{
 		return Result<void>::Failure("Unknown Material alpha mode");
 	}
-	auto target = Resolve(call, material);
+	auto target = Resolve(call, material, true);
 	return target->SetAlphaMode(AlphaMode(value), target->Parameters().alphaCutoff);
 }
 
 Result<void> MaterialServices::SetAlphaCutoff(BindingCall& call, const Handle& material, Float32 value)
 {
-	auto target = Resolve(call, material);
+	auto target = Resolve(call, material, true);
 	return target->SetAlphaMode(target->Parameters().alphaMode, value);
 }
 
@@ -163,7 +169,7 @@ Result<MaterialServices::SamplerValue> MaterialServices::GetSampler(BindingCall&
 
 Result<void> MaterialServices::SetSampler(BindingCall& call, const Handle& material, const SamplerValue& value)
 {
-	return Resolve(call, material)->SetSampler({value.F_Linear != 0, value.F_Repeat != 0});
+	return Resolve(call, material, true)->SetSampler({value.F_Linear != 0, value.F_Repeat != 0});
 }
 
 Result<MaterialServices::OptionalAsset> MaterialServices::GetShader(BindingCall& call, const Handle& material)
@@ -176,11 +182,11 @@ Result<void> MaterialServices::SetShader(BindingCall& call, const Handle& materi
 {
 	auto& api = RuntimeServices::SceneApi(call);
 	const auto asset = ReadAssetValue(value);
-	if (!api.resources || asset.localFileId)
+	if (!api.Resources() || asset.localFileId)
 	{
 		return Result<void>::Failure("Shader assignment requires a ResourceSession and root Shader asset");
 	}
-	return Resolve(call, material)->SetShaderAsset(TakeBindingResult(api.resources->LoadShader(asset.guid)));
+	return Resolve(call, material, true)->SetShaderAsset(TakeBindingResult(api.Resources()->LoadShader(asset.guid)));
 }
 
 Result<MaterialServices::OptionalAsset> MaterialServices::GetTexture(BindingCall& call, const Handle& material,
@@ -206,14 +212,14 @@ Result<void> MaterialServices::SetTexture(BindingCall& call, const Handle& mater
 	MaterialTexturePtr texture;
 	if (value.present)
 	{
-		if (!api.resources)
+		if (!api.Resources())
 		{
 			return Result<void>::Failure("Texture assignment requires a ResourceSession");
 		}
 		reference = ReadAssetValue(value.F_value);
-		texture = TakeBindingResult(api.resources->LoadTexture(reference.guid, reference.localFileId));
+		texture = TakeBindingResult(api.Resources()->LoadTexture(reference.guid, reference.localFileId));
 	}
-	return Resolve(call, material)->SetTextureReference(MaterialTextureSlot(slot), reference, std::move(texture));
+	return Resolve(call, material, true)->SetTextureReference(MaterialTextureSlot(slot), reference, std::move(texture));
 }
 
 Result<DataView> MaterialServices::GetKeywords(BindingCall& call, const Handle& material)
@@ -224,7 +230,7 @@ Result<DataView> MaterialServices::GetKeywords(BindingCall& call, const Handle& 
 
 Result<void> MaterialServices::SetKeyword(BindingCall& call, const Handle& material, const Utf8View& name, bool enabled)
 {
-	return Resolve(call, material)->SetKeywordEnabled(ReadString(name), enabled);
+	return Resolve(call, material, true)->SetKeywordEnabled(ReadString(name), enabled);
 }
 
 Result<Float32> MaterialServices::GetFloat(BindingCall& call, const Handle& material, const Utf8View& name)
@@ -342,18 +348,18 @@ Result<void> MaterialServices::SetTextureProperty(BindingCall& call, const Handl
 	if (value.present)
 	{
 		auto& api = RuntimeServices::SceneApi(call);
-		if (!api.resources)
+		if (!api.Resources())
 		{
 			return Result<void>::Failure("Texture property assignment requires a ResourceSession");
 		}
 		const auto reference = ReadAssetValue(value.F_value);
 		texture.textureId = reference.guid;
 		texture.textureLocalFileId = reference.localFileId;
-		texture.texture = TakeBindingResult(api.resources->LoadTexture(reference.guid, reference.localFileId));
+		texture.texture = TakeBindingResult(api.Resources()->LoadTexture(reference.guid, reference.localFileId));
 	}
 	else
 	{
-		return Resolve(call, material)->RemovePropertyOverride(ReadString(name));
+		return Resolve(call, material, true)->RemovePropertyOverride(ReadString(name));
 	}
 	return SetProperty(call, material, name, std::move(texture));
 }
@@ -361,6 +367,6 @@ Result<void> MaterialServices::SetTextureProperty(BindingCall& call, const Handl
 Result<void> MaterialServices::RemovePropertyOverride(BindingCall& call, const Handle& material, const Utf8View& name)
 {
 	Property(call, material, name);
-	return Resolve(call, material)->RemovePropertyOverride(ReadString(name));
+	return Resolve(call, material, true)->RemovePropertyOverride(ReadString(name));
 }
 } // namespace Ursa::Scripting::Bindings

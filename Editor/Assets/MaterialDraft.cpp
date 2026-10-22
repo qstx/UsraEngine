@@ -31,7 +31,8 @@ Result<std::shared_ptr<MaterialDraft>> MaterialDraft::Load(const VirtualFileSyst
 	{
 		return Result<std::shared_ptr<MaterialDraft>>::Failure(document.error);
 	}
-	auto loaded = LoadMaterialResource(filesystem, path, [&session](ResourceId id) { return session.LoadTexture(id); });
+	auto loaded =
+	    LoadMaterialResource(filesystem, path, [&session](ResourceId id) { return session.LoadTexture(id); }, &session);
 	if (!loaded)
 	{
 		return Result<std::shared_ptr<MaterialDraft>>::Failure(loaded.error);
@@ -180,8 +181,9 @@ Result<void> MaterialDraft::Save(VirtualFileSystem& filesystem, const VirtualPat
 		{
 			continue;
 		}
-		auto assetPath =
-		    assetResolver ? assetResolver(property.second.textureId, 0) : index.ResolveAsset(property.second.textureId);
+		auto assetPath = assetResolver
+		                     ? assetResolver(property.second.textureId, property.second.textureLocalFileId)
+		                     : index.ResolveAsset(property.second.textureId, property.second.textureLocalFileId);
 		if (!assetPath)
 		{
 			return Result<void>::Failure(assetPath.error);
@@ -201,7 +203,9 @@ Result<void> MaterialDraft::Save(VirtualFileSystem& filesystem, const VirtualPat
 	{
 		if (textureIds[slot])
 		{
-			auto assetPath = assetResolver ? assetResolver(textureIds[slot], 0) : index.ResolveAsset(textureIds[slot]);
+			const auto reference = material->TextureReference(static_cast<MaterialTextureSlot>(slot));
+			auto assetPath = assetResolver ? assetResolver(textureIds[slot], reference.localFileId)
+			                               : index.ResolveAsset(textureIds[slot], reference.localFileId);
 			if (!assetPath)
 			{
 				return Result<void>::Failure(assetPath.error);

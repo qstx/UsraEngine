@@ -1,4 +1,5 @@
 #include <Assets/ProjectAssetImporter.hpp>
+#include <Assets/AssetImportRules.hpp>
 #include <Core/Profiler.hpp>
 #include <Assets/ShaderAssetImporter.hpp>
 #include <Assets/TextureImporter.hpp>
@@ -16,6 +17,65 @@ namespace Ursa::Editor
 {
 namespace
 {
+class ImportSourceSnapshot final : public VirtualFileProvider
+{
+public:
+	ImportSourceSnapshot(std::shared_ptr<MemoryFileProvider> contents, String primaryMetadata)
+	    : memory(std::move(contents)), metadataPath(std::move(primaryMetadata))
+	{
+	}
+
+	String Identity() const override
+	{
+		return "import-source:" + memory->Identity();
+	}
+
+	String SourceLabel() const override
+	{
+		return "import-source";
+	}
+
+	Result<bool> Exists(const String& path) const override
+	{
+		return memory->Exists(path);
+	}
+
+	Result<UInt64> Size(const String& path) const override
+	{
+		return memory->Size(path);
+	}
+
+	Result<Vector<UInt8>> ReadRange(const String& path, UInt64 offset, UInt64 size) const override
+	{
+		return memory->ReadRange(path, offset, size);
+	}
+
+	Result<Vector<String>> List() const override
+	{
+		return memory->List();
+	}
+
+	Result<void> CheckWritable(const String& path) const override
+	{
+		return path == metadataPath ? Result<void>{} : Result<void>::Failure("Import source snapshot is read-only");
+	}
+
+	Result<void> WriteAtomic(const String& path, const Vector<UInt8>& bytes, bool createDirectories) override
+	{
+		auto writable = CheckWritable(path);
+		return writable ? memory->WriteAtomic(path, bytes, createDirectories) : writable;
+	}
+
+	Result<void> Append(const String&, const Vector<UInt8>&, bool) override
+	{
+		return Result<void>::Failure("Import source snapshot does not support append");
+	}
+
+private:
+	std::shared_ptr<MemoryFileProvider> memory;
+	String metadataPath;
+};
+
 String ClrFieldTypeName(const String& name)
 {
 	static const Map<String, String> aliases{
@@ -316,7 +376,7 @@ Result<AssetImportResult> ImportScriptableAsset(AssetDatabase& database, const V
 			continue;
 		}
 		// Import dependencies point to source files. Local file IDs are resolved after import by the runtime catalog.
-		auto path = database.Resolve(reference.guid, 0);
+		auto path = database.SourcePath(reference.guid);
 		if (!path)
 		{
 			return Result<AssetImportResult>::Failure("Missing ScriptableAsset dependency from " + source.ToString() +
@@ -337,7 +397,7 @@ Result<AssetImportResult> ImportScriptableAsset(AssetDatabase& database, const V
 	{
 		return Result<AssetImportResult>::Failure(cached.error);
 	}
-	if (!force && cached.value.upToDate)
+	if (!force && cached.value.upToDate && cached.value.mainObjectLocalFileId == asset.value.LocalFileId())
 	{
 		return Result<AssetImportResult>::Success({metadata.value.guid, cached.value.artifacts, dependencies, true});
 	}
@@ -348,7 +408,7 @@ Result<AssetImportResult> ImportScriptableAsset(AssetDatabase& database, const V
 	}
 	ImportedArtifact artifact{asset.value.LocalFileId(), "ScriptableAsset", std::move(artifactBytes.value)};
 	auto published = database.PublishImport(source, "ursa.ScriptableAsset", 1, "scriptable-asset-v1", settings,
-	                                        dependencies, {std::move(artifact)});
+	                                        dependencies, {std::move(artifact)}, asset.value.LocalFileId());
 	if (!published)
 	{
 		return Result<AssetImportResult>::Failure(published.error);
@@ -408,6 +468,10 @@ Result<AssetImportResult> DefaultImport(AssetDatabase& database, const VirtualPa
 
 ProjectAssetImporter::ProjectAssetImporter()
 {
+	auto initial = std::make_shared<Registry>();
+	auto& importers = initial->importers;
+	importers[".ursaasset"] = [](AssetDatabase& database, const VirtualPath& source, bool force)
+	{ return ImportScriptableAsset(database, source, {}, force); };
 	const ImportFunction shader = [](AssetDatabase& database, const VirtualPath& source, bool force)
 	{
 		auto imported = ShaderAssetImporter::Import(database, source, DefaultShaderCompilerTools(), force);
@@ -460,23 +524,153 @@ ProjectAssetImporter::ProjectAssetImporter()
 	};
 	importers[".fbx"] = model;
 	importers[".obj"] = model;
+	initial->nativeImporters = importers;
+	registrations = std::move(initial);
+}
+
+Result<void> ProjectAssetImporter::ReplaceManagedRules(const ProjectAssetImporter& prepared, UInt64 token)
+{
+	const auto next = std::atomic_load(&prepared.registrations);
+	for (;;)
+	{
+		auto previous = std::atomic_load(&registrations);
+		auto updated = std::make_shared<Registry>(*previous);
+		for (const auto& old : updated->scriptedIdentities)
+		{
+			updated->importers.erase(old.first);
+		}
+		for (const auto& extension : updated->processedExtensions)
+		{
+			updated->importers[extension] = updated->nativeImporters.at(extension);
+		}
+		for (const auto& entry : next->scriptedIdentities)
+		{
+			if (updated->importers.count(entry.first))
+			{
+				return Result<void>::Failure("Managed rule conflicts with an existing project importer: " +
+				                             entry.first);
+			}
+			updated->importers.emplace(entry.first, next->importers.at(entry.first));
+		}
+		for (const auto& extension : next->processedExtensions)
+		{
+			updated->importers[extension] = next->importers.at(extension);
+		}
+		updated->scriptedIdentities = next->scriptedIdentities;
+		updated->scriptedVersions = next->scriptedVersions;
+		updated->processedExtensions = next->processedExtensions;
+		updated->importers[".ursaasset"] = next->importers.at(".ursaasset");
+		updated->managedRulesToken = token;
+		updated->generation = previous->generation + 1;
+		if (!updated->generation)
+		{
+			return Result<void>::Failure("Import rule generation exhausted");
+		}
+		std::shared_ptr<const Registry> replacement = std::move(updated);
+		if (std::atomic_compare_exchange_weak(&registrations, &previous, replacement))
+		{
+			return {};
+		}
+	}
 }
 
 Result<void> ProjectAssetImporter::RegisterScriptableAssets(Vector<Ursa::ScriptTypeDescriptor> types)
 {
-	return Register(".ursaasset",
-	                [types = std::move(types)](AssetDatabase& database, const VirtualPath& source, bool force)
-	                { return ImportScriptableAsset(database, source, types, force); });
+	const ImportFunction import =
+	    [types = std::move(types)](AssetDatabase& database, const VirtualPath& source, bool force)
+	{ return ImportScriptableAsset(database, source, types, force); };
+	for (;;)
+	{
+		auto previous = std::atomic_load(&registrations);
+		auto updated = std::make_shared<Registry>(*previous);
+		updated->importers[".ursaasset"] = import;
+		++updated->generation;
+		std::shared_ptr<const Registry> replacement = std::move(updated);
+		if (std::atomic_compare_exchange_weak(&registrations, &previous, replacement))
+		{
+			return {};
+		}
+	}
 }
 
 Result<void> ProjectAssetImporter::Register(const String& extension, ImportFunction importer)
 {
-	if (extension.empty() || extension.front() != '.' || !importer ||
-	    !importers.emplace(extension, std::move(importer)).second)
+	return Register(extension, std::move(importer), {});
+}
+
+Result<void> ProjectAssetImporter::RegisterScripted(const String& extension, const String& identity, UInt32 version,
+                                                    ImportFunction importer)
+{
+	const auto parsed = ImportScriptType::FromIdentity(identity);
+	if (!parsed || !version)
+	{
+		return Result<void>::Failure(parsed ? "ScriptedImporter version must be nonzero" : parsed.error);
+	}
+	return Register(extension, std::move(importer), identity, version);
+}
+
+Result<void> ProjectAssetImporter::Register(const String& extension, ImportFunction importer,
+                                            const String& scriptedIdentity, UInt32 version)
+{
+	if (extension.empty() || extension.front() != '.' || !importer)
 	{
 		return Result<void>::Failure("Invalid or duplicate asset importer extension: " + extension);
 	}
-	return {};
+	for (;;)
+	{
+		auto previous = std::atomic_load(&registrations);
+		auto updated = std::make_shared<Registry>(*previous);
+		if (!updated->importers.emplace(extension, importer).second)
+		{
+			return Result<void>::Failure("Duplicate asset importer extension: " + extension);
+		}
+		++updated->generation;
+		if (!scriptedIdentity.empty())
+		{
+			updated->scriptedIdentities.emplace(extension, scriptedIdentity);
+			updated->scriptedVersions.emplace(extension, version);
+		}
+		std::shared_ptr<const Registry> replacement = std::move(updated);
+		if (std::atomic_compare_exchange_weak(&registrations, &previous, replacement))
+		{
+			return {};
+		}
+	}
+}
+
+Result<void> ProjectAssetImporter::RegisterNativeProcessing(const String& identity, const Vector<String>& extensions,
+                                                            ImportFunction importer)
+{
+	if (!importer || extensions.empty())
+	{
+		return Result<void>::Failure("Native processing requires extensions and a callback");
+	}
+	const auto native = AssetImportRules::Create();
+	if (!native)
+	{
+		return Result<void>::Failure(native.error);
+	}
+	for (;;)
+	{
+		auto previous = std::atomic_load(&registrations);
+		auto updated = std::make_shared<Registry>(*previous);
+		for (const auto& extension : extensions)
+		{
+			const auto selected = native.value.FindImporter(extension);
+			if (!selected || selected.value->identity != identity || !updated->importers.count(extension) ||
+			    !updated->processedExtensions.insert(extension).second)
+			{
+				return Result<void>::Failure("Invalid or duplicate native processing registration: " + extension);
+			}
+			updated->importers[extension] = importer;
+		}
+		++updated->generation;
+		std::shared_ptr<const Registry> replacement = std::move(updated);
+		if (std::atomic_compare_exchange_weak(&registrations, &previous, replacement))
+		{
+			return {};
+		}
+	}
 }
 
 Result<AssetImportResult> ProjectAssetImporter::LoadCurrent(AssetDatabase& database, const VirtualPath& source)
@@ -488,8 +682,12 @@ Result<AssetImportResult> ProjectAssetImporter::LoadCurrent(AssetDatabase& datab
 		                                                 : status.error);
 	}
 	auto metadata = database.Metadata(source);
-	return metadata ? Result<AssetImportResult>::Success(
-	                      {metadata.value.guid, status.value.artifacts, status.value.dependencies, true})
+	return metadata ? Result<AssetImportResult>::Success({metadata.value.guid,
+	                                                      status.value.artifacts,
+	                                                      status.value.dependencies,
+	                                                      true,
+	                                                      {},
+	                                                      status.value.mainObjectLocalFileId})
 	                : Result<AssetImportResult>::Failure(metadata.error);
 }
 
@@ -498,18 +696,66 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 {
 	URSA_PROFILE_DIAGNOSTIC_SCOPE("Asset.Import");
 	URSA_PROFILE_OPERATION("Asset.Import", source.ToString().c_str(), "begin");
+
+	struct ActiveImport
+	{
+		const ProjectAssetImporter* service;
+		const VirtualFileSystem* files;
+		VirtualPath path;
+	};
+
+	static thread_local Vector<ActiveImport> activeImports;
+	if (std::any_of(activeImports.begin(), activeImports.end(), [&](const auto& item)
+	                { return item.service == this && item.files == &database.Filesystem() && item.path == source; }))
+	{
+		String chain;
+		for (const auto& item : activeImports)
+		{
+			chain += item.path.ToString() + " -> ";
+		}
+		return Result<AssetImportResult>::Failure("Cyclic artifact dependency: " + chain + source.ToString());
+	}
+	activeImports.push_back({this, &database.Filesystem(), source});
+
+	struct PopImport
+	{
+		Vector<ActiveImport>& values;
+
+		~PopImport()
+		{
+			values.pop_back();
+		}
+	} pop{activeImports};
+
+	const auto snapshot = std::atomic_load(&registrations);
 	const auto import = [&]() -> Result<AssetImportResult>
 	{
+		const auto& importers = snapshot->importers;
 		auto metadata = database.Metadata(source);
 		if (!metadata || metadata.value.folder)
 		{
 			return Result<AssetImportResult>::Failure(metadata ? "Cannot import a folder" : metadata.error);
 		}
 		const auto extension = Extension(source);
-		const auto selected = importers.find(extension);
-		if (extension == ".ursashader" || extension == ".compute")
+		if (metadata.value.importer.find("script:") == 0)
 		{
-			return selected->second(database, source, force);
+			const auto required = snapshot->scriptedIdentities.find(extension);
+			if (required == snapshot->scriptedIdentities.end() || required->second != metadata.value.importer)
+			{
+				return Result<AssetImportResult>::Failure("Required ScriptedImporter is missing for " +
+				                                          source.ToString() + ": " + metadata.value.importer);
+			}
+		}
+		const auto selected = importers.find(extension);
+		const auto scripted = snapshot->scriptedIdentities.find(extension);
+		if (scripted != snapshot->scriptedIdentities.end() && database.Filesystem().CheckWritable(source))
+		{
+			auto saved = database.SetImporterSettings(
+			    source, scripted->second, snapshot->scriptedVersions.at(extension), metadata.value.importSettings);
+			if (!saved)
+			{
+				return Result<AssetImportResult>::Failure(saved.error);
+			}
 		}
 		if (database.Filesystem().CheckWritable(source))
 		{
@@ -537,7 +783,8 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 				{
 					return Result<AssetImportResult>::Failure(settings.error);
 				}
-				if (metadata.value.importer != "ursa.Model" || metadata.value.importerVersion != 5 ||
+				if (metadata.value.importer != "ursa.Model" ||
+				    metadata.value.importerVersion != ModelImporter::Version ||
 				    metadata.value.importSettings != settings.value.ToJson())
 				{
 					auto saved = ModelImporter::SetSettings(database, source, settings.value);
@@ -548,7 +795,18 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 				}
 			}
 		}
+		metadata = database.Metadata(source);
+		if (!metadata)
+		{
+			return Result<AssetImportResult>::Failure(metadata.error);
+		}
 		VirtualFileSystem frozen;
+		auto candidateLibrary = std::make_shared<MemoryFileProvider>();
+		auto stagedLibrary = frozen.MountProvider(editorLibraryScheme, candidateLibrary, MountAccess::ReadWrite);
+		if (!stagedLibrary)
+		{
+			return Result<AssetImportResult>::Failure(stagedLibrary.error);
+		}
 		Vector<RuntimeContentInput> inputs;
 		for (const auto& scheme : database.Filesystem().Schemes())
 		{
@@ -558,7 +816,9 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 				{
 					if (provider.scheme == scheme)
 					{
-						auto mounted = frozen.MountProvider(scheme, provider.provider, provider.access);
+						auto mounted = frozen.MountProvider(scheme, provider.provider,
+						                                    scheme == editorLibraryScheme ? MountAccess::ReadOnly
+						                                                                  : provider.access);
 						if (!mounted)
 						{
 							return Result<AssetImportResult>::Failure(mounted.error);
@@ -575,7 +835,9 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 			}
 			for (const auto& entry : entries.value)
 			{
-				if (selected == importers.end() || extension == ".png" || extension == ".jpg" || extension == ".jpeg")
+				if (selected == importers.end() ||
+				    ((extension == ".png" || extension == ".jpg" || extension == ".jpeg") &&
+				     !snapshot->processedExtensions.count(extension)))
 				{
 					bool needed = entry.path == source || entry.path.ToString() == source.ToString() + ".meta";
 					for (auto slash = source.relative.find('/'); slash != String::npos;
@@ -597,7 +859,10 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 				    {entry.path, BuildResourceFingerprint(bytes.value), static_cast<UInt64>(bytes.value.size())});
 				memory->WriteAtomic(entry.path.relative, bytes.value, true);
 			}
-			auto mounted = frozen.MountProvider(scheme, memory, MountAccess::ReadOnly);
+			auto snapshotProvider = std::make_shared<ImportSourceSnapshot>(memory, source.relative + ".meta");
+			auto mounted = frozen.MountProvider(scheme, snapshotProvider,
+			                                    database.Filesystem().CheckWritable(source) ? MountAccess::ReadWrite
+			                                                                                : MountAccess::ReadOnly);
 			if (!mounted)
 			{
 				return Result<AssetImportResult>::Failure(mounted.error);
@@ -613,11 +878,20 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 		{
 			return Result<AssetImportResult>::Failure(refreshed.error);
 		}
+		isolated.value->BeginCandidateCapture();
 		auto result = selected == importers.end() ? DefaultImport(*isolated.value, source, force)
 		                                          : selected->second(*isolated.value, source, force);
 		if (!result)
 		{
 			return result;
+		}
+		auto candidate = isolated.value->CurrentImport(source);
+		auto candidateMetadata = isolated.value->Metadata(source);
+		if (!candidate || !candidate.value.upToDate || !candidateMetadata ||
+		    candidateMetadata.value.guid != metadata.value.guid || result.value.guid != metadata.value.guid)
+		{
+			return Result<AssetImportResult>::Failure("Importer did not produce a current candidate for " +
+			                                          source.ToString());
 		}
 		for (const auto& input : inputs)
 		{
@@ -629,9 +903,150 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 			}
 		}
 		refreshed = database.ReloadImports();
-		return refreshed ? result : Result<AssetImportResult>::Failure(refreshed.error);
+		if (!refreshed)
+		{
+			return Result<AssetImportResult>::Failure(refreshed.error);
+		}
+		if (candidateMetadata.value.importer != metadata.value.importer ||
+		    candidateMetadata.value.importerVersion != metadata.value.importerVersion ||
+		    candidateMetadata.value.importSettings != metadata.value.importSettings)
+		{
+			auto saved = database.SetImporterSettings(source, candidateMetadata.value.importer,
+			                                          candidateMetadata.value.importerVersion,
+			                                          candidateMetadata.value.importSettings);
+			if (!saved)
+			{
+				return Result<AssetImportResult>::Failure(saved.error);
+			}
+		}
+		auto currentInputs =
+		    database.CheckImport(source, candidate.value.importer, candidate.value.importerVersion,
+		                         candidate.value.target, candidate.value.settings, candidate.value.dependencies);
+		if (!currentInputs || currentInputs.value.fingerprint != candidate.value.fingerprint)
+		{
+			return Result<AssetImportResult>::Failure("Asset inputs changed before candidate publication: " +
+			                                          source.ToString());
+		}
+		if (std::atomic_load(&registrations) != snapshot)
+		{
+			return Result<AssetImportResult>::Failure("Import rules changed before publication: " + source.ToString());
+		}
+		for (const auto& entry : candidate.value.settings.value("artifacts", nlohmann::json::array()))
+		{
+			const auto reference = AssetReferenceFromJson(entry.at("reference"), "candidate artifact dependency");
+			if (!reference)
+			{
+				return Result<AssetImportResult>::Failure(reference.error);
+			}
+			Result<ImportedArtifactLocation> artifact =
+			    database.ResolveImportedArtifact(reference.value.guid, reference.value.localFileId);
+			if (!database.Contains(reference.value.guid))
+			{
+				for (const auto& scheme : database.Filesystem().Schemes())
+				{
+					if (scheme == database.SourceScheme() || scheme == editorLibraryScheme ||
+					    scheme == userDataScheme || scheme == projectSettingsScheme || scheme == "importframework" ||
+					    scheme.find("framework") == 0)
+					{
+						continue;
+					}
+					auto other = AssetDatabase::Open(database.Filesystem(), scheme);
+					if (!other)
+					{
+						return Result<AssetImportResult>::Failure(other.error);
+					}
+					const auto refreshedOther = other.value->Refresh();
+					if (!refreshedOther)
+					{
+						return Result<AssetImportResult>::Failure(refreshedOther.error);
+					}
+					if (other.value->Contains(reference.value.guid))
+					{
+						artifact =
+						    other.value->ResolveImportedArtifact(reference.value.guid, reference.value.localFileId);
+						break;
+					}
+				}
+			}
+			if (!artifact ||
+			    artifact.value.contentFingerprint != ToUrsaString(entry.at("fingerprint").get<std::string>()))
+			{
+				return Result<AssetImportResult>::Failure("Artifact dependency changed before publication: " +
+				                                          source.ToString());
+			}
+		}
+		auto published = database.PublishCandidates(*isolated.value);
+		if (!published)
+		{
+			return Result<AssetImportResult>::Failure(published.error);
+		}
+		auto current = database.CurrentImport(source);
+		if (!current || !current.value.upToDate)
+		{
+			return Result<AssetImportResult>::Failure(current ? "Published import is not current" : current.error);
+		}
+		result.value.artifacts = current.value.artifacts;
+		result.value.dependencies = current.value.dependencies;
+		result.value.mainObjectLocalFileId = current.value.mainObjectLocalFileId;
+		return result;
 	};
 	auto result = import();
+	for (Size attempt = 0; !result && !result.value.pendingArtifacts.empty() && attempt < 64; ++attempt)
+	{
+		if (std::atomic_load(&registrations) != snapshot)
+		{
+			return Result<AssetImportResult>::Failure("Import rules changed during dependency scheduling: " +
+			                                          source.ToString());
+		}
+		for (const auto& dependency : result.value.pendingArtifacts)
+		{
+			std::unique_ptr<AssetDatabase> secondary;
+			AssetDatabase* owner = &database;
+			if (dependency.source.scheme != database.SourceScheme())
+			{
+				auto opened = AssetDatabase::Open(database.Filesystem(), dependency.source.scheme);
+				if (!opened)
+				{
+					return Result<AssetImportResult>::Failure(opened.error);
+				}
+				secondary = std::move(opened.value);
+				auto refreshed = secondary->Refresh();
+				if (!refreshed)
+				{
+					return Result<AssetImportResult>::Failure(refreshed.error);
+				}
+				owner = secondary.get();
+			}
+			if (!dependency.initialSettings.empty())
+			{
+				const auto metadata = owner->Metadata(dependency.source);
+				if (!metadata)
+				{
+					return Result<AssetImportResult>::Failure(metadata.error);
+				}
+				if (metadata.value.importer.empty() && owner->Filesystem().CheckWritable(dependency.source))
+				{
+					const auto settings = TextureImportSettings::FromJson(dependency.initialSettings);
+					if (!settings)
+					{
+						return Result<AssetImportResult>::Failure(settings.error);
+					}
+					const auto saved = TextureImporter::SetSettings(*owner, dependency.source, settings.value);
+					if (!saved)
+					{
+						return Result<AssetImportResult>::Failure(saved.error);
+					}
+				}
+			}
+			const auto prepared = Import(*owner, dependency.source, false);
+			if (!prepared)
+			{
+				return Result<AssetImportResult>::Failure("Artifact dependency from " + source.ToString() + " to " +
+				                                          dependency.source.ToString() + ": " + prepared.error);
+			}
+		}
+		result = import();
+	}
 	if (result)
 	{
 		URSA_PROFILE_OPERATION("Asset.Import", source.ToString().c_str(),

@@ -309,6 +309,7 @@ Result<void> EditorDocuments::SaveCurrent()
 	}
 	sessions.push_back(std::move(session.value));
 	current->dirty = false;
+	++current->saveVersion;
 	lastError.clear();
 	URSA_LOG_INFO("Editor", "Saved asset " + current->Path().ToString());
 	return {};

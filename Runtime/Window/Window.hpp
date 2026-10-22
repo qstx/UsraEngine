@@ -160,6 +160,8 @@ public:
 
 	void Minimize();
 
+	bool Minimized() const;
+
 	void Restore();
 
 	Ursa::UInt32 Width() const;

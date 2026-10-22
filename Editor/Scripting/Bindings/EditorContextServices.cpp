@@ -1,4 +1,9 @@
 #include <Scripting/Bindings/EditorServices.hpp>
+#include <Assets/AssetImporterInspector.hpp>
+#include <Assets/MaterialDraft.hpp>
+#include <Assets/AssetPreviewExtension.hpp>
+#include <Runtime.generated.hpp>
+#include <Scripting/Bindings/BindingHandles.hpp>
 #include <Scripting/Bindings/BindingAssets.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
 #include <Serialization/RenderResourceReferences.hpp>
@@ -11,6 +16,55 @@ namespace Ursa::Editor::Bindings
 namespace
 {
 using K = B::Wire::Enum_Ursa_Editor_EditorReferenceKind;
+
+class EditorRuntimeApi final : public Scripting::ManagedSceneApi
+{
+public:
+	bool PersistentResourcesReadOnly() const override
+	{
+		return true;
+	}
+
+	bool LocalResourceReferencesReadOnly() const override
+	{
+		return !invocation.source.canEditTarget;
+	}
+
+	EditorRuntimeApi(Scene& scene, ResourceSession* resources, EditorInvocation& invocation)
+	    : ManagedSceneApi(scene, resources), invocation(invocation)
+	{
+	}
+
+	void Require(UInt32 policy) const override
+	{
+		invocation.Require(policy);
+		ManagedSceneApi::Require(policy);
+	}
+
+	void RequireSceneMutation() const override
+	{
+		Require(0);
+		if (!invocation.source.canEditTarget)
+		{
+			throw std::runtime_error("This Editor target is read-only");
+		}
+	}
+
+	void RequireGameExecution() const override
+	{
+		Require(0);
+		throw std::runtime_error("Editor targets cannot access game input, Play, window or untracked file operations");
+	}
+
+	void RequireRendering() const override
+	{
+		Require(0);
+		throw std::runtime_error("Editor target access cannot render; use the Preview host");
+	}
+
+private:
+	EditorInvocation& invocation;
+};
 
 Vector<GameObject::Ptr> Objects(EditorInvocation& scope)
 {
@@ -94,7 +148,16 @@ UInt32 AssetKind(const String& path, const String& artifact = {})
 EditorInvocation::EditorInvocation(ManagedEditorContext& editorContext, UInt64 scriptSession)
     : source(editorContext), session(scriptSession)
 {
-	if (source.target)
+	if (source.serializedTarget)
+	{
+		auto adapter = *source.serializedTarget;
+		if (!adapter.resources && (source.workspace || source.documents || source.selection.loadContext))
+		{
+			adapter.resources = &Resources();
+		}
+		properties = B::TakeBindingResult(SerializedObject::Create(std::move(adapter)));
+	}
+	else if (source.target)
 	{
 		targetId = source.target->PersistentId();
 		targetOwner = source.target->GetGameObject();
@@ -124,7 +187,12 @@ EditorInvocation::~EditorInvocation()
 void EditorInvocation::Require(UInt32 policy) const
 {
 	B::BindingContext::Require(policy);
-	if (source.document && source.documents && source.documents->Current() != source.document)
+	if (source.validateTarget)
+	{
+		B::CompleteBindingResult(source.validateTarget());
+	}
+	if (source.targetUsesDocument && source.document && source.documents &&
+	    source.documents->Current() != source.document)
 	{
 		throw std::runtime_error("The editing document changed or closed during this callback");
 	}
@@ -148,6 +216,11 @@ void EditorInvocation::Require(UInt32 policy) const
 UInt64 EditorInvocation::SessionIdentity() const
 {
 	return session;
+}
+
+void EditorInvocation::CheckHandle(const void* value, Size size, UInt32 kind) const
+{
+	const_cast<EditorInvocation*>(this)->RuntimeApi().CheckHandle(value, size, kind);
 }
 
 UInt64 EditorInvocation::TransferBudget() const
@@ -188,6 +261,217 @@ ResourceSession& EditorInvocation::Resources()
 		throw std::runtime_error("This editing context has no asset loader");
 	}
 	return *fallbackResources;
+}
+
+Scripting::ManagedSceneApi& EditorInvocation::RuntimeApi()
+{
+	Require(0);
+	if (source.preview && !source.previewProperties)
+	{
+		return source.preview->RuntimeApi();
+	}
+	if (!runtimeApi)
+	{
+		ResourceSession* resources =
+		    source.workspace || source.documents || source.selection.loadContext ? &Resources() : nullptr;
+		runtimeApi = std::make_unique<EditorRuntimeApi>(source.selection.scene ? *source.selection.scene : privateScene,
+		                                                resources, *this);
+		if (hostToken)
+		{
+			B::CompleteBindingResult(runtimeApi->BindHostServices(hostToken));
+		}
+		if (!source.selection.scene)
+		{
+			auto roots = source.selection.roots;
+			if (roots.empty() && source.selection.object)
+			{
+				auto root = source.selection.object;
+				while (root->Parent())
+				{
+					root = root->Parent();
+				}
+				roots.push_back(root);
+			}
+			if (!roots.empty())
+			{
+				runtimeApi->SetDetachedRoots(std::move(roots));
+			}
+		}
+	}
+	return *runtimeApi;
+}
+
+Result<bool> EditorInvocation::SynchronizeRuntimeTarget()
+{
+	if (!runtimeMaterial)
+	{
+		return Result<bool>::Success(false);
+	}
+	const auto current = MaterialDraft::DescribeProperties(*runtimeMaterial);
+	if (!current)
+	{
+		return Result<bool>::Failure(current.error);
+	}
+	if (current.value.at("Shader") != runtimeMaterialBaseline.at("Shader"))
+	{
+		return Result<bool>::Failure("Changing the target Shader requires reopening its source Inspector schema");
+	}
+	nlohmann::json fields = nlohmann::json::object();
+	for (const auto& field : current.value.at("Fields").items())
+	{
+		if (field.value() != runtimeMaterialBaseline.at("Fields").at(field.key()))
+		{
+			fields[field.key()] = field.value();
+		}
+	}
+	if (fields.empty())
+	{
+		return Result<bool>::Success(false);
+	}
+	if (!source.canEditTarget)
+	{
+		return Result<bool>::Failure("This material source is read-only");
+	}
+	if (!properties)
+	{
+		return Result<bool>::Failure("Material target has no source property transaction");
+	}
+	const auto applied = properties->ApplyFields(fields);
+	if (applied && applied.value)
+	{
+		changed = true;
+		if (source.markTargetDirty)
+		{
+			source.markTargetDirty();
+		}
+		else if (source.targetUsesDocument && source.document)
+		{
+			source.document->MarkDirty();
+		}
+		runtimeMaterialBaseline = current.value;
+	}
+	return applied;
+}
+
+Result<B::Wire::Value_Ursa_EditorBindingCapability> EditorServices::GetRuntimeCapability(B::BindingCall& call)
+{
+	auto& api = Scope(call).RuntimeApi();
+	return Result<B::Wire::Value_Ursa_EditorBindingCapability>::Success(
+	    {B::Runtime::moduleId, reinterpret_cast<UInt64>(&B::Runtime::NativeDescriptor()),
+	     reinterpret_cast<UInt64>(api.Token())});
+}
+
+Result<B::Wire::Value_Ursa_NativeHandle> EditorServices::GetTargetHandle(B::BindingCall& call)
+{
+	auto& scope = Scope(call);
+	auto& api = scope.RuntimeApi();
+	if (scope.source.targetMesh)
+	{
+		return Result<B::Wire::Value_Ursa_NativeHandle>::Success(
+		    B::WriteManagedHandle<B::Wire::Value_Ursa_NativeHandle>(
+		        B::TakeBindingResult(api.RegisterMesh(scope.source.targetMesh))));
+	}
+	if (scope.source.targetTexture)
+	{
+		return Result<B::Wire::Value_Ursa_NativeHandle>::Success(
+		    B::WriteManagedHandle<B::Wire::Value_Ursa_NativeHandle>(
+		        B::TakeBindingResult(api.RegisterTexture(scope.source.targetTexture))));
+	}
+	if (scope.source.target)
+	{
+		return Result<B::Wire::Value_Ursa_NativeHandle>::Success(
+		    B::WriteManagedHandle<B::Wire::Value_Ursa_NativeHandle>(
+		        B::TakeBindingResult(api.RegisterComponent(scope.source.target))));
+	}
+	if (scope.source.targetMaterial)
+	{
+		if (scope.source.preview && !scope.source.previewProperties)
+		{
+			return Result<B::Wire::Value_Ursa_NativeHandle>::Success(
+			    B::WriteManagedHandle<B::Wire::Value_Ursa_NativeHandle>(
+			        B::TakeBindingResult(api.RegisterMaterial(scope.source.targetMaterial))));
+		}
+		if (!scope.runtimeMaterial)
+		{
+			scope.runtimeMaterial = scope.source.targetMaterial->Clone();
+			if (!scope.runtimeMaterial)
+			{
+				return Result<B::Wire::Value_Ursa_NativeHandle>::Failure("Material target was destroyed");
+			}
+			if (scope.source.assetSelection)
+			{
+				B::CompleteBindingResult(scope.runtimeMaterial->BindAssetIdentity(*scope.source.assetSelection));
+			}
+			scope.runtimeMaterialBaseline =
+			    B::TakeBindingResult(MaterialDraft::DescribeProperties(*scope.runtimeMaterial));
+		}
+		return Result<B::Wire::Value_Ursa_NativeHandle>::Success(
+		    B::WriteManagedHandle<B::Wire::Value_Ursa_NativeHandle>(
+		        B::TakeBindingResult(api.RegisterMaterial(scope.runtimeMaterial, scope.source.canEditTarget))));
+	}
+	if (scope.source.selection.object)
+	{
+		return Result<B::Wire::Value_Ursa_NativeHandle>::Success(
+		    B::WriteManagedHandle<B::Wire::Value_Ursa_NativeHandle>(
+		        B::TakeBindingResult(api.Register(scope.source.selection.object))));
+	}
+	return Result<B::Wire::Value_Ursa_NativeHandle>::Failure("No typed native Editor target is active");
+}
+
+Result<B::Utf8View> EditorServices::GetComponentPayload(B::BindingCall& call,
+                                                        const B::Wire::Value_Ursa_NativeHandle& component)
+{
+	const auto candidate =
+	    B::TakeBindingResult(Scope(call).RuntimeApi().CandidateResource(B::ReadManagedHandle(component)));
+	const auto* script =
+	    dynamic_cast<const Scripting::ScriptBehaviourComponent*>(static_cast<Component*>(candidate.get()));
+	return script && script->HasSerializedPayload()
+	           ? Result<B::Utf8View>::Success(call.arena.StringValue(script->SerializedPayload()))
+	           : Result<B::Utf8View>::Failure("Component has no typed managed field snapshot");
+}
+
+Result<bool> EditorServices::ApplyComponentFields(B::BindingCall& call,
+                                                  const B::Wire::Value_Ursa_NativeHandle& component,
+                                                  const B::Utf8View& fields)
+{
+	auto& scope = Scope(call);
+	if (!scope.source.canEditTarget)
+	{
+		return Result<bool>::Failure("This Editor target is read-only");
+	}
+	const auto candidate = B::TakeBindingResult(scope.RuntimeApi().CandidateResource(B::ReadManagedHandle(component)));
+	auto* script = dynamic_cast<Scripting::ScriptBehaviourComponent*>(static_cast<Component*>(candidate.get()));
+	if (!script)
+	{
+		return Result<bool>::Failure("Component is not a managed field target");
+	}
+	ComponentLoadContext fallback(scope.Resources());
+	auto properties = scope.source.registry
+	                      ? SerializedObject::Create(
+	                            *script, *scope.source.registry,
+	                            scope.source.selection.loadContext ? *scope.source.selection.loadContext : fallback,
+	                            scope.source.saveContext)
+	                      : SerializedObject::Create(*script, &scope.Resources());
+	if (!properties)
+	{
+		return Result<bool>::Failure(properties.error);
+	}
+	const auto changed = script == scope.source.target && scope.properties
+	                         ? scope.properties->ApplyFields(nlohmann::json::parse(ToStdString(B::ReadString(fields))))
+	                         : properties.value->ApplyFields(nlohmann::json::parse(ToStdString(B::ReadString(fields))));
+	if (changed && changed.value)
+	{
+		scope.changed = true;
+		if (scope.source.markTargetDirty)
+		{
+			scope.source.markTargetDirty();
+		}
+		else if (scope.source.targetUsesDocument && scope.source.document)
+		{
+			scope.source.document->MarkDirty();
+		}
+	}
+	return changed;
 }
 
 EditorInvocation& EditorServices::Scope(B::BindingCall& call)
@@ -373,7 +657,8 @@ Vector<EditorAssetData> EditorServices::AssetChoices(EditorInvocation& scope)
 {
 	Vector<EditorAssetData> result;
 	Set<String> identities;
-	const auto append = [&](AssetReference asset, UInt32 kind, const String& path, const String& type)
+	const auto append =
+	    [&](AssetReference asset, UInt32 kind, const String& path, const String& type, bool isSubAsset = false)
 	{
 		const String key = asset.guid.ToString() + ":" + ToUrsaString(std::to_string(asset.localFileId));
 		if (!identities.insert(key).second)
@@ -383,7 +668,8 @@ Vector<EditorAssetData> EditorServices::AssetChoices(EditorInvocation& scope)
 		result.push_back(
 		    {{kind, {}, asset, true, type},
 		     path,
-		     path + (asset.localFileId ? " / " + type + " #" + ToUrsaString(std::to_string(asset.localFileId)) : "")});
+		     path + (isSubAsset ? " / " + type + " #" + ToUrsaString(std::to_string(asset.localFileId)) : ""),
+		     isSubAsset});
 	};
 	if (scope.source.workspace)
 	{
@@ -411,9 +697,10 @@ Vector<EditorAssetData> EditorServices::AssetChoices(EditorInvocation& scope)
 				continue;
 			}
 			const auto root = std::find_if(artifacts.begin(), artifacts.end(), [&](const auto& value)
-			                               { return value.guid == source.metadata.guid && value.localFileId == 0; });
+			                               { return value.guid == source.metadata.guid && value.isMainObject; });
 			const String path = source.path.ToString();
-			append({source.metadata.guid, 0}, AssetKind(path, root == artifacts.end() ? String{} : root->kind), path,
+			append({source.metadata.guid, root == artifacts.end() ? 0 : root->localFileId},
+			       AssetKind(path, root == artifacts.end() ? String{} : root->kind), path,
 			       root == artifacts.end() ? String{} : root->kind);
 		}
 		for (const auto& artifact : artifacts)
@@ -421,7 +708,8 @@ Vector<EditorAssetData> EditorServices::AssetChoices(EditorInvocation& scope)
 			const auto source = std::find_if(assets.begin(), assets.end(),
 			                                 [&](const auto& value) { return value.metadata.guid == artifact.guid; });
 			const String path = source == assets.end() ? artifact.path.ToString() : source->path.ToString();
-			append({artifact.guid, artifact.localFileId}, AssetKind(path, artifact.kind), path, artifact.kind);
+			append({artifact.guid, artifact.localFileId}, AssetKind(path, artifact.kind), path, artifact.kind,
+			       !artifact.isMainObject);
 		}
 		for (const auto& entry : scope.source.workspace->Resources())
 		{
@@ -443,6 +731,100 @@ Result<B::Wire::Value_Ursa_Editor_EditorScopeValue> EditorServices::GetScope(B::
 	const auto& scope = Scope(call);
 	return Result<B::Wire::Value_Ursa_Editor_EditorScopeValue>::Success(
 	    {scope.Generation(), scope.SessionIdentity(), scope.revision, scope.properties ? 1u : 0u});
+}
+
+Result<B::Wire::Value_Ursa_Editor_EditorImporterInfo_> EditorServices::GetImporterInfo(B::BindingCall& call)
+{
+	const auto& scope = Scope(call);
+	B::Wire::Value_Ursa_Editor_EditorImporterInfo_ result;
+	if (const auto target = scope.source.importerInspector)
+	{
+		result.present = 1;
+		result.F_value.F_Path = call.arena.StringValue(target->SourcePath().ToString());
+		result.F_value.F_Identity = call.arena.StringValue(target->Identity());
+		result.F_value.F_ClrTypeName = call.arena.StringValue(target->ClrTypeName());
+		result.F_value.F_Reference =
+		    B::WriteAssetValue<decltype(result.F_value.F_Reference)>(call.arena, target->Reference());
+	}
+	return Result<B::Wire::Value_Ursa_Editor_EditorImporterInfo_>::Success(result);
+}
+
+Result<B::Utf8View> EditorServices::GetTargetPayload(B::BindingCall& call)
+{
+	auto& scope = Scope(call);
+	scope.RequireProperties(scope.revision);
+	return Result<B::Utf8View>::Success(call.arena.StringValue(ToUrsaString(scope.properties->Snapshot().dump())));
+}
+
+Result<bool> EditorServices::ApplyTargetFields(B::BindingCall& call, const B::Utf8View& fields)
+{
+	auto& scope = Scope(call);
+	scope.RequireProperties(scope.revision);
+	if (!scope.source.canEditTarget)
+	{
+		return Result<bool>::Failure("This Editor target is read-only");
+	}
+	auto applied = scope.properties->ApplyFields(nlohmann::json::parse(ToStdString(B::ReadString(fields))));
+	if (applied && applied.value)
+	{
+		scope.changed = true;
+		if (scope.source.markTargetDirty)
+		{
+			scope.source.markTargetDirty();
+		}
+		else if (scope.source.targetUsesDocument && scope.source.document)
+		{
+			scope.source.document->MarkDirty();
+		}
+	}
+	return applied;
+}
+
+Result<bool> EditorServices::HasModifiedImporterSettings(B::BindingCall& call)
+{
+	const auto target = Scope(call).source.importerInspector;
+	return target ? Result<bool>::Success(target->HasModified())
+	              : Result<bool>::Failure("No importer Inspector target is active");
+}
+
+Result<bool> EditorServices::ApplyImporterSettings(B::BindingCall& call)
+{
+	auto& scope = Scope(call);
+	const auto target = scope.source.importerInspector;
+	if (!target || !scope.source.canApplyImporter)
+	{
+		return Result<bool>::Failure("Importer Apply is unavailable in this callback");
+	}
+	const auto properties = ApplyProperties(call, scope.revision);
+	if (!properties)
+	{
+		return Result<bool>::Failure(properties.error);
+	}
+	auto applied = target->Apply();
+	if (applied && applied.value && scope.source.requestImport)
+	{
+		scope.source.requestImport(target->SourcePath());
+	}
+	return applied;
+}
+
+Result<void> EditorServices::RevertImporterSettings(B::BindingCall& call)
+{
+	const auto target = Scope(call).source.importerInspector;
+	return target ? target->Revert() : Result<void>::Failure("No importer Inspector target is active");
+}
+
+Result<void> EditorServices::DrawImporterApplyRevert(B::BindingCall& call)
+{
+	RequireGui(call);
+	auto& context = Scope(call).source;
+	if (!context.importerInspector)
+	{
+		return Result<void>::Failure("No importer Inspector target is active");
+	}
+	context.importerInspector->DrawApplyRevert(context.requestImport, context.canApplyImporter);
+	context.importerControlsDrawn = true;
+	return {};
 }
 
 Result<B::DataView> EditorServices::GetSelection(B::BindingCall& call)
@@ -481,6 +863,28 @@ Result<EditorServices::OptionalReference> EditorServices::GetTarget(B::BindingCa
 		value.F_value =
 		    WriteReference(call, Resolve(scope, K::V_Component, scope.source.target->PersistentId().ToString()));
 	}
+	else if (scope.source.serializedTarget && scope.source.assetSelection)
+	{
+		value.present = 1;
+		if (scope.source.targetMaterial)
+		{
+			value.F_value =
+			    WriteReference(call, {K::V_Material, {}, *scope.source.assetSelection, true, "ursa.Material"});
+			return Result<OptionalReference>::Success(value);
+		}
+		if (scope.source.targetIdentity == "asset:ursa.Prefab")
+		{
+			value.F_value = WriteReference(call, {K::V_Asset, {}, *scope.source.assetSelection, true, "ursa.Prefab"});
+			return Result<OptionalReference>::Success(value);
+		}
+		value.F_value = WriteReference(call, scope.source.targetIdentity.find("asset:") == 0
+		                                         ? EditorReferenceData{K::V_ScriptableObject,
+		                                                               {},
+		                                                               *scope.source.assetSelection,
+		                                                               true,
+		                                                               scope.source.targetIdentity.substr(6)}
+		                                         : Resolve(scope, K::V_Asset, {}, *scope.source.assetSelection));
+	}
 	return Result<OptionalReference>::Success(value);
 }
 
@@ -488,7 +892,7 @@ Result<B::Wire::Value_Ursa_Editor_EditorDocumentValue_> EditorServices::GetDocum
 {
 	const auto& scope = Scope(call);
 	B::Wire::Value_Ursa_Editor_EditorDocumentValue_ value;
-	if (const auto document = scope.source.document)
+	if (const auto document = scope.source.targetUsesDocument ? scope.source.document : nullptr)
 	{
 		using D = B::Wire::Enum_Ursa_Editor_EditorDocumentKind;
 		UInt32 kind = D::V_Unknown;
@@ -526,9 +930,9 @@ Result<B::DataView> EditorServices::GetAssets(B::BindingCall& call)
 	    call.arena, AssetChoices(Scope(call)),
 	    [&](const auto& value)
 	    {
-		    return B::Wire::Value_Ursa_Editor_EditorAssetValue{WriteReference(call, value.reference),
-		                                                       call.arena.StringValue(value.path),
-		                                                       call.arena.StringValue(value.name)};
+		    return B::Wire::Value_Ursa_Editor_EditorAssetValue{
+		        WriteReference(call, value.reference), call.arena.StringValue(value.path),
+		        call.arena.StringValue(value.name), value.isSubAsset ? 1u : 0u};
 	    }));
 }
 
@@ -542,8 +946,22 @@ Result<EditorServices::Reference> EditorServices::ResolveReference(B::BindingCal
 
 Result<void> EditorServices::MarkDirty(B::BindingCall& call)
 {
-	const auto& scope = Scope(call);
-	if (!scope.source.document)
+	auto& scope = Scope(call);
+	if (!scope.source.canEditTarget)
+	{
+		return Result<void>::Failure("This Editor target is read-only");
+	}
+	const auto synchronized = scope.SynchronizeRuntimeTarget();
+	if (!synchronized)
+	{
+		return Result<void>::Failure(synchronized.error);
+	}
+	if (scope.source.markTargetDirty)
+	{
+		scope.source.markTargetDirty();
+		return {};
+	}
+	if (!scope.source.targetUsesDocument || !scope.source.document)
 	{
 		return Result<void>::Failure("No editing document is open");
 	}
@@ -553,7 +971,24 @@ Result<void> EditorServices::MarkDirty(B::BindingCall& call)
 
 Result<void> EditorServices::Save(B::BindingCall& call)
 {
-	const auto& scope = Scope(call);
+	auto& scope = Scope(call);
+	if (!scope.source.canEditTarget)
+	{
+		return Result<void>::Failure("This Editor target is read-only");
+	}
+	const auto synchronized = scope.SynchronizeRuntimeTarget();
+	if (!synchronized)
+	{
+		return Result<void>::Failure(synchronized.error);
+	}
+	if (scope.source.saveTarget)
+	{
+		return scope.source.saveTarget();
+	}
+	if (!scope.source.targetUsesDocument)
+	{
+		return Result<void>::Failure("This target requires its own explicit save or importer Apply command");
+	}
 	return scope.source.documents ? scope.source.documents->SaveCurrent()
 	                              : Result<void>::Failure("No document service is available");
 }

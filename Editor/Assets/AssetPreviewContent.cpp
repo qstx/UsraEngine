@@ -199,7 +199,9 @@ Result<std::unique_ptr<AssetPreviewContent>> AssetPreviewContent::Load(const Ass
 			}
 			else
 			{
-				auto asset = Take(LoadPrefabAssetResource(files, selected.path, registry, context));
+				const auto path = Take(result->resources->ResolveAsset(guid, localId));
+				auto asset =
+				    Take(LoadPrefabAssetResource(result->resources->Index().Filesystem(), path, registry, context));
 				result->scene = std::make_unique<Scene>();
 				result->root = Take(asset.Instantiate(*result->scene, registry, context));
 			}

@@ -4,6 +4,7 @@
 #include <Scripting/DotNet/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
+#include <Scripting/Bindings/BindingHandles.hpp>
 #include <Scripting/Bindings/BindingRequirements.hpp>
 #include <Runtime.generated.hpp>
 #include <Rendering.generated.hpp>
@@ -13,6 +14,7 @@
 #include <cstring>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -35,12 +37,19 @@ struct DotNetHost::BindingState
 {
 	Bindings::CallbackModule<HostBindings::Table> host;
 	Map<UInt64, nlohmann::json> scriptCatalogs;
+	UInt64 importSession = 0;
+	UInt64 importGeneration = 0;
+	UInt64 importInvocation = 0;
 };
 
 #if defined(_WIN32)
 namespace
 {
 std::atomic_bool runtimeStarted = false;
+std::recursive_mutex runtimeGate;
+void* sharedBindingsEntryPoint = nullptr;
+String sharedFrameworkFingerprint;
+thread_local DotNetHost* activeEndpoint = nullptr;
 
 struct CacheFile
 {
@@ -83,6 +92,7 @@ Result<ManagedHostBootstrap> MaterializeManagedHostFiles(VirtualFileSystem& file
 	Set<String> fileNames;
 	UInt64 totalBytes = 0;
 	UInt64 hash = 14695981039346656037ull;
+	Map<String, UInt64> frameworkParts;
 	const String domain = "Ursa.ManagedHostBootstrap.V1";
 	AddFingerprint(hash, domain.data(), domain.size());
 	for (const VirtualPath& source : sources)
@@ -115,6 +125,13 @@ Result<ManagedHostBootstrap> MaterializeManagedHostFiles(VirtualFileSystem& file
 		const UInt64 byteCount = bytes.value.size();
 		AddFingerprint(hash, &byteCount, sizeof(byteCount));
 		AddFingerprint(hash, bytes.value.data(), bytes.value.size());
+		if (fileName != "Ursa.Editor.dll" && std::find(files.scriptAssemblies.begin(), files.scriptAssemblies.end(),
+		                                               source) == files.scriptAssemblies.end())
+		{
+			UInt64 frameworkPart = 14695981039346656037ull;
+			AddFingerprint(frameworkPart, bytes.value.data(), bytes.value.size());
+			frameworkParts.emplace(fileName, frameworkPart);
+		}
 		cacheFiles.push_back({source, fileName, std::move(bytes.value)});
 	}
 
@@ -134,9 +151,30 @@ Result<ManagedHostBootstrap> MaterializeManagedHostFiles(VirtualFileSystem& file
 		{
 			return Result<ManagedHostBootstrap>::Failure(destination.error);
 		}
+		const auto exists = filesystem.Exists(destination.value);
+		if (!exists)
+		{
+			return Result<ManagedHostBootstrap>::Failure(exists.error);
+		}
+		if (exists.value)
+		{
+			const auto current = filesystem.Read(destination.value);
+			if (!current || current.value != file.bytes)
+			{
+				return Result<ManagedHostBootstrap>::Failure(
+				    "Managed host bootstrap cache has conflicting or corrupt bytes: " + destination.value.ToString());
+			}
+			// CLR endpoints share immutable SDK images; a loaded DLL must never be replaced just to reuse it.
+			continue;
+		}
 		auto written = filesystem.WriteAtomic(destination.value, file.bytes);
 		if (!written)
 		{
+			const auto concurrent = filesystem.Read(destination.value);
+			if (concurrent && concurrent.value == file.bytes)
+			{
+				continue;
+			}
 			return Result<ManagedHostBootstrap>::Failure("Cannot stage " + file.source.ToString() +
 			                                             " for the native managed host: " + written.error);
 		}
@@ -164,6 +202,15 @@ Result<ManagedHostBootstrap> MaterializeManagedHostFiles(VirtualFileSystem& file
 	result.entryAssemblyPath = std::move(assemblyPath.value);
 	result.cacheDirectory = std::move(cacheDirectory.value);
 	result.fingerprint = fingerprint;
+	UInt64 frameworkHash = 14695981039346656037ull;
+	for (const auto& part : frameworkParts)
+	{
+		AddFingerprint(frameworkHash, part.first.data(), part.first.size());
+		AddFingerprint(frameworkHash, &part.second, sizeof(part.second));
+	}
+	std::ostringstream frameworkText;
+	frameworkText << "framework-fnv1a64-" << std::hex << std::setfill('0') << std::setw(16) << frameworkHash;
+	result.frameworkFingerprint = ToUrsaString(frameworkText.str());
 	return Result<ManagedHostBootstrap>::Success(std::move(result));
 }
 
@@ -178,6 +225,14 @@ Result<std::unique_ptr<DotNetHost>> DotNetHost::Create()
 
 DotNetHost::~DotNetHost()
 {
+	if (ownsThreadEndpoint)
+	{
+		auto closed = CloseEndpoint();
+		if (!closed)
+		{
+			URSA_LOG_ERROR("Script", "Managed owner endpoint cleanup failed: " + closed.error);
+		}
+	}
 	Deactivate();
 }
 
@@ -191,6 +246,7 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 	(void)sceneApi;
 	return Result<void>::Failure("The .NET host currently supports Windows x64 only");
 #else
+	std::lock_guard runtimeLock(runtimeGate);
 	if (initialized || hostFxrLibrary || bindingsEntryPoint || runtimeStarted.load())
 	{
 		return Result<void>::Failure("A .NET runtime can be initialized only once in this process");
@@ -277,6 +333,9 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 	{
 		return modules;
 	}
+	initialized = true;
+	ownsThreadEndpoint = true;
+	activeEndpoint = this;
 	auto framework = HostBindings::Call_ManagedHostBindings_InitializeFramework(bindingState->host);
 	if (!framework)
 	{
@@ -299,12 +358,328 @@ Result<void> DotNetHost::Start(VirtualFileSystem& filesystem, const ManagedHostF
 			                             loaded.error);
 		}
 	}
+	sharedBindingsEntryPoint = bindingsEntryPoint;
+	sharedFrameworkFingerprint = bootstrap.value.frameworkFingerprint;
 	return {};
 #endif
 }
 
+Result<void> DotNetHost::Connect(VirtualFileSystem& selectedFilesystem, const ManagedHostFiles& files,
+                                 LogCallback logCallback, ManagedSceneApi* sceneApi)
+{
+#if !defined(_WIN32) || !defined(_WIN64)
+	(void)selectedFilesystem;
+	(void)files;
+	(void)logCallback;
+	(void)sceneApi;
+	return Result<void>::Failure("The .NET host currently supports Windows x64 only");
+#else
+	std::lock_guard runtimeLock(runtimeGate);
+	if (initialized || bindingsEntryPoint || !logCallback || activeEndpoint)
+	{
+		return Result<void>::Failure(
+		    "Managed endpoint is already initialized, its owner is occupied, or it has no log callback");
+	}
+	if (!runtimeStarted.load())
+	{
+		auto started = Start(selectedFilesystem, files, std::move(logCallback), sceneApi);
+		ownsThreadEndpoint = initialized && bool(bindingState);
+		return started;
+	}
+	if (!sharedBindingsEntryPoint)
+	{
+		return Result<void>::Failure("The process CLR bootstrap did not complete; restart the application");
+	}
+	auto bootstrap = MaterializeManagedHostFiles(selectedFilesystem, files);
+	if (!bootstrap || bootstrap.value.frameworkFingerprint != sharedFrameworkFingerprint)
+	{
+		return Result<void>::Failure(bootstrap
+		                                 ? "Managed framework differs from the running process; restart the application"
+		                                 : bootstrap.error);
+	}
+	bindingsEntryPoint = sharedBindingsEntryPoint;
+	filesystem = &selectedFilesystem;
+	onLog = std::move(logCallback);
+	auto modules = BindModules(sceneApi);
+	if (!modules)
+	{
+		return modules;
+	}
+	initialized = true;
+	ownsThreadEndpoint = true;
+	activeEndpoint = this;
+	auto framework = HostBindings::Call_ManagedHostBindings_InitializeFramework(bindingState->host);
+	if (!framework)
+	{
+		return Result<void>::Failure(framework.Error());
+	}
+	for (const auto& path : files.scriptAssemblies)
+	{
+		auto bytes = selectedFilesystem.Read(path);
+		if (!bytes)
+		{
+			return Result<void>::Failure(bytes.error);
+		}
+		auto loaded = LoadScriptAssembly(bytes.value);
+		if (!loaded)
+		{
+			return loaded;
+		}
+	}
+	return {};
+#endif
+}
+
+Result<void> DotNetHost::CloseEndpoint()
+{
+	if (!ownsThreadEndpoint)
+	{
+		return {};
+	}
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed owner endpoint is not initialized");
+	}
+#if defined(_WIN32)
+	if (activeEndpoint != this)
+	{
+		return Result<void>::Failure("Managed endpoint can only close on its owner thread");
+	}
+#endif
+	auto closed = HostBindings::Call_ManagedHostBindings_CloseOwnerEndpoint(bindingState->host);
+	ownsThreadEndpoint = false;
+	initialized = false;
+	bindingState.reset();
+#if defined(_WIN32)
+	activeEndpoint = nullptr;
+#endif
+	Deactivate();
+	return closed ? Result<void>{} : Result<void>::Failure(closed.Error());
+}
+
+Result<void> DotNetHost::BeginImportInvocation(UInt64 session, UInt64 generation, UInt64 invocation,
+                                               const Bindings::BindingModuleReference& capability)
+{
+	try
+	{
+		Require(0);
+	}
+	catch (const std::exception& error)
+	{
+		return Result<void>::Failure(ToUrsaString(error.what()));
+	}
+	if (!initialized || !bindingState || sessionFaulted)
+	{
+		return Result<void>::Failure("Managed import host is unavailable");
+	}
+	const Bindings::Wire::Value_Ursa_ImportBindingCapability value{
+	    capability.id, reinterpret_cast<UInt64>(capability.descriptor), reinterpret_cast<UInt64>(capability.context)};
+	auto result = HostBindings::Call_ManagedHostBindings_BeginImportInvocation(bindingState->host, session, generation,
+	                                                                           invocation, value);
+	if (result)
+	{
+		bindingState->importSession = session;
+		bindingState->importGeneration = generation;
+		bindingState->importInvocation = invocation;
+	}
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<void> DotNetHost::EndImportInvocation(UInt64 session, UInt64 generation, UInt64 invocation)
+{
+	try
+	{
+		Require(0);
+	}
+	catch (const std::exception& error)
+	{
+		return Result<void>::Failure(ToUrsaString(error.what()));
+	}
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed import host is unavailable");
+	}
+	if (!invocation || bindingState->importSession != session || bindingState->importGeneration != generation ||
+	    bindingState->importInvocation != invocation)
+	{
+		return Result<void>::Failure("Import invocation belongs to another session or generation");
+	}
+	auto result =
+	    HostBindings::Call_ManagedHostBindings_EndImportInvocation(bindingState->host, session, generation, invocation);
+	bindingState->importInvocation = 0;
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<UInt64> DotNetHost::CreateImportScriptableObject(UInt64 session, const String& typeName)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<UInt64>::Failure("Managed import host is unavailable");
+	}
+	const Bindings::Utf8View name{reinterpret_cast<const UInt8*>(typeName.data()), typeName.size(), 1, 0};
+	auto result =
+	    HostBindings::Call_ManagedHostBindings_CreateImportScriptableObject(bindingState->host, session, name);
+	return result ? Result<UInt64>::Success(result.value) : Result<UInt64>::Failure(result.Error());
+}
+
+Result<String> DotNetHost::SerializeImportScriptableObject(UInt64 session, UInt64 instance)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<String>::Failure("Managed import host is unavailable");
+	}
+	auto result =
+	    HostBindings::Call_ManagedHostBindings_SerializeImportScriptableObject(bindingState->host, session, instance);
+	return result ? Result<String>::Success(Bindings::ReadString(result.value.F_Json))
+	              : Result<String>::Failure(result.Error());
+}
+
+Result<void> DotNetHost::DeserializeImportScriptableObject(UInt64 session, UInt64 instance, const String& archive)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed import host is unavailable");
+	}
+	const Bindings::Wire::Value_Ursa_ManagedHost_ImportObjectArchive value{
+	    1, {reinterpret_cast<const UInt8*>(archive.data()), archive.size(), 1, 0}};
+	auto result = HostBindings::Call_ManagedHostBindings_DeserializeImportScriptableObject(bindingState->host, session,
+	                                                                                       instance, value);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<Vector<ManagedImportReference>> DotNetHost::GetImportReferences(UInt64 session)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<Vector<ManagedImportReference>>::Failure("Managed import host is unavailable");
+	}
+	auto result = HostBindings::Call_ManagedHostBindings_GetImportReferences(bindingState->host, session);
+	if (!result)
+	{
+		return Result<Vector<ManagedImportReference>>::Failure(result.Error());
+	}
+	return Result<Vector<ManagedImportReference>>::Success(
+	    Bindings::ReadArray<Bindings::Wire::Value_Ursa_ImportReferenceInfo, ManagedImportReference>(
+	        result.value,
+	        [](const auto& value)
+	        {
+		        return ManagedImportReference{value.F_Token, value.F_Kind, value.F_Instance,
+		                                      Bindings::ReadManagedHandle(value.F_Handle)};
+	        }));
+}
+
+Result<void> DotNetHost::AssignImportReferences(UInt64 session, const Vector<ManagedImportAssignment>& assignments)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed import host is unavailable");
+	}
+	Vector<String> guids;
+	guids.reserve(assignments.size());
+	for (const auto& assignment : assignments)
+	{
+		guids.push_back(assignment.asset.guid.ToString());
+	}
+	Vector<Bindings::Wire::Value_Ursa_ImportReferenceAssignment> values;
+	for (Size index = 0; index < assignments.size(); ++index)
+	{
+		const auto& guid = guids[index];
+		values.push_back(
+		    {assignments[index].token,
+		     {{reinterpret_cast<const UInt8*>(guid.data()), guid.size(), 1, 0}, assignments[index].asset.localFileId}});
+	}
+	const Bindings::DataView view{values.data(), values.size(), 1, 0};
+	auto result = HostBindings::Call_ManagedHostBindings_AssignImportReferences(bindingState->host, session, view);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<Vector<ManagedScriptedImporter>> DotNetHost::PrepareScriptedImporters(UInt64 session,
+                                                                             const Vector<String>& nativeExtensions)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<Vector<ManagedScriptedImporter>>::Failure("Managed import host is unavailable");
+	}
+	Vector<Bindings::Utf8View> extensions;
+	for (const auto& value : nativeExtensions)
+	{
+		extensions.push_back({reinterpret_cast<const UInt8*>(value.data()), value.size(), 1, 0});
+	}
+	const Bindings::DataView values{extensions.data(), extensions.size(), 1, 0};
+	auto result = HostBindings::Call_ManagedHostBindings_PrepareScriptedImporters(bindingState->host, session, values);
+	if (!result)
+	{
+		return Result<Vector<ManagedScriptedImporter>>::Failure(result.Error());
+	}
+	return Result<Vector<ManagedScriptedImporter>>::Success(
+	    Bindings::ReadArray<Bindings::Wire::Value_Ursa_ScriptedImporterInfo, ManagedScriptedImporter>(
+	        result.value,
+	        [](const auto& value)
+	        {
+		        return ManagedScriptedImporter{
+		            Bindings::ReadString(value.F_SourceGuid),
+		            value.F_LocalFileId,
+		            Bindings::ReadString(value.F_ClrTypeName),
+		            value.F_Version,
+		            Bindings::ReadArray<Bindings::Utf8View, String>(value.F_Extensions, [](const auto& extension)
+		                                                            { return Bindings::ReadString(extension); }),
+		            Bindings::ReadString(value.F_DefaultSettings)};
+	        }));
+}
+
+Result<void> DotNetHost::InvokeScriptedImporter(UInt64 session, const String& identity)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed import host is unavailable");
+	}
+	const Bindings::Utf8View value{reinterpret_cast<const UInt8*>(identity.data()), identity.size(), 1, 0};
+	auto result = HostBindings::Call_ManagedHostBindings_InvokeScriptedImporter(bindingState->host, session, value);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<void> DotNetHost::InvokeAssetPostprocessor(UInt64 session, const String& identity)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<void>::Failure("Managed import host is unavailable");
+	}
+	const Bindings::Utf8View value{reinterpret_cast<const UInt8*>(identity.data()), identity.size(), 1, 0};
+	auto result = HostBindings::Call_ManagedHostBindings_InvokeAssetPostprocessor(bindingState->host, session, value);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<Vector<ManagedAssetPostprocessor>> DotNetHost::DescribeAssetPostprocessors(UInt64 session)
+{
+	if (!initialized || !bindingState)
+	{
+		return Result<Vector<ManagedAssetPostprocessor>>::Failure("Managed import host is unavailable");
+	}
+	auto result = HostBindings::Call_ManagedHostBindings_DescribeAssetPostprocessors(bindingState->host, session);
+	if (!result)
+	{
+		return Result<Vector<ManagedAssetPostprocessor>>::Failure(result.Error());
+	}
+	return Result<Vector<ManagedAssetPostprocessor>>::Success(
+	    Bindings::ReadArray<Bindings::Wire::Value_Ursa_AssetPostprocessorInfo, ManagedAssetPostprocessor>(
+	        result.value,
+	        [](const auto& value)
+	        {
+		        return ManagedAssetPostprocessor{Bindings::ReadString(value.F_SourceGuid),
+		                                         value.F_LocalFileId,
+		                                         Bindings::ReadString(value.F_ClrTypeName),
+		                                         value.F_Version,
+		                                         value.F_Order,
+		                                         value.F_Targets};
+	        }));
+}
+
 Result<void> DotNetHost::BindModules(ManagedSceneApi* sceneApi)
 {
+	if (bindingState && bindingState->importInvocation)
+	{
+		return Result<void>::Failure("Cannot replace bindings during an import invocation");
+	}
 	if (!bindingsEntryPoint)
 	{
 		return Result<void>::Failure("Binding bootstrap is unavailable");
@@ -584,6 +959,33 @@ Result<bool> DotNetHost::InvokeEditorExtension(UInt64 sessionId, const String& e
 	return result ? Result<bool>::Success(result.value != 0) : Result<bool>::Failure(result.Error());
 }
 
+Result<ManagedPreviewResult> DotNetHost::InvokeEditorPreview(UInt64 sessionId, const String& extensionId,
+                                                             UInt64 instance, ManagedPreviewPhase phase, Float32 x,
+                                                             Float32 y, Float32 width, Float32 height,
+                                                             const Bindings::BindingModuleReference& capability)
+{
+	if (sessionFaulted || !bindingState || !capability.descriptor || !capability.context)
+	{
+		return Result<ManagedPreviewResult>::Failure("Managed Preview session or callback scope is unavailable");
+	}
+	const Bindings::Wire::Value_Ursa_EditorBindingCapability transfer{
+	    capability.id, reinterpret_cast<UInt64>(capability.descriptor), reinterpret_cast<UInt64>(capability.context)};
+	const Bindings::Utf8View id{reinterpret_cast<const UInt8*>(extensionId.data()), extensionId.size(), 1, 0};
+	const Bindings::Wire::Value_Ursa_Rect rect{x, y, width, height};
+	auto result = HostBindings::Call_ManagedHostBindings_InvokeEditorPreview(
+	    bindingState->host, sessionId, id, instance, static_cast<UInt32>(phase), rect, transfer);
+	if (!result)
+	{
+		return Result<ManagedPreviewResult>::Failure(result.Error());
+	}
+	if (!result.value.F_Success)
+	{
+		return Result<ManagedPreviewResult>::Failure(Bindings::ReadString(result.value.F_Diagnostic));
+	}
+	return Result<ManagedPreviewResult>::Success({result.value.F_HasPreview != 0, result.value.F_ConstantRepaint != 0,
+	                                              Bindings::ReadString(result.value.F_Info)});
+}
+
 Result<String> DotNetHost::PrepareScriptReload(UInt64 sessionId, const String& snapshots)
 {
 	if (!bindingState || snapshots.empty())
@@ -731,6 +1133,22 @@ Result<UInt64> DotNetHost::CreateScriptSession(bool editor, ManagedSceneApi* sce
 	                                   : Result<UInt64>::Failure(result.Error());
 }
 
+Result<UInt64> DotNetHost::CreateImportSession(ManagedSceneApi* sceneApi)
+{
+	if (!initialized || !bindingState || sessionFaulted)
+	{
+		return Result<UInt64>::Failure("Managed import host is unavailable or faulted");
+	}
+	auto modules = BindModules(sceneApi);
+	if (!modules)
+	{
+		return Result<UInt64>::Failure(modules.error);
+	}
+	auto result = HostBindings::Call_ManagedHostBindings_CreateImportSession(bindingState->host);
+	return result && result.value != 0 ? Result<UInt64>::Success(result.value)
+	                                   : Result<UInt64>::Failure(result.Error());
+}
+
 Result<void> DotNetHost::SelectScriptSession(UInt64 sessionId)
 {
 	if (!initialized || !bindingState)
@@ -764,6 +1182,21 @@ Result<void> DotNetHost::ValidateScriptSession(UInt64 sessionId)
 	}
 	auto result = HostBindings::Call_ManagedHostBindings_ValidateScriptSession(bindingState->host, sessionId);
 	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<void> DotNetHost::DetachImportResources(UInt64 sessionId)
+{
+	if (!initialized || !bindingState || bindingState->importInvocation)
+	{
+		return Result<void>::Failure("Import resources can only detach after its invocation has ended");
+	}
+	auto modules = BindModules(nullptr);
+	if (!modules)
+	{
+		return modules;
+	}
+	auto bound = HostBindings::Call_ManagedHostBindings_BindScriptSession(bindingState->host, sessionId);
+	return bound ? Result<void>{} : Result<void>::Failure(bound.Error());
 }
 
 Result<void> DotNetHost::CloseScriptSession(UInt64 sessionId)

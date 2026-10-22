@@ -468,6 +468,10 @@ internal static unsafe partial class Program
 		using var runtimeBindings = InstallRuntimeBindings();
 		using var renderingBindings = InstallRenderingBindings();
 		ScriptableObjectTests.Run();
+		TestOwnerThreadIsolation();
+		TestEditorObjectSnapshots();
+		TestImporterRegistration();
+		TestPostprocessorRegistration();
 		RenderCommandProtocolTests.Run();
 		ScriptableAssetFieldTests.Run();
 		ShaderFieldTests.Run();
@@ -609,6 +613,10 @@ internal static unsafe partial class Program
 		Expect(ReferenceEquals(child.GetComponent<ReferenceProbeBehaviour>(), identityProbe) &&
 		           child.GetComponents<Behaviour>().Any(component => ReferenceEquals(component, identityProbe)),
 		       "GetComponent created a second Behaviour instance or failed the base-type query");
+		Expect(parent.GetChildren().Length == 1 && parent.GetChildren()[0].Name == child.Name &&
+		           parent.GetComponentsInChildren<ReferenceProbeBehaviour>().Length == 0 &&
+		           ReferenceEquals(parent.GetComponentsInChildren<ReferenceProbeBehaviour>(true).Single(), identityProbe),
+		       "Child traversal lost component identity or ignored the inactive filter");
 		child.Transform.LocalPosition = new Vector3(1.0f, 2.0f, 3.0f);
 		Expect(child.Transform.LocalPosition.X == 1.0f && child.Transform.LocalPosition.Y == 2.0f &&
 		           child.Transform.LocalPosition.Z == 3.0f,

@@ -5,12 +5,17 @@ namespace Ursa;
 
 public abstract class RenderResource : IEquatable<RenderResource>
 {
-	private static readonly Dictionary<NativeHandle, WeakReference<RenderResource>> wrappers = new();
+	[ThreadStatic] private static Dictionary<NativeHandle, WeakReference<RenderResource>>? ownerWrappers;
+	private static Dictionary<NativeHandle, WeakReference<RenderResource>> wrappers => ownerWrappers ??= new();
 	internal NativeHandle Handle { get; }
+	private readonly int ownerThread;
+	private readonly ulong importInvocation;
 
 	internal RenderResource(NativeHandle handle)
 	{
 		Handle = handle;
+		ownerThread = Environment.CurrentManagedThreadId;
+		importInvocation = ImportExecution.Active ? ImportExecution.Current.Invocation : 0;
 	}
 
 	internal static T? Wrap<T>(NativeHandle handle, Func<NativeHandle, T> factory) where T : RenderResource
@@ -27,9 +32,11 @@ public abstract class RenderResource : IEquatable<RenderResource>
 		return result;
 	}
 
-	public bool IsValid => EngineApi.ResourceValid(Handle);
+	public virtual bool IsValid => ownerThread == Environment.CurrentManagedThreadId &&
+		(importInvocation == 0 || (ImportExecution.Active && ImportExecution.Current.Invocation == importInvocation)) &&
+		EngineApi.ResourceValid(Handle);
 
-	public bool Equals(RenderResource? other) => other is not null && Handle.Equals(other.Handle);
+	public virtual bool Equals(RenderResource? other) => other is not null && Handle.Equals(other.Handle);
 
 	public override bool Equals(object? obj) => obj is RenderResource other && Equals(other);
 

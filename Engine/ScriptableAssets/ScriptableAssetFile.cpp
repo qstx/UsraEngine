@@ -210,6 +210,21 @@ Result<ScriptableAsset> CreateScriptableAssetWithDefaults(ResourceId metadataGui
 			                                       {"ElementKind", ToStdString(field.elementKind)},
 			                                       {"TypeName", ToStdString(field.typeName)},
 			                                       {"ElementTypeName", ToStdString(field.elementTypeName)}};
+			if (field.kind == "Enumeration" || field.elementKind == "Enumeration")
+			{
+				auto& schema = fieldTypes[ToStdString(field.name)];
+				schema["EnumValues"] = nlohmann::json::array();
+				schema["EnumNumericValues"] = nlohmann::json::array();
+				schema["EnumUnderlyingType"] = ToStdString(field.enumUnderlyingType);
+				for (const auto& name : field.enumValues)
+				{
+					schema["EnumValues"].push_back(ToStdString(name));
+				}
+				for (const auto& value : field.enumNumericValuesJson)
+				{
+					schema["EnumNumericValues"].push_back(nlohmann::json::parse(ToStdString(value)));
+				}
+			}
 		}
 	}
 	catch (const std::exception& error)
@@ -251,7 +266,7 @@ Result<ScriptableAssetGraph> LoadScriptableAssetGraph(ResourceSession& resources
 	Vector<AssetReference> pending;
 	const auto enqueue = [&](AssetReference reference) -> Result<void>
 	{
-		if (!reference.guid || !reference.localFileId)
+		if (!reference.guid || (!reference.localFileId && (!pending.empty() || reference.guid != root.guid)))
 		{
 			return Result<void>::Failure("ScriptableAsset root/dependency identity is empty");
 		}
@@ -297,10 +312,25 @@ Result<ScriptableAssetGraph> LoadScriptableAssetGraph(ResourceSession& resources
 		{
 			return Result<ScriptableAssetGraph>::Failure(asset.error + " at " + path.value.ToString());
 		}
-		if (asset.value.SourceGuid() != reference.guid || asset.value.LocalFileId() != reference.localFileId)
+		if (asset.value.SourceGuid() != reference.guid ||
+		    (reference.localFileId && asset.value.LocalFileId() != reference.localFileId))
 		{
 			return Result<ScriptableAssetGraph>::Failure(
 			    "ScriptableAsset artifact identity does not match its catalog reference");
+		}
+		if (!reference.localFileId)
+		{
+			const AssetReference canonical{reference.guid, asset.value.LocalFileId()};
+			visited.erase(reference.guid.ToString() + ":0");
+			const String key = canonical.guid.ToString() + ":" + ToUrsaString(std::to_string(canonical.localFileId));
+			if (!visited.insert(key).second)
+			{
+				continue;
+			}
+			if (graph.assets.empty())
+			{
+				graph.root = canonical;
+			}
 		}
 		Vector<AssetReference> dependencies;
 		valid = References(asset.value.Payload(), dependencies);

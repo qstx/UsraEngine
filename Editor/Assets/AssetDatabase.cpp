@@ -1,4 +1,5 @@
 #include <Assets/AssetDatabase.hpp>
+#include <Assets/AssetImportRules.hpp>
 
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceFile.hpp>
@@ -19,7 +20,8 @@ Vector<ImportedArtifactRecord> AssetDatabase::ImportedArtifacts() const
 		{
 			for (const auto& artifact : cached->artifacts)
 			{
-				records.push_back({entry.second.metadata.guid, artifact.localFileId, artifact.kind, artifact.path});
+				records.push_back({entry.second.metadata.guid, artifact.localFileId, artifact.kind, artifact.path,
+				                   artifact.localFileId == cached->mainObjectLocalFileId});
 			}
 		}
 	}
@@ -29,7 +31,7 @@ Vector<ImportedArtifactRecord> AssetDatabase::ImportedArtifacts() const
 namespace
 {
 using Json = nlohmann::json;
-constexpr Ursa::UInt32 importCacheVersion = 2;
+constexpr Ursa::UInt32 importCacheVersion = 3;
 
 Vector<Ursa::UInt8> BytesOf(const std::string& text)
 {
@@ -128,6 +130,11 @@ Result<AssetMetadata> DecodeMetadata(const String& text, const VirtualPath& side
 				                                      sidecar.ToString());
 			}
 			metadata.importSettings = document["settings"];
+		}
+		if (metadata.importer.compare(0, 7, "script:") == 0 &&
+		    (!ImportScriptType::FromIdentity(metadata.importer) || !metadata.importerVersion))
+		{
+			return Result<AssetMetadata>::Failure("Invalid script importer identity/version at " + sidecar.ToString());
 		}
 		if (document.contains("scriptTypes"))
 		{
@@ -288,6 +295,10 @@ Result<void> AssetDatabase::LoadCache()
 	cacheLoaded = true;
 	importsByKey.clear();
 	selectedImports.clear();
+	if (!capturingCandidates)
+	{
+		candidatePublications.clear();
+	}
 	if (!filesystem.IsMounted(editorLibraryScheme))
 	{
 		return {};
@@ -324,6 +335,7 @@ Result<void> AssetDatabase::LoadCache()
 			    !entry["importerVersion"].is_number_unsigned() || !entry.contains("target") ||
 			    !entry["target"].is_string() || !entry.contains("settings") || !entry["settings"].is_object() ||
 			    !entry.contains("fingerprint") || !entry["fingerprint"].is_string() ||
+			    !entry.contains("mainObjectLocalFileId") || !entry["mainObjectLocalFileId"].is_number_unsigned() ||
 			    !entry.contains("dependencies") || !entry["dependencies"].is_array() || !entry.contains("artifacts") ||
 			    !entry["artifacts"].is_array())
 			{
@@ -340,6 +352,7 @@ Result<void> AssetDatabase::LoadCache()
 			cached.target = ToUrsaString(entry["target"].get<std::string>());
 			cached.settings = entry["settings"];
 			cached.fingerprint = ToUrsaString(entry["fingerprint"].get<std::string>());
+			cached.mainObjectLocalFileId = entry["mainObjectLocalFileId"].get<UInt64>();
 			bool valid = true;
 			for (const Json& dependency : entry["dependencies"])
 			{
@@ -371,13 +384,23 @@ Result<void> AssetDatabase::LoadCache()
 					valid = false;
 					break;
 				}
-				cached.artifacts.push_back({artifact["localFileId"].get<Ursa::UInt64>(),
-				                            ToUrsaString(artifact["kind"].get<std::string>()), std::move(path.value),
-				                            ToUrsaString(artifact.value("contentFingerprint", std::string{})),
-				                            artifact.value("size", Ursa::UInt64{0})});
+				if (!artifact.contains("outputKey") || !artifact["outputKey"].is_string())
+				{
+					valid = false;
+					break;
+				}
+				cached.artifacts.push_back(
+				    {artifact["localFileId"].get<Ursa::UInt64>(), ToUrsaString(artifact["kind"].get<std::string>()),
+				     std::move(path.value), ToUrsaString(artifact.value("contentFingerprint", std::string{})),
+				     artifact.value("size", Ursa::UInt64{0}), ToUrsaString(artifact["outputKey"].get<std::string>())});
 			}
 			if (valid && !cached.artifacts.empty())
 			{
+				if (std::none_of(cached.artifacts.begin(), cached.artifacts.end(), [&](const auto& artifact)
+				                 { return artifact.localFileId == cached.mainObjectLocalFileId; }))
+				{
+					continue;
+				}
 				const String key = guid.value.ToString() + ":" + cached.target;
 				if (entry.value("selected", false))
 				{
@@ -419,6 +442,7 @@ Result<void> AssetDatabase::SaveCache(const Map<String, CachedImport>& imports) 
 			entry["target"] = ToStdString(item.second.target);
 			entry["settings"] = item.second.settings;
 			entry["fingerprint"] = ToStdString(item.second.fingerprint);
+			entry["mainObjectLocalFileId"] = item.second.mainObjectLocalFileId;
 			entry["dependencies"] = Json::array();
 			for (const VirtualPath& dependency : item.second.dependencies)
 			{
@@ -432,6 +456,7 @@ Result<void> AssetDatabase::SaveCache(const Map<String, CachedImport>& imports) 
 				                              {"path", ToStdString(artifact.path.ToString())},
 				                              {"contentFingerprint", ToStdString(artifact.contentFingerprint)},
 				                              {"size", artifact.size}});
+				entry["artifacts"].back()["outputKey"] = ToStdString(artifact.outputKey);
 			}
 			document["imports"].push_back(std::move(entry));
 		}
@@ -652,7 +677,8 @@ Result<void> AssetDatabase::UpdateScriptIdentities(const ScriptSourceAsset& sour
 Result<void> AssetDatabase::SetImporterSettings(const VirtualPath& path, const String& importer,
                                                 Ursa::UInt32 importerVersion, const nlohmann::json& settings)
 {
-	if (importer.empty() || !settings.is_object())
+	if (importer.empty() || !importerVersion || !settings.is_object() ||
+	    (importer.compare(0, 7, "script:") == 0 && !ImportScriptType::FromIdentity(importer)))
 	{
 		return Result<void>::Failure("Importer identity and settings object are required");
 	}
@@ -693,6 +719,13 @@ Result<void> AssetDatabase::SetImporterSettings(const VirtualPath& path, const S
 	return {};
 }
 
+Result<VirtualPath> AssetDatabase::SourcePath(ResourceId guid) const
+{
+	const auto source = pathsByGuid.find(guid.ToString());
+	return source == pathsByGuid.end() ? Result<VirtualPath>::Failure("Missing asset GUID " + guid.ToString())
+	                                   : VirtualPath::Parse(source->second);
+}
+
 Result<VirtualPath> AssetDatabase::Resolve(ResourceId guid, Ursa::UInt64 localFileId) const
 {
 	const String key = guid.ToString();
@@ -706,9 +739,9 @@ Result<VirtualPath> AssetDatabase::Resolve(ResourceId guid, Ursa::UInt64 localFi
 		const auto* imported = FindImport(key);
 		if (imported)
 		{
-			const auto rootArtifact =
-			    std::find_if(imported->artifacts.begin(), imported->artifacts.end(),
-			                 [](const ImportedArtifactLocation& item) { return item.localFileId == 0; });
+			const auto rootArtifact = std::find_if(imported->artifacts.begin(), imported->artifacts.end(),
+			                                       [&](const ImportedArtifactLocation& item)
+			                                       { return item.localFileId == imported->mainObjectLocalFileId; });
 			if (rootArtifact != imported->artifacts.end())
 			{
 				return Result<VirtualPath>::Success(rootArtifact->path);
@@ -730,6 +763,35 @@ Result<VirtualPath> AssetDatabase::Resolve(ResourceId guid, Ursa::UInt64 localFi
 		                                    ToUrsaString(std::to_string(localFileId)));
 	}
 	return Result<VirtualPath>::Success(artifact->path);
+}
+
+Result<ImportedArtifactLocation> AssetDatabase::ResolveImportedArtifact(ResourceId guid, UInt64 localFileId) const
+{
+	const auto* cached = FindImport(guid.ToString());
+	if (!cached)
+	{
+		return Result<ImportedArtifactLocation>::Failure("Asset has no completed import: " + guid.ToString());
+	}
+	const UInt64 selected = localFileId ? localFileId : cached->mainObjectLocalFileId;
+	const auto artifact = std::find_if(cached->artifacts.begin(), cached->artifacts.end(),
+	                                   [&](const auto& value) { return value.localFileId == selected; });
+	if (artifact == cached->artifacts.end())
+	{
+		return Result<ImportedArtifactLocation>::Failure("Completed import has no requested output: " +
+		                                                 guid.ToString());
+	}
+	const auto bytes = filesystem.Read(artifact->path);
+	FingerprintBuilder fingerprint;
+	if (bytes)
+	{
+		fingerprint.Add(bytes.value);
+	}
+	if (!bytes || bytes.value.size() != artifact->size || fingerprint.ToString() != artifact->contentFingerprint)
+	{
+		return Result<ImportedArtifactLocation>::Failure("Completed import output is missing or corrupt: " +
+		                                                 artifact->path.ToString());
+	}
+	return Result<ImportedArtifactLocation>::Success(*artifact);
 }
 
 Result<void> AssetDatabase::ReloadImports()
@@ -931,6 +993,9 @@ Result<ImportCacheStatus> AssetDatabase::CheckImport(const VirtualPath& source, 
 	ImportCacheStatus status;
 	status.fingerprint = fingerprint.value;
 	status.settings = settings;
+	status.importer = importer;
+	status.importerVersion = importerVersion;
+	status.target = target;
 	const String guid = asset->second.metadata.guid.ToString();
 	const String key = guid + ":" + target;
 	const auto cached = importsByKey.find(key);
@@ -939,6 +1004,7 @@ Result<ImportCacheStatus> AssetDatabase::CheckImport(const VirtualPath& source, 
 		return Result<ImportCacheStatus>::Success(std::move(status));
 	}
 	status.dependencies = cached->second.dependencies;
+	status.mainObjectLocalFileId = cached->second.mainObjectLocalFileId;
 	if (cached->second.fingerprint != fingerprint.value)
 	{
 		return Result<ImportCacheStatus>::Success(std::move(status));
@@ -1030,7 +1096,8 @@ Result<Vector<ImportedArtifactRecord>> AssetDatabase::CurrentImportedArtifacts()
 		}
 		for (const ImportedArtifactLocation& artifact : current.value.artifacts)
 		{
-			result.push_back({asset.metadata.guid, artifact.localFileId, artifact.kind, artifact.path});
+			result.push_back({asset.metadata.guid, artifact.localFileId, artifact.kind, artifact.path,
+			                  artifact.localFileId == current.value.mainObjectLocalFileId});
 		}
 	}
 	std::sort(result.begin(), result.end(),
@@ -1048,7 +1115,7 @@ Result<Vector<ImportedArtifactRecord>> AssetDatabase::CurrentImportedArtifacts()
 Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const String& importer,
                                           Ursa::UInt32 importerVersion, const String& target,
                                           const nlohmann::json& settings, const Vector<VirtualPath>& dependencies,
-                                          const Vector<ImportedArtifact>& artifacts)
+                                          const Vector<ImportedArtifact>& artifacts, UInt64 mainObjectLocalFileId)
 {
 	if (!filesystem.IsMounted(editorLibraryScheme))
 	{
@@ -1063,16 +1130,8 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 	{
 		return Result<void>::Failure("Importer produced no artifacts for " + source.ToString());
 	}
-	auto status = CheckImport(source, importer, importerVersion, target, settings, dependencies);
-	if (!status)
-	{
-		return Result<void>::Failure(status.error);
-	}
-	if (status.value.upToDate)
-	{
-		return {};
-	}
 	Map<String, bool> localFileIds;
+	Set<String> outputKeys;
 	for (const ImportedArtifact& artifact : artifacts)
 	{
 		if (artifact.kind.empty())
@@ -1080,11 +1139,56 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 			return Result<void>::Failure("Imported artifacts need a kind at " + source.ToString());
 		}
 		const String key = ToUrsaString(std::to_string(artifact.localFileId));
+		if (!artifact.outputKey.empty())
+		{
+			auto expected = StableImportObjectId(importer, artifact.outputKey);
+			if (!expected || expected.value != artifact.localFileId || !outputKeys.insert(artifact.outputKey).second)
+			{
+				return Result<void>::Failure("Invalid or duplicate imported object key " + artifact.outputKey + " at " +
+				                             source.ToString());
+			}
+		}
 		if (!localFileIds.emplace(key, true).second)
 		{
 			return Result<void>::Failure("Importer produced a duplicate local file ID " + key + " at " +
 			                             source.ToString());
 		}
+	}
+	if (localFileIds.find(ToUrsaString(std::to_string(mainObjectLocalFileId))) == localFileIds.end())
+	{
+		return Result<void>::Failure("Imported main object is not present at " + source.ToString());
+	}
+	auto status = CheckImport(source, importer, importerVersion, target, settings, dependencies);
+	if (!status)
+	{
+		return Result<void>::Failure(status.error);
+	}
+	const auto sameOutputs = [&]
+	{
+		if (!status.value.upToDate || status.value.mainObjectLocalFileId != mainObjectLocalFileId ||
+		    status.value.artifacts.size() != artifacts.size())
+		{
+			return false;
+		}
+		for (const auto& output : artifacts)
+		{
+			const auto previous =
+			    std::find_if(status.value.artifacts.begin(), status.value.artifacts.end(),
+			                 [&](const auto& item) { return item.localFileId == output.localFileId; });
+			FingerprintBuilder content;
+			content.Add(output.bytes);
+			if (previous == status.value.artifacts.end() || previous->kind != output.kind ||
+			    previous->outputKey != output.outputKey || previous->size != output.bytes.size() ||
+			    previous->contentFingerprint != content.ToString())
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	if (sameOutputs())
+	{
+		return {};
 	}
 
 	CachedImport candidate;
@@ -1094,9 +1198,12 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 	candidate.settings = settings;
 	candidate.fingerprint = status.value.fingerprint;
 	candidate.dependencies = dependencies;
+	candidate.mainObjectLocalFileId = mainObjectLocalFileId;
 	Vector<VirtualPath> newlyWritten;
 	for (const ImportedArtifact& artifact : artifacts)
 	{
+		FingerprintBuilder content;
+		content.Add(artifact.bytes);
 		const char* extension = ".bin";
 		if (artifact.kind == "Mesh")
 		{
@@ -1106,11 +1213,11 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 		{
 			extension = ".ursatex";
 		}
-		else if (artifact.localFileId == 0 && artifact.kind == "Shader")
+		else if (artifact.kind == "Shader")
 		{
 			extension = ".ursashaderasset";
 		}
-		else if (artifact.localFileId == 0 && artifact.kind == "Model")
+		else if (artifact.kind == "Model")
 		{
 			extension = ".ursamodel";
 		}
@@ -1127,7 +1234,8 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 			extension = ".ursaprefab";
 		}
 		const String relative = String("Artifacts/") + candidate.fingerprint + "/" +
-		                        ToUrsaString(std::to_string(artifact.localFileId)) + extension;
+		                        ToUrsaString(std::to_string(artifact.localFileId)) + "-" + content.ToString() +
+		                        extension;
 		auto artifactPath = VirtualPath::Parse(String(editorLibraryScheme) + ":" + relative);
 		if (!artifactPath)
 		{
@@ -1164,10 +1272,9 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 			}
 			newlyWritten.push_back(artifactPath.value);
 		}
-		FingerprintBuilder content;
-		content.Add(artifact.bytes);
 		candidate.artifacts.push_back({artifact.localFileId, artifact.kind, std::move(artifactPath.value),
-		                               content.ToString(), static_cast<Ursa::UInt64>(artifact.bytes.size())});
+		                               content.ToString(), static_cast<Ursa::UInt64>(artifact.bytes.size()),
+		                               artifact.outputKey});
 	}
 
 	const String guid = asset->second.metadata.guid.ToString();
@@ -1187,6 +1294,139 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 		return saved;
 	}
 	importsByKey = std::move(nextImports);
+	if (capturingCandidates)
+	{
+		candidatePublications.insert(key);
+	}
+	++revision;
+	return {};
+}
+
+void AssetDatabase::BeginCandidateCapture()
+{
+	capturingCandidates = true;
+	candidatePublications.clear();
+}
+
+Result<void> AssetDatabase::PublishCandidates(const AssetDatabase& candidates)
+{
+	if (&candidates == this || sourceScheme != candidates.sourceScheme || !candidates.capturingCandidates)
+	{
+		return Result<void>::Failure(
+		    "Import publication requires a separate candidate database for the same source scheme");
+	}
+	if (candidates.candidatePublications.empty())
+	{
+		return {};
+	}
+	Map<String, CachedImport> nextImports = importsByKey;
+	auto nextSelections = selectedImports;
+	for (const auto& key : candidates.candidatePublications)
+	{
+		const auto entry = candidates.importsByKey.find(key);
+		auto guid = ResourceId::Parse(key.substr(0, key.find(':')));
+		if (entry == candidates.importsByKey.end() || !guid)
+		{
+			return Result<void>::Failure("Candidate import is missing its source identity");
+		}
+		auto source = SourcePath(guid.value);
+		if (!source)
+		{
+			return Result<void>::Failure(source.error);
+		}
+		const auto& candidate = entry->second;
+		auto current = Fingerprint(source.value, candidate.importer, candidate.importerVersion, candidate.target,
+		                           candidate.settings, candidate.dependencies);
+		if (!current || current.value != candidate.fingerprint)
+		{
+			return Result<void>::Failure("Candidate dependency inputs changed before publication: " +
+			                             source.value.ToString());
+		}
+		nextImports[key] = candidate;
+		const auto selection = candidates.selectedImports.find(guid.value.ToString());
+		if (selection != candidates.selectedImports.end())
+		{
+			nextSelections[selection->first] = selection->second;
+		}
+	}
+
+	struct StagedFiles
+	{
+		VirtualFileSystem& files;
+		Vector<VirtualPath> paths;
+		bool committed = false;
+
+		~StagedFiles()
+		{
+			if (!committed)
+			{
+				for (const auto& path : paths)
+				{
+					files.Remove(path);
+				}
+			}
+		}
+	};
+
+	StagedFiles staged{filesystem, {}, false};
+	for (const auto& key : candidates.candidatePublications)
+	{
+		for (const auto& artifact : candidates.importsByKey.at(key).artifacts)
+		{
+			if (artifact.path.scheme != editorLibraryScheme)
+			{
+				return Result<void>::Failure("Candidate artifact is outside Library");
+			}
+			auto bytes = candidates.filesystem.Read(artifact.path);
+			FingerprintBuilder content;
+			if (bytes)
+			{
+				content.Add(bytes.value);
+			}
+			if (!bytes || bytes.value.size() != artifact.size || content.ToString() != artifact.contentFingerprint)
+			{
+				return Result<void>::Failure("Candidate artifact changed before publication: " +
+				                             artifact.path.ToString());
+			}
+			auto exists = filesystem.Exists(artifact.path);
+			if (!exists)
+			{
+				return Result<void>::Failure(exists.error);
+			}
+			if (exists.value)
+			{
+				auto previous = filesystem.Read(artifact.path);
+				if (previous && previous.value == bytes.value)
+				{
+					continue;
+				}
+			}
+			auto written = filesystem.WriteAtomic(artifact.path, bytes.value);
+			if (!written)
+			{
+				return written;
+			}
+			if (!exists.value)
+			{
+				staged.paths.push_back(artifact.path);
+			}
+		}
+	}
+	const auto oldSelections = selectedImports;
+	selectedImports = std::move(nextSelections);
+	auto saved = SaveCache(nextImports);
+	if (!saved)
+	{
+		selectedImports = oldSelections;
+		return saved;
+	}
+	importsByKey = std::move(nextImports);
+	if (capturingCandidates)
+	{
+		candidatePublications.insert(candidates.candidatePublications.begin(), candidates.candidatePublications.end());
+	}
+	++revision;
+	staged.committed = true;
 	return {};
 }
 

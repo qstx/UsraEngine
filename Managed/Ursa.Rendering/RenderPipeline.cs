@@ -64,8 +64,10 @@ public static class RenderPipelineManager
 		internal PipelineState(ulong session) => this.session = session;
 	}
 
-	private static readonly Dictionary<ulong, PipelineState> states = new() { [0] = new PipelineState(0) };
-	private static PipelineState currentState = states[0];
+	[ThreadStatic] private static Dictionary<ulong, PipelineState>? ownerStates;
+	[ThreadStatic] private static PipelineState? ownerCurrentState;
+	private static Dictionary<ulong, PipelineState> states => ownerStates ??= new() { [0] = new PipelineState(0) };
+	private static PipelineState currentState { get => ownerCurrentState ??= states[0]; set => ownerCurrentState = value; }
 	private static RenderPipelineAsset? activeAsset { get => currentState.activeAsset; set => currentState.activeAsset = value; }
 	private static RenderPipeline? activePipeline { get => currentState.activePipeline; set => currentState.activePipeline = value; }
 	private static RenderPipelineAsset? pendingAsset { get => currentState.pendingAsset; set => currentState.pendingAsset = value; }
@@ -136,6 +138,7 @@ public static class RenderPipelineManager
 
 	public static void SetPipelineAsset(RenderPipelineAsset? candidate)
 	{
+		if (ImportExecution.Active) throw new InvalidOperationException("Import callbacks cannot change the render pipeline.");
 		ScriptableObjectRegistry.RequireThread();
 		candidate?.RequireValid();
 		pendingAsset = candidate;
@@ -144,6 +147,7 @@ public static class RenderPipelineManager
 
 	internal static void ApplyPendingChanges()
 	{
+		if (ImportExecution.Active) throw new InvalidOperationException("Import callbacks cannot create render pipelines.");
 		ScriptableObjectRegistry.RequireThread();
 		if (rendering) throw new InvalidOperationException("Pipeline changes require a render boundary.");
 		RenderPipelineAsset? candidate = hasPendingSelection ? pendingAsset : activeAsset;
@@ -180,6 +184,7 @@ public static class RenderPipelineManager
 
 	public static void Render(List<Ursa.Rendering.Camera> cameras, float aspect)
 	{
+		if (ImportExecution.Active) throw new InvalidOperationException("Import callbacks cannot render.");
 		ArgumentNullException.ThrowIfNull(cameras);
 		ApplyPendingChanges();
 		var context = new ScriptableRenderContext(aspect);
@@ -246,6 +251,7 @@ public static class RenderPipelineManager
 
 	public static void Reset()
 	{
+		if (ImportExecution.Active) throw new InvalidOperationException("Import callbacks cannot reset render pipelines.");
 		ScriptableObjectRegistry.RequireThread();
 		if (rendering) throw new InvalidOperationException("Cannot reset a pipeline inside its render callback.");
 		RenderPipeline? previous = activePipeline;

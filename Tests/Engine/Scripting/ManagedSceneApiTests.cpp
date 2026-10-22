@@ -106,6 +106,48 @@ W::Value_Ursa_Rendering_RenderTargetValue Target(const Handle& handle)
 	return value;
 }
 
+void RunDetached()
+{
+	Scene privateScene;
+	auto root = GameObject::Create("Prefab root");
+	auto camera = Take(root->AddComponent<CameraComponent>());
+	ManagedSceneApi scope(privateScene);
+	scope.SetDetachedRoots({root});
+	const auto rootHandle = B::WriteManagedHandle<Handle>(Take(scope.Register(root)));
+	const auto cameraHandle = B::WriteManagedHandle<Handle>(Take(scope.RegisterComponent(camera)));
+	Expect(privateScene.RootGameObjects().empty(), "Exposing a Prefab inserted it into a Scene");
+	const auto child = Create(scope.Token(), "New prefab child");
+	Complete(InvokeVoid(R::NativeRuntimeBindings_SetParent, scope.Token(), &child, &rootHandle));
+	const W::Value_Ursa_LocalTransformValue transform{{1, 2, 3}, {0, 0, 0, 1}, {1, 1, 1}};
+	Complete(InvokeVoid(R::NativeRuntimeBindings_SetLocalTransform, scope.Token(), &child, &transform));
+	Expect(root->Children().size() == 1 && Take(root->Children()[0]->GetLocalTransform()).position.x == 1 &&
+	           privateScene.RootGameObjects().empty(),
+	       "Managed Prefab edits escaped their detached graph");
+	// Keep the identity bytes alive while invoking the generated binding.
+	const String stableId = root->Children()[0]->Id().ToString();
+	const auto stableView = StringView(stableId);
+	Expect(Same(child, Value(Invoke<Handle>(R::NativeRuntimeBindings_ResolveGameObjectPersistentId, scope.Token(),
+	                                        &stableView))),
+	       "Detached Prefab IDs did not resolve");
+	const String cameraId = camera->PersistentId().ToString();
+	const auto cameraIdView = StringView(cameraId);
+	Expect(Same(cameraHandle, Value(Invoke<Handle>(R::NativeRuntimeBindings_ResolveComponentPersistentId, scope.Token(),
+	                                               &cameraIdView))),
+	       "Detached component IDs did not resolve");
+	Complete(InvokeVoid(R::NativeRuntimeBindings_SetComponentEnabled, scope.Token(), &cameraHandle, UInt32{0}));
+	Expect(!camera->IsEnabled() &&
+	           !Value(Invoke<UInt32>(R::NativeRuntimeBindings_IsComponentActive, scope.Token(), &cameraHandle)),
+	       "Detached component state was lost");
+	const auto outside = GameObject::Create("Not exposed");
+	Expect(!scope.Register(outside), "Managed Prefab scope accepted another asset's object");
+	Complete(InvokeVoid(R::NativeRuntimeBindings_RemoveComponent, scope.Token(), &cameraHandle));
+	Expect(!Invoke<B::Utf8View>(R::NativeRuntimeBindings_GetComponentType, scope.Token(), &cameraHandle),
+	       "Removed detached component handle was still usable");
+	Complete(InvokeVoid(R::NativeRuntimeBindings_DestroyGameObject, scope.Token(), &child));
+	Expect(root->Children().empty() && !Invoke<B::Utf8View>(R::NativeRuntimeBindings_GetName, scope.Token(), &child),
+	       "Destroyed detached object handle was still usable");
+}
+
 void Run()
 {
 	VirtualFileSystem resourceFiles;
@@ -497,6 +539,7 @@ int main()
 {
 	try
 	{
+		RunDetached();
 		Run();
 		return 0;
 	}

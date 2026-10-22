@@ -10,7 +10,7 @@ Result<RuntimeServices::LocalValue> RuntimeServices::GetLocalTransform(BindingCa
 {
 	auto& api = SceneApi(call);
 	const auto transform =
-	    TakeBindingResult(api.scene.GetLocalTransform(TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))));
+	    TakeBindingResult(TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->GetLocalTransform());
 	LocalValue value;
 	value.F_Position = WriteVector3<VectorValue>(transform.position);
 	value.F_Rotation = WriteQuaternion<Wire::Value_Ursa_Quaternion>(transform.rotation);
@@ -21,11 +21,12 @@ Result<RuntimeServices::LocalValue> RuntimeServices::GetLocalTransform(BindingCa
 Result<void> RuntimeServices::SetLocalTransform(BindingCall& call, const Handle& handle, const LocalValue& value)
 {
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
 	LocalTransform transform;
 	transform.position = ReadVector3(value.F_Position);
 	transform.rotation = ReadQuaternion(value.F_Rotation);
 	transform.scale = ReadVector3(value.F_Scale);
-	return api.scene.SetLocalTransform(TakeBindingResult(api.Resolve(ReadManagedHandle(handle))), transform);
+	return TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->SetLocalTransform(transform);
 }
 
 Result<RuntimeServices::VectorValue> RuntimeServices::GetWorldPosition(BindingCall& call, const Handle& handle)
@@ -42,6 +43,7 @@ Result<void> RuntimeServices::SetWorldPosition(BindingCall& call, const Handle& 
 		return Result<void>::Failure("World position must be finite");
 	}
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
 	const auto object = TakeBindingResult(api.Resolve(ReadManagedHandle(handle)));
 	auto transform = TakeBindingResult(object->GetLocalTransform());
 	Vec3 position = ReadVector3(value);
@@ -80,6 +82,7 @@ Result<void> RuntimeServices::SetCameraProjection(BindingCall& call, const Handl
 		return Result<void>::Failure("Camera projection requires radians in (0, pi) and 0 < near < far");
 	}
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
 	auto* target = dynamic_cast<CameraComponent*>(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(camera))));
 	if (!target)
 	{
@@ -119,6 +122,7 @@ Result<void> RuntimeServices::SetCameraRenderingSettings(BindingCall& call, cons
                                                          const CameraSettingsValue& value)
 {
 	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
 	auto* target = dynamic_cast<CameraComponent*>(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(camera))));
 	if (!target)
 	{

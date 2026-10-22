@@ -12,6 +12,15 @@ namespace Ursa::Editor
 {
 class SerializedObject;
 
+struct SerializedTargetAdapter
+{
+	std::function<Result<nlohmann::json>()> capture;
+	// Commits a complete typed payload to the owning draft and returns its canonical snapshot.
+	std::function<Result<nlohmann::json>(const nlohmann::json&)> apply;
+	std::function<Result<void>(const nlohmann::json&, const nlohmann::json&)> validateReference;
+	ResourceSession* resources = nullptr;
+};
+
 class SerializedProperty final
 {
 public:
@@ -40,6 +49,8 @@ private:
 class SerializedObject final
 {
 public:
+	static Result<std::unique_ptr<SerializedObject>> Create(SerializedTargetAdapter adapter);
+
 	static Result<std::unique_ptr<SerializedObject>> Create(Scripting::ScriptBehaviourComponent& target,
 	                                                        ResourceSession* resources = nullptr);
 
@@ -56,6 +67,13 @@ public:
 	Vector<String> PropertyPaths() const;
 
 	Result<void> Apply();
+	Result<bool> ApplyFields(const nlohmann::json& fields);
+	Result<void> ValidateAll() const;
+
+	const nlohmann::json& Snapshot() const
+	{
+		return pendingPayload;
+	}
 
 	bool HasModifiedProperties() const
 	{
@@ -66,7 +84,11 @@ private:
 	friend class SerializedProperty;
 
 	explicit SerializedObject(Component& target, nlohmann::json payload)
-	    : target(target), originalPayload(payload), pendingPayload(std::move(payload))
+	    : target(&target), originalPayload(payload), pendingPayload(std::move(payload))
+	{
+	}
+
+	explicit SerializedObject(nlohmann::json payload) : originalPayload(payload), pendingPayload(std::move(payload))
 	{
 	}
 
@@ -76,7 +98,9 @@ private:
 
 	Result<void> ValidateCandidate(const nlohmann::json& candidate) const;
 
-	Component& target;
+	Component* target = nullptr;
+	std::function<Result<nlohmann::json>(const nlohmann::json&)> adapterApply;
+	std::function<Result<void>(const nlohmann::json&, const nlohmann::json&)> adapterReference;
 	std::function<Result<nlohmann::json>(const nlohmann::json&)> nativeApply;
 	std::function<Result<nlohmann::json>()> captureCurrent;
 	ResourceSession* resources = nullptr;

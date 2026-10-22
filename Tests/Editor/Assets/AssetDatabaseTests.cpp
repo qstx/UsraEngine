@@ -281,7 +281,7 @@ void TestImportCache(const std::filesystem::path& root)
 	const Vector<ImportedArtifact> firstArtifacts{{17, "mesh", Bytes("mesh-v1")},
 	                                              {29, "material", Bytes("material-v1")}};
 	Expect(static_cast<bool>(
-	           database.PublishImport(source, "ursa.Model", 1, "vulkan", settings, dependencies, firstArtifacts)),
+	           database.PublishImport(source, "ursa.Model", 1, "vulkan", settings, dependencies, firstArtifacts, 17)),
 	       "AssetDatabase could not publish a content-addressed import");
 	status = database.CheckImport(source, "ursa.Model", 1, "vulkan", settings, dependencies);
 	Expect(status && status.value.upToDate && status.value.artifacts.size() == 2,
@@ -319,7 +319,7 @@ void TestImportCache(const std::filesystem::path& root)
 	const Vector<ImportedArtifact> updatedArtifacts{{17, "mesh", Bytes("mesh-v2")},
 	                                                {29, "material", Bytes("material-v2")}};
 	Expect(static_cast<bool>(reopened.value->PublishImport(source, "ursa.Model", 1, "vulkan", settings, dependencies,
-	                                                       updatedArtifacts)),
+	                                                       updatedArtifacts, 17)),
 	       "AssetDatabase could not publish artifacts after a dependency change");
 	status = reopened.value->CheckImport(source, "ursa.Model", 2, "vulkan", settings, dependencies);
 	Expect(status && !status.value.upToDate, "Changing the importer version did not invalidate its cache");

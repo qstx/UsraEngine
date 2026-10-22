@@ -400,11 +400,11 @@ Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 	}
 	for (Size i = 0; i < textures.size(); ++i)
 	{
-		if (!textures[i])
+		if (!textures[i] && !textureResourceIds[i])
 		{
 			continue;
 		}
-		if (!writer.Context())
+		if (!writer.Context() && !textureResourceIds[i])
 		{
 			return Result<void>::Failure("Missing texture ID resolver");
 		}

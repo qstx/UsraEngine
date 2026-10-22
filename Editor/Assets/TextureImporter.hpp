@@ -51,6 +51,10 @@ class TextureImporter final
 {
 public:
 	static Result<MaterialTexturePtr> DecodeSourceImage(const VirtualFileSystem& filesystem, const VirtualPath& source);
+	static Result<MaterialTexturePtr> DecodeCandidate(const VirtualFileSystem& filesystem, const VirtualPath& source,
+	                                                  const TextureImportSettings& settings);
+	static Result<MaterialTexturePtr> FinalizeCandidate(const MaterialTexture& candidate,
+	                                                    const TextureImportSettings& settings);
 
 	static Result<TextureImportSettings> Settings(const AssetDatabase& database, const VirtualPath& source);
 

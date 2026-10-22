@@ -1,4 +1,5 @@
 #include <Scripting/Bindings/EditorServices.hpp>
+#include <Assets/AssetPreviewExtension.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -38,6 +39,15 @@ String GuiString(const B::Utf8View& value)
 	return text;
 }
 
+bool Edited(B::BindingCall& call, bool changed)
+{
+	if (changed && EditorServices::Scope(call).source.preview)
+	{
+		EditorServices::Scope(call).source.preview->RequestRepaint();
+	}
+	return changed;
+}
+
 void Finite(Float64 value)
 {
 	if (!std::isfinite(value))
@@ -49,7 +59,12 @@ void Finite(Float64 value)
 
 void EditorServices::RequireGui(B::BindingCall& call)
 {
-	(void)Scope(call);
+	const auto& scope = Scope(call);
+	if (scope.source.preview && !scope.source.preview->GuiAllowed())
+	{
+		throw std::runtime_error(
+		    "Preview layout controls require OnPreviewSettings; image drawing uses the supplied Rect");
+	}
 	if (!ImGui::GetCurrentContext() || !ImGui::GetCurrentContext()->WithinFrameScope)
 	{
 		throw std::runtime_error("GUI controls require an active Editor frame");
@@ -67,7 +82,7 @@ Result<void> EditorServices::Text(B::BindingCall& call, const B::Utf8View& text)
 Result<bool> EditorServices::Button(B::BindingCall& call, const B::Utf8View& label)
 {
 	RequireGui(call);
-	return Result<bool>::Success(ImGui::Button(GuiString(label).c_str()));
+	return Result<bool>::Success(Edited(call, ImGui::Button(GuiString(label).c_str())));
 }
 
 Result<void> EditorServices::SameLine(B::BindingCall& call)
@@ -108,14 +123,14 @@ Result<void> EditorServices::EndGroup(B::BindingCall& call)
 Result<bool> EditorServices::Toggle(B::BindingCall& call, const B::Utf8View& label, bool value)
 {
 	RequireGui(call);
-	ImGui::Checkbox(GuiString(label).c_str(), &value);
+	Edited(call, ImGui::Checkbox(GuiString(label).c_str(), &value));
 	return Result<bool>::Success(value);
 }
 
 Result<Int64> EditorServices::IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value)
 {
 	RequireGui(call);
-	ImGui::InputScalar(GuiString(label).c_str(), ImGuiDataType_S64, &value);
+	Edited(call, ImGui::InputScalar(GuiString(label).c_str(), ImGuiDataType_S64, &value));
 	return Result<Int64>::Success(value);
 }
 
@@ -123,7 +138,7 @@ Result<Float64> EditorServices::FloatField(B::BindingCall& call, const B::Utf8Vi
 {
 	RequireGui(call);
 	Finite(value);
-	ImGui::InputDouble(GuiString(label).c_str(), &value);
+	Edited(call, ImGui::InputDouble(GuiString(label).c_str(), &value));
 	Finite(value);
 	return Result<Float64>::Success(value);
 }
@@ -134,7 +149,7 @@ Result<B::Utf8View> EditorServices::TextField(B::BindingCall& call, const B::Utf
 	const String text = B::ReadString(value);
 	Vector<char> buffer(text.size() + 4096, 0);
 	std::memcpy(buffer.data(), text.data(), text.size());
-	const bool edited = ImGui::InputText(GuiString(label).c_str(), buffer.data(), buffer.size());
+	const bool edited = Edited(call, ImGui::InputText(GuiString(label).c_str(), buffer.data(), buffer.size()));
 	return Result<B::Utf8View>::Success(call.arena.StringValue(edited ? String(buffer.data()) : text));
 }
 
@@ -158,6 +173,7 @@ Result<Int32> EditorServices::Popup(B::BindingCall& call, const B::Utf8View& lab
 			if (ImGui::Selectable(names[index].c_str(), selected == static_cast<Int32>(index)))
 			{
 				selected = static_cast<Int32>(index);
+				Edited(call, true);
 			}
 		}
 	}
@@ -171,7 +187,7 @@ Result<EditorServices::Vector2Value> EditorServices::Vector2Field(B::BindingCall
 	Finite(value.F_X);
 	Finite(value.F_Y);
 	Float32 values[]{value.F_X, value.F_Y};
-	ImGui::DragFloat2(GuiString(label).c_str(), values, 0.05f);
+	Edited(call, ImGui::DragFloat2(GuiString(label).c_str(), values, 0.05f));
 	return Result<Vector2Value>::Success({values[0], values[1]});
 }
 
@@ -183,7 +199,7 @@ Result<EditorServices::Vector3Value> EditorServices::Vector3Field(B::BindingCall
 	Finite(value.F_Y);
 	Finite(value.F_Z);
 	Float32 values[]{value.F_X, value.F_Y, value.F_Z};
-	ImGui::DragFloat3(GuiString(label).c_str(), values, 0.05f);
+	Edited(call, ImGui::DragFloat3(GuiString(label).c_str(), values, 0.05f));
 	return Result<Vector3Value>::Success({values[0], values[1], values[2]});
 }
 
@@ -196,7 +212,7 @@ Result<EditorServices::Vector4Value> EditorServices::Vector4Field(B::BindingCall
 	Finite(value.F_Z);
 	Finite(value.F_W);
 	Float32 values[]{value.F_X, value.F_Y, value.F_Z, value.F_W};
-	ImGui::DragFloat4(GuiString(label).c_str(), values, 0.05f);
+	Edited(call, ImGui::DragFloat4(GuiString(label).c_str(), values, 0.05f));
 	return Result<Vector4Value>::Success({values[0], values[1], values[2], values[3]});
 }
 
@@ -216,7 +232,7 @@ Result<EditorServices::ColorValue> EditorServices::ColorField(B::BindingCall& ca
 	Finite(value.F_B);
 	Finite(value.F_A);
 	Float32 values[]{value.F_R, value.F_G, value.F_B, value.F_A};
-	ImGui::ColorEdit4(GuiString(label).c_str(), values);
+	Edited(call, ImGui::ColorEdit4(GuiString(label).c_str(), values));
 	return Result<ColorValue>::Success({values[0], values[1], values[2], values[3]});
 }
 

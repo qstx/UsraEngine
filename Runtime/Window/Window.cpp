@@ -405,6 +405,11 @@ Ursa::UInt32 Window::FramebufferWidth() const
 	return static_cast<Ursa::UInt32>(w);
 }
 
+bool Window::Minimized() const
+{
+	return glfwGetWindowAttrib(static_cast<GLFWwindow*>(handle), GLFW_ICONIFIED) == GLFW_TRUE;
+}
+
 Ursa::UInt32 Window::FramebufferHeight() const
 {
 	int w = 0, h = 0;

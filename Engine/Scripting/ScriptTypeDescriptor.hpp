@@ -29,7 +29,9 @@ enum class ScriptAssemblyGroup
 enum class ScriptTypeKind
 {
 	Behaviour,
-	ScriptableObject
+	ScriptableObject,
+	ScriptedImporter,
+	AssetPostprocessor
 };
 
 struct ScriptTypeDescriptor

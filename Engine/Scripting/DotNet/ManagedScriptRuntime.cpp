@@ -206,7 +206,11 @@ Result<void> ManagedScriptRuntime::Dispatch(UInt64 instanceToken, BehaviourEvent
 	const FrameContext* previous = sceneApi.SetFrameContext(context           ? context
 	                                                        : hasFrameContext ? &lastFrameContext
 	                                                                          : nullptr);
+	const auto previousOwner = sceneApi.SetLifecycleOwner(
+	    event == BehaviourEvent::OnDisable || event == BehaviourEvent::OnDestroy ? component->GetGameObject()
+	                                                                             : GameObject::Ptr{});
 	const auto result = host.InvokeBehaviour(instanceToken, static_cast<ManagedBehaviourEvent>(event));
+	sceneApi.SetLifecycleOwner(previousOwner);
 	sceneApi.SetFrameContext(previous);
 	return result;
 }

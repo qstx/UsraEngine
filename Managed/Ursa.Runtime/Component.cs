@@ -5,9 +5,20 @@ namespace Ursa;
 
 public abstract class Component
 {
+	[ThreadStatic] internal static Func<NativeHandle, Type, Component?>? EditorFactory;
 	private GameObject? gameObject;
 	private NativeHandle handle;
 	private bool nativeBound;
+	private Action? editorValidation;
+	internal void RequireSerializedAccess() => editorValidation?.Invoke();
+	internal static Component CreateEditorProxy(Type type, NativeHandle handle, Action requireValid)
+	{
+		if (Activator.CreateInstance(type) is not Component component)
+			throw new InvalidOperationException("Cannot construct the typed Editor component target.");
+		component.AttachNative(GameObject.FromHandle(EngineApi.GetComponentOwner(handle)), handle);
+		component.editorValidation = requireValid;
+		return component;
+	}
 
 	public GameObject GameObject => gameObject ?? throw new InvalidOperationException("Component is not attached.");
 
@@ -75,7 +86,7 @@ public abstract class Component
 		Type? actualType = FindConcreteType(typeId);
 		if (actualType == null || !expectedType.IsAssignableFrom(actualType)) return null;
 		if (typeof(Behaviour).IsAssignableFrom(actualType))
-			return BehaviourRegistry.FindByNativeHandle(componentHandle, actualType);
+			return EditorFactory?.Invoke(componentHandle, actualType) ?? BehaviourRegistry.FindByNativeHandle(componentHandle, actualType);
 		NativeHandle ownerHandle = EngineApi.GetComponentOwner(componentHandle);
 		if (Activator.CreateInstance(actualType) is not Component component)
 			throw new InvalidOperationException($"Could not construct Component wrapper '{actualType.FullName}'.");
@@ -120,6 +131,7 @@ public abstract class Component
 
 	private NativeHandle RequireNativeHandle()
 	{
+		editorValidation?.Invoke();
 		if (!nativeBound)
 		{
 			throw new InvalidOperationException("This Component is not attached to a native Scene instance.");

@@ -23,6 +23,7 @@ class ProjectBrowserPanel final
 public:
 	void Reset()
 	{
+		expandedAssets.clear();
 		searchText.fill(0);
 		destinationPath.fill(0);
 		folderName.fill(0);
@@ -43,6 +44,7 @@ private:
 	Result<void> RenameSelected(const ProjectBrowserModel& model, EditorSelectionContext& selection,
 	                            const ProjectBrowserActions& actions);
 
+	Map<String, bool> expandedAssets;
 	Ursa::Array<char, 256> searchText{};
 	Ursa::Array<char, 256> destinationPath{};
 	Ursa::Array<char, 128> folderName{};

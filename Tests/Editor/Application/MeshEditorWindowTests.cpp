@@ -52,7 +52,8 @@ public:
 protected:
 	Result<void> OnStart() override
 	{
-		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(100);
+		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(300);
+		std::cout << "Mesh Editor startup complete\n" << std::flush;
 		return {};
 	}
 
@@ -60,6 +61,11 @@ protected:
 	{
 		try
 		{
+			if (reportedPhase != phase)
+			{
+				reportedPhase = phase;
+				std::cout << "Mesh Editor phase " << phase << '\n' << std::flush;
+			}
 			if (std::chrono::steady_clock::now() > deadline)
 			{
 				throw std::runtime_error("Mesh Editor workflow timed out at phase " + std::to_string(phase) + ": " +
@@ -87,7 +93,7 @@ protected:
 				auto camera = Take(cameraObject->AddComponent<CameraComponent>());
 				Done(draft->GetScene().SetActiveCamera(camera->Id()));
 				modelView = Take(ModelImportView::Open(Take(VirtualPath::Parse("prj:Models/Cube.fbx")), {}));
-				Done(modelView->Reimport(*Workspace()->Database(), true));
+				Done(modelView->Reimport(*Workspace()->Database(), Workspace()->Importer(), true));
 				Done(modelView->Instantiate(*draft));
 				owner = Take(
 				    CreatePrimitive(draft->GetScene(), Documents()->Session(), PrimitiveType::Cube, "Mesh workflow"));
@@ -199,7 +205,7 @@ protected:
 		auto drawn = EditorApplication::OnGui();
 		if (drawn && modelView)
 		{
-			drawn = modelView->Draw(*Workspace()->Database(), false);
+			drawn = modelView->Draw(*Workspace()->Database(), Workspace()->Importer(), false);
 		}
 		if (phase == 3 && !RunningScene() && !ScriptWorkPending() && !AssetWorkPending())
 		{
@@ -248,6 +254,7 @@ private:
 	EditorHierarchy hierarchy;
 	std::chrono::steady_clock::time_point deadline;
 	UInt32 phase = 0;
+	UInt32 reportedPhase = UINT32_MAX;
 	UInt32 runs = 0;
 	UInt32 inspectorFrames = 0;
 	bool completed = false;

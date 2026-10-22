@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "ad4100b7d8c7ec6109e96f312b40c80ef839ba5fda51494c05e140a8b32e5c09",
+      "Hash": "552adeae31f9fe90604d004ef447ec04c5243d365bdb4ace65fc23c11bf61ad6",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -16,6 +16,35 @@
       ],
       "Methods": [
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ApplyComponentFields",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "fields",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ApplyImporterSettings",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.ApplyProperties",
           "Direction": "NativeMethod",
           "Return": "bool",
@@ -23,6 +52,21 @@
             {
               "Name": "revision",
               "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ApplyTargetFields",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "fields",
+              "Type": "string",
               "HandleKind": 0,
               "Session": false
             }
@@ -66,6 +110,27 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.BeginPreview",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "utility",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.Button",
           "Direction": "NativeMethod",
           "Return": "bool",
@@ -102,6 +167,29 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.CreatePreviewUtility",
+          "Direction": "NativeMethod",
+          "Return": "ulong",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.DestroyPreviewUtility",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "utility",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.DrawDefaultInspector",
           "Direction": "NativeMethod",
           "Return": "bool",
@@ -117,10 +205,93 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.DrawImporterApplyRevert",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.DrawPreviewPixels",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "width",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "height",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "pixels",
+              "Type": "global::Ursa.Color[]",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "linear",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.DrawPreviewTexture",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 3,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.EndGroup",
           "Direction": "NativeMethod",
           "Return": "void",
           "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.EndPreview",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "utility",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
           "Thread": 0,
           "NativeOnly": false
         },
@@ -154,9 +325,40 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetComponentPayload",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [
+            {
+              "Name": "component",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.GetDocument",
           "Direction": "NativeMethod",
           "Return": "global::Ursa.Editor.EditorDocumentValue?",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetImporterInfo",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.EditorImporterInfo?",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetPreviewInput",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Editor.PreviewInput",
           "Parameters": [],
           "Thread": 0,
           "NativeOnly": false
@@ -198,6 +400,14 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetRuntimeCapability",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.EditorBindingCapability",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.GetScope",
           "Direction": "NativeMethod",
           "Return": "global::Ursa.Editor.EditorScopeValue",
@@ -217,6 +427,30 @@
           "Identity": "Ursa.Editor.NativeEditorBindings.GetTarget",
           "Direction": "NativeMethod",
           "Return": "global::Ursa.Editor.EditorReferenceValue?",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetTargetHandle",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetTargetPayload",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.HasModifiedImporterSettings",
+          "Direction": "NativeMethod",
+          "Return": "bool",
           "Parameters": [],
           "Thread": 0,
           "NativeOnly": false
@@ -335,6 +569,78 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.PreviewDrawMesh",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "utility",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mesh",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 4,
+              "Session": false
+            },
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            },
+            {
+              "Name": "position",
+              "Type": "global::Ursa.Vector3",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "rotation",
+              "Type": "global::Ursa.Quaternion",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "scale",
+              "Type": "global::Ursa.Vector3",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.PreviewInstantiatePrefab",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "utility",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "guid",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "localFileId",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.PropertyField",
           "Direction": "NativeMethod",
           "Return": "void",
@@ -437,6 +743,14 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.RevertImporterSettings",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.SameLine",
           "Direction": "NativeMethod",
           "Return": "void",
@@ -457,6 +771,72 @@
           "Direction": "NativeMethod",
           "Return": "void",
           "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SetPreviewCamera",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "utility",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "camera",
+              "Type": "global::Ursa.Editor.PreviewCamera",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SetPreviewLighting",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "utility",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "ambient",
+              "Type": "global::Ursa.Color",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "ambientIntensity",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "light",
+              "Type": "global::Ursa.Color",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "lightIntensity",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "rotation",
+              "Type": "global::Ursa.Quaternion",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
           "Thread": 0,
           "NativeOnly": false
         },
@@ -618,9 +998,393 @@
       ]
     },
     {
+      "Id": 56953326496644908,
+      "Name": "Import",
+      "Hash": "72fbdd3a70010cce03747c87f11724ce97b7dbd7310a7cb8f839bd84bad2e3fe",
+      "CommandHash": "",
+      "Required": false,
+      "CallScoped": true,
+      "Dependencies": [
+        "Rendering",
+        "Runtime"
+      ],
+      "Methods": [
+        {
+          "Identity": "Ursa.NativeImportBindings.AddObject",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "key",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "reference",
+              "Type": "global::Ursa.ImportReferenceInfo",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.BeginInvocation",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.CreateTexture2D",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "width",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "height",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "linear",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.DependsOnArtifact",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "reference",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.DependsOnSourceAsset",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.EndInvocation",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.GetImporterSettings",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.GetModelSettings",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.ModelImporterSettingsValue",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.GetPostprocessObject",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.GetScope",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.ImportScopeValue",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.GetTexture2DInfo",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Texture2DInfo",
+          "Parameters": [
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.GetTexture2DPixels",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Color[]",
+          "Parameters": [
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.GetTextureSettings",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.TextureImporterSettingsValue",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.LogDiagnostic",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "severity",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "message",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.ReadArtifact",
+          "Direction": "NativeMethod",
+          "Return": "byte[]",
+          "Parameters": [
+            {
+              "Name": "reference",
+              "Type": "global::Ursa.NativeAssetReference",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.ReadSourceAsset",
+          "Direction": "NativeMethod",
+          "Return": "byte[]",
+          "Parameters": [
+            {
+              "Name": "path",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.ReadSourceBytes",
+          "Direction": "NativeMethod",
+          "Return": "byte[]",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.RequireCandidate",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "candidate",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.RequireInvocation",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "generation",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "invocation",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.SetMainObject",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.SetMaterialTexture",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "reference",
+              "Type": "global::Ursa.NativeAssetReference?",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "slot",
+              "Type": "global::Ursa.MaterialTextureSlot",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.SetModelSettings",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "settings",
+              "Type": "global::Ursa.ModelImporterSettingsValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.SetTexture2DPixels",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "pixels",
+              "Type": "global::Ursa.Color[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeImportBindings.SetTextureSettings",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "settings",
+              "Type": "global::Ursa.TextureImporterSettingsValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        }
+      ]
+    },
+    {
       "Id": 14281836054586644981,
       "Name": "ManagedHost",
-      "Hash": "1f0babce59e54db9d556a635d3941ea93f877dac8cf2bf67ff623c8f73b6c46b",
+      "Hash": "1bfa8aaaa223e3b52f97e936f3b1ef7f02848d0edc113a4b99925167716c91df",
       "CommandHash": "",
       "Required": true,
       "CallScoped": false,
@@ -629,6 +1393,60 @@
         "Runtime"
       ],
       "Methods": [
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.AssignImportReferences",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "assignments",
+              "Type": "global::Ursa.ImportReferenceAssignment[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.BeginImportInvocation",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "generation",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "invocation",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "capability",
+              "Type": "global::Ursa.ImportBindingCapability",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
         {
           "Identity": "Ursa.ManagedHost.ManagedHostBindings.BindBehaviour",
           "Direction": "ManagedCallback",
@@ -662,6 +1480,14 @@
               "Session": true
             }
           ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.CloseOwnerEndpoint",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [],
           "Thread": 0,
           "NativeOnly": false
         },
@@ -723,6 +1549,35 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.CreateImportScriptableObject",
+          "Direction": "ManagedCallback",
+          "Return": "ulong",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "typeName",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.CreateImportSession",
+          "Direction": "ManagedCallback",
+          "Return": "ulong",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.ManagedHost.ManagedHostBindings.CreateScriptSession",
           "Direction": "ManagedCallback",
           "Return": "ulong",
@@ -732,6 +1587,21 @@
               "Type": "bool",
               "HandleKind": 0,
               "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.DescribeAssetPostprocessors",
+          "Direction": "ManagedCallback",
+          "Return": "global::Ursa.AssetPostprocessorInfo[]",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
             }
           ],
           "Thread": 0,
@@ -759,6 +1629,33 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.DeserializeImportScriptableObject",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "instance",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "archive",
+              "Type": "global::Ursa.ManagedHost.ImportObjectArchive",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.ManagedHost.ManagedHostBindings.DestroyBehaviour",
           "Direction": "ManagedCallback",
           "Return": "void",
@@ -774,10 +1671,73 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.EndImportInvocation",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "generation",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "invocation",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.GetImportReferences",
+          "Direction": "ManagedCallback",
+          "Return": "global::Ursa.ImportReferenceInfo[]",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.ManagedHost.ManagedHostBindings.InitializeFramework",
           "Direction": "ManagedCallback",
           "Return": "void",
           "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.InvokeAssetPostprocessor",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "identity",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
           "Thread": 0,
           "NativeOnly": false
         },
@@ -822,6 +1782,72 @@
             {
               "Name": "capability",
               "Type": "global::Ursa.EditorBindingCapability",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.InvokeEditorPreview",
+          "Direction": "ManagedCallback",
+          "Return": "global::Ursa.EditorPreviewResult",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "extension",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "instance",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "phase",
+              "Type": "global::Ursa.EditorPreviewPhase",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "capability",
+              "Type": "global::Ursa.EditorBindingCapability",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.InvokeScriptedImporter",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "identity",
+              "Type": "string",
               "HandleKind": 0,
               "Session": false
             }
@@ -917,6 +1943,27 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.PrepareScriptedImporters",
+          "Direction": "ManagedCallback",
+          "Return": "global::Ursa.ScriptedImporterInfo[]",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "nativeExtensions",
+              "Type": "string[]",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.ManagedHost.ManagedHostBindings.RenderScene",
           "Direction": "ManagedCallback",
           "Return": "void",
@@ -959,6 +2006,27 @@
           "Parameters": [
             {
               "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.SerializeImportScriptableObject",
+          "Direction": "ManagedCallback",
+          "Return": "global::Ursa.ManagedHost.ImportObjectArchive",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "instance",
               "Type": "ulong",
               "HandleKind": 0,
               "Session": false
@@ -2034,7 +3102,7 @@
     {
       "Id": 11788884058683052816,
       "Name": "Runtime",
-      "Hash": "11ec22bbe3eae583578c8c39b49806660a2def42af2f4e0bac75c7cfb4229a8a",
+      "Hash": "fd0fe3325559283c0bc0817c338bd10507182dd0833c56ab63f2b56b4bbc7b35",
       "CommandHash": "",
       "Required": true,
       "CallScoped": false,
@@ -3174,6 +4242,36 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.NativeResourceBindings.GetTextureInfo",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Texture2DInfo",
+          "Parameters": [
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 3,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeResourceBindings.GetTexturePixels",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Color[]",
+          "Parameters": [
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 3,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.NativeResourceBindings.IsValid",
           "Direction": "NativeMethod",
           "Return": "bool",
@@ -3395,6 +4493,21 @@
               "Name": "camera",
               "Type": "global::Ursa.NativeHandle",
               "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetChildren",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle[]",
+          "Parameters": [
+            {
+              "Name": "handle",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 1,
               "Session": false
             }
           ],

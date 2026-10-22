@@ -20,6 +20,7 @@ struct AssetImportOptions
 
 struct AssetImportReport
 {
+	std::shared_ptr<const AssetImportRules> rules;
 	RuntimeContentSnapshot snapshot;
 	VirtualFileSystem runtimeFiles;
 	UInt64 importedAssets = 0;

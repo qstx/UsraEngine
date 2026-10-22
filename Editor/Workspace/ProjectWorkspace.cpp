@@ -1,4 +1,6 @@
 #include <Workspace/ProjectWorkspace.hpp>
+#include <Assets/ManagedImportEnvironment.hpp>
+#include <Assets/ManagedImportRequirements.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
 #include <algorithm>
@@ -34,6 +36,101 @@ bool ContainedIn(const std::filesystem::path& root, const std::filesystem::path&
 	return true;
 }
 } // namespace
+
+void ProjectWorkspace::InvalidateManagedImports()
+{
+	if (managedImports)
+	{
+		managedImports->Cancel();
+	}
+}
+
+std::shared_ptr<const AssetImportRules> ProjectWorkspace::ImportRuleDescriptions() const
+{
+	if (managedImports)
+	{
+		return managedImports->Rules();
+	}
+	return importDescriptions ? importDescriptions
+	                          : std::make_shared<const AssetImportRules>(AssetImportRules::Create().value);
+}
+
+Result<Vector<ScriptTypeDescriptor>> ProjectWorkspace::PrepareManagedImports(const String& configuration,
+                                                                             bool buildScripts)
+{
+	const auto refreshed = assetDatabase->Refresh();
+	if (!refreshed)
+	{
+		return Result<Vector<ScriptTypeDescriptor>>::Failure(refreshed.error);
+	}
+	if (assetDatabase->ScriptSources().empty())
+	{
+		InvalidateManagedImports();
+		managedImports.reset();
+		if (importer.ManagedRulesToken())
+		{
+			ProjectAssetImporter native;
+			const auto replaced = importer.ReplaceManagedRules(native);
+			if (!replaced)
+			{
+				return Result<Vector<ScriptTypeDescriptor>>::Failure(replaced.error);
+			}
+		}
+		const auto nativeRules = AssetImportRules::Create();
+		importDescriptions = std::make_shared<const AssetImportRules>(nativeRules.value);
+		const auto saved = SaveManagedImportRequirements(*assetDatabase, nativeRules.value);
+		if (!saved)
+		{
+			return Result<Vector<ScriptTypeDescriptor>>::Failure(saved.error);
+		}
+		return Result<Vector<ScriptTypeDescriptor>>::Success({});
+	}
+#if defined(URSA_ENABLE_DOTNET)
+	bool current = false;
+	if (managedImports && managedConfiguration == configuration)
+	{
+		const auto checked = managedImports->IsCurrent();
+		if (!checked)
+		{
+			InvalidateManagedImports();
+			return Result<Vector<ScriptTypeDescriptor>>::Failure(checked.error);
+		}
+		current = checked.value;
+	}
+	if (!current)
+	{
+		InvalidateManagedImports();
+		auto opened = ManagedImportEnvironment::Open(index.Filesystem(), configuration, buildScripts);
+		if (!opened)
+		{
+			return Result<Vector<ScriptTypeDescriptor>>::Failure(opened.error);
+		}
+		managedImports = std::move(opened.value);
+		managedConfiguration = configuration;
+	}
+	const auto installed = managedImports->Install(importer);
+	if (!installed)
+	{
+		return Result<Vector<ScriptTypeDescriptor>>::Failure(installed.error);
+	}
+	const auto reloaded = assetDatabase->ReloadImports();
+	if (!reloaded)
+	{
+		return Result<Vector<ScriptTypeDescriptor>>::Failure(reloaded.error);
+	}
+	const auto saved = SaveManagedImportRequirements(*assetDatabase, *managedImports->Rules());
+	if (!saved)
+	{
+		InvalidateManagedImports();
+		return Result<Vector<ScriptTypeDescriptor>>::Failure(saved.error);
+	}
+	return Result<Vector<ScriptTypeDescriptor>>::Success(managedImports->ScriptTypes());
+#else
+	(void)configuration;
+	(void)buildScripts;
+	return Result<Vector<ScriptTypeDescriptor>>::Failure("Project script rules require a build with .NET support");
+#endif
+}
 
 Result<std::unique_ptr<ProjectWorkspace>> ProjectWorkspace::Open(const std::filesystem::path& projectDirectory,
                                                                  const Vector<ResourceMount>& builtinMounts)

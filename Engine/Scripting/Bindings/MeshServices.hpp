@@ -10,7 +10,7 @@ struct MeshServices
 	using Handle = Wire::Value_Ursa_NativeHandle;
 	using Data = Wire::Value_Ursa_MeshData;
 	using Section = Wire::Value_Ursa_SubMesh;
-	static MeshPtr Resolve(BindingCall& call, const Handle& mesh);
+	static MeshPtr Resolve(BindingCall& call, const Handle& mesh, bool writable = false);
 	static Result<Handle> Create(BindingCall& call);
 	static Result<Handle> Load(BindingCall& call, const Utf8View& guid, UInt64 localFileId);
 	static Result<Handle> Clone(BindingCall& call, const Handle& mesh);

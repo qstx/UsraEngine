@@ -1,6 +1,9 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 #include <Assets/AssetPreviewPanel.hpp>
+#include <Assets/ProjectBrowserPanel.hpp>
+#include <Assets/ImportedAssetInspector.hpp>
+#include <Assets/AssetImportRules.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/TextureDraft.hpp>
 #include <Assets/ModelImporter.hpp>
@@ -11,6 +14,12 @@
 #include <Serialization/MeshResource.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
+#if defined(URSA_ENABLE_DOTNET)
+#include <Scripting/Bindings/BindingRequirements.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
+#include <iomanip>
+#include <sstream>
+#endif
 #include <Rendering/Diagnostics/FrameCapture.hpp>
 #include <RenderingFixtures.hpp>
 #include <MeshFixtures.hpp>
@@ -194,12 +203,15 @@ struct Harness
 	std::unique_ptr<Test::SceneRenderer> renderer;
 	std::unique_ptr<AssetPreviewPanel> preview;
 	AssetInspectorPanel inspector;
+	ProjectBrowserPanel projectPanel;
+	bool drawProject = false;
 	std::unique_ptr<SceneViewPanel> views;
 	EditorHierarchy hierarchy;
 	PlaySession play;
 	std::shared_ptr<SceneDraft> author;
 	Vector<UInt8> lastPixels;
 	Vector<Mat4> lastPalette;
+	Vector<ScriptTypeDescriptor> scriptTypes;
 	Rhi::TexturePtr canvas;
 	std::filesystem::path evidence;
 	Float32 dpi = 1;
@@ -229,12 +241,20 @@ struct Harness
 	UInt64 clipId = 0;
 	Float64 clipDuration = 0;
 
-	explicit Harness(std::filesystem::path output) : evidence(std::move(output))
+	explicit Harness(std::filesystem::path output, bool managed = false) : evidence(std::move(output))
 	{
 		files = Take(OpenEngineFileSystem());
 		Done(files.MountProvider("prj", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
 		Done(files.MountProvider("lib", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
-		Done(files.MountProvider("user", settings, MountAccess::ReadWrite));
+		if (managed)
+		{
+			std::filesystem::create_directories(evidence / "ManagedUser");
+			Done(files.Mount(userDataScheme, evidence / "ManagedUser", MountAccess::ReadWrite));
+		}
+		else
+		{
+			Done(files.MountProvider("user", settings, MountAccess::ReadWrite));
+		}
 		workspace = Take(ProjectWorkspace::FromFilesystem({}, files));
 		documents = Take(EditorDocuments::Create(*workspace));
 		Done(RegisterBuiltinComponents(registry));
@@ -413,6 +433,13 @@ struct Harness
 			ImGui::TextUnformatted("Inactive preview tab test");
 			ImGui::End();
 		}
+		if (drawProject)
+		{
+			ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+			ImGui::SetNextWindowSize({640, 410}, ImGuiCond_Always);
+			bool projectOpen = true;
+			Done(projectPanel.Draw(*workspace, browser, selection, hierarchy, projectOpen, false, diagnostic, {}));
+		}
 		bool showScene = true, showGame = true;
 		ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
 		ImGui::SetNextWindowSize({640, 410}, ImGuiCond_Always);
@@ -427,7 +454,8 @@ struct Harness
 				ImGui::SetNextWindowPos({650, 0}, ImGuiCond_Always);
 				ImGui::SetNextWindowSize({inspectorWidth, inspectorHeight}, ImGuiCond_Always);
 			}
-			inspector.Draw(*workspace, browser, selection, show, nullptr, {}, {}, preview->ReservedHeight(),
+			inspector.Draw(*workspace, browser, selection, show, scriptTypes.empty() ? nullptr : &scriptTypes, {}, {},
+			               preview->ReservedHeight(),
 			               [&](Float32 maximumHeight) { preview->Draw(*workspace, registry, nullptr, maximumHeight); });
 		}
 		const EditorRenderViewport render =
@@ -587,10 +615,10 @@ struct Harness
 				continue;
 			}
 			auto bytes = Take(files.Read(record.path));
-			if (!record.localFileId || record.kind == "AnimationClip")
+			if (record.isMainObject || record.kind == "AnimationClip")
 			{
 				auto data = nlohmann::json::from_cbor(bytes.begin(), bytes.end());
-				if (!record.localFileId && remove)
+				if (record.isMainObject && remove)
 				{
 					data["animationClipLocalFileIds"] = nlohmann::json::array();
 				}
@@ -605,12 +633,338 @@ struct Harness
 		}
 		Done(database->PublishImport(modelPath, metadata.importer, metadata.importerVersion,
 		                             "preview-test-" + ToUrsaString(std::to_string(++publishedPreviewVersion)),
-		                             status.settings, status.dependencies, artifacts));
+		                             status.settings, status.dependencies, artifacts, status.mainObjectLocalFileId));
 		preview->Reload();
 		Frame();
 		Frame();
 	}
 };
+
+#if defined(URSA_ENABLE_DOTNET)
+void ManagedPreviewContracts(Harness& h)
+{
+	using namespace Ursa::Scripting;
+	auto& files = h.workspace->ContentFiles();
+	Done(files.Mount("mng", std::filesystem::u8path(URSA_PREVIEW_MANAGED_OUTPUT), MountAccess::ReadOnly));
+	const auto jsonBytes = [](const nlohmann::json& json)
+	{
+		const auto text = json.dump();
+		const auto* bytes = reinterpret_cast<const UInt8*>(text.data());
+		return Vector<UInt8>(bytes, bytes + text.size());
+	};
+	const auto fingerprint = [](const Vector<UInt8>& bytes)
+	{
+		UInt64 hash = 14695981039346656037ull;
+		for (auto value : bytes)
+		{
+			hash ^= value;
+			hash *= 1099511628211ull;
+		}
+		std::ostringstream text;
+		text << std::hex << std::setfill('0') << std::setw(16) << hash;
+		return text.str();
+	};
+	nlohmann::json catalog{{"Version", 1u}, {"Scripts", nlohmann::json::array()}};
+	UInt64 localId = 0;
+	for (const auto& type : Vector<std::pair<String, String>>{{"SessionProbe", "test.session-probe"},
+	                                                          {"ReloadDependency", "test.reload-dependency"}})
+	{
+		catalog["Scripts"].push_back(
+		    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+		     {"LocalFileId", ++localId},
+		     {"Kind", localId == 1 ? "Behaviour" : "ScriptableObject"},
+		     {"ScriptType", ToStdString(type.second)},
+		     {"Version", 1u},
+		     {"Group", "Game"},
+		     {"ClrTypeName", ToStdString("Ursa.SessionFixtures." + type.first + ", Ursa.SessionFixtures")}});
+	}
+	catalog["Scripts"].push_back(
+	    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+	     {"LocalFileId", 3u},
+	     {"Kind", "ScriptableObject"},
+	     {"ScriptType", "auto:11111111-1111-4111-8111-111111111111:Ursa.Examples.GeneratedFormatAsset"},
+	     {"Version", 1u},
+	     {"Group", "Game"},
+	     {"ClrTypeName", "Ursa.Examples.GeneratedFormatAsset, Ursa.SessionFixtures"}});
+	const auto catalogBytes = jsonBytes(catalog);
+	Done(files.WriteAtomic(Path("prj:PreviewCatalog.json"), catalogBytes));
+	nlohmann::json content{{"Version", 2u},
+	                       {"RequiredBindings", Scripting::Bindings::ScriptBindingRequirements(false)},
+	                       {"Group", "Game"},
+	                       {"TypeCatalog", "prj:PreviewCatalog.json"},
+	                       {"CatalogFingerprint", fingerprint(catalogBytes)},
+	                       {"Assemblies", nlohmann::json::array()}};
+	for (const char* name : {"Ursa.SessionFixtures", "Ursa.SessionDependency"})
+	{
+		const auto path = Take(VirtualPath::Parse("mng:TestScripts/" + String(name) + ".dll"));
+		content["Assemblies"].push_back({{"Name", name},
+		                                 {"Path", ToStdString(path.ToString())},
+		                                 {"Fingerprint", fingerprint(Take(files.Read(path)))}});
+	}
+	Done(files.WriteAtomic(Path("prj:PreviewGame.json"), jsonBytes(content)));
+	auto host = Take(DotNetHost::Create());
+	ManagedHostFiles framework;
+	framework.runtimeConfig = Path("mng:Ursa.ManagedHost.runtimeconfig.json");
+	framework.entryAssembly = Path("mng:Ursa.ManagedHost.dll");
+	framework.dependencies = {Path("mng:Ursa.ManagedHost.deps.json"), Path("mng:Ursa.Runtime.dll"),
+	                          Path("mng:Ursa.Editor.dll"), Path("mng:Ursa.Rendering.dll"),
+	                          Path("mng:Ursa.Bindings.dll")};
+	Done(host->Connect(files, framework,
+	                   [](UInt32 level, const String& message)
+	                   {
+		                   if (level >= 3)
+		                   {
+			                   std::cerr << message.c_str() << '\n';
+		                   }
+	                   }));
+	Done(host->LoadEditorApi(Path("mng:Ursa.Editor.dll")));
+	const auto session = Take(host->CreateScriptSession(true));
+	Done(host->LoadScriptContent(session, Path("prj:PreviewGame.json")));
+	Done(host->LoadScriptAssembly(Take(files.Read(Path("mng:TestScripts/Ursa.EditorFixtures.dll")))));
+	Done(host->ValidateScriptSession(session));
+	const auto descriptors = Take(host->PrepareEditorExtensions(session));
+	h.preview->SetExtensionResolver(
+	    [&](ManagedEditorContext& context)
+	    {
+		    const auto found = std::find_if(descriptors.begin(), descriptors.end(),
+		                                    [&](const auto& item) { return item.target == context.targetIdentity; });
+		    if (found == descriptors.end())
+		    {
+			    return;
+		    }
+		    const auto id = found->id;
+		    h.preview->ConfigureExtension(
+		        id,
+		        [&, id](UInt64 instance, ManagedPreviewPhase phase, const ViewportRect& rect,
+		                ManagedEditorContext& scope)
+		        { return InvokeManagedEditorPreview(*host, session, id, instance, phase, rect, scope); },
+		        context);
+	    });
+	const auto meshPath = Path("prj:CustomPreview.ursamesh");
+	const auto mesh = Take(CreateMaterialPreviewMesh(MaterialPreviewShape::Cube));
+	Done(SaveMeshResource(h.files, meshPath, ResourceId::Generate(), *mesh));
+	const auto sourcePath = Path("prj:CustomPreview.ursaasset");
+	Done(h.files.WriteAtomic(sourcePath, {}));
+	Done(h.workspace->Refresh());
+	ScriptTypeDescriptor type;
+	type.scriptType = "test.reload-dependency";
+	type.sourceGuid = Take(ResourceId::Parse("11111111-1111-4111-8111-111111111111"));
+	type.localFileId = 2;
+	type.kind = ScriptTypeKind::ScriptableObject;
+	type.fields.push_back({"value", "SignedInteger", "Unsupported", "System.Int32", "7"});
+	type.fields.push_back(
+	    {"self", "ScriptableObjectReference", "Unsupported", "Ursa.SessionFixtures.ReloadDependency", "null"});
+	h.scriptTypes.push_back(type);
+	const auto guid = Take(h.workspace->Database()->Metadata(sourcePath)).guid;
+	Done(SaveScriptableAssetSource(h.files, sourcePath, Take(CreateScriptableAssetWithDefaults(guid, type))));
+	Done(h.workspace->Refresh());
+	Done(h.browser.Refresh(*h.workspace));
+	const auto authorCount = h.author->GetScene().RootGameObjects().size();
+	const auto authorRevision = h.documents->Current()->Revision();
+	h.Select(meshPath);
+	Expect(h.preview->State().Target().custom && h.previewCalls > 0 &&
+	           h.vertexCount == mesh->Snapshot()->data.positions.size(),
+	       "Managed Mesh Preview did not render its private scene through the Preview camera");
+	const auto beforeDrag = h.lastPixels;
+	const auto rect = h.preview->ImageRect();
+	h.Mouse({rect.x + rect.width * .4f, rect.y + rect.height * .5f}, false);
+	h.Mouse({rect.x + rect.width * .4f, rect.y + rect.height * .5f}, true);
+	h.Mouse({rect.x + rect.width * .7f, rect.y + rect.height * .5f}, true);
+	h.Mouse({rect.x + rect.width * .7f, rect.y + rect.height * .5f}, false);
+	Expect(Difference(beforeDrag, h.lastPixels) > 100,
+	       "Actual Preview mouse drag did not change the managed camera image");
+	const auto beforeLight = h.lastPixels;
+	h.Activate("Toggle preview light");
+	Expect(Difference(beforeLight, h.lastPixels) > 100,
+	       "Managed private Preview light did not affect the PBR material image");
+	h.Activate("Toggle preview light");
+	for (const auto dpi : {1.f, 1.5f, 2.f})
+	{
+		h.dpi = dpi;
+		h.inspectorWidth = 240;
+		h.Frame();
+		h.Frame();
+		h.Capture(("12-Custom-Mesh-DPI-" + std::to_string(int(dpi * 100)) + ".png").c_str());
+	}
+	h.Activate("Fail next Preview");
+	std::cout << "Managed Preview injected failure returned\n" << std::flush;
+	Expect(h.preview->State().HasImage() && !h.preview->State().Diagnostic().empty(),
+	       "Same-target managed failure discarded its last successful image or used default Preview");
+	h.preview->Reload();
+	std::cout << "Managed Preview reload requested\n" << std::flush;
+	h.Frame();
+	h.Frame();
+	std::cout << "Managed Preview reload rendered\n" << std::flush;
+	Expect(h.preview->State().HasImage() && h.preview->State().Diagnostic().empty(),
+	       "Managed Preview did not recover with a new instance on reload");
+	const auto renders = h.preview->RenderCount();
+	const auto viewingTime = h.preview->ViewingTime();
+	h.Frame(10, false);
+	Expect(h.preview->RenderCount() == renders && h.preview->ViewingTime() == viewingTime,
+	       "Hidden managed Preview continued rendering or advancing time");
+	h.Frame();
+	Expect(h.preview->ViewingTime() == viewingTime, "Managed Preview caught up hidden wall-clock time");
+	h.TogglePreview(true);
+	const auto collapsedRenders = h.preview->RenderCount();
+	const auto collapsedTime = h.preview->ViewingTime();
+	h.Frame(5);
+	Expect(h.preview->RenderCount() == collapsedRenders && h.preview->ViewingTime() == collapsedTime,
+	       "Collapsed managed Preview continued updating");
+	h.TogglePreview(false);
+	const auto fullHeight = h.inspectorHeight;
+	h.inspectorHeight = 70;
+	h.Frame();
+	const auto clippedRenders = h.preview->RenderCount();
+	const auto clippedTime = h.preview->ViewingTime();
+	h.Frame(5);
+	Expect(h.preview->RenderCount() == clippedRenders && h.preview->ViewingTime() == clippedTime,
+	       "A managed Preview without a usable image region continued rendering or advancing time");
+	h.inspectorHeight = fullHeight;
+	h.Frame();
+	Expect(h.preview->ViewingTime() == clippedTime, "Managed Preview caught up time after its image region returned");
+	h.Select(sourcePath);
+	std::cout << "Managed ScriptableObject Preview selected\n" << std::flush;
+	Expect(h.preview->State().Target().custom, "ScriptableObject did not select its registered Preview");
+	for (const auto dpi : {1.f, 1.5f, 2.f})
+	{
+		h.dpi = dpi;
+		h.Frame();
+		h.Frame();
+		h.Capture(("13-Custom-Image-DPI-" + std::to_string(int(dpi * 100)) + ".png").c_str());
+		const auto canvasPixels = Readback(h.device, h.canvas, Rhi::ResourceState::ColorAttachment);
+		const auto area = h.preview->ImageRect();
+		const auto sample = [&](Float32 x, Float32 y, Size channel)
+		{
+			const auto column = UInt32((area.x + area.width * x) * dpi);
+			const auto row = UInt32((area.y + area.height * y) * dpi);
+			return canvasPixels[(Size(row) * h.canvas->desc.width + column) * 4 + channel];
+		};
+		Expect(sample(.25f, .25f, 0) > 125 && sample(.25f, .25f, 0) < 150 && sample(.25f, .75f, 0) >= 20 &&
+		           sample(.25f, .75f, 0) <= 24,
+		       "Actual managed GUI texture lost semi-transparent/transparent pixels or DPI placement");
+	}
+	h.Select(h.materialPath);
+	Expect(!h.preview->State().Target().custom,
+	       "An Inspector without HasPreviewGUI suppressed built-in Material fallback");
+	const auto generatedPath = Path("prj:Generated.previewfixture");
+	Done(h.files.WriteAtomic(generatedPath, {1}));
+	Done(h.workspace->Refresh());
+	const auto generatedGuid = Take(h.workspace->Database()->Metadata(generatedPath)).guid;
+	const auto dataId = Take(StableImportObjectId("test.Preview", "data"));
+	const auto importedMeshId = Take(StableImportObjectId("test.Preview", "mesh"));
+	auto generated = Take(CreateScriptableAssetWithDefaults(generatedGuid, type));
+	Done(generated.SetDescription(generatedGuid, dataId, type.scriptType, 1, generated.Payload()));
+	Vector<ImportedArtifact> outputs{
+	    {dataId, "ScriptableObject", Take(EncodeScriptableAssetArtifact(generated)), "data"},
+	    {importedMeshId, "Mesh", Take(EncodeMeshResource(generatedGuid, *mesh, importedMeshId)), "mesh"}};
+	Done(h.workspace->Database()->PublishImport(generatedPath, "test.Preview", 1, "preview-fixture",
+	                                            nlohmann::json::object(), {}, outputs, dataId));
+	Done(h.workspace->Refresh());
+	Done(h.browser.Refresh(*h.workspace));
+	h.Select(generatedPath);
+	Expect(h.preview->State().Target().custom && !h.preview->State().Target().identity.localFileId,
+	       "Imported main-object alias did not dispatch its ScriptableObject Preview");
+	h.Choose("##Subasset", "Mesh " + ToUrsaString(std::to_string(importedMeshId)));
+	Expect(h.preview->State().Target().custom && h.preview->State().Target().identity.localFileId == importedMeshId &&
+	           h.vertexCount == mesh->Snapshot()->data.positions.size(),
+	       "Imported Mesh sub-asset did not receive its typed custom Preview");
+	h.Capture("14-Custom-Imported-Subasset.png");
+	// Select the published object through the actual Project controls, independently of the footer picker.
+	h.selection.SelectAsset(generatedPath);
+	h.drawProject = true;
+	h.Frame();
+	h.Frame();
+	ImGuiWindow* projectContent = nullptr;
+	for (auto* window : GImGui->Windows)
+	{
+		if (window->Active && std::string(window->Name).find("Project/") == 0 &&
+		    std::string(window->Name).find("ProjectFolderContents") != std::string::npos &&
+		    std::string(window->Name).find("ProjectBreadcrumbs") == std::string::npos)
+		{
+			projectContent = window;
+		}
+	}
+	Expect(projectContent != nullptr, "Project asset list child is unavailable");
+	const auto assetSeed = ImHashStr(generatedPath.relative.c_str(), 0, projectContent->ID);
+	ImGui::FocusWindow(projectContent);
+	ImGui::ActivateItemByID(ImHashStr("##ImportedObjects", 0, assetSeed));
+	h.Frame();
+	h.Frame();
+	const String projectObjectId = ToUrsaString(std::to_string(importedMeshId));
+	ImGui::FocusWindow(projectContent);
+	ImGui::ActivateItemByID(
+	    ImHashStr(("Mesh " + projectObjectId).c_str(), 0, ImHashStr(projectObjectId.c_str(), 0, assetSeed)));
+	h.Frame();
+	h.Frame();
+	Expect(h.selection.assetLocalFileId == importedMeshId &&
+	           h.preview->State().Target().identity.localFileId == importedMeshId,
+	       "Project sub-asset selection did not reach the resource Inspector and Preview");
+	const auto resourceInspector =
+	    Take(ImportedAssetInspector::Open(*h.workspace, {generatedGuid, importedMeshId}, "Mesh"));
+	auto resourceContext = resourceInspector->Context();
+	Expect(!resourceContext.canEditTarget && resourceContext.targetMesh && !resourceContext.document &&
+	           !h.inspector.SelectedDocument(h.selection) && !Take(h.inspector.SaveSelectedSource(h.selection)),
+	       "Published sub-asset Inspector exposed an author document or source save command");
+	h.Capture("14b-Project-Subasset-Inspector.png");
+	h.drawProject = false;
+	const auto stableRegistrations = h.gui->RegisteredTextureCount();
+	for (UInt32 iteration = 0; iteration < 8; ++iteration)
+	{
+		h.Select(sourcePath);
+		h.Select(meshPath);
+	}
+	Expect(h.gui->RegisteredTextureCount() <= stableRegistrations + 2,
+	       "Repeated custom 2D/3D target changes leaked UI image registrations");
+	const auto originalProjectSession = h.preview->State().Target().projectSession;
+	{
+		auto alternate = Take(ProjectWorkspace::FromFilesystem({}, h.files));
+		Done(h.preview->Prepare(*alternate, h.browser, h.selection, nullptr, "managed-other-project"));
+		Expect(!h.preview->State().HasImage() && h.preview->State().Target().projectSession != originalProjectSession,
+		       "Switching projects retained a custom image for the same asset GUID");
+		Done(h.preview->CloseExtension());
+	}
+	h.Frame();
+	h.Frame();
+	const auto rootsBeforeRelease = h.gui->RegisteredTextureCount();
+	h.duringRender = [&]
+	{
+		h.selection.Clear();
+		Done(h.preview->Prepare(*h.workspace, h.browser, h.selection, h.documents->Current(), h.projectKey));
+	};
+	h.Frame();
+	Expect(!h.preview->State().HasImage(),
+	       "A custom render completion published after selection changed during submission");
+	h.Frame();
+	Expect(h.gui->RegisteredTextureCount() < rootsBeforeRelease, "Custom Preview close retained registered GPU images");
+	auto bad = Take(CreateScriptableAssetWithDefaults(guid, type));
+	auto badPayload = bad.Payload();
+	badPayload["Fields"]["value"] = -1;
+	Done(bad.SetDescription(guid, 2, type.scriptType, 1, badPayload));
+	Done(SaveScriptableAssetSource(h.files, sourcePath, bad));
+	Done(h.workspace->Refresh());
+	Done(h.browser.Refresh(*h.workspace));
+	h.Select(meshPath);
+	h.selection.SelectAsset(sourcePath);
+	h.Frame();
+	h.Frame();
+	Expect(!h.preview->State().HasImage() && h.preview->State().Diagnostic().find(guid.ToString()) != String::npos,
+	       "A new failing custom target displayed the previous asset or omitted its target identity");
+	Expect(h.author->GetScene().RootGameObjects().size() == authorCount &&
+	           h.documents->Current()->Revision() == authorRevision && h.documents->Current()->Dirty() &&
+	           Probe::callbacks == 0,
+	       "Managed Preview changed author objects, Dirty or invoked gameplay callbacks");
+	auto submitted = h.SubmitUi();
+	h.selection.Clear();
+	h.Frame();
+	h.Frame();
+	Done(submitted->Wait());
+	h.preview->SetExtensionResolver({});
+	Done(host->CloseScriptSession(session));
+	Done(host->CloseEndpoint());
+	std::cout << "Managed Preview GPU images, mouse, DPI, narrow Inspector, hidden, reload and submitted-frame cleanup "
+	             "passed\n";
+}
+#endif
 
 void ContentContracts(Harness& h)
 {
@@ -747,9 +1101,18 @@ void ContentContracts(Harness& h)
 	       "100% texture pan did not change clipped pixels");
 }
 
-void Run(const std::filesystem::path& evidence)
+void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 {
-	Harness h(evidence);
+	Harness h(evidence, managedOnly);
+#if defined(URSA_ENABLE_DOTNET)
+	if (managedOnly)
+	{
+		ManagedPreviewContracts(h);
+		return;
+	}
+#else
+	(void)managedOnly;
+#endif
 	h.Select(h.materialPath);
 	const auto sphere = h.lastPixels;
 	h.Capture("01-Material-Sphere.png");
@@ -1236,14 +1599,15 @@ int main(int argc, char** argv)
 	{
 		const auto evidence =
 		    argc > 1 ? std::filesystem::u8path(argv[1]) : std::filesystem::path("AssetPreviewEvidence");
-		Run(evidence / "Loose");
+		const bool managedOnly = argc > 2 && std::string(argv[2]) == "--managed-only";
+		Run(evidence / "Loose", managedOnly);
 		const auto engine = Take(OpenEngineFileSystem());
 		VirtualFileSystem output;
 		Done(output.Mount("out", evidence, MountAccess::ReadWrite));
 		Done(PakBuilder::Build(engine, {engineScheme}, output, Path("out:PreviewEngine.pak")));
 		auto packaged = std::make_shared<VirtualFileSystem>(Take(OpenEngineFileSystem(evidence / "PreviewEngine.pak")));
 		ConfigureEngineFileSystem(packaged);
-		Run(evidence / "Pak");
+		Run(evidence / "Pak", managedOnly);
 		ConfigureEngineFileSystem(nullptr);
 		return 0;
 	}

@@ -103,6 +103,10 @@ protected:
 	                                          UInt64 sessionId = 0);
 
 	Result<void> EnsureManagedHost();
+	Result<bool> DrawAssetExtension(ManagedEditorContext& context);
+	void ConfigureAssetPreview(ManagedEditorContext& context);
+	bool BeforeImporterSelection(const EditorSelectionContext& next);
+	void DrawImporterSelectionPrompt();
 
 	Result<void> ReloadEditorScripts();
 
@@ -323,6 +327,11 @@ private:
 	ProjectBrowserModel projectBrowser;
 	ProjectBrowserPanel projectBrowserPanel;
 	AssetInspectorPanel assetInspectorPanel;
+	std::shared_ptr<AssetImporterInspector> assetImporterInspector;
+	std::optional<EditorSelectionContext> pendingImporterSelection;
+	bool importerSelectionPopup = false;
+	bool pendingSourceAsset = false;
+	VirtualPath pendingImporterOpen;
 	EditorSelectionContext selectionContext;
 	EditorConsolePanel consolePanel;
 	std::unique_ptr<AssetDatabase> scriptAssetDatabase;
@@ -367,6 +376,7 @@ private:
 	String workspaceError;
 	String inspectorError;
 	bool exitRequested = false;
+	bool exitAfterInspectorPrompt = false;
 	bool dockLayoutInitialized = false;
 	bool showProjectPanel = true;
 	bool showHierarchyPanel = true;

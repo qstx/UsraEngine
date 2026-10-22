@@ -25,6 +25,7 @@ internal static unsafe partial class Program
 		table->NativeRuntimeBindings_GetActive = &BoundGetActive;
 		table->NativeRuntimeBindings_SetActive = &BoundSetActive;
 		table->NativeRuntimeBindings_GetParent = &BoundGetParent;
+		table->NativeRuntimeBindings_GetChildren = &BoundGetChildren;
 		table->NativeRuntimeBindings_SetParent = &BoundSetParent;
 		table->NativeRuntimeBindings_DestroyGameObject = &BoundDestroy;
 		table->NativeRuntimeBindings_GetLayer = &BoundGetLayer;
@@ -123,6 +124,18 @@ internal static unsafe partial class Program
 	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static int BoundGetParent(nint context, WireHandle* handle, WireHandle* result, BindingOutcome* outcome) =>
 		BoundCall(context, outcome, _ => *result = BoundObject(*handle).parent.sessionId == 0 ? default : BoundHandle(BoundObject(*handle).parent.index));
+
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+	private static int BoundGetChildren(nint context, WireHandle* handle, DataView* result, BindingOutcome* outcome) =>
+		BoundCall(context, outcome, arena =>
+		{
+			_ = BoundObject(*handle);
+			uint index = handle->F_index;
+			ulong session = handle->F_sessionId;
+			uint[] children = fakeObjects.Where(pair => pair.Value.parent.index == index && pair.Value.parent.sessionId == session)
+				.OrderBy(pair => pair.Key).Select(pair => pair.Key).ToArray();
+			*result = arena.Array<uint, WireHandle>(children, static (child, _) => BoundHandle(child), false);
+		});
 
 	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static int BoundSetParent(nint context, WireHandle* handle, WireHandle* parent, BindingOutcome* outcome) =>

@@ -93,7 +93,7 @@ int main(int count, char** arguments)
 		auto* inspector = ImGui::FindWindowByName("Inspector");
 		Expect(inspector && guid != type.sourceGuid, "Inspector identity fixture was not independent");
 		// Exercise the actual widgets through ImGui navigation; no desktop input is injected.
-		const ImGuiID field = ImHashStr("##Value", 0, ImHashStr("enabled", 0, inspector->ID));
+		const ImGuiID field = ImHashStr("enabled", 0, ImHashStr("/Fields/enabled", 0, inspector->ID));
 		ImGui::ActivateItemByID(field);
 		frame();
 		Expect(Take(LoadScriptableAssetSource(files, path, guid)).Payload()["Fields"]["enabled"] == true,

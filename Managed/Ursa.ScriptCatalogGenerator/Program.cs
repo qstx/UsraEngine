@@ -161,6 +161,8 @@ internal static class Program
 			INamedTypeSymbol assetBase = compilation.GetTypeByMetadataName("Ursa.ScriptableObject")
 			                            ?? throw new InvalidDataException("Ursa.Runtime does not define Ursa.ScriptableObject.");
 			INamedTypeSymbol? pipelineBase = compilation.GetTypeByMetadataName("Ursa.Rendering.RenderPipelineAsset");
+			INamedTypeSymbol? importerBase = compilation.GetTypeByMetadataName("Ursa.Editor.ScriptedImporter");
+			INamedTypeSymbol? postprocessorBase = compilation.GetTypeByMetadataName("Ursa.Editor.AssetPostprocessor");
 			INamedTypeSymbol? scriptTypeAttribute = compilation.GetTypeByMetadataName("Ursa.UrsaScriptTypeAttribute");
 			INamedTypeSymbol? behaviorType = compilation.GetTypeByMetadataName("Ursa.Behaviour");
 			INamedTypeSymbol? componentType = compilation.GetTypeByMetadataName("Ursa.Component");
@@ -197,7 +199,9 @@ internal static class Program
 				INamedTypeSymbol[] sourceTypes = root.DescendantNodes().OfType<ClassDeclarationSyntax>()
 					.Select(declaration => semanticModel.GetDeclaredSymbol(declaration)).OfType<INamedTypeSymbol>()
 					.Where(candidate => candidate.DeclaredAccessibility == Accessibility.Public && !candidate.IsAbstract &&
-						candidate.Arity == 0 && (DerivesFrom(candidate, behaviorBase) || DerivesFrom(candidate, assetBase)))
+						candidate.Arity == 0 && (DerivesFrom(candidate, behaviorBase) || DerivesFrom(candidate, assetBase) ||
+						(importerBase != null && DerivesFrom(candidate, importerBase)) ||
+						(postprocessorBase != null && DerivesFrom(candidate, postprocessorBase))))
 					.Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default).ToArray();
 				foreach (ClassDeclarationSyntax declaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
 				{
@@ -215,8 +219,13 @@ internal static class Program
 							                                                              createAssetMenuAttribute));
 					bool isAsset = DerivesFrom(type, assetBase);
 					bool isBehavior = DerivesFrom(type, behaviorBase);
+					bool isImporter = source.Group == "Editor" && importerBase != null && DerivesFrom(type, importerBase);
+					if (source.Group != "Editor" && ((importerBase != null && DerivesFrom(type, importerBase)) ||
+					    (postprocessorBase != null && DerivesFrom(type, postprocessorBase))))
+						throw new InvalidDataException($"Importer and postprocessor types must be in an Editor assembly: {type.ToDisplayString()} in {source.VirtualPath}.");
+					bool isPostprocessor = source.Group == "Editor" && postprocessorBase != null && DerivesFrom(type, postprocessorBase);
 					bool supportedType = type.DeclaredAccessibility == Accessibility.Public && !type.IsAbstract &&
-					                    type.Arity == 0 && (isBehavior || isAsset);
+					                    type.Arity == 0 && (isBehavior || isAsset || isImporter || isPostprocessor);
 					if (createMenu != null && (!supportedType || !isAsset || source.Group != "Game"))
 					{
 						throw new InvalidDataException(
@@ -274,7 +283,7 @@ internal static class Program
 						              (source.Group == "Editor" ? "Ursa.EditorScripts" : "Ursa.Game"),
 						VirtualPath = source.VirtualPath,
 						Group = source.Group,
-						Kind = isAsset ? "ScriptableObject" : "Behaviour",
+						Kind = isPostprocessor ? "AssetPostprocessor" : isImporter ? "ScriptedImporter" : isAsset ? "ScriptableObject" : "Behaviour",
 						IsRenderPipeline = pipelineBase != null && DerivesFrom(type, pipelineBase),
 						CreateAssetMenuName = menuName,
 						CreateAssetFileName = fileName,

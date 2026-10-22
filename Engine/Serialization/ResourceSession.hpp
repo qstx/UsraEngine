@@ -66,6 +66,12 @@ public:
 
 	Result<std::shared_ptr<const Shader::ShaderAsset>> LoadShader(ResourceId id);
 
+	// Import callbacks resolve completed artifacts exclusively and use CPU built-in Shader schemas.
+	void RequireImportedArtifacts()
+	{
+		strictArtifactReads = true;
+	}
+
 	Result<ResourceId> IdentifyMaterial(const std::shared_ptr<MaterialInstance>& material) const;
 
 	Result<AssetReference> IdentifyMaterialReference(const std::shared_ptr<MaterialInstance>& material) const;
@@ -89,6 +95,7 @@ private:
 
 	ResourceIndex index;
 	AssetPathResolver assetPathResolver;
+	bool strictArtifactReads = false;
 	Map<String, MaterialTexturePtr> textures;
 	Map<String, std::shared_ptr<MaterialInstance>> materials;
 	Map<String, std::shared_ptr<const Shader::ShaderAsset>> shaders;

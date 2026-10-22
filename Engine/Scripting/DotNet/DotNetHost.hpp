@@ -53,6 +53,56 @@ struct ManagedEditorExtension
 	String title;
 };
 
+enum class ManagedPreviewPhase : UInt32
+{
+	Query,
+	Settings,
+	Draw,
+	Release,
+	Inspector
+};
+
+struct ManagedPreviewResult
+{
+	bool hasPreview = false;
+	bool constantRepaint = false;
+	String info;
+};
+
+struct ManagedImportReference
+{
+	UInt64 token = 0;
+	UInt32 kind = 0;
+	UInt64 instance = 0;
+	ManagedHandle handle;
+};
+
+struct ManagedScriptedImporter
+{
+	String sourceGuid;
+	UInt64 localFileId = 0;
+	String clrTypeName;
+	UInt32 version = 0;
+	Vector<String> extensions;
+	String defaultSettingsJson;
+};
+
+struct ManagedImportAssignment
+{
+	UInt64 token = 0;
+	AssetReference asset;
+};
+
+struct ManagedAssetPostprocessor
+{
+	String sourceGuid;
+	UInt64 localFileId = 0;
+	String clrTypeName;
+	UInt32 version = 0;
+	Int32 order = 0;
+	UInt32 targets = 0;
+};
+
 class ManagedHostBootstrap final
 {
 public:
@@ -69,6 +119,7 @@ private:
 	std::filesystem::path entryAssemblyPath;
 	VirtualPath cacheDirectory;
 	String fingerprint;
+	String frameworkFingerprint;
 };
 
 Result<ManagedHostBootstrap> MaterializeManagedHostFiles(VirtualFileSystem& filesystem, const ManagedHostFiles& files);
@@ -88,6 +139,24 @@ public:
 
 	Result<void> Start(VirtualFileSystem& filesystem, const ManagedHostFiles& files, LogCallback logCallback,
 	                   ManagedSceneApi* sceneApi = nullptr);
+
+	// Create an owner-thread endpoint, reusing the process CLR when it is already running.
+	Result<void> Connect(VirtualFileSystem& filesystem, const ManagedHostFiles& files, LogCallback logCallback,
+	                     ManagedSceneApi* sceneApi = nullptr);
+	Result<void> CloseEndpoint();
+	Result<void> BeginImportInvocation(UInt64 session, UInt64 generation, UInt64 invocation,
+	                                   const Bindings::BindingModuleReference& capability);
+	Result<void> EndImportInvocation(UInt64 session, UInt64 generation, UInt64 invocation);
+	Result<UInt64> CreateImportScriptableObject(UInt64 session, const String& typeName);
+	Result<String> SerializeImportScriptableObject(UInt64 session, UInt64 instance);
+	Result<void> DeserializeImportScriptableObject(UInt64 session, UInt64 instance, const String& archive);
+	Result<Vector<ManagedImportReference>> GetImportReferences(UInt64 session);
+	Result<void> AssignImportReferences(UInt64 session, const Vector<ManagedImportAssignment>& assignments);
+	Result<Vector<ManagedScriptedImporter>> PrepareScriptedImporters(UInt64 session,
+	                                                                 const Vector<String>& nativeExtensions);
+	Result<void> InvokeScriptedImporter(UInt64 session, const String& identity);
+	Result<Vector<ManagedAssetPostprocessor>> DescribeAssetPostprocessors(UInt64 session);
+	Result<void> InvokeAssetPostprocessor(UInt64 session, const String& identity);
 
 	Result<UInt64> CreateBehaviour(const String& typeName, const ManagedHandle& gameObject);
 
@@ -109,6 +178,10 @@ public:
 
 	Result<bool> InvokeEditorExtension(UInt64 sessionId, const String& extensionId,
 	                                   const Bindings::BindingModuleReference& capability);
+	Result<ManagedPreviewResult> InvokeEditorPreview(UInt64 sessionId, const String& extensionId, UInt64 instance,
+	                                                 ManagedPreviewPhase phase, Float32 x, Float32 y, Float32 width,
+	                                                 Float32 height,
+	                                                 const Bindings::BindingModuleReference& capability);
 
 	Result<String> PrepareScriptReload(UInt64 sessionId, const String& snapshots);
 	Result<void> TransferScriptableAssets(UInt64 sourceSession, UInt64 candidateSession);
@@ -122,10 +195,12 @@ public:
 	Result<void> LoadScriptAssembly(const Vector<UInt8>& assemblyBytes);
 
 	Result<UInt64> CreateScriptSession(bool editor, ManagedSceneApi* sceneApi = nullptr);
+	Result<UInt64> CreateImportSession(ManagedSceneApi* sceneApi = nullptr);
 
 	Result<void> SelectScriptSession(UInt64 sessionId);
 
 	Result<void> BindScriptSession(UInt64 sessionId, ManagedSceneApi& sceneApi);
+	Result<void> DetachImportResources(UInt64 sessionId);
 
 	Result<void> ValidateScriptSession(UInt64 sessionId);
 
@@ -163,5 +238,6 @@ private:
 	std::unique_ptr<BindingState> bindingState;
 	bool sessionFaulted = false;
 	bool initialized = false;
+	bool ownsThreadEndpoint = false;
 };
 } // namespace Ursa::Scripting

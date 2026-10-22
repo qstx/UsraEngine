@@ -13,7 +13,7 @@ struct MaterialServices
 	using ColorValue = Wire::Value_Ursa_Color;
 	using VectorValue = Wire::Value_Ursa_Vector4;
 	using SamplerValue = Wire::Value_Ursa_MaterialSampler;
-	static std::shared_ptr<MaterialInstance> Resolve(BindingCall& call, const Handle& material);
+	static std::shared_ptr<MaterialInstance> Resolve(BindingCall& call, const Handle& material, bool writable = false);
 	static std::shared_ptr<const Shader::ShaderAsset> ShaderFor(BindingCall& call,
 	                                                            const std::shared_ptr<MaterialInstance>& material);
 	static MaterialPropertyValue Property(BindingCall& call, const Handle& material, const Utf8View& name);

@@ -3,13 +3,14 @@
 #include <Core/Containers.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Serialization/MaterialResource.hpp>
+#include <Serialization/SerializedObject.hpp>
 
 namespace Ursa::Editor
 {
 class MaterialInspectors;
 class InspectorUI;
 
-class MaterialDraft final
+class MaterialDraft final : public std::enable_shared_from_this<MaterialDraft>
 {
 public:
 	explicit MaterialDraft(MaterialType type) : material(std::make_shared<MaterialInstance>(type))
@@ -22,6 +23,9 @@ public:
 	Result<void> SetTextureId(MaterialTextureSlot slot, ResourceId id, ResourceSession& session);
 
 	Result<void> SetPropertyValue(const String& identifier, MaterialPropertyValue value);
+	SerializedTargetAdapter Properties(ResourceSession& session, bool writable = true,
+	                                   std::function<Result<void>()> validate = {});
+	static Result<nlohmann::json> DescribeProperties(const MaterialInstance& material);
 
 	Result<void> SetTextureProperty(const String& identifier, ResourceId id, const Shader::ShaderAsset& shader,
 	                                ResourceSession& session);

@@ -49,6 +49,7 @@ struct ImportedArtifact
 	Ursa::UInt64 localFileId = 0;
 	String kind;
 	Vector<Ursa::UInt8> bytes;
+	String outputKey;
 };
 
 struct ImportedArtifactLocation
@@ -58,6 +59,7 @@ struct ImportedArtifactLocation
 	VirtualPath path;
 	String contentFingerprint;
 	Ursa::UInt64 size = 0;
+	String outputKey;
 };
 
 struct ImportedArtifactRecord
@@ -66,6 +68,7 @@ struct ImportedArtifactRecord
 	Ursa::UInt64 localFileId = 0;
 	String kind;
 	VirtualPath path;
+	bool isMainObject = false;
 };
 
 struct ImportCacheStatus
@@ -75,6 +78,10 @@ struct ImportCacheStatus
 	Vector<ImportedArtifactLocation> artifacts;
 	Vector<VirtualPath> dependencies;
 	nlohmann::json settings = nlohmann::json::object();
+	UInt64 mainObjectLocalFileId = 0;
+	String importer;
+	UInt32 importerVersion = 0;
+	String target;
 };
 
 class AssetDatabase final
@@ -97,6 +104,8 @@ public:
 	                                 const nlohmann::json& settings);
 
 	Result<VirtualPath> Resolve(ResourceId guid, Ursa::UInt64 localFileId = 0) const;
+	Result<ImportedArtifactLocation> ResolveImportedArtifact(ResourceId guid, UInt64 localFileId = 0) const;
+	Result<VirtualPath> SourcePath(ResourceId guid) const;
 
 	bool Contains(ResourceId guid) const;
 
@@ -116,7 +125,11 @@ public:
 
 	Result<void> PublishImport(const VirtualPath& source, const String& importer, Ursa::UInt32 importerVersion,
 	                           const String& target, const nlohmann::json& settings,
-	                           const Vector<VirtualPath>& dependencies, const Vector<ImportedArtifact>& artifacts);
+	                           const Vector<VirtualPath>& dependencies, const Vector<ImportedArtifact>& artifacts,
+	                           UInt64 mainObjectLocalFileId = 0);
+
+	void BeginCandidateCapture();
+	Result<void> PublishCandidates(const AssetDatabase& candidates);
 
 	Vector<AssetRecord> Assets() const;
 
@@ -164,6 +177,7 @@ private:
 		String fingerprint;
 		Vector<VirtualPath> dependencies;
 		Vector<ImportedArtifactLocation> artifacts;
+		UInt64 mainObjectLocalFileId = 0;
 	};
 
 	AssetDatabase(VirtualFileSystem& selectedFilesystem, String selectedScheme)
@@ -200,5 +214,7 @@ private:
 	Map<String, String> selectedImports;
 	bool cacheLoaded = false;
 	Ursa::UInt64 revision = 0;
+	bool capturingCandidates = false;
+	Set<String> candidatePublications;
 };
 } // namespace Ursa::Editor

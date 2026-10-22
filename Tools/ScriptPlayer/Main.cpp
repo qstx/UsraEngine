@@ -312,7 +312,8 @@ int main(int argc, char** argv)
 					throw std::runtime_error(
 					    "Project Library is missing; run UrsaAssetImport --project <project> before launching Player");
 				}
-				Done(sources.Mount("framework", EngineFrameworkDirectory(), MountAccess::ReadOnly));
+				Done(sources.Mount(EngineFrameworkScheme(EngineBuildConfiguration()), EngineFrameworkDirectory(),
+				                   MountAccess::ReadOnly));
 				const auto ready =
 				    Take(ReadRuntimeContent(sources, EngineBuildConfiguration(), "Player", "WindowsVulkan", &sources));
 				const auto runtimeView =

@@ -54,6 +54,11 @@ public:
 		return revision;
 	}
 
+	UInt64 SaveVersion() const
+	{
+		return saveVersion;
+	}
+
 	template <class T> void SetPayload(std::shared_ptr<T> value)
 	{
 		payload = std::move(value);
@@ -80,6 +85,7 @@ private:
 	DocumentWriter writer;
 	bool dirty = false;
 	UInt64 revision = 0;
+	UInt64 saveVersion = 0;
 	std::shared_ptr<void> payload;
 	std::type_index payloadType{typeid(void)};
 };

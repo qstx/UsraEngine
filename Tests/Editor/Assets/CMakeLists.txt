@@ -1,5 +1,44 @@
 if(URSA_BUILD_EDITOR)
 
+  ursa_add_test_executable(UrsaNativeAssetInspectorTests NativeAssetInspectorTests.cpp)
+  target_link_libraries(UrsaNativeAssetInspectorTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaNativeAssetInspectorTests COMMAND UrsaNativeAssetInspectorTests)
+
+  ursa_add_test_executable(UrsaMaterialDraftPropertyTests MaterialDraftPropertyTests.cpp)
+  target_link_libraries(UrsaMaterialDraftPropertyTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaMaterialDraftPropertyTests COMMAND UrsaMaterialDraftPropertyTests)
+
+  ursa_add_test_executable(UrsaScriptableAssetPropertyTests ScriptableAssetPropertyTests.cpp)
+  target_link_libraries(UrsaScriptableAssetPropertyTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaScriptableAssetPropertyTests COMMAND UrsaScriptableAssetPropertyTests)
+
+  ursa_add_test_executable(UrsaAssetImporterInspectorTests AssetImporterInspectorTests.cpp)
+  target_link_libraries(UrsaAssetImporterInspectorTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaAssetImporterInspectorTests COMMAND UrsaAssetImporterInspectorTests)
+
+  ursa_add_test_executable(UrsaImportInvocationTests ImportInvocationTests.cpp)
+  target_link_libraries(UrsaImportInvocationTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaImportInvocationTests COMMAND UrsaImportInvocationTests)
+
+  ursa_add_test_executable(UrsaAssetImportRulesTests AssetImportRulesTests.cpp)
+  target_link_libraries(UrsaAssetImportRulesTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaAssetImportRulesTests COMMAND UrsaAssetImportRulesTests)
+
+  ursa_add_test_executable(UrsaImportSettingsDraftTests ImportSettingsDraftTests.cpp)
+  target_link_libraries(UrsaImportSettingsDraftTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaImportSettingsDraftTests COMMAND UrsaImportSettingsDraftTests)
+
+  ursa_add_test_executable(UrsaAssetImportCandidateTests AssetImportCandidateTests.cpp)
+  target_link_libraries(UrsaAssetImportCandidateTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaAssetImportCandidateTests COMMAND UrsaAssetImportCandidateTests)
+
+  ursa_add_test_executable(UrsaModelImportCandidateTests ModelImportCandidateTests.cpp)
+  target_link_libraries(UrsaModelImportCandidateTests PRIVATE Ursa::Editor)
+  target_compile_definitions(UrsaModelImportCandidateTests PRIVATE
+    URSA_CANDIDATE_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx"
+    URSA_CANDIDATE_EMBEDDED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/embedded_ascii/box_embedded_texture_fragmented.fbx")
+  add_test(NAME UrsaModelImportCandidateTests COMMAND UrsaModelImportCandidateTests)
+
   ursa_add_test_executable(UrsaAssetPreviewPanelTests AssetPreviewPanelTests.cpp)
   target_link_libraries(UrsaAssetPreviewPanelTests PRIVATE Ursa::Editor Ursa::StbImage)
   target_compile_definitions(UrsaAssetPreviewPanelTests PRIVATE
@@ -7,6 +46,14 @@ if(URSA_BUILD_EDITOR)
   add_test(NAME UrsaAssetPreviewPanelTests COMMAND UrsaAssetPreviewPanelTests
     "${URSA_BINARY_ROOT}/Temp/AssetPreviewEvidence/$<CONFIG>")
   ursa_require_test_content(UrsaAssetPreviewPanelTests UrsaAssetPreviewPanelTests)
+	if(URSA_ENABLE_DOTNET)
+	  target_compile_definitions(UrsaAssetPreviewPanelTests PRIVATE URSA_PREVIEW_MANAGED_OUTPUT="${URSA_MANAGED_OUTPUT_DIR}")
+	  add_dependencies(UrsaAssetPreviewPanelTests UrsaManagedTestAssemblies)
+	  ursa_attach_dotnet_host_runtime(UrsaAssetPreviewPanelTests)
+	  add_test(NAME UrsaManagedAssetPreviewTests COMMAND UrsaAssetPreviewPanelTests
+	    "${URSA_BINARY_ROOT}/Temp/ManagedAssetPreviewEvidence/$<CONFIG>" --managed-only)
+	  ursa_require_test_content(UrsaManagedAssetPreviewTests UrsaAssetPreviewPanelTests)
+	endif()
 
   ursa_add_test_executable(UrsaAssetPreviewStateTests AssetPreviewStateTests.cpp)
   target_link_libraries(UrsaAssetPreviewStateTests PRIVATE Ursa::Editor)

@@ -6,13 +6,15 @@ public abstract class ScriptableObject : IDisposable
 {
 	private ulong instanceId;
 	private ulong sessionId;
+	private int ownerThread;
 	private bool alive;
 	private bool disposing;
 	private bool enabled;
+	private bool editorProxy;
 	private AssetReference? assetReference;
 	internal ulong ValidationRevision { get; private set; }
 
-	public bool IsValid => alive && ScriptableObjectRegistry.IsCurrentSession(sessionId);
+	public bool IsValid => alive && ownerThread == Environment.CurrentManagedThreadId && ScriptableObjectRegistry.IsCurrentSession(sessionId);
 
 	public ulong InstanceId
 	{
@@ -37,6 +39,7 @@ public abstract class ScriptableObject : IDisposable
 	public static ScriptableObject CreateInstance(Type type)
 	{
 		ScriptableObject instance = CreateForLoad(type);
+		instance.editorProxy = false;
 		try
 		{
 			instance.Activate();
@@ -53,21 +56,44 @@ public abstract class ScriptableObject : IDisposable
 	{
 		ArgumentNullException.ThrowIfNull(type);
 		ScriptableObjectRegistry.RequireThread();
+		if (Ursa.Bindings.Generated.RuntimeModule.Context == 0)
+			throw new InvalidOperationException("ScriptableObject creation requires an active host binding.");
 		if (!typeof(ScriptableObject).IsAssignableFrom(type) || type.IsAbstract || type.ContainsGenericParameters)
 			throw new ArgumentException($"'{type.FullName}' is not a concrete ScriptableObject type.", nameof(type));
 		ScriptableObject instance = Activator.CreateInstance(type, nonPublic: true) as ScriptableObject ??
 			throw new InvalidOperationException($"Cannot instantiate ScriptableObject '{type.FullName}'.");
 		(instance.instanceId, instance.sessionId) = ScriptableObjectRegistry.Register(instance);
+		instance.ownerThread = Environment.CurrentManagedThreadId;
 		instance.alive = true;
+		instance.editorProxy = ScriptableObjectRegistry.SnapshotOnly;
 		return instance;
 	}
 
 	internal void Activate()
 	{
 		RequireValid();
+		if (editorProxy) return;
 		if (enabled) return;
 		enabled = true;
 		OnEnable();
+	}
+
+	// Inspector field proxies are snapshots, not loaded game instances. Their lifetime
+	// must never invoke user game callbacks or occupy the persistent asset cache.
+	internal static ScriptableObject CreateEditorProxy(Type type, AssetReference reference)
+	{
+		ScriptableObject instance = CreateForLoad(type);
+		instance.editorProxy = true;
+		instance.BindAsset(reference, register: false);
+		return instance;
+	}
+
+	internal void ReleaseEditorProxy()
+	{
+		if (!alive) return;
+		alive = false;
+		enabled = false;
+		ScriptableObjectRegistry.Unregister(sessionId, instanceId);
 	}
 
 	public void Dispose()
@@ -75,6 +101,7 @@ public abstract class ScriptableObject : IDisposable
 		ScriptableObjectRegistry.RequireThread();
 		if (!alive || disposing) return;
 		RequireValid();
+		ImportExecution.RequireWritableAsset(this);
 		Release();
 		GC.SuppressFinalize(this);
 	}
@@ -114,6 +141,7 @@ public abstract class ScriptableObject : IDisposable
 	internal void Release()
 	{
 		if (!alive || disposing) return;
+		if (editorProxy) { ReleaseEditorProxy(); return; }
 		disposing = true;
 		Exception? disableError = null;
 		Exception? destroyError = null;
