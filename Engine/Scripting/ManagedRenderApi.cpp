@@ -11,7 +11,8 @@
 
 namespace Ursa::Scripting
 {
-Result<void> ManagedSceneApi::ExecuteRenderBatch(const UInt8* bytes, Size byteCount)
+Result<void> ManagedSceneApi::ExecuteRenderBatch(const UInt8* bytes, Size byteCount,
+                                                 const Bindings::Utf8View& bufferName)
 {
 	namespace B = Bindings;
 	namespace C = Bindings::Rendering::Commands;
@@ -19,7 +20,50 @@ Result<void> ManagedSceneApi::ExecuteRenderBatch(const UInt8* bytes, Size byteCo
 	{
 		B::BindingArena arena;
 		const auto decoded = C::Decode(bytes, byteCount, arena);
-		if (decoded.empty())
+		String copiedBufferName = B::ReadString(bufferName);
+		if (copiedBufferName.size() > 1024 || copiedBufferName.find('\0') != String::npos)
+		{
+			return Result<void>::Failure("CommandBuffer name is invalid or exceeds 1024 UTF-8 bytes");
+		}
+		Vector<String> sampleStack;
+		for (const auto& record : decoded)
+		{
+			std::visit(
+			    [&](const auto& value)
+			    {
+				    using T = std::decay_t<decltype(value)>;
+				    if constexpr (std::is_same_v<T, C::RenderCommands_BeginSample>)
+				    {
+					    const auto sampleName = B::ReadString(value.F_name);
+					    if (sampleName.empty() || sampleName.size() > 1024 || sampleName.find('\0') != String::npos ||
+					        std::all_of(sampleName.begin(), sampleName.end(),
+					                    [](unsigned char character)
+					                    {
+						                    return character == ' ' || character == '\t' || character == '\r' ||
+						                           character == '\n';
+					                    }))
+					    {
+						    throw std::runtime_error("BeginSample name is invalid");
+					    }
+					    sampleStack.push_back(sampleName);
+				    }
+				    else if constexpr (std::is_same_v<T, C::RenderCommands_EndSample>)
+				    {
+					    const auto sampleName = B::ReadString(value.F_name);
+					    if (sampleStack.empty() || sampleStack.back() != sampleName)
+					    {
+						    throw std::runtime_error("EndSample does not match the most recently opened sample");
+					    }
+					    sampleStack.pop_back();
+				    }
+			    },
+			    record);
+		}
+		if (!sampleStack.empty())
+		{
+			return Result<void>::Failure("Render command batch contains an unclosed profiling sample");
+		}
+		if (decoded.empty() && copiedBufferName.empty())
 		{
 			return {};
 		}
@@ -68,7 +112,14 @@ Result<void> ManagedSceneApi::ExecuteRenderBatch(const UInt8* bytes, Size byteCo
 			command.lighting = renderScene.Lighting();
 		};
 		Vector<Rendering::RenderCommand> operations;
-		operations.reserve(decoded.size());
+		operations.reserve(decoded.size() + (copiedBufferName.empty() ? 0 : 2));
+		if (!copiedBufferName.empty())
+		{
+			Rendering::RenderCommand sample;
+			sample.opcode = Rendering::RenderCommandOpcode::BeginSample;
+			sample.debugName = copiedBufferName;
+			operations.push_back(std::move(sample));
+		}
 		for (const auto& record : decoded)
 		{
 			Rendering::RenderCommand command;
@@ -231,6 +282,13 @@ Result<void> ManagedSceneApi::ExecuteRenderBatch(const UInt8* bytes, Size byteCo
 					    command.kernel = UInt32(value.F_kernel);
 					    command.groups = {value.F_groupsX, value.F_groupsY, value.F_groupsZ};
 				    }
+				    else if constexpr (std::is_same_v<T, C::RenderCommands_BeginSample> ||
+				                       std::is_same_v<T, C::RenderCommands_EndSample>)
+				    {
+					    command.opcode =
+					        std::is_same_v<T, C::RenderCommands_BeginSample> ? Opcode::BeginSample : Opcode::EndSample;
+					    command.debugName = B::ReadString(value.F_name);
+				    }
 				    else if constexpr (std::is_same_v<T, C::RenderCommands_ResetCameraState>)
 				    {
 					    throw std::runtime_error("Camera reset is reserved for native execution");
@@ -292,6 +350,13 @@ Result<void> ManagedSceneApi::ExecuteRenderBatch(const UInt8* bytes, Size byteCo
 			    },
 			    record);
 			operations.push_back(std::move(command));
+		}
+		if (!copiedBufferName.empty())
+		{
+			Rendering::RenderCommand sample;
+			sample.opcode = Rendering::RenderCommandOpcode::EndSample;
+			sample.debugName = std::move(copiedBufferName);
+			operations.push_back(std::move(sample));
 		}
 		return renderExecutor->Execute(operations);
 	}

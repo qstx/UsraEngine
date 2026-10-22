@@ -10,6 +10,8 @@ public sealed class CommandBuffer : IDisposable
 {
 	private readonly BindingCommandWriter writer = new(RenderingCommands.Hash);
 	private readonly List<RenderResource> recordedResources = new();
+	private readonly List<string> sampleNames = new();
+	private uint recordingGeneration;
 	private readonly HashSet<uint> temporaryTargetIds = new();
 	private bool disposed;
 	private string name;
@@ -251,24 +253,54 @@ public sealed class CommandBuffer : IDisposable
 		RenderCommands.DispatchCompute(writer, Compute(shader, kernel), kernel, groupsX, groupsY, groupsZ);
 	}
 
+	public void BeginSample(string sampleName)
+	{
+		EnsureAlive();
+		ValidateSampleName(sampleName);
+		RenderCommands.BeginSample(writer, sampleName);
+		sampleNames.Add(sampleName);
+	}
+
+	public void EndSample(string sampleName)
+	{
+		EnsureAlive();
+		ValidateSampleName(sampleName);
+		if (sampleNames.Count == 0 || sampleNames[^1] != sampleName)
+			throw new InvalidOperationException("EndSample must match the most recently opened sample.");
+		RenderCommands.EndSample(writer, sampleName);
+		sampleNames.RemoveAt(sampleNames.Count - 1);
+	}
+
+	internal uint RecordingGeneration => recordingGeneration;
+	internal bool IsAlive => !disposed;
+	internal void EndSampleIfCurrent(string sampleName, uint generation)
+	{
+		if (disposed || generation != recordingGeneration) return;
+		EndSample(sampleName);
+	}
+
 	public void Clear()
 	{
 		EnsureAlive();
 		writer.Clear();
 		recordedResources.Clear();
 		temporaryTargetIds.Clear();
+		sampleNames.Clear();
+		++recordingGeneration;
 	}
 
 	public void Execute(ScriptableRenderContext context)
 	{
 		EnsureAlive();
 		ArgumentNullException.ThrowIfNull(context);
-		context.Submit(BuildBatch(), recordedResources);
+		context.Submit(BuildBatch(), recordedResources, name);
 	}
 
 	internal byte[] BuildBatch()
 	{
 		EnsureAlive();
+		if (sampleNames.Count != 0)
+			throw new InvalidOperationException($"CommandBuffer has {sampleNames.Count} unclosed profiling sample(s).");
 		byte[] batch = writer.ToArray();
 		RenderingCommands.Validate(batch);
 		return batch;
@@ -280,6 +312,8 @@ public sealed class CommandBuffer : IDisposable
 		writer.Dispose();
 		recordedResources.Clear();
 		temporaryTargetIds.Clear();
+		sampleNames.Clear();
+		++recordingGeneration;
 		disposed = true;
 	}
 
@@ -297,6 +331,13 @@ public sealed class CommandBuffer : IDisposable
 		EnsureAlive();
 		ArgumentException.ThrowIfNullOrWhiteSpace(name);
 		if (Encoding.UTF8.GetByteCount(name) > 1024 || name.Contains('\0')) throw new ArgumentOutOfRangeException(nameof(name));
+	}
+
+	private static void ValidateSampleName(string sampleName)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(sampleName);
+		if (sampleName.Contains('\0') || Encoding.UTF8.GetByteCount(sampleName) > 1024)
+			throw new ArgumentOutOfRangeException(nameof(sampleName), "Sample names must fit within 1024 UTF-8 bytes and contain no null character.");
 	}
 
 	private static NativeAssetReference Compute(ComputeShader shader, int kernel)

@@ -32,7 +32,8 @@ struct RenderingServices
 	static Result<RenderResult> Cull(BindingCall& call, const Token& token, const Utf8View& identity);
 	static Result<RenderResult> CreateRendererList(BindingCall& call, const Token& token, const RenderResult& culling,
 	                                               const Drawing& drawing, const Filtering& filtering);
-	static Result<void> EnqueueBatch(BindingCall& call, const Token& token, const DataView& batch);
+	static Result<void> EnqueueBatch(BindingCall& call, const Token& token, const DataView& batch,
+	                                 const Utf8View& name);
 	static Result<Handle> CreateRenderTexture(BindingCall& call, const TextureDescription& descriptor);
 	static Result<void> ReleaseRenderTexture(BindingCall& call, const Handle& texture);
 	static Result<DataView> ReadRenderTexture(BindingCall& call, const Handle& texture);

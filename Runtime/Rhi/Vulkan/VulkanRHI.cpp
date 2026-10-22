@@ -478,6 +478,9 @@ struct Context
 {
 	VkInstance instance = VK_NULL_HANDLE;
 	VkDebugUtilsMessengerEXT debug = VK_NULL_HANDLE;
+	PFN_vkCmdBeginDebugUtilsLabelEXT beginDebugLabel = nullptr;
+	PFN_vkCmdEndDebugUtilsLabelEXT endDebugLabel = nullptr;
+	bool debugUtilsEnabled = false;
 	VkSurfaceKHR surface = VK_NULL_HANDLE;
 	VkPhysicalDevice physical = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
@@ -614,6 +617,20 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 		extensions.assign(required, required + count);
 	}
 	Vector<const char*> layers;
+	Ursa::UInt32 debugUtilsExtensionCount = 0;
+	Check(vkEnumerateInstanceExtensionProperties(nullptr, &debugUtilsExtensionCount, nullptr),
+	      "Enumerating Vulkan instance extensions");
+	Vector<VkExtensionProperties> availableExtensions(debugUtilsExtensionCount);
+	Check(vkEnumerateInstanceExtensionProperties(nullptr, &debugUtilsExtensionCount, availableExtensions.data()),
+	      "Enumerating Vulkan instance extensions");
+	const bool debugUtilsAvailable =
+	    std::any_of(availableExtensions.begin(), availableExtensions.end(), [](const auto& extension)
+	                { return std::strcmp(extension.extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0; });
+	if (debugUtilsAvailable && std::none_of(extensions.begin(), extensions.end(), [](const char* extension)
+	                                        { return std::strcmp(extension, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0; }))
+	{
+		extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	}
 	if (desc.validation)
 	{
 		Ursa::UInt32 count = 0;
@@ -624,7 +641,7 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 		                         { return std::strcmp(layer.layerName, "VK_LAYER_KHRONOS_validation") == 0; });
 		Require(found, "VK_LAYER_KHRONOS_validation is required in Debug mode");
 		layers.push_back("VK_LAYER_KHRONOS_validation");
-		extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		Require(debugUtilsAvailable, "VK_EXT_debug_utils is required for Vulkan validation in Debug mode");
 	}
 	VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
 	app.pApplicationName = "UrsaEngine";
@@ -636,6 +653,20 @@ std::shared_ptr<Context> CreateContext(const DeviceDesc& desc)
 	instanceInfo.enabledLayerCount = static_cast<Ursa::UInt32>(layers.size());
 	instanceInfo.ppEnabledLayerNames = layers.data();
 	Check(vkCreateInstance(&instanceInfo, nullptr, &ctx->instance), "Creating Vulkan instance");
+	ctx->debugUtilsEnabled = debugUtilsAvailable;
+	if (ctx->debugUtilsEnabled)
+	{
+		ctx->beginDebugLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+		    vkGetInstanceProcAddr(ctx->instance, "vkCmdBeginDebugUtilsLabelEXT"));
+		ctx->endDebugLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+		    vkGetInstanceProcAddr(ctx->instance, "vkCmdEndDebugUtilsLabelEXT"));
+		if (!ctx->beginDebugLabel || !ctx->endDebugLabel)
+		{
+			ctx->beginDebugLabel = nullptr;
+			ctx->endDebugLabel = nullptr;
+			ctx->debugUtilsEnabled = false;
+		}
+	}
 	if (desc.validation)
 	{
 		VkDebugUtilsMessengerCreateInfoEXT debugInfo{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
@@ -1435,6 +1466,7 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 	Format depthFormat{};
 	bool hasDepth = false;
 	bool rendering = false;
+	Ursa::UInt32 debugRegionDepth = 0;
 	int state = 0;
 
 	~CommandImpl() override
@@ -1467,6 +1499,7 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 			    VkCommandBufferBeginInfo info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
 			    info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 			    Check(vkBeginCommandBuffer(command, &info), "Beginning command list");
+			    debugRegionDepth = 0;
 			    state = 1;
 		    });
 	}
@@ -1477,6 +1510,7 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 		    [&]
 		    {
 			    Recording(true);
+			    Require(debugRegionDepth == 0, "End all debug regions before ending the command list");
 #if defined(URSA_ENABLE_TRACY)
 			    if (ctx->tracyGpu)
 			    {
@@ -1500,6 +1534,7 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 				    Require(!fence || fence->Completed(), "Command list is still in use by the GPU");
 			    }
 			    Check(vkResetCommandPool(ctx->device, pool, 0), "Resetting completed command pool");
+			    debugRegionDepth = 0;
 			    if (temporaryPool)
 			    {
 				    Require(temporaryPool->generation != (std::numeric_limits<UInt64>::max)(),
@@ -1527,6 +1562,43 @@ struct CommandImpl final : CommandList, std::enable_shared_from_this<CommandImpl
 			    colorFormats.clear();
 			    state = 0;
 			    ++resets;
+		    });
+	}
+
+	Result<void> BeginDebugRegion(const String& name) override
+	{
+		return GuardedVoid(
+		    [&]
+		    {
+			    Recording();
+			    Require(!name.empty() && name.size() <= 1024 && name.find('\0') == String::npos,
+			            "Debug region name must be nonempty, contain no null bytes, and fit within 1024 bytes");
+			    if (debugRegionDepth == (std::numeric_limits<Ursa::UInt32>::max)())
+			    {
+				    throw std::runtime_error("Debug region nesting limit exceeded");
+			    }
+			    if (ctx->debugUtilsEnabled)
+			    {
+				    VkDebugUtilsLabelEXT label{VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
+				    label.pLabelName = name.c_str();
+				    ctx->beginDebugLabel(command, &label);
+			    }
+			    ++debugRegionDepth;
+		    });
+	}
+
+	Result<void> EndDebugRegion() override
+	{
+		return GuardedVoid(
+		    [&]
+		    {
+			    Recording();
+			    Require(debugRegionDepth > 0, "No active debug region");
+			    if (ctx->debugUtilsEnabled)
+			    {
+				    ctx->endDebugLabel(command);
+			    }
+			    --debugRegionDepth;
 		    });
 	}
 

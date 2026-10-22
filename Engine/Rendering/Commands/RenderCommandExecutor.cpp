@@ -86,6 +86,38 @@ String ComputeScope(const RenderCommand& operation)
 	return operation.shader->id.ToString() + ":" + operation.shader->sourceHash + ":" +
 	       operation.shader->compilerVersion + ":" + ToUrsaString(std::to_string(operation.kernel));
 }
+
+String CameraRegionName(const CameraData& camera)
+{
+	const char* type = camera.settings.type == CameraType::SceneView ? "SceneView"
+	                   : camera.settings.type == CameraType::Preview ? "Preview"
+	                                                                 : "Game";
+	const String identity = camera.identity.ToString();
+	const String prefix = String(type) + " / ";
+	const String suffix = " [" + identity + "]";
+	const String& displayName = camera.debugName.empty() ? identity : camera.debugName;
+	constexpr Size maximumBytes = 1024;
+	const Size maximumDisplayBytes = maximumBytes - prefix.size() - suffix.size();
+	Size displayBytes = 0;
+	while (displayBytes < displayName.size())
+	{
+		const auto lead = static_cast<UInt8>(displayName[displayBytes]);
+		const Size characterBytes = (lead & 0x80u) == 0       ? 1
+		                            : (lead & 0xe0u) == 0xc0u ? 2
+		                            : (lead & 0xf0u) == 0xe0u ? 3
+		                            : (lead & 0xf8u) == 0xf0u ? 4
+		                                                      : 1;
+		if (displayBytes + characterBytes > maximumDisplayBytes || displayBytes + characterBytes > displayName.size())
+		{
+			break;
+		}
+		displayBytes += characterBytes;
+	}
+	String result = prefix;
+	result.append(displayName.data(), displayBytes);
+	result += suffix;
+	return result;
+}
 } // namespace
 
 struct RenderCommandExecutor::Impl
@@ -497,7 +529,7 @@ Result<void> RenderCommandExecutor::Begin(std::shared_ptr<RenderTextureResource>
 	return result;
 }
 
-Result<void> RenderCommandExecutor::ResetCamera()
+Result<void> RenderCommandExecutor::ResetCamera(std::optional<CameraData> camera)
 {
 	return Guard(
 	    [&]
@@ -521,6 +553,10 @@ Result<void> RenderCommandExecutor::ResetCamera()
 		    }
 		    RenderCommand boundary;
 		    boundary.opcode = RenderCommandOpcode::ResetCameraState;
+		    if (camera)
+		    {
+			    boundary.debugName = CameraRegionName(*camera);
+		    }
 		    impl->committed.push_back(std::move(boundary));
 	    });
 }
@@ -546,10 +582,22 @@ Result<void> RenderCommandExecutor::Execute(const Vector<RenderCommand>& command
 		    auto currentColors = impl->currentColors;
 		    auto currentDepth = impl->currentDepth;
 		    Vector<RenderCommand> accepted;
+		    Vector<String> sampleStack;
 		    for (auto operation : commands)
 		    {
 			    switch (operation.opcode)
 			    {
+				    case RenderCommandOpcode::BeginSample:
+					    Require(!operation.debugName.empty() && operation.debugName.size() <= 1024 &&
+					                operation.debugName.find('\0') == String::npos,
+					            "BeginSample name is invalid");
+					    sampleStack.push_back(operation.debugName);
+					    break;
+				    case RenderCommandOpcode::EndSample:
+					    Require(!sampleStack.empty() && sampleStack.back() == operation.debugName,
+					            "EndSample does not match the most recently opened sample");
+					    sampleStack.pop_back();
+					    break;
 				    case RenderCommandOpcode::GetTemporaryTarget:
 					    Require(operation.target.id && targets.find(operation.target.id) == targets.end(),
 					            "Temporary target ID is zero or already active");
@@ -788,6 +836,7 @@ Result<void> RenderCommandExecutor::Execute(const Vector<RenderCommand>& command
 			    }
 			    accepted.push_back(std::move(operation));
 		    }
+		    Require(sampleStack.empty(), "Render command batch contains an unclosed profiling sample");
 		    impl->pending.insert(impl->pending.end(), accepted.begin(), accepted.end());
 		    impl->temporaryTargets = std::move(targets);
 		    impl->currentTarget = std::move(current);
@@ -1002,16 +1051,43 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 			Map<String, Map<String, RenderGlobalParameter>> computeParameters;
 			std::optional<Rhi::ViewportRect> viewport;
 			std::optional<Rhi::ScissorRect> scissor;
+			String pendingCameraName;
+			bool cameraRegionOpen = false;
+			auto closeCameraRegion = [&]
+			{
+				if (cameraRegionOpen)
+				{
+					Done(command->EndDebugRegion());
+					cameraRegionOpen = false;
+				}
+			};
+			auto openCameraRegion = [&]
+			{
+				if (!cameraRegionOpen && !pendingCameraName.empty())
+				{
+					Done(command->BeginDebugRegion(pendingCameraName));
+					cameraRegionOpen = true;
+				}
+			};
 			for (const auto& operation : committed)
 			{
 				const auto target = operation.target.texture;
 				switch (operation.opcode)
 				{
 					case RenderCommandOpcode::ResetCameraState:
+						closeCameraRegion();
+						pendingCameraName = operation.debugName;
 						globals.clear();
 						computeParameters.clear();
 						viewport.reset();
 						scissor.reset();
+						break;
+					case RenderCommandOpcode::BeginSample:
+						openCameraRegion();
+						Done(command->BeginDebugRegion(operation.debugName));
+						break;
+					case RenderCommandOpcode::EndSample:
+						Done(command->EndDebugRegion());
 						break;
 					case RenderCommandOpcode::SetGlobalParameters:
 						globals[operation.global.name] = operation.global;
@@ -1030,6 +1106,7 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 						{
 							sceneRenderer = Take(SceneDrawEncoder::Create(device));
 						}
+						openCameraRegion();
 						SceneDrawEncoding encoding;
 						encoding.frames = frames.get();
 						encoding.globals = &globals;
@@ -1080,6 +1157,7 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 					}
 					case RenderCommandOpcode::DispatchCompute:
 					{
+						openCameraRegion();
 						auto& program = ComputeProgram(operation);
 						const auto& parameters = computeParameters[ComputeScope(operation)];
 						Vector<Rhi::BindingResource> bindings;
@@ -1182,6 +1260,7 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 						break;
 					case RenderCommandOpcode::ClearTarget:
 					{
+						openCameraRegion();
 						Rhi::RenderTarget pass;
 						pass.renderArea = scissor;
 						for (const auto& attachment : operation.colors)
@@ -1211,12 +1290,14 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 						break;
 					}
 					case RenderCommandOpcode::CopyTexture:
+						openCameraRegion();
 						transitionTexture(operation.source.texture, !operation.source.texture->color,
 						                  Rhi::ResourceState::TransferSource);
 						transitionTexture(target, !target->color, Rhi::ResourceState::TransferDestination);
 						Done(command->CopyTexture(SampledTexture(operation.source.texture), SampledTexture(target)));
 						break;
 					case RenderCommandOpcode::CopyBuffer:
+						openCameraRegion();
 						transitionBuffer(operation.sourceBuffer, Rhi::ResourceState::TransferSource);
 						transitionBuffer(operation.targetBuffer, Rhi::ResourceState::TransferDestination);
 						Done(command->CopyBuffer(operation.sourceBuffer->buffer, operation.targetBuffer->buffer,
@@ -1226,6 +1307,7 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 					case RenderCommandOpcode::Blit:
 					case RenderCommandOpcode::DrawFullscreen:
 					{
+						openCameraRegion();
 						auto& program = FullscreenProgram(operation);
 						Vector<Rhi::BindingResource> bindings;
 						const auto samplerSettings = operation.material->Parameters().sampler;
@@ -1366,6 +1448,7 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 			{
 				transitionTexture(cameraTarget, false, finalState);
 			}
+			closeCameraRegion();
 			completion = Take(frames->Complete(captureFrame ? capture : nullptr));
 			activeFrame = nullptr;
 			for (const auto& state : textures)

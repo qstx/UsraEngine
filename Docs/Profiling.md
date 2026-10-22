@@ -114,3 +114,19 @@ Release 的实际 Demo Snake/MaterialShowcase Player 均正常退出，capture �
 `UrsaMemoryBenchmarks --repeat 5` 可重现未连接数据，`--repeat 5 --wait-for-profiler` 等待连接后执行采集中数据。原始日志和两种调用栈 capture 位于 `Engine/Build/ProfilingCaptures/Benchmark-*`。
 
 基础 `tracy-profiling` 的联合 CPU/GPU/C# capture 与中文采样流程现已补充实际证据。2026-10-11 在 Windows x64 Debug 下，将 `URSA_ENABLE_TRACY`、`URSA_ENABLE_TRACY_MEMORY` 和 `URSA_ENABLE_TRACY_DIAGNOSTICS` 全部关闭，保留 .NET 与 Editor 支持，重新构建并通过 `UrsaManagedBehaviourRuntimeTests`、`UrsaDotNetHostSmoke`、`UrsaManagedProtocolTests` 和 `UrsaProjectPlaySessionTests` 及其准备步骤。实际 .NET 宿主验证了生命周期顺序、回调异常隔离和销毁行为，项目运行会话验证了 Run/Stop 与编辑状态恢复；对应 Runtime 和测试工程未引入 Tracy client 链接依赖。
+# GPU 抓帧调试域
+
+RenderDoc 标记由 RHI 的 GPU 调试域输出，与 Tracy 性能采样和 Vulkan validation 分开控制。可用 Vulkan `VK_EXT_debug_utils` 时，Debug/Release 均可看到相机与阶段的嵌套事件；扩展或函数不可用时后端跳过标签。
+
+默认 Forward 命令缓冲使用 `Ursa Forward` 名称。在抓帧中相机域按 `Game`、`SceneView` 或 `Preview` 类型，加场景对象名与持久 identity 标识；无显示名时回退 identity。相机下可见实际发生的 `Clear`、`Draw Opaque` 与 `Draw Transparent`。Editor UI 使用独立域。CPU 剔除不作为 GPU 域显示。
+
+C# 自定义管线可用 `CommandBuffer.BeginSample(name)` / `EndSample(name)` 或缓存 `ProfilingSampler` 并用 `ProfilingScope`：
+
+```csharp
+private static readonly ProfilingSampler opaque = new("Draw Opaque");
+
+using (new ProfilingScope(commands, opaque))
+    commands.DrawRendererList(opaqueList, context);
+```
+
+每个样本须在同一命令缓冲的单次 Execute 中按栈顺序配对。首版的 `ProfilingSampler` 和 `ProfilingScope` 只生成 GPU 调试域，不提供耗时统计、CPU-only 采样或跨 Execute 配对。命令缓冲 Name 在交付时复制；改名和 Clear 不改变已提交段的名称。

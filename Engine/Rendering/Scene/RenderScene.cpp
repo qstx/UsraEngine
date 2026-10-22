@@ -205,6 +205,14 @@ Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& obj
 			         world.InverseAffine(),
 			     {world.At(0, 3), world.At(1, 3), world.At(2, 3)},
 			     camera->rendering});
+			if (const auto gameObject = camera->GetGameObject())
+			{
+				auto name = gameObject->Name();
+				if (name)
+				{
+					cameras.back().debugName = std::move(name.value);
+				}
+			}
 		}
 		if (auto* renderer = dynamic_cast<RendererComponent*>(component))
 		{

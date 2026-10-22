@@ -49,5 +49,6 @@ struct CameraData
 	Mat4 viewProjection = Mat4::Identity();
 	Vec3 position;
 	CameraSettings settings;
+	String debugName;
 };
 } // namespace Ursa::Rendering

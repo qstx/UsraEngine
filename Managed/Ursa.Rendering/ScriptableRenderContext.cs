@@ -161,10 +161,10 @@ public sealed class ScriptableRenderContext : IDisposable
 		finally { retainedResources.Clear(); disposed = true; }
 	}
 
-	internal void Submit(ReadOnlySpan<byte> batch, IReadOnlyCollection<RenderResource> resources)
+	internal void Submit(ReadOnlySpan<byte> batch, IReadOnlyCollection<RenderResource> resources, string name)
 	{
 		RequireValid();
-		RenderCommandProtocol.Submit(context, batch);
+		RenderCommandProtocol.Submit(context, batch, name);
 		retainedResources.Add(new List<RenderResource>(resources).ToArray());
 	}
 

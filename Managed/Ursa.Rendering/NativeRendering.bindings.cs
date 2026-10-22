@@ -25,7 +25,7 @@ internal static partial class NativeRenderingBindings
 	internal static partial RenderResultValue CreateRendererList(RenderContextToken context, RenderResultValue culling,
 		DrawingSettingsValue drawing, FilteringSettings filtering);
 	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::EnqueueBatch")]
-	internal static partial void EnqueueBatch(RenderContextToken context, ReadOnlySpan<byte> batch);
+	internal static partial void EnqueueBatch(RenderContextToken context, ReadOnlySpan<byte> batch, string name);
 	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::CreateRenderTexture")]
 	internal static partial NativeHandle CreateRenderTexture(RenderTextureValue descriptor);
 	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::ReleaseRenderTexture")]

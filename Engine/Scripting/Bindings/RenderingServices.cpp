@@ -191,7 +191,7 @@ Result<RenderingServices::CameraFrame> RenderingServices::SetupCamera(BindingCal
 	const auto& camera = FindCamera(api, identity);
 	if (api.renderExecutor)
 	{
-		CompleteBindingResult(api.renderExecutor->ResetCamera());
+		CompleteBindingResult(api.renderExecutor->ResetCamera(camera));
 	}
 	api.activeRenderCamera = camera.identity.ToString();
 	return Result<CameraFrame>::Success(WriteCamera(call, api, camera));
@@ -257,11 +257,12 @@ Result<RenderingServices::RenderResult> RenderingServices::CreateRendererList(Bi
 	return Result<RenderResult>::Success({WriteToken(list.context), list.index, list.generation});
 }
 
-Result<void> RenderingServices::EnqueueBatch(BindingCall& call, const Token& token, const DataView& batch)
+Result<void> RenderingServices::EnqueueBatch(BindingCall& call, const Token& token, const DataView& batch,
+                                             const Utf8View& name)
 {
 	auto& api = RenderApi(call);
 	ValidateActive(api, token);
-	const auto result = api.ExecuteRenderBatch(static_cast<const UInt8*>(batch.data), Size(batch.length));
+	const auto result = api.ExecuteRenderBatch(static_cast<const UInt8*>(batch.data), Size(batch.length), name);
 	if (result)
 	{
 		++api.acceptedRenderBatchCount;

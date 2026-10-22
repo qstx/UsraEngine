@@ -197,3 +197,8 @@ RenderGraph、阴影体系、Deferred/Forward+、IBL、TAA、GPU 驱动剔除和
 - Shader 外层资源封套版本、反射/布局产物版本、源语法版本独立演进。当前 `.ursashaderasset` 封套为 v3、Shader archive 为 v4、SPIR-V 反射契约为 v2、绑定策略为 `UrsaBindingMapV5UniformLayout`；Pass、规范化反射和合并后的绑定布局都有稳定身份。导入校验入口、descriptor、uniform block 和顶点输入后才发布资产；源指纹包含源文件、UsePass/fallback 依赖 Shader 内容、include 内容、编译器和格式版本。反射布局或参数频率约定改变时提升对应版本并使旧 Library 产物失效；源 GUID、属性名和有效材质引用保持不变。Player 拒绝不兼容产物，Editor/导入工具从源重建，普通 C++ 构建不准备项目内容。
 
 协议的双端尺寸/偏移和恶意批次测试位于 Tests/Engine/Rendering 与 Tests/Managed/Ursa.ManagedHost.ProtocolTests；资产描述的双格式往返与版本拒绝测试位于 Tests/Engine/ScriptableAssets。
+# GPU 调试域
+
+`CommandBuffer.Name` 会作为该次执行的外层 GPU 域；项目可在其内部用 `BeginSample(name)` / `EndSample(name)` 创建自定义嵌套阶段，或用 `ProfilingScope` 在 `using` 结束时配对。样本名称必须非空、有效 UTF-8、无 NUL 且最多 1024 字节。开始/结束必须同名并遵循栈顺序，且都在同一缓冲的一次 Execute 内完成。Clear 会丢弃尚未交付的样本；先前交付的缓冲与名称快照不受改名、Clear 或 Dispose 影响。
+
+`ProfilingSampler` 可以缓存并复用于多个缓冲。首版接口提供 GPU 调试标记，不提供时间统计或 CPU-only 采样。Vulkan 通过可选的 `VK_EXT_debug_utils` 向 RenderDoc 输出标记，独立于 Tracy 与 validation。

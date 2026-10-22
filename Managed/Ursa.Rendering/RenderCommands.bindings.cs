@@ -7,6 +7,11 @@ namespace Ursa.Rendering;
 internal static partial class RenderCommands
 {
 	[RecordedCommand]
+	internal static partial void BeginSample(BindingCommandWriter writer, string name);
+	[RecordedCommand]
+	internal static partial void EndSample(BindingCommandWriter writer, string name);
+
+	[RecordedCommand]
 	internal static partial void SetRenderTarget(BindingCommandWriter writer, RenderTargetValue target);
 	[RecordedCommand]
 	internal static partial void SetRenderTargets(BindingCommandWriter writer, RenderTargetValue[] colors, RenderTargetValue? depth);

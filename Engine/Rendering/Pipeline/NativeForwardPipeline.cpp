@@ -86,13 +86,20 @@ Result<void> NativeForwardPipeline::RenderTarget(const Scene& scene,
 		Take(context.Begin(1, ++frameId, snapshot));
 		for (const auto& camera : snapshot.Cameras())
 		{
-			Done(executor->ResetCamera());
+			Done(executor->ResetCamera(camera));
 			commands.clear();
 			const auto& rect = camera.settings.viewport;
 			RenderCommand viewport;
 			viewport.opcode = RenderCommandOpcode::SetViewport;
 			viewport.viewport = {rect.x * width, rect.y * height, rect.width * width, rect.height * height, 0, 1};
 			commands.push_back(viewport);
+			auto sample = [&](RenderCommandOpcode opcode, const char* name)
+			{
+				RenderCommand marker;
+				marker.opcode = opcode;
+				marker.debugName = name;
+				commands.push_back(std::move(marker));
+			};
 			RenderCommand scissor;
 			scissor.opcode = RenderCommandOpcode::SetScissor;
 			scissor.scissor = {Int32(std::floor(rect.x * width)), Int32(std::floor(rect.y * height)),
@@ -102,15 +109,19 @@ Result<void> NativeForwardPipeline::RenderTarget(const Scene& scene,
 			commands.push_back(scissor);
 			if (camera.settings.clearFlags != CameraClearFlags::Nothing)
 			{
+				sample(RenderCommandOpcode::BeginSample, "Clear");
 				RenderCommand clear;
 				clear.opcode = RenderCommandOpcode::ClearTarget;
 				clear.clearFlags = camera.settings.clearFlags == CameraClearFlags::ColorAndDepth ? 3 : 2;
 				clear.color = camera.settings.background;
 				commands.push_back(clear);
+				sample(RenderCommandOpcode::EndSample, "Clear");
 			}
 			const auto culled = Take(context.Cull(camera));
 			for (const bool transparent : {false, true})
 			{
+				const char* stageName = transparent ? "Draw Transparent" : "Draw Opaque";
+				sample(RenderCommandOpcode::BeginSample, stageName);
 				DrawingSettings drawing;
 				drawing.shaderTags = {{"SRPDefaultUnlit"}, {"UniversalForward"}, {"ForwardBase"}};
 				drawing.sorting = {transparent ? SortingCriteria::CommonTransparent : SortingCriteria::CommonOpaque,
@@ -134,6 +145,7 @@ Result<void> NativeForwardPipeline::RenderTarget(const Scene& scene,
 					draw.draws.push_back(std::move(record));
 				}
 				commands.push_back(std::move(draw));
+				sample(RenderCommandOpcode::EndSample, stageName);
 			}
 			Done(executor->Execute(commands));
 			Done(executor->Submit());

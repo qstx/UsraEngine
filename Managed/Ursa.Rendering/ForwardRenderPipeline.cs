@@ -14,6 +14,9 @@ public sealed class ForwardRenderPipelineAsset : RenderPipelineAsset
 public sealed class ForwardRenderPipeline : RenderPipeline
 {
 	private readonly CommandBuffer commands = new("Ursa Forward");
+	private static readonly ProfilingSampler clearSampler = new("Clear");
+	private static readonly ProfilingSampler opaqueSampler = new("Draw Opaque");
+	private static readonly ProfilingSampler transparentSampler = new("Draw Transparent");
 	private readonly DrawingSettings opaqueDrawing = new()
 	{
 		ShaderTags = new[] { "SRPDefaultUnlit", "UniversalForward", "ForwardBase" },
@@ -53,11 +56,14 @@ public sealed class ForwardRenderPipeline : RenderPipeline
 				if (camera.ClearFlags != CameraClearFlags.Nothing)
 				{
 					Color background = camera.Background;
-					commands.ClearTarget(camera.ClearFlags == CameraClearFlags.ColorAndDepth, true, false,
-						new Vector4(background.R, background.G, background.B, background.A));
+					using (new ProfilingScope(commands, clearSampler))
+						commands.ClearTarget(camera.ClearFlags == CameraClearFlags.ColorAndDepth, true, false,
+							new Vector4(background.R, background.G, background.B, background.A));
 				}
-				commands.DrawRendererList(opaque, context);
-				commands.DrawRendererList(transparent, context);
+				using (new ProfilingScope(commands, opaqueSampler))
+					commands.DrawRendererList(opaque, context);
+				using (new ProfilingScope(commands, transparentSampler))
+					commands.DrawRendererList(transparent, context);
 				context.ExecuteCommandBuffer(commands);
 				context.Submit();
 				commands.Clear();

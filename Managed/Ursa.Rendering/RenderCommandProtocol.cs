@@ -21,9 +21,9 @@ internal static class RenderCommandProtocol
 	internal const int batchHeaderSize = BindingCommandWriter.HeaderSize;
 	internal const int maxByteSize = BindingCommandWriter.MaximumBytes;
 	internal static void Validate(ReadOnlySpan<byte> batch) => RenderingCommands.Validate(batch);
-	internal static void Submit(RenderContextToken context, ReadOnlySpan<byte> batch)
+	internal static void Submit(RenderContextToken context, ReadOnlySpan<byte> batch, string name)
 	{
 		Validate(batch);
-		NativeRenderingBindings.EnqueueBatch(context, batch);
+		NativeRenderingBindings.EnqueueBatch(context, batch, name);
 	}
 }

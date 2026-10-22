@@ -4177,8 +4177,21 @@ Result<void> EditorApplication::PresentGuiFrame(bool capture)
 	}
 	if (result)
 	{
-		result = gui->Record(command.value, swapchain->Format(), acquired.value.texture->desc.width,
-		                     acquired.value.texture->desc.height);
+		auto editorRegion = Rhi::DebugRegionScope::Begin(*command.value, "Editor UI");
+		if (!editorRegion)
+		{
+			result = Result<void>::Failure(editorRegion.error);
+		}
+		else
+		{
+			result = gui->Record(command.value, swapchain->Format(), acquired.value.texture->desc.width,
+			                     acquired.value.texture->desc.height);
+			auto ended = editorRegion.value.Close();
+			if (result && !ended)
+			{
+				result = std::move(ended);
+			}
+		}
 	}
 	if (result)
 	{

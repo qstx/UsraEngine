@@ -5,7 +5,7 @@
 #include <variant>
 namespace Ursa::Scripting::Bindings::Rendering::Commands
 {
-inline constexpr Array<UInt8, 32> hash{0x1b, 0xc9, 0x34, 0x2e, 0x4c, 0xa2, 0x97, 0x33, 0x05, 0x4a, 0x53, 0x6d, 0x7d, 0xe0, 0x70, 0x70, 0xa5, 0x9c, 0x5e, 0xae, 0x0d, 0x32, 0x5e, 0x0f, 0x9e, 0xb3, 0x7c, 0xbd, 0x40, 0x71, 0x3e, 0x9a};
+inline constexpr Array<UInt8, 32> hash{0x4f, 0x9b, 0xa8, 0xeb, 0x8e, 0xf7, 0xe8, 0xf9, 0xe5, 0xbe, 0x0f, 0xb1, 0xe6, 0xb4, 0x7a, 0x7f, 0xe4, 0xbf, 0xbb, 0xf1, 0x65, 0xa9, 0x4c, 0x0b, 0xb2, 0x46, 0x72, 0x28, 0xdc, 0x83, 0x41, 0x17};
 static_assert(bindingCommandVersion == 1 && bindingCommandHeaderSize == 48 && maximumCommandBytes == 67108864, "Command framing differs from the generated contract");
 inline UInt32 Read_Wire_b760f44fa5965c24(BindingCommandReader& reader, BindingArena& arena)
 {
@@ -350,6 +350,23 @@ inline void Write_Wire_6da88c34ba124c41(BindingCommandWriter& writer, const Int3
 	Check_Wire_6da88c34ba124c41(value);
 	writer.Scalar(value);
 }
+struct RenderCommands_BeginSample
+{
+	static constexpr UInt32 opcode = 0xccaf6f2eu;
+	Utf8View F_name{};
+};
+inline void Record_RenderCommands_BeginSample(BindingCommandWriter& writer, const RenderCommands_BeginSample& value)
+{
+	(void)value;
+	writer.RequireIdentity(hash);
+	writer.Begin(RenderCommands_BeginSample::opcode);
+	try
+	{
+		Write_Wire_473287f8298dba71(writer, value.F_name);
+		writer.End();
+	}
+	catch (...) { writer.Cancel(); throw; }
+}
 struct RenderCommands_Blit
 {
 	static constexpr UInt32 opcode = 0x1e5c7edcu;
@@ -522,6 +539,23 @@ inline void Record_RenderCommands_DrawRendererList(BindingCommandWriter& writer,
 	try
 	{
 		Write_Wire_85aea3c5bd534cc7(writer, value.F_list);
+		writer.End();
+	}
+	catch (...) { writer.Cancel(); throw; }
+}
+struct RenderCommands_EndSample
+{
+	static constexpr UInt32 opcode = 0x4c31e746u;
+	Utf8View F_name{};
+};
+inline void Record_RenderCommands_EndSample(BindingCommandWriter& writer, const RenderCommands_EndSample& value)
+{
+	(void)value;
+	writer.RequireIdentity(hash);
+	writer.Begin(RenderCommands_EndSample::opcode);
+	try
+	{
+		Write_Wire_473287f8298dba71(writer, value.F_name);
 		writer.End();
 	}
 	catch (...) { writer.Cancel(); throw; }
@@ -915,7 +949,7 @@ inline void Record_RenderCommands_SetViewport(BindingCommandWriter& writer, cons
 	}
 	catch (...) { writer.Cancel(); throw; }
 }
-using Command = std::variant<RenderCommands_Blit, RenderCommands_ClearTarget, RenderCommands_CopyBuffer, RenderCommands_CopyTexture, RenderCommands_DispatchCompute, RenderCommands_DrawFullscreen, RenderCommands_DrawMesh, RenderCommands_DrawRendererList, RenderCommands_GetTemporaryTarget, RenderCommands_ReleaseTemporaryTarget, RenderCommands_ResetCameraState, RenderCommands_SetComputeBuffer, RenderCommands_SetComputeFloat, RenderCommands_SetComputeInt, RenderCommands_SetComputeMatrix, RenderCommands_SetComputeTexture, RenderCommands_SetComputeVector, RenderCommands_SetGlobalBuffer, RenderCommands_SetGlobalFloat, RenderCommands_SetGlobalInt, RenderCommands_SetGlobalMatrix, RenderCommands_SetGlobalTexture, RenderCommands_SetGlobalVector, RenderCommands_SetRenderTarget, RenderCommands_SetRenderTargets, RenderCommands_SetScissor, RenderCommands_SetViewport>;
+using Command = std::variant<RenderCommands_BeginSample, RenderCommands_Blit, RenderCommands_ClearTarget, RenderCommands_CopyBuffer, RenderCommands_CopyTexture, RenderCommands_DispatchCompute, RenderCommands_DrawFullscreen, RenderCommands_DrawMesh, RenderCommands_DrawRendererList, RenderCommands_EndSample, RenderCommands_GetTemporaryTarget, RenderCommands_ReleaseTemporaryTarget, RenderCommands_ResetCameraState, RenderCommands_SetComputeBuffer, RenderCommands_SetComputeFloat, RenderCommands_SetComputeInt, RenderCommands_SetComputeMatrix, RenderCommands_SetComputeTexture, RenderCommands_SetComputeVector, RenderCommands_SetGlobalBuffer, RenderCommands_SetGlobalFloat, RenderCommands_SetGlobalInt, RenderCommands_SetGlobalMatrix, RenderCommands_SetGlobalTexture, RenderCommands_SetGlobalVector, RenderCommands_SetRenderTarget, RenderCommands_SetRenderTargets, RenderCommands_SetScissor, RenderCommands_SetViewport>;
 inline Vector<Command> Decode(const void* bytes, Size size, BindingArena& arena, bool allowNativeOnly = false)
 {
 	(void)arena;
@@ -929,6 +963,13 @@ inline Vector<Command> Decode(const void* bytes, Size size, BindingArena& arena,
 	{
 		switch (opcode)
 		{
+			case RenderCommands_BeginSample::opcode:
+			{
+				RenderCommands_BeginSample value;
+				value.F_name = Read_Wire_473287f8298dba71(reader, arena);
+				result.emplace_back(std::move(value));
+				break;
+			}
 			case RenderCommands_Blit::opcode:
 			{
 				RenderCommands_Blit value;
@@ -1002,6 +1043,13 @@ inline Vector<Command> Decode(const void* bytes, Size size, BindingArena& arena,
 			{
 				RenderCommands_DrawRendererList value;
 				value.F_list = Read_Wire_85aea3c5bd534cc7(reader, arena);
+				result.emplace_back(std::move(value));
+				break;
+			}
+			case RenderCommands_EndSample::opcode:
+			{
+				RenderCommands_EndSample value;
+				value.F_name = Read_Wire_473287f8298dba71(reader, arena);
 				result.emplace_back(std::move(value));
 				break;
 			}

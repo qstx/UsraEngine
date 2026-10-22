@@ -2076,8 +2076,8 @@
     {
       "Id": 1878535983750053602,
       "Name": "Rendering",
-      "Hash": "ad7401be90c580978342b09182377926f49a1e0d62d5165e2c4714438d89ed68",
-      "CommandHash": "1bc9342e4ca29733054a536d7de07070a59c5eae0d325e0f9eb37cbd40713e9a",
+      "Hash": "9fcadf4291f2dc7f3741c91fac9d47ef52a01c1d569df4a9b504dcc03113fb73",
+      "CommandHash": "4f9ba8eb8ef7e8f9e5be0fb1e6b47a7fe4bfbbf165a94c0bb2467228dc834117",
       "Required": true,
       "CallScoped": false,
       "Dependencies": [
@@ -2262,6 +2262,12 @@
               "Type": "global::System.ReadOnlySpan\u003Cbyte\u003E",
               "HandleKind": 0,
               "Session": false
+            },
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
             }
           ],
           "Thread": 0,
@@ -2368,6 +2374,21 @@
             {
               "Name": "context",
               "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.BeginSample",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
               "HandleKind": 0,
               "Session": false
             }
@@ -2608,6 +2629,21 @@
             {
               "Name": "list",
               "Type": "global::Ursa.Rendering.RenderResultValue",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.EndSample",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
               "HandleKind": 0,
               "Session": false
             }

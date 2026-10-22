@@ -16,7 +16,7 @@ struct Table
 	Int32 (*NativeRenderingBindings_CreateRendererList)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Wire::Value_Ursa_Rendering_RenderResultValue*, const Wire::Value_Ursa_Rendering_DrawingSettingsValue*, const Wire::Value_Ursa_Rendering_FilteringSettings*, Wire::Value_Ursa_Rendering_RenderResultValue*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_Cull)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Utf8View*, Wire::Value_Ursa_Rendering_RenderResultValue*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_End)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, BindingOutcome*) = nullptr;
-	Int32 (*NativeRenderingBindings_EnqueueBatch)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const DataView*, BindingOutcome*) = nullptr;
+	Int32 (*NativeRenderingBindings_EnqueueBatch)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const DataView*, const Utf8View*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_ReadGraphicsBuffer)(void*, const Wire::Value_Ursa_NativeHandle*, UInt64, UInt64, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_ReadRenderTexture)(void*, const Wire::Value_Ursa_NativeHandle*, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_ReleaseGraphicsBuffer)(void*, const Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
@@ -160,7 +160,7 @@ inline Int32 NativeRenderingBindings_End(void* context, const Wire::Value_Ursa_R
 #line 1 "Rendering.generated.hpp"
 // Contract: Ursa.Rendering/NativeRendering.bindings.cs:28
 #line 28 "Ursa.Rendering/NativeRendering.bindings.cs"
-inline Int32 NativeRenderingBindings_EnqueueBatch(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, const DataView* p_batch, BindingOutcome* outcome) noexcept
+inline Int32 NativeRenderingBindings_EnqueueBatch(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, const DataView* p_batch, const Utf8View* p_name, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
 	{
@@ -168,9 +168,11 @@ inline Int32 NativeRenderingBindings_EnqueueBatch(void* context, const Wire::Val
 		Check_Wire_04a0edee134a5c26(*p_context);
 		if (!p_batch) throw std::runtime_error("Null binding parameter: batch");
 		Check_Wire_a2e6d7f1f60b4db4(*p_batch);
-		using TargetSignature = Result<void> (*)(BindingCall&, const Wire::Value_Ursa_Rendering_RenderContextToken&, const DataView&);
+		if (!p_name) throw std::runtime_error("Null binding parameter: name");
+		Check_Wire_473287f8298dba71(*p_name);
+		using TargetSignature = Result<void> (*)(BindingCall&, const Wire::Value_Ursa_Rendering_RenderContextToken&, const DataView&, const Utf8View&);
 		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::RenderingServices::EnqueueBatch), TargetSignature>, "Native binding target signature mismatch: Ursa.Rendering.NativeRenderingBindings.EnqueueBatch");
-		CompleteBindingResult(::Ursa::Scripting::Bindings::RenderingServices::EnqueueBatch(call, *p_context, *p_batch));
+		CompleteBindingResult(::Ursa::Scripting::Bindings::RenderingServices::EnqueueBatch(call, *p_context, *p_batch, *p_name));
 	});
 }
 #line 1 "Rendering.generated.hpp"
@@ -295,7 +297,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeRenderingBindings_SetupCamera,
 		&NativeRenderingBindings_Submit,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 15, &table, &ValidateBindingContext, {0xad, 0x74, 0x01, 0xbe, 0x90, 0xc5, 0x80, 0x97, 0x83, 0x42, 0xb0, 0x91, 0x82, 0x37, 0x79, 0x26, 0xf4, 0x9a, 0x1e, 0x0d, 0x62, 0xd5, 0x16, 0x5e, 0x2c, 0x47, 0x14, 0x43, 0x8d, 0x89, 0xed, 0x68}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 15, &table, &ValidateBindingContext, {0x9f, 0xca, 0xdf, 0x42, 0x91, 0xf2, 0xdc, 0x7f, 0x37, 0x41, 0xc9, 0x1f, 0xac, 0x9d, 0x47, 0xef, 0x52, 0xa0, 0x1c, 0x1d, 0x56, 0x9d, 0xf4, 0xa9, 0xb5, 0x04, 0xdc, 0xc0, 0x31, 0x13, 0xfb, 0x73}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Rendering

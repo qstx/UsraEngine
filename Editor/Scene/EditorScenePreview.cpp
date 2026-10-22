@@ -33,6 +33,7 @@ Result<void> EditorScenePreview::Render(const Scene& scene,
 	Rendering::CameraData data;
 	data.identity = cameraIdentity;
 	data.settings.type = Rendering::CameraType::SceneView;
+	data.debugName = "Scene View Preview";
 	data.position = camera.position;
 	data.viewProjection =
 	    camera.ViewProjection(Float32(target->description.width) / Float32(target->description.height));

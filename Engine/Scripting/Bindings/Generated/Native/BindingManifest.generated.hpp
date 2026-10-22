@@ -19,7 +19,7 @@ inline constexpr std::array<Module, 5> modules{{
 	{0x054b31391c166a93ull, "Editor", "552adeae31f9fe90604d004ef447ec04c5243d365bdb4ace65fc23c11bf61ad6", 58, false, true},
 	{0x00ca56bfaa9bff2cull, "Import", "72fbdd3a70010cce03747c87f11724ce97b7dbd7310a7cb8f839bd84bad2e3fe", 24, false, true},
 	{0xc63346392600d9f5ull, "ManagedHost", "1bfa8aaaa223e3b52f97e936f3b1ef7f02848d0edc113a4b99925167716c91df", 35, true, false},
-	{0x1a11e6863935fee2ull, "Rendering", "ad7401be90c580978342b09182377926f49a1e0d62d5165e2c4714438d89ed68", 15, true, false},
+	{0x1a11e6863935fee2ull, "Rendering", "9fcadf4291f2dc7f3741c91fac9d47ef52a01c1d569df4a9b504dcc03113fb73", 15, true, false},
 	{0xa39a879758119310ull, "Runtime", "fd0fe3325559283c0bc0817c338bd10507182dd0833c56ab63f2b56b4bbc7b35", 107, true, false},
 }};
 } // namespace Ursa::Scripting::Bindings::Manifest

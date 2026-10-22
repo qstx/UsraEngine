@@ -175,7 +175,7 @@ private:
 
 	Result<std::shared_ptr<ManagedGraphicsBuffer>> ResolveGraphicsBuffer(const ManagedHandle& handle) const;
 
-	Result<void> ExecuteRenderBatch(const UInt8* bytes, Size byteCount);
+	Result<void> ExecuteRenderBatch(const UInt8* bytes, Size byteCount, const Bindings::Utf8View& name);
 
 	UnorderedMap<UInt32, MeshPtr> ownedMeshes;
 	UnorderedMap<UInt32, std::shared_ptr<MaterialInstance>> ownedMaterials;

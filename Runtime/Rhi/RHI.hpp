@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <utility>
 
 namespace Ursa::Rhi
 {
@@ -538,6 +539,10 @@ public:
 	// Reuse a completed command list; pending GPU submissions are rejected.
 	virtual Result<void> Reset() = 0;
 
+	// Debug regions annotate recorded GPU work for capture tools; they do not sample elapsed time.
+	virtual Result<void> BeginDebugRegion(const String& name) = 0;
+	virtual Result<void> EndDebugRegion() = 0;
+
 	virtual Result<BindGroupPtr> CreateTransientBindGroup(const BindGroupDesc& desc) = 0;
 
 	virtual CommandListStatistics Statistics() const = 0;
@@ -591,6 +596,65 @@ public:
 	                                 Ursa::Int32 vertexOffset = 0) = 0;
 
 	virtual Result<void> Dispatch(Ursa::UInt32 x, Ursa::UInt32 y = 1, Ursa::UInt32 z = 1) = 0;
+};
+
+class DebugRegionScope final
+{
+public:
+	DebugRegionScope() = default;
+	DebugRegionScope(const DebugRegionScope&) = delete;
+	DebugRegionScope& operator=(const DebugRegionScope&) = delete;
+
+	DebugRegionScope(DebugRegionScope&& other) noexcept : command(std::exchange(other.command, nullptr))
+	{
+	}
+
+	DebugRegionScope& operator=(DebugRegionScope&& other) noexcept
+	{
+		if (this != &other)
+		{
+			Close();
+			command = std::exchange(other.command, nullptr);
+		}
+		return *this;
+	}
+
+	~DebugRegionScope()
+	{
+		Close();
+	}
+
+	static Result<DebugRegionScope> Begin(CommandList& command, const String& name)
+	{
+		auto result = command.BeginDebugRegion(name);
+		if (!result)
+		{
+			return Result<DebugRegionScope>::Failure(result.error);
+		}
+		DebugRegionScope scope;
+		scope.command = &command;
+		return Result<DebugRegionScope>::Success(std::move(scope));
+	}
+
+	Result<void> Close() noexcept
+	{
+		if (!command)
+		{
+			return {};
+		}
+		CommandList* active = std::exchange(command, nullptr);
+		try
+		{
+			return active->EndDebugRegion();
+		}
+		catch (...)
+		{
+			return Result<void>::Failure("Ending a GPU debug region failed");
+		}
+	}
+
+private:
+	CommandList* command = nullptr;
 };
 
 struct SwapchainStatistics

@@ -133,3 +133,20 @@ CPU 快速回归 60/60 通过；无 Editor/.NET 的独立 UrsaCapture 和聚合�
 `Build/Temp/SrpCreatedAssetInspectorFocused.png` 是命令行捕获的实际 Editor 界面，显示通过创建菜单生成的资产及其材质/计算引用、浮点和 tint 字段。此前 Inspector 错将资产 GUID 与脚本 GUID 比较，现以 payload 中的脚本身份验证类型。`UrsaScriptableAssetInspectorTests` 用真实 ImGui 控件导航验证字段 Dirty/保存及未知字段保留，避免仅以文件往返代替界面行为。
 
 创建菜单、字段保存、Graphics 选择及三个预览的完整界面交互证据，以及 Snake/MaterialShowcase 松散/Pak Player 系统验收，已在本报告前文记录，OpenSpec 任务 8.6/10.2/10.3 已完成。
+# RenderDoc GPU 调试域验收
+
+使用含 Game 相机的 Demo 项目运行 `Engine/Build/Debug/UrsaScriptPlayer.exe --project Demo --scene Snake/Snake.ursascene`，在 RenderDoc 中启动或附加进程并抓取一帧。在 Vulkan RenderDoc Event Browser 中检查事件树：
+
+```text
+Game / <GameObject> [<camera identity>]
++-- Ursa Forward
+    +-- Clear
+    +-- Draw Opaque
+    +-- Draw Transparent
+```
+
+Editor 抓帧应按 SceneView、Game、资产 Preview 区分相机，并显示独立 `Editor UI` 域。相机显示名重复时方括号中的 identity 应不同。`CameraClearFlags.Nothing` 时不出现 Clear；CPU Cull 不出现为 GPU 阶段；对象、材质和 Shader Pass 不额外展开。
+
+验证项目 C# 管线的嵌套范围：在单次 CommandBuffer Execute 中用可缓存 ProfilingSampler/ProfilingScope 包住一个自定义绘制阶段，确认该域位于相机及 CommandBuffer.Name 内。关闭 Tracy 与 validation 后使用 Release 应用重复抓帧，标记仍应可见。另确认修改 Name 并 Clear 缓冲后，已提交帧仍保留旧标签。
+
+捕获记录应包含 Engine 配置类型、托管渲染是否启用、Tracy/validation 开关、RenderDoc 版本及相机/阶段树截图或导出的事件列表。测试物理提交次数和画面回归沿现有渲染验收流程进行；调试标签自身不应引入新的提交或等待。

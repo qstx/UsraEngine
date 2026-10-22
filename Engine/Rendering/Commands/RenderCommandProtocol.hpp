@@ -23,7 +23,9 @@ enum class RenderCommandOpcode : UInt32
 	DrawFullscreen,
 	SetRenderTargets,
 	SetComputeParameters,
-	ResetCameraState
+	ResetCameraState,
+	BeginSample,
+	EndSample
 };
 
 struct RenderContextToken

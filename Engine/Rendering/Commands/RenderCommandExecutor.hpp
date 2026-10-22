@@ -26,6 +26,7 @@ struct RenderCommand
 	Array<UInt32, 3> groups{1, 1, 1};
 	Vector<SceneDrawRecord> draws;
 	CameraData camera;
+	String debugName;
 	SceneLighting lighting;
 	String activePipeline = "UrsaForward";
 	RenderGlobalParameter global;
@@ -62,7 +63,7 @@ public:
 	Result<void> Begin(std::shared_ptr<RenderTextureResource> cameraTarget = {},
 	                   Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead,
 	                   const Rhi::SwapchainPtr& swapchain = {});
-	Result<void> ResetCamera();
+	Result<void> ResetCamera(std::optional<CameraData> camera = {});
 	Result<void> Execute(const Vector<RenderCommand>& commands);
 	Result<void> Submit();
 	Result<Rhi::FencePtr> End();
