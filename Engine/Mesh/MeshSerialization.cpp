@@ -2,6 +2,7 @@
 #include <Serialization/ResourceSession.hpp>
 #include <Serialization/SerializationContext.hpp>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace Ursa
@@ -101,7 +102,20 @@ Result<void> Mesh::Serialize(ArchiveWriter& writer) const
 	}
 	try
 	{
-		auto result = writer.Write("dataVersion", UInt64{1});
+		Vector<UInt16> serializedJointIndices = data.skinJointIndices;
+		if (serializedJointIndices.empty() && !data.skinInverseBindMatrices.empty())
+		{
+			if (data.skinInverseBindMatrices.size() > Size(std::numeric_limits<UInt16>::max()) + 1)
+			{
+				return Result<void>::Failure("Mesh skin binding exceeds the supported joint index range");
+			}
+			serializedJointIndices.reserve(data.skinInverseBindMatrices.size());
+			for (Size index = 0; index < data.skinInverseBindMatrices.size(); ++index)
+			{
+				serializedJointIndices.push_back(static_cast<UInt16>(index));
+			}
+		}
+		auto result = writer.Write("dataVersion", UInt64{3});
 		if (result)
 		{
 			result = writer.Write("vertexCount", UInt64(data.positions.size()));
@@ -225,6 +239,34 @@ Result<void> Mesh::Serialize(ArchiveWriter& writer) const
 				                                                     }
 			                                                     }));
 		}
+		if (result)
+		{
+			result = writer.Write("skinJointCount", UInt64(serializedJointIndices.size()));
+		}
+		if (result)
+		{
+			result = writer.WriteBytes("skinJointIndices", Channel(serializedJointIndices,
+			                                                       [](Vector<UInt8>& bytes, UInt16 joint)
+			                                                       {
+				                                                       bytes.push_back(UInt8(joint));
+				                                                       bytes.push_back(UInt8(joint >> 8));
+			                                                       }));
+		}
+		if (result)
+		{
+			result = writer.WriteBytes("skinInverseBindMatrices",
+			                           Channel(data.skinInverseBindMatrices,
+			                                   [](Vector<UInt8>& bytes, const Mat4& matrix)
+			                                   {
+				                                   for (Int32 row = 0; row < 4; ++row)
+				                                   {
+					                                   for (Int32 column = 0; column < 4; ++column)
+					                                   {
+						                                   WriteFloat(bytes, matrix.At(row, column));
+					                                   }
+				                                   }
+			                                   }));
+		}
 		return result;
 	}
 	catch (const std::exception& error)
@@ -240,8 +282,8 @@ Result<void> Mesh::Deserialize(const ArchiveReader& reader, SerializationContext
 		auto format = reader.Unsigned("dataVersion");
 		auto count = reader.Unsigned("vertexCount");
 		auto indexCount = reader.Unsigned("indexCount");
-		if (!format || format.value != 1 || !count || !indexCount || count.value > maxDataBytes / sizeof(Vec3) ||
-		    indexCount.value > maxDataBytes / sizeof(UInt32))
+		if (!format || (format.value < 1 || format.value > 3) || !count || !indexCount ||
+		    count.value > maxDataBytes / sizeof(Vec3) || indexCount.value > maxDataBytes / sizeof(UInt32))
 		{
 			return Result<void>::Failure("Invalid Mesh data version or channel count");
 		}
@@ -376,6 +418,48 @@ Result<void> Mesh::Deserialize(const ArchiveReader& reader, SerializationContext
 			}
 			data.skeletonReference = reference.value;
 			data.skeleton = std::move(skeleton.value);
+		}
+		if (format.value >= 2)
+		{
+			Size bindingCount = data.skeleton ? data.skeleton->joints.size() : 0;
+			if (format.value >= 3)
+			{
+				auto loadedJointCount = reader.Unsigned("skinJointCount");
+				if (!loadedJointCount || loadedJointCount.value > (data.skeleton ? data.skeleton->joints.size() : 0))
+				{
+					return Result<void>::Failure("Invalid Mesh skin joint count");
+				}
+				bindingCount = Size(loadedJointCount.value);
+				result = ReadChannel(reader, "skinJointIndices", bindingCount, 2, data.skinJointIndices, budget,
+				                     [](const Vector<UInt8>& bytes, Size& at)
+				                     {
+					                     const UInt16 joint = UInt16(UInt16(bytes[at]) | (UInt16(bytes[at + 1]) << 8));
+					                     at += 2;
+					                     return joint;
+				                     });
+				if (!result)
+				{
+					return result;
+				}
+			}
+			result =
+			    ReadChannel(reader, "skinInverseBindMatrices", bindingCount, 64, data.skinInverseBindMatrices, budget,
+			                [](const Vector<UInt8>& bytes, Size& at)
+			                {
+				                Mat4 matrix;
+				                for (Int32 row = 0; row < 4; ++row)
+				                {
+					                for (Int32 column = 0; column < 4; ++column)
+					                {
+						                matrix.At(row, column) = ReadFloat(bytes, at);
+					                }
+				                }
+				                return matrix;
+			                });
+			if (!result)
+			{
+				return result;
+			}
 		}
 		std::lock_guard<std::mutex> lock(mutex);
 		return Publish(std::move(data));

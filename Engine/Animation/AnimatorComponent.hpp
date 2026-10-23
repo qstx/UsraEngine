@@ -78,6 +78,11 @@ public:
 		return jointPalette;
 	}
 
+	const Vector<Mat4>& JointGlobalTransforms() const
+	{
+		return jointGlobalTransforms;
+	}
+
 	Result<void> Update(const FrameContext& context) override;
 
 private:
@@ -89,6 +94,7 @@ private:
 	std::shared_ptr<const ModelSkeleton> skeleton;
 	std::shared_ptr<const AnimationClip> clip;
 	Vector<Mat4> jointPalette;
+	Vector<Mat4> jointGlobalTransforms;
 	Ursa::Float64 timeSeconds = 0.0;
 	Ursa::Float32 speed = 1.0f;
 	bool loop = true;

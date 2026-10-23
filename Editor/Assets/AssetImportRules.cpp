@@ -48,7 +48,7 @@ Vector<AssetImporterDescriptor> NativeImporters()
 	         {".ursamat", ".ursaprefab", ".ursascene", ".ursamesh", ".ursatex", ".ursashaderasset", ".ursamodel", ".cs",
 	          ".dll", ".meta"},
 	         {}},
-	        {"ursa.Model", ModelImporter::Version, {".fbx", ".obj"}, {}},
+	        {"ursa.Model", ModelImporter::Version, ModelImporter::SupportedExtensions(), {}},
 	        {"ursa.Shader", 3, {".ursashader", ".compute"}, {}},
 	        {"ursa.ScriptableAsset", 1, {".ursaasset"}, {}},
 	        {"ursa.Texture", 1, {".png", ".jpg", ".jpeg"}, {}}};

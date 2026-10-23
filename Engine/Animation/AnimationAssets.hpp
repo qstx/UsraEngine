@@ -6,6 +6,13 @@
 
 namespace Ursa
 {
+enum class AnimationInterpolation : Ursa::UInt8
+{
+	Linear,
+	Step,
+	CubicSpline
+};
+
 struct SkeletonJoint
 {
 	Ursa::UInt64 nodeLocalFileId = 0;
@@ -26,17 +33,24 @@ struct AnimationVectorKey
 {
 	Ursa::Float64 timeSeconds = 0.0;
 	Vec3 value{};
+	Vec3 inTangent{};
+	Vec3 outTangent{};
 };
 
 struct AnimationRotationKey
 {
 	Ursa::Float64 timeSeconds = 0.0;
 	Quat value{};
+	Quat inTangent{0, 0, 0, 0};
+	Quat outTangent{0, 0, 0, 0};
 };
 
 struct AnimationNodeChannel
 {
 	Ursa::UInt64 nodeLocalFileId = 0;
+	AnimationInterpolation positionInterpolation = AnimationInterpolation::Linear;
+	AnimationInterpolation rotationInterpolation = AnimationInterpolation::Linear;
+	AnimationInterpolation scaleInterpolation = AnimationInterpolation::Linear;
 	Vector<AnimationVectorKey> positions;
 	Vector<AnimationRotationKey> rotations;
 	Vector<AnimationVectorKey> scales;

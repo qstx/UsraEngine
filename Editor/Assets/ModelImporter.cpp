@@ -56,7 +56,484 @@ bool IsSupportedModel(const VirtualPath& path)
 		return false;
 	}
 	const String extension = Lowered(path.relative.substr(dot));
-	return extension == ".fbx" || extension == ".obj";
+	return extension == ".fbx" || extension == ".obj" || extension == ".gltf" || extension == ".glb";
+}
+
+Result<Vector<String>> ValidateGltfSource(const VirtualFileSystem& filesystem, const VirtualPath& source)
+{
+	const String sourceExtension = Lowered(source.relative.substr(source.relative.rfind('.')));
+	if (sourceExtension != ".gltf" && sourceExtension != ".glb")
+	{
+		return Result<Vector<String>>::Success({});
+	}
+	auto bytesResult = filesystem.ReadPrefix(source, 256ull * 1024ull * 1024ull);
+	if (!bytesResult)
+	{
+		return Result<Vector<String>>::Failure("Cannot read glTF source: " + bytesResult.error);
+	}
+	const auto& bytes = bytesResult.value;
+	String jsonText;
+	if (sourceExtension == ".glb")
+	{
+		auto readU32 = [&bytes](Ursa::Size offset) -> Ursa::UInt32
+		{
+			return static_cast<Ursa::UInt32>(bytes[offset]) | (static_cast<Ursa::UInt32>(bytes[offset + 1]) << 8) |
+			       (static_cast<Ursa::UInt32>(bytes[offset + 2]) << 16) |
+			       (static_cast<Ursa::UInt32>(bytes[offset + 3]) << 24);
+		};
+		if (bytes.size() < 20 || readU32(0) != 0x46546C67 || readU32(4) != 2 || readU32(8) != bytes.size())
+		{
+			return Result<Vector<String>>::Failure("Invalid GLB header, version, or total length");
+		}
+		Ursa::Size offset = 12;
+		bool foundJson = false;
+		while (offset + 8 <= bytes.size())
+		{
+			const Ursa::UInt32 chunkLength = readU32(offset);
+			const Ursa::UInt32 chunkType = readU32(offset + 4);
+			offset += 8;
+			if (chunkLength > bytes.size() - offset)
+			{
+				return Result<Vector<String>>::Failure("GLB chunk length exceeds the container boundary");
+			}
+			if (!foundJson)
+			{
+				if (chunkType != 0x4E4F534A)
+				{
+					return Result<Vector<String>>::Failure("GLB first chunk must contain JSON");
+				}
+				jsonText.assign(reinterpret_cast<const char*>(bytes.data() + offset), chunkLength);
+				foundJson = true;
+			}
+			offset += chunkLength;
+		}
+		if (!foundJson || offset != bytes.size())
+		{
+			return Result<Vector<String>>::Failure("GLB has a missing JSON chunk or malformed chunk boundary");
+		}
+	}
+	else
+	{
+		jsonText.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+	}
+	Json document;
+	try
+	{
+		document = Json::parse(ToStdString(jsonText));
+	}
+	catch (const std::exception& error)
+	{
+		return Result<Vector<String>>::Failure("Invalid glTF JSON: " + ToUrsaString(error.what()));
+	}
+	if (!document.is_object() || !document.contains("asset") || !document["asset"].is_object() ||
+	    !document["asset"].contains("version") || document["asset"]["version"] != "2.0")
+	{
+		return Result<Vector<String>>::Failure("Only glTF 2.0 assets are supported");
+	}
+	if (!document.contains("scenes") || !document["scenes"].is_array() || document["scenes"].empty())
+	{
+		return Result<Vector<String>>::Failure("glTF has no selectable scene");
+	}
+	Ursa::UInt64 selectedScene = 0;
+	if (document.contains("scene"))
+	{
+		const Json& sceneIndex = document["scene"];
+		if (!sceneIndex.is_number_integer() && !sceneIndex.is_number_unsigned())
+		{
+			return Result<Vector<String>>::Failure("glTF default scene index is invalid");
+		}
+		if (sceneIndex.is_number_unsigned())
+		{
+			selectedScene = sceneIndex.get<Ursa::UInt64>();
+		}
+		else
+		{
+			const Ursa::Int64 signedSceneIndex = sceneIndex.get<Ursa::Int64>();
+			if (signedSceneIndex < 0)
+			{
+				return Result<Vector<String>>::Failure("glTF default scene index is invalid");
+			}
+			selectedScene = static_cast<Ursa::UInt64>(signedSceneIndex);
+		}
+	}
+	if (selectedScene >= document["scenes"].size())
+	{
+		return Result<Vector<String>>::Failure("glTF default scene index is out of range");
+	}
+	if (document.contains("extensionsRequired"))
+	{
+		if (!document["extensionsRequired"].is_array())
+		{
+			return Result<Vector<String>>::Failure("glTF extensionsRequired must be an array");
+		}
+		if (!document["extensionsRequired"].empty())
+		{
+			String extensions;
+			for (const auto& requiredExtension : document["extensionsRequired"])
+			{
+				if (!requiredExtension.is_string())
+				{
+					return Result<Vector<String>>::Failure("glTF extensionsRequired contains a non-string value");
+				}
+				if (!extensions.empty())
+				{
+					extensions += ", ";
+				}
+				extensions += ToUrsaString(requiredExtension.get<std::string>());
+			}
+			return Result<Vector<String>>::Failure("Unsupported required glTF extensions: " + extensions);
+		}
+	}
+	Vector<String> diagnostics;
+	if (document.contains("extensionsUsed") && document["extensionsUsed"].is_array())
+	{
+		for (const auto& usedExtension : document["extensionsUsed"])
+		{
+			if (usedExtension.is_string())
+			{
+				diagnostics.push_back("glTF optional extension " + ToUrsaString(usedExtension.get<std::string>()) +
+				                      " may be ignored when its effect is not represented by the importer");
+			}
+		}
+	}
+	return Result<Vector<String>>::Success(std::move(diagnostics));
+}
+
+struct GltfNodeNormalization
+{
+	Vector<Ursa::UInt8> sourceOverride;
+	Map<String, String> displayNames;
+	Map<String, Ursa::UInt32> nodeIndices;
+	Vector<String> diagnostics;
+};
+
+Result<GltfNodeNormalization> NormalizeGltfNodes(const VirtualFileSystem& filesystem, const VirtualPath& source)
+{
+	GltfNodeNormalization normalized;
+	const String extension = Lowered(source.relative.substr(source.relative.rfind('.')));
+	if (extension != ".gltf" && extension != ".glb")
+	{
+		return Result<GltfNodeNormalization>::Success(std::move(normalized));
+	}
+	auto sourceBytes = filesystem.Read(source);
+	if (!sourceBytes)
+	{
+		return Result<GltfNodeNormalization>::Failure(sourceBytes.error);
+	}
+	const Vector<Ursa::UInt8>& bytes = sourceBytes.value;
+	String jsonText;
+	Vector<std::pair<Ursa::UInt32, Vector<Ursa::UInt8>>> remainingChunks;
+	auto readU32 = [](const Vector<Ursa::UInt8>& data, Ursa::Size offset) -> Ursa::UInt32
+	{
+		return static_cast<Ursa::UInt32>(data[offset]) | (static_cast<Ursa::UInt32>(data[offset + 1]) << 8) |
+		       (static_cast<Ursa::UInt32>(data[offset + 2]) << 16) |
+		       (static_cast<Ursa::UInt32>(data[offset + 3]) << 24);
+	};
+	if (extension == ".glb")
+	{
+		Ursa::Size offset = 12;
+		bool jsonChunk = false;
+		while (offset + 8 <= bytes.size())
+		{
+			const Ursa::UInt32 length = readU32(bytes, offset);
+			const Ursa::UInt32 type = readU32(bytes, offset + 4);
+			offset += 8;
+			if (length > bytes.size() - offset)
+			{
+				return Result<GltfNodeNormalization>::Failure("GLB chunk length exceeds the container boundary");
+			}
+			if (!jsonChunk)
+			{
+				if (type != 0x4E4F534A)
+				{
+					return Result<GltfNodeNormalization>::Failure("GLB first chunk must contain JSON");
+				}
+				jsonText.assign(reinterpret_cast<const char*>(bytes.data() + offset), length);
+				jsonChunk = true;
+			}
+			else
+			{
+				remainingChunks.emplace_back(type, Vector<Ursa::UInt8>(bytes.begin() + Ursa::Size(offset),
+				                                                       bytes.begin() + Ursa::Size(offset + length)));
+			}
+			offset += length;
+		}
+		if (!jsonChunk || offset != bytes.size())
+		{
+			return Result<GltfNodeNormalization>::Failure("Malformed GLB chunk boundary");
+		}
+	}
+	else
+	{
+		jsonText.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+	}
+	Json document;
+	try
+	{
+		document = Json::parse(ToStdString(jsonText));
+	}
+	catch (const std::exception& error)
+	{
+		return Result<GltfNodeNormalization>::Failure("Invalid glTF JSON: " + ToUrsaString(error.what()));
+	}
+	if (!document.contains("nodes"))
+	{
+		document["nodes"] = Json::array();
+	}
+	if (!document["nodes"].is_array())
+	{
+		return Result<GltfNodeNormalization>::Failure("glTF nodes must be an array");
+	}
+	if (document.contains("materials") && document["materials"].is_array())
+	{
+		for (Ursa::Size materialIndex = 0; materialIndex < document["materials"].size(); ++materialIndex)
+		{
+			const Json& material = document["materials"][materialIndex];
+			if (!material.is_object())
+			{
+				continue;
+			}
+			const String materialName = material.contains("name") && material["name"].is_string()
+			                                ? ToUrsaString(material["name"].get<std::string>())
+			                                : "Material" + ToUrsaString(std::to_string(materialIndex));
+			if (material.contains("alphaMode") && material["alphaMode"].is_string() &&
+			    material["alphaMode"] != "OPAQUE")
+			{
+				normalized.diagnostics.push_back("Material " + materialName +
+				                                 ": glTF alphaMode is not represented by the current material model");
+			}
+			if (material.contains("alphaCutoff"))
+			{
+				normalized.diagnostics.push_back("Material " + materialName +
+				                                 ": glTF alphaCutoff is not represented by the current material model");
+			}
+			if (material.contains("doubleSided") && material["doubleSided"] == true)
+			{
+				normalized.diagnostics.push_back(
+				    "Material " + materialName +
+				    ": glTF doubleSided state is not represented by the current material model");
+			}
+			const auto inspectTexture = [&](const char* slot, const Json& textureInfo)
+			{
+				if (!textureInfo.is_object())
+				{
+					return;
+				}
+				if (textureInfo.contains("texCoord") && textureInfo["texCoord"].is_number() &&
+				    textureInfo["texCoord"].get<double>() > 0.0)
+				{
+					normalized.diagnostics.push_back("Material " + materialName + ": " + ToUrsaString(slot) +
+					                                 " uses a nonzero glTF texCoord set; only UV set 0 is supported");
+				}
+				if (textureInfo.contains("extensions") && textureInfo["extensions"].is_object() &&
+				    textureInfo["extensions"].contains("KHR_texture_transform"))
+				{
+					normalized.diagnostics.push_back("Material " + materialName + ": " + ToUrsaString(slot) +
+					                                 " uses KHR_texture_transform, which is not represented");
+				}
+				if (!textureInfo.contains("index") || !textureInfo["index"].is_number_unsigned() ||
+				    !document.contains("textures") || !document["textures"].is_array())
+				{
+					return;
+				}
+				const Ursa::UInt32 textureIndex = textureInfo["index"].get<Ursa::UInt32>();
+				if (textureIndex < document["textures"].size() && document["textures"][textureIndex].is_object() &&
+				    document["textures"][textureIndex].contains("sampler"))
+				{
+					normalized.diagnostics.push_back("Material " + materialName + ": " + ToUrsaString(slot) +
+					                                 " uses explicit glTF sampler settings, which are not represented");
+				}
+			};
+			if (material.contains("pbrMetallicRoughness") && material["pbrMetallicRoughness"].is_object())
+			{
+				const Json& pbr = material["pbrMetallicRoughness"];
+				if (pbr.contains("baseColorTexture"))
+				{
+					inspectTexture("baseColorTexture", pbr["baseColorTexture"]);
+				}
+				if (pbr.contains("metallicRoughnessTexture"))
+				{
+					inspectTexture("metallicRoughnessTexture", pbr["metallicRoughnessTexture"]);
+				}
+			}
+			for (const char* slot : {"normalTexture", "occlusionTexture", "emissiveTexture"})
+			{
+				if (material.contains(slot))
+				{
+					inspectTexture(slot, material[slot]);
+				}
+			}
+		}
+	}
+	if (document.contains("skins") && document["skins"].is_array())
+	{
+		if (!document.contains("buffers") || !document["buffers"].is_array())
+		{
+			document["buffers"] = Json::array();
+		}
+		if (!document.contains("bufferViews") || !document["bufferViews"].is_array())
+		{
+			document["bufferViews"] = Json::array();
+		}
+		if (!document.contains("accessors") || !document["accessors"].is_array())
+		{
+			document["accessors"] = Json::array();
+		}
+		static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+		for (Json& skin : document["skins"])
+		{
+			if (!skin.is_object() || skin.contains("inverseBindMatrices") || !skin.contains("joints") ||
+			    !skin["joints"].is_array())
+			{
+				continue;
+			}
+			const Ursa::Size jointCount = skin["joints"].size();
+			if (jointCount == 0 || jointCount > std::numeric_limits<Ursa::UInt32>::max() / 64)
+			{
+				return Result<GltfNodeNormalization>::Failure("glTF skin has an invalid joint count");
+			}
+			Vector<Ursa::UInt8> identityMatrices;
+			identityMatrices.reserve(jointCount * 64);
+			for (Ursa::Size joint = 0; joint < jointCount; ++joint)
+			{
+				for (Ursa::Size component = 0; component < 16; ++component)
+				{
+					const Ursa::Float32 value = component % 5 == 0 ? 1.0f : 0.0f;
+					Ursa::UInt32 bits = 0;
+					std::memcpy(&bits, &value, sizeof(bits));
+					for (Ursa::UInt32 byte = 0; byte < 4; ++byte)
+					{
+						identityMatrices.push_back(static_cast<Ursa::UInt8>(bits >> (byte * 8)));
+					}
+				}
+			}
+			std::string base64;
+			base64.reserve((identityMatrices.size() + 2) / 3 * 4);
+			for (Ursa::Size offset = 0; offset < identityMatrices.size(); offset += 3)
+			{
+				const Ursa::UInt32 a = identityMatrices[offset];
+				const Ursa::UInt32 b = offset + 1 < identityMatrices.size() ? identityMatrices[offset + 1] : 0;
+				const Ursa::UInt32 c = offset + 2 < identityMatrices.size() ? identityMatrices[offset + 2] : 0;
+				const Ursa::UInt32 bits = (a << 16) | (b << 8) | c;
+				base64.push_back(alphabet[(bits >> 18) & 63]);
+				base64.push_back(alphabet[(bits >> 12) & 63]);
+				base64.push_back(offset + 1 < identityMatrices.size() ? alphabet[(bits >> 6) & 63] : '=');
+				base64.push_back(offset + 2 < identityMatrices.size() ? alphabet[bits & 63] : '=');
+			}
+			const Ursa::UInt32 bufferIndex = static_cast<Ursa::UInt32>(document["buffers"].size());
+			const Ursa::UInt32 viewIndex = static_cast<Ursa::UInt32>(document["bufferViews"].size());
+			const Ursa::UInt32 accessorIndex = static_cast<Ursa::UInt32>(document["accessors"].size());
+			document["buffers"].push_back(
+			    {{"byteLength", identityMatrices.size()}, {"uri", "data:application/octet-stream;base64," + base64}});
+			document["bufferViews"].push_back(
+			    {{"buffer", bufferIndex}, {"byteOffset", 0}, {"byteLength", identityMatrices.size()}});
+			document["accessors"].push_back({{"bufferView", viewIndex},
+			                                 {"byteOffset", 0},
+			                                 {"componentType", 5126},
+			                                 {"count", jointCount},
+			                                 {"type", "MAT4"}});
+			skin["inverseBindMatrices"] = accessorIndex;
+		}
+	}
+	// Assimp associates bones with the source mesh object. Duplicate a shared glTF mesh for each
+	// distinct skin so each imported aiMesh retains that skin's joint ordering and bind matrices.
+	if (document.contains("meshes") && document["meshes"].is_array())
+	{
+		Map<Ursa::UInt64, Ursa::UInt32> meshBySkin;
+		for (Json& node : document["nodes"])
+		{
+			if (!node.is_object() || !node.contains("mesh") || !node["mesh"].is_number_unsigned() ||
+			    !node.contains("skin") || !node["skin"].is_number_unsigned())
+			{
+				continue;
+			}
+			const Ursa::UInt32 sourceMesh = node["mesh"].get<Ursa::UInt32>();
+			const Ursa::UInt32 skin = node["skin"].get<Ursa::UInt32>();
+			if (sourceMesh >= document["meshes"].size())
+			{
+				continue;
+			}
+			const Ursa::UInt64 key = (Ursa::UInt64(sourceMesh) << 32) | skin;
+			auto mapped = meshBySkin.find(key);
+			if (mapped == meshBySkin.end())
+			{
+				Ursa::UInt32 importedMesh = sourceMesh;
+				const bool hasAnotherSkin =
+				    std::any_of(meshBySkin.begin(), meshBySkin.end(), [sourceMesh](const auto& entry)
+				                { return Ursa::UInt32(entry.first >> 32) == sourceMesh; });
+				if (hasAnotherSkin)
+				{
+					if (document["meshes"].size() >= std::numeric_limits<Ursa::UInt32>::max())
+					{
+						return Result<GltfNodeNormalization>::Failure(
+						    "glTF shared mesh skin variants exceed the index limit");
+					}
+					importedMesh = static_cast<Ursa::UInt32>(document["meshes"].size());
+					document["meshes"].push_back(document["meshes"][sourceMesh]);
+				}
+				mapped = meshBySkin.emplace(key, importedMesh).first;
+			}
+			node["mesh"] = mapped->second;
+		}
+	}
+	for (Ursa::UInt32 index = 0; index < document["nodes"].size(); ++index)
+	{
+		Json& node = document["nodes"][index];
+		if (!node.is_object())
+		{
+			return Result<GltfNodeNormalization>::Failure("glTF node entry must be an object");
+		}
+		const String internalName = "__ursa_gltf_node_" + ToUrsaString(std::to_string(index));
+		const String displayName = node.contains("name") && node["name"].is_string()
+		                               ? ToUrsaString(node["name"].get<std::string>())
+		                               : "Node " + ToUrsaString(std::to_string(index));
+		node["name"] = ToStdString(internalName);
+		normalized.displayNames.emplace(internalName, displayName);
+		normalized.nodeIndices.emplace(internalName, index);
+	}
+	const String encodedJson = ToUrsaString(document.dump());
+	if (extension == ".gltf")
+	{
+		normalized.sourceOverride.assign(encodedJson.begin(), encodedJson.end());
+	}
+	else
+	{
+		Vector<Ursa::UInt8>& output = normalized.sourceOverride;
+		auto appendU32 = [&output](Ursa::UInt32 value)
+		{
+			output.push_back(static_cast<Ursa::UInt8>(value & 0xff));
+			output.push_back(static_cast<Ursa::UInt8>((value >> 8) & 0xff));
+			output.push_back(static_cast<Ursa::UInt8>((value >> 16) & 0xff));
+			output.push_back(static_cast<Ursa::UInt8>((value >> 24) & 0xff));
+		};
+		Vector<Ursa::UInt8> encodedJsonBytes(encodedJson.begin(), encodedJson.end());
+		while (encodedJsonBytes.size() % 4 != 0)
+		{
+			encodedJsonBytes.push_back(static_cast<Ursa::UInt8>(' '));
+		}
+		Ursa::UInt64 totalLength = 12 + 8 + encodedJsonBytes.size();
+		for (const auto& chunk : remainingChunks)
+		{
+			totalLength += 8 + chunk.second.size();
+		}
+		if (totalLength > std::numeric_limits<Ursa::UInt32>::max())
+		{
+			return Result<GltfNodeNormalization>::Failure("Normalized GLB exceeds the format size limit");
+		}
+		appendU32(0x46546C67);
+		appendU32(2);
+		appendU32(static_cast<Ursa::UInt32>(totalLength));
+		appendU32(static_cast<Ursa::UInt32>(encodedJsonBytes.size()));
+		appendU32(0x4E4F534A);
+		output.insert(output.end(), encodedJsonBytes.begin(), encodedJsonBytes.end());
+		for (const auto& chunk : remainingChunks)
+		{
+			appendU32(static_cast<Ursa::UInt32>(chunk.second.size()));
+			appendU32(chunk.first);
+			output.insert(output.end(), chunk.second.begin(), chunk.second.end());
+		}
+	}
+	return Result<GltfNodeNormalization>::Success(std::move(normalized));
 }
 
 Ursa::UInt64 StableLocalFileId(const String& key)
@@ -68,6 +545,130 @@ Json Vector3Json(const aiVector3D& value)
 {
 	return Json::array({static_cast<Ursa::Float32>(value.x), static_cast<Ursa::Float32>(value.y),
 	                    static_cast<Ursa::Float32>(value.z)});
+}
+
+AnimationInterpolation AnimationMode(aiAnimInterpolation value)
+{
+	switch (value)
+	{
+		case aiAnimInterpolation_Step:
+			return AnimationInterpolation::Step;
+		case aiAnimInterpolation_Cubic_Spline:
+			return AnimationInterpolation::CubicSpline;
+		default:
+			return AnimationInterpolation::Linear;
+	}
+}
+
+String AnimationModeName(AnimationInterpolation value)
+{
+	switch (value)
+	{
+		case AnimationInterpolation::Step:
+			return "STEP";
+		case AnimationInterpolation::CubicSpline:
+			return "CUBICSPLINE";
+		default:
+			return "LINEAR";
+	}
+}
+
+Result<Json> ConvertVectorTrack(const aiVectorKey* keys, Ursa::UInt32 keyCount, Ursa::Float64 ticksPerSecond,
+                                Ursa::Float64& durationTicks, AnimationInterpolation& interpolation)
+{
+	Json result = Json::array();
+	if (keyCount == 0)
+	{
+		interpolation = AnimationInterpolation::Linear;
+		return Result<Json>::Success(std::move(result));
+	}
+	interpolation = AnimationMode(keys[0].mInterpolation);
+	const Ursa::UInt32 stride = interpolation == AnimationInterpolation::CubicSpline ? 3 : 1;
+	if (keyCount % stride != 0)
+	{
+		return Result<Json>::Failure("Animation cubic-spline vector track has an incomplete tangent triplet");
+	}
+	Ursa::Float64 previousTime = -1.0;
+	for (Ursa::UInt32 logicalIndex = 0; logicalIndex < keyCount / stride; ++logicalIndex)
+	{
+		const Ursa::UInt32 valueIndex = logicalIndex * stride + (stride == 3 ? 1 : 0);
+		const aiVectorKey& key = keys[valueIndex];
+		if (!std::isfinite(key.mTime) || key.mTime < 0.0 || key.mTime <= previousTime || !std::isfinite(key.mValue.x) ||
+		    !std::isfinite(key.mValue.y) || !std::isfinite(key.mValue.z))
+		{
+			return Result<Json>::Failure("Animation contains an invalid or unordered vector key");
+		}
+		previousTime = key.mTime;
+		durationTicks = (std::max)(durationTicks, key.mTime);
+		Json encoded = Json::array({key.mTime / ticksPerSecond, Vector3Json(key.mValue)});
+		if (stride == 3)
+		{
+			const aiVectorKey& inTangent = keys[logicalIndex * stride];
+			const aiVectorKey& outTangent = keys[logicalIndex * stride + 2];
+			if (inTangent.mTime != key.mTime || outTangent.mTime != key.mTime || !std::isfinite(inTangent.mValue.x) ||
+			    !std::isfinite(inTangent.mValue.y) || !std::isfinite(inTangent.mValue.z) ||
+			    !std::isfinite(outTangent.mValue.x) || !std::isfinite(outTangent.mValue.y) ||
+			    !std::isfinite(outTangent.mValue.z))
+			{
+				return Result<Json>::Failure("Animation contains invalid cubic-spline vector tangents");
+			}
+			encoded.push_back(Vector3Json(inTangent.mValue));
+			encoded.push_back(Vector3Json(outTangent.mValue));
+		}
+		result.push_back(std::move(encoded));
+	}
+	return Result<Json>::Success(std::move(result));
+}
+
+Result<Json> ConvertRotationTrack(const aiQuatKey* keys, Ursa::UInt32 keyCount, Ursa::Float64 ticksPerSecond,
+                                  Ursa::Float64& durationTicks, AnimationInterpolation& interpolation)
+{
+	Json result = Json::array();
+	if (keyCount == 0)
+	{
+		interpolation = AnimationInterpolation::Linear;
+		return Result<Json>::Success(std::move(result));
+	}
+	interpolation = AnimationMode(keys[0].mInterpolation);
+	const Ursa::UInt32 stride = interpolation == AnimationInterpolation::CubicSpline ? 3 : 1;
+	if (keyCount % stride != 0)
+	{
+		return Result<Json>::Failure("Animation cubic-spline rotation track has an incomplete tangent triplet");
+	}
+	Ursa::Float64 previousTime = -1.0;
+	for (Ursa::UInt32 logicalIndex = 0; logicalIndex < keyCount / stride; ++logicalIndex)
+	{
+		const Ursa::UInt32 valueIndex = logicalIndex * stride + (stride == 3 ? 1 : 0);
+		const aiQuatKey& key = keys[valueIndex];
+		if (!std::isfinite(key.mTime) || key.mTime < 0.0 || key.mTime <= previousTime || !std::isfinite(key.mValue.x) ||
+		    !std::isfinite(key.mValue.y) || !std::isfinite(key.mValue.z) || !std::isfinite(key.mValue.w))
+		{
+			return Result<Json>::Failure("Animation contains an invalid or unordered rotation key");
+		}
+		previousTime = key.mTime;
+		durationTicks = (std::max)(durationTicks, key.mTime);
+		Json encoded =
+		    Json::array({key.mTime / ticksPerSecond, {key.mValue.x, key.mValue.y, key.mValue.z, key.mValue.w}});
+		if (stride == 3)
+		{
+			const aiQuatKey& inTangent = keys[logicalIndex * stride];
+			const aiQuatKey& outTangent = keys[logicalIndex * stride + 2];
+			const auto finite = [](const aiQuaternion& value)
+			{
+				return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z) &&
+				       std::isfinite(value.w);
+			};
+			if (inTangent.mTime != key.mTime || outTangent.mTime != key.mTime || !finite(inTangent.mValue) ||
+			    !finite(outTangent.mValue))
+			{
+				return Result<Json>::Failure("Animation contains invalid cubic-spline rotation tangents");
+			}
+			encoded.push_back({inTangent.mValue.x, inTangent.mValue.y, inTangent.mValue.z, inTangent.mValue.w});
+			encoded.push_back({outTangent.mValue.x, outTangent.mValue.y, outTangent.mValue.z, outTangent.mValue.w});
+		}
+		result.push_back(std::move(encoded));
+	}
+	return Result<Json>::Success(std::move(result));
 }
 
 Json MatrixJson(const aiMatrix4x4& value)
@@ -155,8 +756,9 @@ private:
 class VfsIOSystem final : public Assimp::IOSystem
 {
 public:
-	VfsIOSystem(const VirtualFileSystem& selectedFilesystem, VirtualPath selectedSource)
-	    : filesystem(selectedFilesystem), source(std::move(selectedSource))
+	VfsIOSystem(const VirtualFileSystem& selectedFilesystem, VirtualPath selectedSource,
+	            Vector<Ursa::UInt8> sourceOverride = {})
+	    : filesystem(selectedFilesystem), source(std::move(selectedSource)), sourceOverride(std::move(sourceOverride))
 	{
 		const auto slash = source.relative.rfind('/');
 		sourceDirectory = slash == String::npos ? String{} : source.relative.substr(0, slash);
@@ -190,6 +792,10 @@ public:
 			lastError = path.error;
 			return nullptr;
 		}
+		if (path.value == source && !sourceOverride.empty())
+		{
+			return new VfsStream(sourceOverride);
+		}
 		auto bytes = filesystem.Read(path.value);
 		if (!bytes)
 		{
@@ -214,7 +820,52 @@ public:
 		{
 			return Result<VirtualPath>::Failure("Assimp requested an empty virtual path");
 		}
-		String requested = ToUrsaString(requestedPath);
+		const String uri = ToUrsaString(requestedPath);
+		String requested;
+		requested.reserve(uri.size());
+		const auto hexValue = [](char value) -> Int32
+		{
+			if (value >= '0' && value <= '9')
+			{
+				return value - '0';
+			}
+			if (value >= 'a' && value <= 'f')
+			{
+				return value - 'a' + 10;
+			}
+			if (value >= 'A' && value <= 'F')
+			{
+				return value - 'A' + 10;
+			}
+			return -1;
+		};
+		for (Ursa::Size index = 0; index < uri.size(); ++index)
+		{
+			if (uri[index] == '%')
+			{
+				if (index + 2 >= uri.size())
+				{
+					return Result<VirtualPath>::Failure("Assimp dependency has an invalid percent escape: " + uri);
+				}
+				const Int32 high = hexValue(uri[index + 1]);
+				const Int32 low = hexValue(uri[index + 2]);
+				if (high < 0 || low < 0)
+				{
+					return Result<VirtualPath>::Failure("Assimp dependency has an invalid percent escape: " + uri);
+				}
+				const char decoded = static_cast<char>((high << 4) | low);
+				if (decoded == '\0')
+				{
+					return Result<VirtualPath>::Failure("Assimp dependency contains an encoded null byte");
+				}
+				requested.push_back(decoded);
+				index += 2;
+			}
+			else
+			{
+				requested.push_back(uri[index]);
+			}
+		}
 		for (char& character : requested)
 		{
 			if (character == '\\')
@@ -306,6 +957,7 @@ public:
 private:
 	const VirtualFileSystem& filesystem;
 	VirtualPath source;
+	Vector<Ursa::UInt8> sourceOverride;
 	String sourceDirectory;
 	Map<String, VirtualPath> dependencies;
 	String lastError;
@@ -400,18 +1052,13 @@ bool IsSupportedMaterialProperty(const String& key)
 	                                      "$mat.roughnessFactor",
 	                                      "$mat.opacity",
 	                                      "$mat.shininess",
-	                                      "$mat.twosided",
 	                                      "$mat.shadingm",
 	                                      "$tex.file",
 	                                      "$tex.uvwsrc",
 	                                      "$tex.mapping",
 	                                      "$tex.blend",
 	                                      "$tex.op",
-	                                      "$tex.mapmodeu",
-	                                      "$tex.mapmodev",
 	                                      "$tex.mappingname",
-	                                      "$mat.gltf.alphaMode",
-	                                      "$mat.gltf.alphaCutoff",
 	                                      "$mat.gltf.pbrMetallicRoughness.baseColorFactor",
 	                                      "$mat.gltf.pbrMetallicRoughness.metallicFactor",
 	                                      "$mat.gltf.pbrMetallicRoughness.roughnessFactor"};
@@ -606,14 +1253,14 @@ Result<ModelCandidateMaterial> ConvertMaterial(aiScene const& scene, Ursa::UInt3
 	Map<MaterialTextureSlot, AssetReference> textures;
 	const aiTextureType types[] = {aiTextureType_BASE_COLOR,        aiTextureType_DIFFUSE,
 	                               aiTextureType_NORMALS,           aiTextureType_METALNESS,
-	                               aiTextureType_DIFFUSE_ROUGHNESS, aiTextureType_AMBIENT_OCCLUSION,
-	                               aiTextureType_EMISSIVE};
-	const char* slots[] = {"baseColor",         "baseColor", "normal",  "metallicRoughness",
-	                       "metallicRoughness", "occlusion", "emissive"};
+	                               aiTextureType_DIFFUSE_ROUGHNESS, aiTextureType_LIGHTMAP,
+	                               aiTextureType_AMBIENT_OCCLUSION, aiTextureType_EMISSIVE};
+	const char* slots[] = {"baseColor",         "baseColor", "normal",    "metallicRoughness",
+	                       "metallicRoughness", "occlusion", "occlusion", "emissive"};
 	const MaterialTextureSlot materialSlots[] = {
 	    MaterialTextureSlot::BaseColor,         MaterialTextureSlot::BaseColor,         MaterialTextureSlot::Normal,
 	    MaterialTextureSlot::MetallicRoughness, MaterialTextureSlot::MetallicRoughness, MaterialTextureSlot::Occlusion,
-	    MaterialTextureSlot::Emissive};
+	    MaterialTextureSlot::Occlusion,         MaterialTextureSlot::Emissive};
 	for (Ursa::Size slotIndex = 0; importTextures && slotIndex < std::size(types); ++slotIndex)
 	{
 		const aiTextureType type = types[slotIndex];
@@ -667,6 +1314,17 @@ Result<ModelCandidateMaterial> ConvertMaterial(aiScene const& scene, Ursa::UInt3
 }
 
 } // namespace
+
+const Vector<String>& ModelImporter::SupportedExtensions()
+{
+	static const Vector<String> extensions{".fbx", ".obj", ".gltf", ".glb"};
+	return extensions;
+}
+
+bool ModelImporter::IsSupportedSource(const VirtualPath& path)
+{
+	return IsSupportedModel(path);
+}
 
 Result<Vector<ModelSkinInfluence>> ModelImporter::NormalizeSkinInfluences(Ursa::UInt32 vertexCount,
                                                                           const Vector<RawSkinInfluence>& influences,
@@ -902,13 +1560,25 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 		return Result<ModelImportCandidate>::Failure(metadata.error);
 	}
 	const auto guid = metadata.value.guid;
+	auto gltfValidation = ValidateGltfSource(database.Filesystem(), source);
+	if (!gltfValidation)
+	{
+		return Result<ModelImportCandidate>::Failure(gltfValidation.error + " at " + source.ToString());
+	}
+	auto normalizedGltf = NormalizeGltfNodes(database.Filesystem(), source);
+	if (!normalizedGltf)
+	{
+		return Result<ModelImportCandidate>::Failure(normalizedGltf.error + " at " + source.ToString());
+	}
 	ModelImportCandidate candidate;
 	candidate.guid = guid;
 	candidate.mainObjectLocalFileId = StableLocalFileId("main");
 	candidate.outputKeys[candidate.mainObjectLocalFileId] = "main";
 
 	Assimp::Importer importer;
-	auto* ioSystem = new VfsIOSystem(database.Filesystem(), source);
+	const auto& gltfDisplayNames = normalizedGltf.value.displayNames;
+	const auto& gltfNodeIndices = normalizedGltf.value.nodeIndices;
+	auto* ioSystem = new VfsIOSystem(database.Filesystem(), source, std::move(normalizedGltf.value.sourceOverride));
 	importer.SetIOHandler(ioSystem);
 	importer.SetPropertyFloat(AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY, settings.scaleFactor);
 	unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_ImproveCacheLocality |
@@ -926,7 +1596,16 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 	{
 		flags |= aiProcess_FlipUVs;
 	}
-	const aiScene* scene = importer.ReadFile(ToStdString(source.relative), flags);
+	const aiScene* scene = nullptr;
+	try
+	{
+		scene = importer.ReadFile(ToStdString(source.relative), flags);
+	}
+	catch (const std::exception& error)
+	{
+		return Result<ModelImportCandidate>::Failure("Assimp failed to parse " + source.ToString() + ": " +
+		                                             ToUrsaString(error.what()));
+	}
 	if (!scene || !scene->mRootNode)
 	{
 		const String diagnostic =
@@ -944,8 +1623,12 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 	{
 		const String name = ToUrsaString(node.mName.C_Str());
 		const String nodePath = parentPath + "/" + name + "[" + ToUrsaString(std::to_string(childIndex)) + "]";
-		const Ursa::UInt64 localFileId = StableLocalFileId("node:" + nodePath);
-		candidate.outputKeys[localFileId] = "node:" + nodePath;
+		const auto originalNodeIndex = gltfNodeIndices.find(name);
+		const String nodeKey = originalNodeIndex == gltfNodeIndices.end()
+		                           ? "node:" + nodePath
+		                           : "node:gltf-index:" + ToUrsaString(std::to_string(originalNodeIndex->second));
+		const Ursa::UInt64 localFileId = StableLocalFileId(nodeKey);
+		candidate.outputKeys[localFileId] = nodeKey;
 		if (!uniqueNodeIds.insert(localFileId).second)
 		{
 			return Result<void>::Failure("Model node local-file-ID collision at " + nodePath);
@@ -976,7 +1659,9 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 	Map<String, Ursa::UInt64> embeddedIds;
 	Map<Ursa::UInt32, Ursa::UInt64> materialIds;
 	Vector<Ursa::UInt64> allMaterialIds;
-	Vector<String> diagnostics;
+	Vector<String> diagnostics = std::move(gltfValidation.value);
+	diagnostics.insert(diagnostics.end(), normalizedGltf.value.diagnostics.begin(),
+	                   normalizedGltf.value.diagnostics.end());
 	const Ursa::UInt64 skeletonLocalFileId = StableLocalFileId("skeleton:root");
 	candidate.outputKeys[skeletonLocalFileId] = "skeleton:root";
 	Map<String, const aiBone*> bonesByName;
@@ -1096,7 +1781,9 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 			}
 			const Ursa::UInt32 jointIndex = static_cast<Ursa::UInt32>(skeletonJoints.size());
 			jointIndicesByNode.emplace(jointNode, jointIndex);
-			const String name = ToUrsaString(jointNode->mName.C_Str());
+			const String internalName = ToUrsaString(jointNode->mName.C_Str());
+			const auto originalName = gltfDisplayNames.find(internalName);
+			const String name = originalName == gltfDisplayNames.end() ? internalName : originalName->second;
 			aiVector3D bindScale;
 			aiQuaternion bindRotation;
 			aiVector3D bindPosition;
@@ -1189,7 +1876,15 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 			return Result<ModelImportCandidate>::Failure("Assimp returned a null mesh at index " +
 			                                             ToUrsaString(std::to_string(index)));
 		}
-		Json materialLocalId = nullptr;
+		if (mesh->mNumAnimMeshes != 0)
+		{
+			diagnostics.push_back("Mesh " + name + ": Morph Targets are unsupported and were ignored");
+		}
+		if (mesh->GetNumUVChannels() > 1)
+		{
+			diagnostics.push_back("Mesh " + name + ": only UV set 0 is supported; additional UV sets were ignored");
+		}
+		UInt64 materialLocalId = 0;
 		if (settings.importMaterials && mesh->mMaterialIndex < scene->mNumMaterials)
 		{
 			materialLocalId = materialIds.at(mesh->mMaterialIndex);
@@ -1204,6 +1899,9 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 				                                             source.ToString());
 			}
 			Vector<RawSkinInfluence> rawInfluences;
+			Map<Ursa::UInt32, Ursa::UInt16> skinSlotsByJoint;
+			data.skeletonReference = {guid, skeletonLocalFileId};
+			data.skeleton = candidate.skeletons.at(skeletonLocalFileId);
 			for (Ursa::UInt32 boneIndex = 0; boneIndex < mesh->mNumBones; ++boneIndex)
 			{
 				const aiBone* bone = mesh->mBones[boneIndex];
@@ -1220,16 +1918,32 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 					                                             " is absent from the skeleton");
 				}
 				const auto joint = jointIndicesByNode.find(boneNode->second);
-				if (joint == jointIndicesByNode.end() || joint->second > std::numeric_limits<Ursa::UInt16>::max())
+				if (joint == jointIndicesByNode.end() || boneIndex > std::numeric_limits<Ursa::UInt16>::max() ||
+				    joint->second > std::numeric_limits<Ursa::UInt16>::max())
 				{
 					return Result<ModelImportCandidate>::Failure("Skin bone index exceeds the supported range: " +
 					                                             boneName);
 				}
+				const Ursa::UInt16 skinSlot = static_cast<Ursa::UInt16>(boneIndex);
+				if (!skinSlotsByJoint.emplace(joint->second, skinSlot).second)
+				{
+					return Result<ModelImportCandidate>::Failure("Skin contains a duplicate joint binding: " +
+					                                             boneName);
+				}
+				data.skinJointIndices.push_back(static_cast<Ursa::UInt16>(joint->second));
+				Mat4 inverseBind;
+				for (Int32 row = 0; row < 4; ++row)
+				{
+					for (Int32 column = 0; column < 4; ++column)
+					{
+						inverseBind.At(row, column) = bone->mOffsetMatrix[row][column];
+					}
+				}
+				data.skinInverseBindMatrices.push_back(inverseBind);
 				for (Ursa::UInt32 weightIndex = 0; weightIndex < bone->mNumWeights; ++weightIndex)
 				{
 					const aiVertexWeight& weight = bone->mWeights[weightIndex];
-					rawInfluences.push_back(
-					    {weight.mVertexId, joint->second, static_cast<Ursa::Float32>(weight.mWeight)});
+					rawInfluences.push_back({weight.mVertexId, skinSlot, static_cast<Ursa::Float32>(weight.mWeight)});
 				}
 			}
 			auto normalizedInfluences =
@@ -1238,8 +1952,22 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 			{
 				return Result<ModelImportCandidate>::Failure(normalizedInfluences.error + " at " + source.ToString());
 			}
-			data.skeletonReference = {guid, skeletonLocalFileId};
-			data.skeleton = candidate.skeletons.at(skeletonLocalFileId);
+			Vector<Ursa::UInt32> influenceCounts(mesh->mNumVertices, 0);
+			Ursa::UInt32 truncatedVertices = 0;
+			for (const auto& influence : rawInfluences)
+			{
+				if (influence.weight > 0.0f &&
+				    ++influenceCounts[influence.vertexIndex] == settings.maxBoneInfluences + 1)
+				{
+					++truncatedVertices;
+				}
+			}
+			if (truncatedVertices != 0)
+			{
+				diagnostics.push_back("Mesh " + ToUrsaString(mesh->mName.C_Str()) + ": influences were truncated to " +
+				                      ToUrsaString(std::to_string(settings.maxBoneInfluences)) + " on " +
+				                      ToUrsaString(std::to_string(truncatedVertices)) + " vertices");
+			}
 			for (const auto& influence : normalizedInfluences.value)
 			{
 				data.skinInfluences.push_back({influence.jointIndices, influence.weights});
@@ -1282,6 +2010,15 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 			diagnostics.push_back("Animation " + name +
 			                      ": mesh and morph animation channels are unsupported and were ignored");
 		}
+		if (animation->mNumChannels == 0)
+		{
+			if (animation->mNumMeshChannels != 0 || animation->mNumMorphMeshChannels != 0)
+			{
+				continue;
+			}
+			diagnostics.push_back("Animation " + name + ": empty animation clip was ignored");
+			continue;
+		}
 		for (Ursa::UInt32 channelIndex = 0; channelIndex < animation->mNumChannels; ++channelIndex)
 		{
 			const aiNodeAnim* channel = animation->mChannels[channelIndex];
@@ -1296,54 +2033,38 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 				return Result<ModelImportCandidate>::Failure("Animation " + name + " node '" + nodeName +
 				                                             "' is missing or ambiguous at " + source.ToString());
 			}
-			Json positionKeys = Json::array();
-			for (Ursa::UInt32 keyIndex = 0; keyIndex < channel->mNumPositionKeys; ++keyIndex)
+			AnimationInterpolation positionInterpolation;
+			AnimationInterpolation rotationInterpolation;
+			AnimationInterpolation scaleInterpolation;
+			auto positionKeys = ConvertVectorTrack(channel->mPositionKeys, channel->mNumPositionKeys, ticksPerSecond,
+			                                       durationTicks, positionInterpolation);
+			auto rotationKeys = ConvertRotationTrack(channel->mRotationKeys, channel->mNumRotationKeys, ticksPerSecond,
+			                                         durationTicks, rotationInterpolation);
+			auto scaleKeys = ConvertVectorTrack(channel->mScalingKeys, channel->mNumScalingKeys, ticksPerSecond,
+			                                    durationTicks, scaleInterpolation);
+			if (!positionKeys || !rotationKeys || !scaleKeys)
 			{
-				const aiVectorKey& key = channel->mPositionKeys[keyIndex];
-				if (!std::isfinite(key.mTime) || !std::isfinite(key.mValue.x) || !std::isfinite(key.mValue.y) ||
-				    !std::isfinite(key.mValue.z))
-				{
-					return Result<ModelImportCandidate>::Failure("Animation " + name + " has an invalid position key");
-				}
-				durationTicks = (std::max)(durationTicks, key.mTime);
-				positionKeys.push_back({key.mTime / ticksPerSecond, Vector3Json(key.mValue)});
+				return Result<ModelImportCandidate>::Failure("Animation " + name + ": " +
+				                                             (!positionKeys   ? positionKeys.error
+				                                              : !rotationKeys ? rotationKeys.error
+				                                                              : scaleKeys.error));
 			}
-			Json rotationKeys = Json::array();
-			for (Ursa::UInt32 keyIndex = 0; keyIndex < channel->mNumRotationKeys; ++keyIndex)
-			{
-				const aiQuatKey& key = channel->mRotationKeys[keyIndex];
-				if (!std::isfinite(key.mTime) || !std::isfinite(key.mValue.x) || !std::isfinite(key.mValue.y) ||
-				    !std::isfinite(key.mValue.z) || !std::isfinite(key.mValue.w))
-				{
-					return Result<ModelImportCandidate>::Failure("Animation " + name + " has an invalid rotation key");
-				}
-				durationTicks = (std::max)(durationTicks, key.mTime);
-				rotationKeys.push_back(
-				    {key.mTime / ticksPerSecond, {key.mValue.x, key.mValue.y, key.mValue.z, key.mValue.w}});
-			}
-			Json scaleKeys = Json::array();
-			for (Ursa::UInt32 keyIndex = 0; keyIndex < channel->mNumScalingKeys; ++keyIndex)
-			{
-				const aiVectorKey& key = channel->mScalingKeys[keyIndex];
-				if (!std::isfinite(key.mTime) || !std::isfinite(key.mValue.x) || !std::isfinite(key.mValue.y) ||
-				    !std::isfinite(key.mValue.z))
-				{
-					return Result<ModelImportCandidate>::Failure("Animation " + name + " has an invalid scale key");
-				}
-				durationTicks = (std::max)(durationTicks, key.mTime);
-				scaleKeys.push_back({key.mTime / ticksPerSecond, Vector3Json(key.mValue)});
-			}
-			channels.push_back({{"nodeLocalFileId", nodeIdsByPointer.at(matchingNodes->second[0])},
-			                    {"positionKeys", std::move(positionKeys)},
-			                    {"rotationKeys", std::move(rotationKeys)},
-			                    {"scaleKeys", std::move(scaleKeys)}});
+			Json channelDocument = Json::object();
+			channelDocument["nodeLocalFileId"] = nodeIdsByPointer.at(matchingNodes->second[0]);
+			channelDocument["positionKeys"] = std::move(positionKeys.value);
+			channelDocument["rotationKeys"] = std::move(rotationKeys.value);
+			channelDocument["scaleKeys"] = std::move(scaleKeys.value);
+			channelDocument["positionInterpolation"] = ToStdString(AnimationModeName(positionInterpolation));
+			channelDocument["rotationInterpolation"] = ToStdString(AnimationModeName(rotationInterpolation));
+			channelDocument["scaleInterpolation"] = ToStdString(AnimationModeName(scaleInterpolation));
+			channels.push_back(std::move(channelDocument));
 		}
 		if (!std::isfinite(durationTicks) || durationTicks < 0.0)
 		{
 			return Result<ModelImportCandidate>::Failure("Animation " + name + " has an invalid duration");
 		}
 		const Ursa::Float64 durationSeconds = durationTicks / ticksPerSecond;
-		Json clipDocument = {{"format", "UrsaAnimationClip"},      {"version", 1},
+		Json clipDocument = {{"format", "UrsaAnimationClip"},      {"version", 2},
 		                     {"localFileId", localFileId},         {"name", ToStdString(name)},
 		                     {"durationSeconds", durationSeconds}, {"ticksPerSecond", ticksPerSecond},
 		                     {"channels", std::move(channels)}};
@@ -1357,7 +2078,9 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 	auto visitNode = [&](auto&& self, const aiNode& node, UInt64 parentId) -> Result<UInt64>
 	{
 		ModelCandidateNode value;
-		value.name = ToUrsaString(node.mName.C_Str());
+		const String internalName = ToUrsaString(node.mName.C_Str());
+		const auto originalName = gltfDisplayNames.find(internalName);
+		value.name = originalName == gltfDisplayNames.end() ? internalName : originalName->second;
 		value.localFileId = nodeIdsByPointer.at(&node);
 		value.parentLocalFileId = parentId;
 		aiVector3D scale;

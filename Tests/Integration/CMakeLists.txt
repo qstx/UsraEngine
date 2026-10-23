@@ -6,6 +6,7 @@ if(URSA_ENABLE_DOTNET AND URSA_BUILD_EDITOR)
     URSA_WORKFLOW_EXAMPLES="${URSA_SOURCE_ROOT}/Docs/Examples"
     URSA_WORKFLOW_ENGINE_ASSETS="${URSA_SOURCE_ROOT}/Assets"
     URSA_WORKFLOW_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx"
+    URSA_WORKFLOW_ANIMATED_GLTF="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/simple_skin/simple_skin.gltf"
     URSA_WORKFLOW_CLI="$<TARGET_FILE:UrsaAssetImport>"
     URSA_WORKFLOW_EDITOR="$<TARGET_FILE:UrsaEditor>"
     URSA_WORKFLOW_CAPTURE="$<TARGET_FILE:UrsaCapture>"
@@ -16,7 +17,7 @@ if(URSA_ENABLE_DOTNET AND URSA_BUILD_EDITOR)
   ursa_attach_dotnet_host_runtime(UrsaManagedAssetImportWorkflowTests)
   add_test(NAME UrsaManagedAssetImportWorkflowTests COMMAND UrsaManagedAssetImportWorkflowTests)
   set_tests_properties(UrsaManagedAssetImportWorkflowTests PROPERTIES TIMEOUT 600
-    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/ManagedWorkflowUser")
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/ManagedWorkflowUser;TEMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler;TMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler")
   add_test(NAME UrsaGeneratedAssetPlayerWorkflowTests COMMAND UrsaManagedAssetImportWorkflowTests --player)
   set_tests_properties(UrsaGeneratedAssetPlayerWorkflowTests PROPERTIES TIMEOUT 300
     ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/GeneratedPlayerUser")
@@ -194,12 +195,18 @@ if(URSA_ENABLE_DOTNET)
         URSA_DEMO_TEXTURE_PATH="${URSA_TEST_SAMPLE_PROJECT}/Assets/Textures/UrsaEngine.png"
         URSA_ASSIMP_EMBEDDED_FBX_PATH="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/embedded_ascii/box_embedded_texture_fragmented.fbx"
         URSA_ASSIMP_ANIMATED_FBX_PATH="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx"
+        URSA_ASSIMP_GLTF_EXTERNAL_DIR="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/BoxTextured-glTF"
+        URSA_ASSIMP_GLTF_ANIMATED="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/simple_skin/simple_skin.gltf"
+        URSA_ASSET_IMPORT_EXECUTABLE="$<TARGET_FILE:UrsaAssetImport>"
+        URSA_SCRIPT_PLAYER_EXECUTABLE="$<TARGET_FILE:UrsaScriptPlayer>"
         URSA_PAK_EXECUTABLE="$<TARGET_FILE:UrsaPak>"
         URSA_DEMO_ENGINE_ASSET_PATH="${URSA_SOURCE_ROOT}/Assets"
         URSA_TEST_CONFIGURATION="$<CONFIG>")
-      add_dependencies(UrsaProjectModelImportTests UrsaPak)
+      add_dependencies(UrsaProjectModelImportTests UrsaAssetImport UrsaScriptPlayer UrsaPak)
 
       add_test(NAME UrsaProjectModelImportTests COMMAND UrsaProjectModelImportTests)
+      set_property(TEST UrsaProjectModelImportTests APPEND PROPERTY ENVIRONMENT
+        "TEMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler;TMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler;URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/GltfImportPlayerUser")
     endif()
   endif()
 endif()

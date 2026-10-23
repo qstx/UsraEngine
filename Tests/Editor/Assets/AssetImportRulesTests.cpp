@@ -51,8 +51,10 @@ void Registration()
 	auto native = Take(AssetImportRules::Create());
 	Expect(Take(native.FindImporter("PNG"))->identity == "ursa.Texture" &&
 	           Take(native.FindImporter(".obj"))->identity == "ursa.Model" &&
+	           Take(native.FindImporter(".GLTF"))->identity == "ursa.Model" &&
+	           Take(native.FindImporter(".GlB"))->identity == "ursa.Model" &&
 	           Take(native.FindImporter(".unknown"))->identity == "ursa.Default",
-	       "Native importer resolution changed");
+	       "Native importer resolution changed or did not normalize glTF/GLB extensions");
 	const ScriptedImporterDescriptor shape{Type(1), 2, {"shape", ".SHAPEDATA"}};
 	auto rules = Take(AssetImportRules::Create({shape}, {}, "code-v1", 7));
 	const auto stableId = Take(shape.type.StableIdentity());
@@ -69,7 +71,7 @@ void Registration()
 	Expect(!AssetImportRules::Create({{Type(1), 1, {"PNG"}}}, {}, "code"),
 	       "Scripted importer replaced a native importer");
 	for (const String extension : {".ursamat", ".ursaprefab", ".ursascene", ".ursamesh", ".ursatex", ".ursashaderasset",
-	                               ".ursamodel", ".cs", ".dll", ".meta"})
+	                               ".ursamodel", ".gltf", ".glb", ".fbx", ".obj", ".cs", ".dll", ".meta"})
 	{
 		Expect(!AssetImportRules::Create({{Type(1), 1, {extension}}}, {}, "code"),
 		       "Scripted importer replaced a reserved native source format");

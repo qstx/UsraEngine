@@ -1,4 +1,5 @@
 #include <Assets/AssetPreviewState.hpp>
+#include <Assets/ModelImporter.hpp>
 #include <Core/StringInterop.hpp>
 #include <algorithm>
 #include <cctype>
@@ -29,7 +30,7 @@ AssetPreviewKind PreviewKind(std::optional<ResourceKind> kind, const VirtualPath
 	auto extension = PathFromUrsaString(path.relative).extension().string();
 	std::transform(extension.begin(), extension.end(), extension.begin(),
 	               [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-	if (extension == ".fbx" || extension == ".obj")
+	if (ModelImporter::IsSupportedSource(path))
 	{
 		return AssetPreviewKind::Model;
 	}

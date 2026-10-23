@@ -11,7 +11,8 @@ namespace Ursa
 {
 namespace
 {
-Vec3 SampleVector(const Vector<AnimationVectorKey>& keys, Ursa::Float64 timeSeconds, Vec3 fallback)
+Vec3 SampleVector(const Vector<AnimationVectorKey>& keys, AnimationInterpolation interpolation,
+                  Ursa::Float64 timeSeconds, Vec3 fallback)
 {
 	if (keys.empty())
 	{
@@ -34,6 +35,25 @@ Vec3 SampleVector(const Vector<AnimationVectorKey>& keys, Ursa::Float64 timeSeco
 			const Ursa::Float64 span = second.timeSeconds - first.timeSeconds;
 			const Ursa::Float32 alpha =
 			    span > 0.0 ? static_cast<Ursa::Float32>((timeSeconds - first.timeSeconds) / span) : 0.0f;
+			if (interpolation == AnimationInterpolation::Step)
+			{
+				return first.value;
+			}
+			if (interpolation == AnimationInterpolation::CubicSpline)
+			{
+				const Ursa::Float32 alpha2 = alpha * alpha;
+				const Ursa::Float32 alpha3 = alpha2 * alpha;
+				const Ursa::Float32 h00 = 2 * alpha3 - 3 * alpha2 + 1;
+				const Ursa::Float32 h10 = alpha3 - 2 * alpha2 + alpha;
+				const Ursa::Float32 h01 = -2 * alpha3 + 3 * alpha2;
+				const Ursa::Float32 h11 = alpha3 - alpha2;
+				return {h00 * first.value.x + h10 * static_cast<Ursa::Float32>(span) * first.outTangent.x +
+				            h01 * second.value.x + h11 * static_cast<Ursa::Float32>(span) * second.inTangent.x,
+				        h00 * first.value.y + h10 * static_cast<Ursa::Float32>(span) * first.outTangent.y +
+				            h01 * second.value.y + h11 * static_cast<Ursa::Float32>(span) * second.inTangent.y,
+				        h00 * first.value.z + h10 * static_cast<Ursa::Float32>(span) * first.outTangent.z +
+				            h01 * second.value.z + h11 * static_cast<Ursa::Float32>(span) * second.inTangent.z};
+			}
 			return {first.value.x + (second.value.x - first.value.x) * alpha,
 			        first.value.y + (second.value.y - first.value.y) * alpha,
 			        first.value.z + (second.value.z - first.value.z) * alpha};
@@ -54,7 +74,8 @@ Quat Normalize(Quat value)
 	return {value.x * inverse, value.y * inverse, value.z * inverse, value.w * inverse};
 }
 
-Quat SampleRotation(const Vector<AnimationRotationKey>& keys, Ursa::Float64 timeSeconds, Quat fallback)
+Quat SampleRotation(const Vector<AnimationRotationKey>& keys, AnimationInterpolation interpolation,
+                    Ursa::Float64 timeSeconds, Quat fallback)
 {
 	if (keys.empty())
 	{
@@ -77,12 +98,49 @@ Quat SampleRotation(const Vector<AnimationRotationKey>& keys, Ursa::Float64 time
 			const Ursa::Float64 span = second.timeSeconds - first.timeSeconds;
 			const Ursa::Float32 alpha =
 			    span > 0.0 ? static_cast<Ursa::Float32>((timeSeconds - first.timeSeconds) / span) : 0.0f;
+			if (interpolation == AnimationInterpolation::Step)
+			{
+				return Normalize(first.value);
+			}
+			if (interpolation == AnimationInterpolation::CubicSpline)
+			{
+				const Ursa::Float32 alpha2 = alpha * alpha;
+				const Ursa::Float32 alpha3 = alpha2 * alpha;
+				const Ursa::Float32 h00 = 2 * alpha3 - 3 * alpha2 + 1;
+				const Ursa::Float32 h10 = alpha3 - 2 * alpha2 + alpha;
+				const Ursa::Float32 h01 = -2 * alpha3 + 3 * alpha2;
+				const Ursa::Float32 h11 = alpha3 - alpha2;
+				return Normalize(
+				    {h00 * first.value.x + h10 * static_cast<Ursa::Float32>(span) * first.outTangent.x +
+				         h01 * second.value.x + h11 * static_cast<Ursa::Float32>(span) * second.inTangent.x,
+				     h00 * first.value.y + h10 * static_cast<Ursa::Float32>(span) * first.outTangent.y +
+				         h01 * second.value.y + h11 * static_cast<Ursa::Float32>(span) * second.inTangent.y,
+				     h00 * first.value.z + h10 * static_cast<Ursa::Float32>(span) * first.outTangent.z +
+				         h01 * second.value.z + h11 * static_cast<Ursa::Float32>(span) * second.inTangent.z,
+				     h00 * first.value.w + h10 * static_cast<Ursa::Float32>(span) * first.outTangent.w +
+				         h01 * second.value.w + h11 * static_cast<Ursa::Float32>(span) * second.inTangent.w});
+			}
 			Quat end = second.value;
-			const Ursa::Float32 dot =
+			Ursa::Float32 dot =
 			    first.value.x * end.x + first.value.y * end.y + first.value.z * end.z + first.value.w * end.w;
 			if (dot < 0.0f)
 			{
 				end = {-end.x, -end.y, -end.z, -end.w};
+				dot = -dot;
+			}
+			if (interpolation == AnimationInterpolation::Linear && dot < 0.9995f)
+			{
+				const Ursa::Float32 theta = std::acos((std::max)(-1.0f, (std::min)(1.0f, dot)));
+				const Ursa::Float32 sine = std::sin(theta);
+				if (std::abs(sine) > 0.000001f)
+				{
+					const Ursa::Float32 firstWeight = std::sin((1.0f - alpha) * theta) / sine;
+					const Ursa::Float32 secondWeight = std::sin(alpha * theta) / sine;
+					return Normalize({first.value.x * firstWeight + end.x * secondWeight,
+					                  first.value.y * firstWeight + end.y * secondWeight,
+					                  first.value.z * firstWeight + end.z * secondWeight,
+					                  first.value.w * firstWeight + end.w * secondWeight});
+				}
 			}
 			return Normalize(
 			    {first.value.x + (end.x - first.value.x) * alpha, first.value.y + (end.y - first.value.y) * alpha,
@@ -290,9 +348,12 @@ Result<void> AnimatorComponent::EvaluatePose()
 		const auto channel = channelsByNode.find(joint.nodeLocalFileId);
 		if (channel != channelsByNode.end())
 		{
-			local.position = SampleVector(channel->second->positions, timeSeconds, local.position);
-			local.rotation = SampleRotation(channel->second->rotations, timeSeconds, local.rotation);
-			local.scale = SampleVector(channel->second->scales, timeSeconds, local.scale);
+			local.position = SampleVector(channel->second->positions, channel->second->positionInterpolation,
+			                              timeSeconds, local.position);
+			local.rotation = SampleRotation(channel->second->rotations, channel->second->rotationInterpolation,
+			                                timeSeconds, local.rotation);
+			local.scale =
+			    SampleVector(channel->second->scales, channel->second->scaleInterpolation, timeSeconds, local.scale);
 		}
 		const Mat4 global = joint.parentJointIndex < 0
 		                        ? local.Matrix()
@@ -300,6 +361,7 @@ Result<void> AnimatorComponent::EvaluatePose()
 		globalTransforms.push_back(global);
 		jointPalette[jointIndex] = global * joint.inverseBindMatrix;
 	}
+	jointGlobalTransforms = std::move(globalTransforms);
 	return {};
 }
 } // namespace Ursa

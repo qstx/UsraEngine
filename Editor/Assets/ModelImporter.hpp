@@ -50,8 +50,10 @@ class ModelImporter final
 {
 public:
 	using TextureDependency = std::function<Result<ResourceId>(const VirtualPath&, const TextureImportSettings&)>;
-	inline static constexpr UInt32 Version = 8;
-	inline static constexpr const char* ContentTarget = "model-v8";
+	inline static constexpr UInt32 Version = 9;
+	inline static constexpr const char* ContentTarget = "model-v9";
+	static const Vector<String>& SupportedExtensions();
+	static bool IsSupportedSource(const VirtualPath& path);
 
 	static Result<ModelImportCandidate> BuildCandidate(AssetDatabase& database, const VirtualPath& source,
 	                                                   const ModelImportSettings& settings,

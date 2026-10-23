@@ -438,6 +438,54 @@ void TestSkinBounds()
 	Done(context.End());
 }
 
+void TestSkinBindingPaletteUsesModelAndMeshSpace()
+{
+	Scene scene;
+	auto modelRoot = Take(scene.CreateGameObject("ModelRoot"));
+	LocalTransform rootTransform;
+	rootTransform.position.x = 10.0f;
+	Done(modelRoot->SetLocalTransform(rootTransform));
+	auto meshObject = Take(scene.CreateGameObject("SkinnedMesh"));
+	Done(meshObject->SetParent(modelRoot));
+	LocalTransform meshTransform;
+	meshTransform.position.x = 4.0f;
+	Done(meshObject->SetLocalTransform(meshTransform));
+	MeshData data = Take(Triangle()->GetData());
+	auto skeleton = std::make_shared<ModelSkeleton>();
+	skeleton->modelGuid = ResourceId::Generate();
+	skeleton->localFileId = 17;
+	SkeletonJoint rootJoint;
+	rootJoint.nodeLocalFileId = 1;
+	rootJoint.bindLocalTransform.position.x = 1.0f;
+	SkeletonJoint childJoint;
+	childJoint.nodeLocalFileId = 2;
+	childJoint.parentJointIndex = 0;
+	childJoint.bindLocalTransform.position.x = 2.0f;
+	skeleton->joints = {rootJoint, childJoint};
+	data.skeletonReference = {skeleton->modelGuid, skeleton->localFileId};
+	data.skeleton = skeleton;
+	data.skinJointIndices = {1};
+	Mat4 inverseBind = Mat4::Identity();
+	inverseBind.At(0, 3) = -3.0f;
+	data.skinInverseBindMatrices = {inverseBind};
+	data.skinInfluences.resize(data.positions.size());
+	for (auto& influence : data.skinInfluences)
+	{
+		influence.jointIndices[0] = 0;
+		influence.weights[0] = 1.0f;
+	}
+	auto mesh = Take(Mesh::Create(std::move(data)));
+	auto renderer = Take(meshObject->AddComponent<SkinnedMeshRendererComponent>());
+	Done(renderer->SetSharedMesh(mesh));
+	Done(renderer->SetMaterial(std::make_shared<MaterialInstance>(MaterialType::Unlit)));
+	RenderScene captured;
+	Done(captured.Capture(scene, 1.0f));
+	Expect(captured.Objects().size() == 1 && captured.Objects()[0].jointPalette.size() == 1,
+	       "Skin-local binding did not produce its compact joint palette");
+	Expect(std::abs(captured.Objects()[0].jointPalette[0].At(0, 3) + 4.0f) < 0.0001f,
+	       "Bind-pose palette did not account for model-root and mesh transforms");
+}
+
 void ExpectNear(Float32 actual, Float32 expected, Float32 tolerance, const char* message)
 {
 	if (std::abs(actual - expected) > tolerance)
@@ -588,7 +636,7 @@ void TestIndependentShadowCasterCulling()
 	LocalTransform skinnedTransform;
 	skinnedTransform.position = {100, 0, 0};
 	Done(skinnedRoot->SetLocalTransform(skinnedTransform));
-	MeshPtr skinnedMesh = Triangle(200);
+	MeshPtr skinnedMesh = Triangle(100);
 	MeshData skinnedData = Take(skinnedMesh->GetData());
 	auto skeleton = std::make_shared<ModelSkeleton>();
 	SkeletonJoint joint;
@@ -667,6 +715,7 @@ int main()
 		TestSnapshotAndLists();
 		TestSortingAndPasses();
 		TestSkinBounds();
+		TestSkinBindingPaletteUsesModelAndMeshSpace();
 		TestDirectionalShadowCascades();
 		TestIndependentShadowCasterCulling();
 		std::cout << "Render scene, camera and renderer list tests passed\n";

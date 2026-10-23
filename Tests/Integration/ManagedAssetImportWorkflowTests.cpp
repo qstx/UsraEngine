@@ -211,8 +211,13 @@ int main(int argc, char** argv)
 		                           root / "Assets/GeneratedTextures/Order.mask.png");
 		std::filesystem::copy_file(std::filesystem::u8path(URSA_WORKFLOW_ANIMATED_FBX),
 		                           root / "Assets/Models/Processed/Order.fbx");
+		const auto gltfModelPath = root / "Assets/Models/Processed/SimpleSkin/simple_skin.gltf";
+		std::filesystem::create_directories(gltfModelPath.parent_path());
+		std::filesystem::copy_file(std::filesystem::u8path(URSA_WORKFLOW_ANIMATED_GLTF), gltfModelPath);
 		Write(root / "Assets/OrderConfig.txt", "0.5");
-		Write(root / "Assets/Editor/OrderedRules.cs", R"(using System.Globalization;
+		Write(root / "Assets/ModelConfig.txt", "ok");
+		Write(root / "Assets/Editor/OrderedRules.cs", R"(using System;
+using System.Globalization;
 using Ursa;
 using Ursa.Editor;
 public sealed class FirstRules : AssetPostprocessor
@@ -227,7 +232,13 @@ public sealed class FirstRules : AssetPostprocessor
         for (int i = 0; i < pixels.Length; ++i) pixels[i] = new Color(value, 0, 0, 1);
         texture.SetPixels(pixels);
     }
-    public override void OnPostprocessModel(GameObject root) { root.Name += "-first"; }
+    public override void OnPostprocessModel(GameObject root)
+    {
+        if (AssetPath.EndsWith("simple_skin.gltf", StringComparison.Ordinal) &&
+            Context.ReadSourceAssetText("prj:ModelConfig.txt") == "fail")
+            throw new InvalidOperationException("Injected glTF model postprocessor failure");
+        root.Name += "-first";
+    }
 }
 public sealed class SecondRules : AssetPostprocessor
 {
@@ -299,12 +310,15 @@ public sealed class WorkflowReader : Behaviour
 		const auto source = Take(VirtualPath::Parse("prj:Example.ursadataset"));
 		const auto textureSource = Take(VirtualPath::Parse("prj:GeneratedTextures/Order.mask.png"));
 		const auto modelSource = Take(VirtualPath::Parse("prj:Models/Processed/Order.fbx"));
+		const auto gltfModelSource = Take(VirtualPath::Parse("prj:Models/Processed/SimpleSkin/simple_skin.gltf"));
 		auto workspace =
 		    Take(AssetImportPipeline::OpenProject(root, std::filesystem::u8path(URSA_WORKFLOW_ENGINE_ASSETS)));
 		const auto cli = Take(workspace->Database()->CurrentImport(source));
 		const auto cliTexture = Take(workspace->Database()->CurrentImport(textureSource));
 		const auto cliModel = Take(workspace->Database()->CurrentImport(modelSource));
-		Expect(cliTexture.upToDate && cliModel.upToDate, "CLI did not process its PNG and animated FBX");
+		const auto cliGltfModel = Take(workspace->Database()->CurrentImport(gltfModelSource));
+		Expect(cliTexture.upToDate && cliModel.upToDate && cliGltfModel.upToDate && cliGltfModel.artifacts.size() >= 4,
+		       "CLI did not process its PNG, FBX, and animated glTF");
 		const auto guid = Take(workspace->Database()->Metadata(source)).guid;
 		Expect(cli.upToDate && cli.artifacts.size() == 5 && cli.mainObjectLocalFileId,
 		       "CLI did not publish its complete typed outputs");
@@ -355,15 +369,38 @@ public sealed class WorkflowReader : Behaviour
 		Expect(!editor.cacheHit && editor.guid == guid,
 		       "Cold Editor import changed source identity or reused a missing cache");
 		Compare(status, cli);
-		for (const auto& processed : {textureSource, modelSource})
+		for (const auto& processed : {textureSource, modelSource, gltfModelSource})
 		{
 			Expect(!Take(workspace->Importer().Import(*workspace->Database(), processed)).cacheHit,
 			       "Cold Editor processing reused a missing cache");
 		}
 		Compare(Take(workspace->Database()->CurrentImport(textureSource)), cliTexture);
 		Compare(Take(workspace->Database()->CurrentImport(modelSource)), cliModel);
+		Compare(Take(workspace->Database()->CurrentImport(gltfModelSource)), cliGltfModel);
+		const auto gltfGuid = Take(workspace->Database()->Metadata(gltfModelSource)).guid;
+		const auto gltfMainPath =
+		    Take(workspace->Database()->ResolveImportedArtifact(gltfGuid, cliGltfModel.mainObjectLocalFileId));
+		const auto gltfMainBytes = Take(workspace->Index().Filesystem().Read(gltfMainPath.path));
+		const auto gltfMain = nlohmann::json::from_cbor(gltfMainBytes.begin(), gltfMainBytes.end());
+		const auto rootNodeId = gltfMain.at("rootNodeLocalFileId").get<UInt64>();
+		const auto rootNode =
+		    std::find_if(gltfMain.at("nodes").begin(), gltfMain.at("nodes").end(),
+		                 [&](const auto& node) { return node.at("localFileId").get<UInt64>() == rootNodeId; });
+		const std::string processedGltfRoot =
+		    rootNode == gltfMain.at("nodes").end() ? std::string{} : rootNode->at("name").get<std::string>();
+		Expect(processedGltfRoot.size() >= 13 &&
+		           processedGltfRoot.compare(processedGltfRoot.size() - 13, 13, "-first-second") == 0,
+		       "Ordered managed postprocessors did not preserve their sequence on glTF output");
 		Expect(Take(workspace->Importer().Import(*workspace->Database(), source)).cacheHit,
 		       "Unchanged worker rules missed their cache");
+		const auto previousGltf = Take(workspace->Database()->CurrentImport(gltfModelSource));
+		Write(root / "Assets/ModelConfig.txt", "fail");
+		const auto rejectedGltf = workspace->Importer().Import(*workspace->Database(), gltfModelSource);
+		Expect(!rejectedGltf && rejectedGltf.error.find("Injected glTF model postprocessor failure") != String::npos,
+		       "A failing managed glTF postprocessor unexpectedly succeeded");
+		ExpectPublished(*workspace->Database(), gltfGuid, previousGltf);
+		Write(root / "Assets/ModelConfig.txt", "ok");
+		Take(workspace->Importer().Import(*workspace->Database(), gltfModelSource));
 		auto resources = Take(ResourceSession::Open(workspace->Index().Filesystem(), workspace->AssetResolver()));
 		Expect(Take(LoadScriptableAssetGraph(*resources, {guid, 0})).assets.size() == 1,
 		       "Generated main asset cannot be loaded through its runtime alias");

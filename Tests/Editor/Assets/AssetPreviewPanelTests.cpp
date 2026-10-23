@@ -21,6 +21,7 @@
 #include <sstream>
 #endif
 #include <Rendering/Diagnostics/FrameCapture.hpp>
+#include <Shader/ShaderBuiltins.hpp>
 #include <RenderingFixtures.hpp>
 #include <MeshFixtures.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -61,6 +62,38 @@ void Expect(bool value, const char* message)
 	{
 		throw std::runtime_error(message);
 	}
+}
+
+AnimatorComponent* FindAnimator(const GameObject::Ptr& object)
+{
+	if (auto* animator = object->FindComponent<AnimatorComponent>())
+	{
+		return animator;
+	}
+	for (const auto& child : object->Children())
+	{
+		if (auto* animator = FindAnimator(child))
+		{
+			return animator;
+		}
+	}
+	return nullptr;
+}
+
+SkinnedMeshRendererComponent* FindSkinnedRenderer(const GameObject::Ptr& object)
+{
+	if (auto* renderer = object->FindComponent<SkinnedMeshRendererComponent>())
+	{
+		return renderer;
+	}
+	for (const auto& child : object->Children())
+	{
+		if (auto* renderer = FindSkinnedRenderer(child))
+		{
+			return renderer;
+		}
+	}
+	return nullptr;
 }
 
 VirtualPath Path(const char* text)
@@ -234,10 +267,14 @@ struct Harness
 	VirtualPath materialPath = Path("prj:A.ursamat");
 	VirtualPath otherMaterial = Path("prj:B.ursamat");
 	VirtualPath modelPath = Path("prj:Animated.fbx");
+	VirtualPath staticGltfPath = Path("prj:Static.glb");
+	VirtualPath staticTextGltfPath = Path("prj:External/BoxTextured.gltf");
 	VirtualPath texturePath = Path("prj:Alpha.png");
 	VirtualPath prefabPath = Path("prj:Probe.ursaprefab");
 	UInt64 meshId = 0;
 	UInt64 secondMeshId = 0;
+	ResourceId staticTextGltfGuid;
+	Vector<UInt64> staticTextGltfMeshIds;
 	UInt64 clipId = 0;
 	Float64 clipDuration = 0;
 
@@ -296,6 +333,52 @@ struct Harness
 		Done(workspace->Refresh());
 		Take(TextureImporter::Import(*workspace->Database(), texturePath, TextureImportSettings{}));
 		const auto imported = Take(ModelImporter::Import(*workspace->Database(), modelPath, ModelImportSettings{}));
+		std::ifstream glbInput(URSA_PREVIEW_STATIC_GLB, std::ios::binary | std::ios::ate);
+		Expect(bool(glbInput), "Static glTF binary fixture is unavailable");
+		Vector<UInt8> glbBytes(static_cast<Size>(glbInput.tellg()));
+		glbInput.seekg(0);
+		glbInput.read(reinterpret_cast<char*>(glbBytes.data()), static_cast<std::streamsize>(glbBytes.size()));
+		Expect(bool(glbInput), "Cannot read static glTF binary fixture");
+		Done(files.WriteAtomic(staticGltfPath, glbBytes));
+		Done(workspace->Refresh());
+		const auto staticGltf =
+		    Take(ModelImporter::Import(*workspace->Database(), staticGltfPath, ModelImportSettings{}));
+		const auto staticGltfBytes = Take(files.Read(staticGltf.artifactPath));
+		const auto staticGltfModel = nlohmann::json::from_cbor(staticGltfBytes.begin(), staticGltfBytes.end());
+		Expect(!staticGltfModel["meshLocalFileIds"].empty() && !staticGltfModel["materialLocalFileIds"].empty(),
+		       "Static GLB did not import geometry and material sub-assets");
+		for (const auto& entry : std::filesystem::directory_iterator(URSA_PREVIEW_STATIC_GLTF_DIR))
+		{
+			if (!entry.is_regular_file())
+			{
+				continue;
+			}
+			std::ifstream gltfInput(entry.path(), std::ios::binary | std::ios::ate);
+			Expect(bool(gltfInput), "External glTF fixture file is unavailable");
+			Vector<UInt8> gltfBytes(static_cast<Size>(gltfInput.tellg()));
+			gltfInput.seekg(0);
+			gltfInput.read(reinterpret_cast<char*>(gltfBytes.data()), static_cast<std::streamsize>(gltfBytes.size()));
+			Expect(bool(gltfInput), "Cannot read external glTF fixture file");
+			const auto virtualPath =
+			    Take(VirtualPath::Parse("prj:External/" + PathToUrsaString(entry.path().filename())));
+			Done(files.WriteAtomic(virtualPath, gltfBytes));
+		}
+		Done(workspace->Refresh());
+		const auto staticTextGltf =
+		    Take(ModelImporter::Import(*workspace->Database(), staticTextGltfPath, ModelImportSettings{}));
+		staticTextGltfGuid = staticTextGltf.guid;
+		for (const auto& artifact : staticTextGltf.subAssets)
+		{
+			if (artifact.kind == "Mesh")
+			{
+				staticTextGltfMeshIds.push_back(artifact.localFileId);
+			}
+		}
+		const auto staticTextGltfBytes = Take(files.Read(staticTextGltf.artifactPath));
+		const auto staticTextGltfModel =
+		    nlohmann::json::from_cbor(staticTextGltfBytes.begin(), staticTextGltfBytes.end());
+		Expect(!staticTextGltfModel["meshLocalFileIds"].empty() && !staticTextGltfModel["materialLocalFileIds"].empty(),
+		       "External glTF did not import geometry and material sub-assets");
 		const auto bytes = Take(files.Read(imported.artifactPath));
 		const auto model = nlohmann::json::from_cbor(bytes.begin(), bytes.end());
 		meshId = model["meshLocalFileIds"][0].get<UInt64>();
@@ -1172,6 +1255,44 @@ void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 	           h.preview->Content()->MeshAsset()->Snapshot()->data.indices.size() != indicesA,
 	       "Subasset preview reused geometry/statistics for another local file ID");
 	h.Capture("04-Mesh.png");
+	h.Select(h.staticGltfPath);
+	const auto staticGltfFrame = Take(h.preview->Content()->RenderScene()->CollectPreviewRenderData(Camera{}, 1));
+	Expect(!staticGltfFrame.objects.empty() &&
+	           std::any_of(staticGltfFrame.objects.begin(), staticGltfFrame.objects.end(),
+	                       [](const Rendering::RenderObject& object)
+	                       {
+		                       return object.material && object.material->IsShaderBacked() &&
+		                              object.material->ShaderId() == Shader::BuiltinPbrShaderId();
+	                       }),
+	       "Static GLB preview did not render through its imported PBR material");
+	const auto [minimumPreviewPixel, maximumPreviewPixel] =
+	    std::minmax_element(h.lastPixels.begin(), h.lastPixels.end());
+	Expect(minimumPreviewPixel != h.lastPixels.end() && *maximumPreviewPixel - *minimumPreviewPixel > 16,
+	       "Static GLB PBR material produced no visible preview pixel range");
+	h.Capture("04b-Static-GLB-PBR.png");
+	h.Select(h.staticTextGltfPath);
+	const auto externalGltfFrame = Take(h.preview->Content()->RenderScene()->CollectPreviewRenderData(Camera{}, 1));
+	Expect(!externalGltfFrame.objects.empty() &&
+	           std::any_of(externalGltfFrame.objects.begin(), externalGltfFrame.objects.end(),
+	                       [](const Rendering::RenderObject& object)
+	                       {
+		                       return object.material && object.material->IsShaderBacked() &&
+		                              object.material->ShaderId() == Shader::BuiltinPbrShaderId();
+	                       }),
+	       "External glTF preview did not render through its imported PBR material");
+	h.Capture("04c-Static-glTF-PBR.png");
+	const auto reimportedTextGltf =
+	    Take(ModelImporter::Import(*h.workspace->Database(), h.staticTextGltfPath, ModelImportSettings{}, true));
+	Vector<UInt64> reimportedMeshIds;
+	for (const auto& artifact : reimportedTextGltf.subAssets)
+	{
+		if (artifact.kind == "Mesh")
+		{
+			reimportedMeshIds.push_back(artifact.localFileId);
+		}
+	}
+	Expect(reimportedTextGltf.guid == h.staticTextGltfGuid && reimportedMeshIds == h.staticTextGltfMeshIds,
+	       "External glTF reimport changed stable model or Mesh identities");
 	h.Select(h.modelPath);
 	Expect(!h.preview->Content()->SelectedClip(), "New model did not start in bind pose");
 	const auto clips = h.preview->Content()->Clips();
@@ -1197,6 +1318,45 @@ void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 		}
 	}
 	Expect(changedPalette, "Animated GPU pixels changed without sampling a different joint palette");
+	SkinnedMeshRendererComponent* previewSkin = nullptr;
+	for (const auto& root : h.preview->Content()->RenderScene()->RootGameObjects())
+	{
+		previewSkin = FindSkinnedRenderer(root);
+		if (previewSkin)
+		{
+			break;
+		}
+	}
+	Expect(previewSkin && previewSkin->SharedMesh(), "Animated preview has no skinned mesh binding");
+	const auto previewMeshSnapshot = previewSkin->SharedMesh()->Snapshot();
+	Expect(bool(previewMeshSnapshot), "Animated preview skinned mesh resource was destroyed");
+	const auto& previewBinding = previewMeshSnapshot->data;
+	const ResourceId modelGuid = Take(h.workspace->Database()->Metadata(h.modelPath)).guid;
+	AnimatorComponent runtimeAnimator;
+	Done(runtimeAnimator.SetAnimation(modelGuid, previewBinding.skeletonReference.localFileId, clips[0].localFileId,
+	                                  h.preview->Content()->Resources()));
+	Done(runtimeAnimator.SetTime(h.preview->Clock().Time()));
+	AnimatorComponent* previewAnimator = nullptr;
+	for (const auto& root : h.preview->Content()->RenderScene()->RootGameObjects())
+	{
+		previewAnimator = FindAnimator(root);
+		if (previewAnimator)
+		{
+			break;
+		}
+	}
+	Expect(previewAnimator &&
+	           previewAnimator->JointGlobalTransforms().size() == runtimeAnimator.JointGlobalTransforms().size(),
+	       "Preview and runtime Animator did not expose the same sampled joint pose");
+	for (Size joint = 0; joint < runtimeAnimator.JointGlobalTransforms().size(); ++joint)
+	{
+		for (Size element = 0; element < runtimeAnimator.JointGlobalTransforms()[joint].values.size(); ++element)
+		{
+			Expect(std::abs(previewAnimator->JointGlobalTransforms()[joint].values[element] -
+			                runtimeAnimator.JointGlobalTransforms()[joint].values[element]) < .00001f,
+			       "Preview and runtime Animator poses differ at the same clip time");
+		}
+	}
 	h.Capture("05-Animation-Playing.png");
 	const auto hiddenTime = h.preview->Clock().Time();
 	const auto hiddenFrames = h.preview->RenderCount();

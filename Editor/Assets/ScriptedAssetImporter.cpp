@@ -1,5 +1,6 @@
 #include <Assets/ScriptedAssetImporter.hpp>
 #include <Assets/ModelImportScene.hpp>
+#include <Assets/ModelImporter.hpp>
 
 #if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/Bindings/ImportServices.hpp>
@@ -858,7 +859,7 @@ Result<void> RegisterScriptedAssetImporters(ProjectAssetImporter& importer,
 	    !rules->PostprocessorsFor("ursa.Texture", projectScheme).empty())
 	{
 		return importer.RegisterNativeProcessing(
-		    "ursa.Model", {".fbx", ".obj"},
+		    "ursa.Model", ModelImporter::SupportedExtensions(),
 		    bind([rules, &host, session, generationProvider](AssetDatabase& database, const VirtualPath& source,
 		                                                     bool force)
 		         { return ImportProcessedModel(database, source, force, *rules, host, session, generationProvider); },

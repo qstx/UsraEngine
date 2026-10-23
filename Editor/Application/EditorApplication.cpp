@@ -4,6 +4,7 @@
 #include <EditorIcon.hpp>
 #include <stb_image.h>
 #include <Assets/AssetImportPipeline.hpp>
+#include <Assets/ModelImporter.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
 #include <Ui/ImGuiBridge.hpp>
@@ -128,20 +129,7 @@ bool IsTextureSource(const VirtualPath& path)
 
 bool IsModelSource(const VirtualPath& path)
 {
-	const auto dot = path.relative.rfind('.');
-	if (dot == String::npos)
-	{
-		return false;
-	}
-	String extension = path.relative.substr(dot);
-	for (char& character : extension)
-	{
-		if (character >= 'A' && character <= 'Z')
-		{
-			character = static_cast<char>(character - 'A' + 'a');
-		}
-	}
-	return extension == ".fbx" || extension == ".obj";
+	return ModelImporter::IsSupportedSource(path);
 }
 
 bool HasManagedScriptComponent(Scene& scene)

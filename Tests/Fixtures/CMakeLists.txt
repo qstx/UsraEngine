@@ -3,6 +3,7 @@ add_library(UrsaTestFixtures STATIC ${sources})
 target_link_libraries(UrsaTestFixtures PUBLIC Ursa::Engine)
 target_include_directories(UrsaTestFixtures PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 ursa_source_groups(UrsaTestFixtures "Tests/Fixtures")
+file(MAKE_DIRECTORY "${URSA_BINARY_ROOT}/Temp/ShaderCompiler")
 if(TARGET UrsaAssetImport)
 
   add_test(NAME UrsaTestContentPrepare COMMAND "${CMAKE_COMMAND}"
@@ -11,7 +12,7 @@ if(TARGET UrsaAssetImport)
     "-DSHADER_SOURCES=${URSA_SOURCE_ROOT}/Tests/Runtime/Rhi/Shaders"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/PrepareTestContent.cmake")
   set_tests_properties(UrsaTestContentPrepare PROPERTIES FIXTURES_SETUP UrsaTestContent
-    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/TestContentUser/$<CONFIG>")
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/TestContentUser/$<CONFIG>;TEMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler;TMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler")
   if(NOT URSA_PROJECT_DIR STREQUAL "")
 
     add_test(NAME UrsaTestSamplePrepare COMMAND "${CMAKE_COMMAND}"
@@ -19,7 +20,7 @@ if(TARGET UrsaAssetImport)
       "-DIMPORTER=$<TARGET_FILE:UrsaAssetImport>" "-DCONFIGURATION=$<CONFIG>"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/PrepareSampleProject.cmake")
     set_tests_properties(UrsaTestSamplePrepare PROPERTIES FIXTURES_SETUP UrsaTestSample
-      ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/TestSampleUser/$<CONFIG>")
+      ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/TestSampleUser/$<CONFIG>;TEMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler;TMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler")
   endif()
 endif()
 ursa_finalize_test_directory()

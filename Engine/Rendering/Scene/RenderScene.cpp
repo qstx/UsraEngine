@@ -230,6 +230,8 @@ Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& obj
 		{
 			MeshPtr mesh;
 			auto& palette = scratchPalette;
+			AnimatorComponent* poseAnimator = nullptr;
+			Mat4 poseRootWorld = Mat4::Identity();
 			palette.clear();
 			if (dynamic_cast<MeshRendererComponent*>(renderer))
 			{
@@ -256,27 +258,82 @@ Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& obj
 						if (animator && animator->ModelGuid() == binding.skeletonReference.guid &&
 						    animator->SkeletonLocalFileId() == binding.skeletonReference.localFileId)
 						{
+							poseAnimator = animator;
+							auto animatorObject = animator->GetGameObject();
+							auto animatorWorld = animatorObject ? animatorObject->WorldTransform()
+							                                    : Result<Mat4>::Failure("Animator has no scene object");
+							if (!animatorWorld)
+							{
+								return Result<void>::Failure("Cannot resolve Animator root transform: " +
+								                             animatorWorld.error);
+							}
+							poseRootWorld = animatorWorld.value;
 							palette = animator->JointPalette();
 							break;
 						}
 					}
-					if (palette.empty() && binding.skeleton)
+					if (binding.skeleton)
 					{
-						auto& transforms = scratchTransforms;
-						transforms.clear();
-						for (const auto& joint : binding.skeleton->joints)
+						Vector<Mat4> bindTransforms;
+						const Vector<Mat4>* jointTransforms = nullptr;
+						if (poseAnimator)
 						{
-							const Mat4 global = joint.parentJointIndex < 0 ? joint.bindLocalTransform.Matrix()
-							                                               : transforms[Size(joint.parentJointIndex)] *
-							                                                     joint.bindLocalTransform.Matrix();
-							transforms.push_back(global);
-							palette.push_back(global * joint.inverseBindMatrix);
+							jointTransforms = &poseAnimator->JointGlobalTransforms();
+						}
+						else
+						{
+							auto modelRoot = object;
+							while (modelRoot->Parent())
+							{
+								modelRoot = modelRoot->Parent();
+							}
+							auto rootTransform = modelRoot->WorldTransform();
+							if (!rootTransform)
+							{
+								return Result<void>::Failure("Cannot resolve skin model root transform: " +
+								                             rootTransform.error);
+							}
+							poseRootWorld = rootTransform.value;
+							for (const auto& joint : binding.skeleton->joints)
+							{
+								const Mat4 global = joint.parentJointIndex < 0
+								                        ? joint.bindLocalTransform.Matrix()
+								                        : bindTransforms[Size(joint.parentJointIndex)] *
+								                              joint.bindLocalTransform.Matrix();
+								bindTransforms.push_back(global);
+							}
+							jointTransforms = &bindTransforms;
+						}
+						if (!binding.skinInverseBindMatrices.empty() &&
+						    binding.skinInverseBindMatrices.size() != (binding.skinJointIndices.empty()
+						                                                   ? binding.skeleton->joints.size()
+						                                                   : binding.skinJointIndices.size()))
+						{
+							return Result<void>::Failure(
+							    "Skinned mesh inverse-bind data does not match its joint binding");
+						}
+						const Size bindingCount = binding.skinJointIndices.empty() ? jointTransforms->size()
+						                                                           : binding.skinJointIndices.size();
+						palette.resize(bindingCount);
+						for (Size joint = 0; joint < bindingCount; ++joint)
+						{
+							const Size poseJoint =
+							    binding.skinJointIndices.empty() ? joint : binding.skinJointIndices[joint];
+							if (poseJoint >= jointTransforms->size())
+							{
+								return Result<void>::Failure(
+								    "Skinned mesh binding refers outside the active node pose");
+							}
+							const Mat4& inverseBind = binding.skinInverseBindMatrices.empty()
+							                              ? binding.skeleton->joints[poseJoint].inverseBindMatrix
+							                              : binding.skinInverseBindMatrices[joint];
+							palette[joint] = (*jointTransforms)[poseJoint] * inverseBind;
 						}
 					}
 					const Mat4 inverse = world.InverseAffine();
 					for (Mat4& joint : palette)
 					{
-						joint = inverse * joint;
+						joint = inverse * poseRootWorld * joint;
 					}
 				}
 			}

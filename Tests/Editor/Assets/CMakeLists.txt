@@ -23,6 +23,8 @@ if(URSA_BUILD_EDITOR)
   ursa_add_test_executable(UrsaAssetImportRulesTests AssetImportRulesTests.cpp)
   target_link_libraries(UrsaAssetImportRulesTests PRIVATE Ursa::Editor)
   add_test(NAME UrsaAssetImportRulesTests COMMAND UrsaAssetImportRulesTests)
+  set_tests_properties(UrsaAssetImportRulesTests PROPERTIES
+    ENVIRONMENT "TEMP=${URSA_BINARY_ROOT}/Temp;TMP=${URSA_BINARY_ROOT}/Temp")
 
   ursa_add_test_executable(UrsaImportSettingsDraftTests ImportSettingsDraftTests.cpp)
   target_link_libraries(UrsaImportSettingsDraftTests PRIVATE Ursa::Editor)
@@ -37,6 +39,12 @@ if(URSA_BUILD_EDITOR)
   target_compile_definitions(UrsaModelImportCandidateTests PRIVATE
     URSA_CANDIDATE_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx"
     URSA_CANDIDATE_EMBEDDED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/embedded_ascii/box_embedded_texture_fragmented.fbx"
+    URSA_CANDIDATE_GLTF_EXTERNAL_DIR="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/BoxTextured-glTF"
+    URSA_CANDIDATE_GLTF_DATA_URI_DIR="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/BoxTextured-glTF-Embedded"
+    URSA_CANDIDATE_GLTF_JPEG_DIR="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/ClearCoat-glTF"
+    URSA_CANDIDATE_ANIMATED_GLTF="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/simple_skin/simple_skin.gltf"
+    URSA_CANDIDATE_MORPH_GLTF_DIR="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/AnimatedMorphSphere/glTF"
+    URSA_CANDIDATE_GLB="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/BoxTextured-glTF-Binary/BoxTextured.glb"
     URSA_ENGINE_SHADER_PAK="${URSA_SHADER_TEST_PAK}")
   add_dependencies(UrsaModelImportCandidateTests UrsaPak)
   add_test(NAME UrsaModelImportCandidateTests COMMAND UrsaModelImportCandidateTests)
@@ -45,7 +53,9 @@ if(URSA_BUILD_EDITOR)
   ursa_add_test_executable(UrsaAssetPreviewPanelTests AssetPreviewPanelTests.cpp)
   target_link_libraries(UrsaAssetPreviewPanelTests PRIVATE Ursa::Editor Ursa::StbImage)
   target_compile_definitions(UrsaAssetPreviewPanelTests PRIVATE
-    URSA_PREVIEW_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx")
+    URSA_PREVIEW_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx"
+    URSA_PREVIEW_STATIC_GLTF_DIR="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/BoxTextured-glTF"
+    URSA_PREVIEW_STATIC_GLB="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/glTF2/BoxTextured-glTF-Binary/BoxTextured.glb")
   add_test(NAME UrsaAssetPreviewPanelTests COMMAND UrsaAssetPreviewPanelTests
     "${URSA_BINARY_ROOT}/Temp/AssetPreviewEvidence/$<CONFIG>")
   ursa_require_test_content(UrsaAssetPreviewPanelTests UrsaAssetPreviewPanelTests)

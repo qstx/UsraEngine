@@ -4,6 +4,11 @@ target_compile_definitions(UrsaResourceVfsTests PRIVATE URSA_TEST_ENGINE_ASSET_R
 
 add_test(NAME UrsaResourceVfsTests COMMAND UrsaResourceVfsTests)
 
+ursa_add_test_executable(UrsaAnimationResourceTests AnimationResourceTests.cpp)
+target_link_libraries(UrsaAnimationResourceTests PRIVATE Ursa::Engine)
+
+add_test(NAME UrsaAnimationResourceTests COMMAND UrsaAnimationResourceTests)
+
 ursa_add_test_executable(UrsaSerializationBaseTests SerializationBaseTests.cpp)
 target_link_libraries(UrsaSerializationBaseTests PRIVATE Ursa::Engine)
 

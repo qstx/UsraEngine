@@ -30,6 +30,9 @@ struct MeshData
 	AssetReference skeletonReference;
 	std::shared_ptr<const ModelSkeleton> skeleton;
 	Vector<MeshSkinInfluence> skinInfluences;
+	// Skin-local joint slot -> shared node-pose joint index. Empty retains the legacy identity mapping.
+	Vector<UInt16> skinJointIndices;
+	Vector<Mat4> skinInverseBindMatrices;
 };
 
 struct MeshSnapshot

@@ -66,7 +66,8 @@ bool RuntimeAsset(const AssetRecord& asset)
 	}
 	const auto extension = PathFromUrsaString(asset.path.relative).extension();
 	return extension != ".cs" && extension != ".hlsli" && extension != ".hlsl" && extension != ".frag" &&
-	       extension != ".vert" && extension != ".comp" && extension != ".md" && extension != ".mtl";
+	       extension != ".vert" && extension != ".comp" && extension != ".md" && extension != ".mtl" &&
+	       extension != ".bin";
 }
 
 void AddEntry(RuntimeContentSnapshot& snapshot, const VirtualFileSystem& files, const VirtualPath& logical,

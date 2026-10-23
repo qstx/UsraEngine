@@ -574,8 +574,10 @@ ProjectAssetImporter::ProjectAssetImporter()
 		                                                      imported.value.diagnostics})
 		                : Result<AssetImportResult>::Failure(imported.error);
 	};
-	importers[".fbx"] = model;
-	importers[".obj"] = model;
+	for (const auto& extension : ModelImporter::SupportedExtensions())
+	{
+		importers[extension] = model;
+	}
 	initial->nativeImporters = importers;
 	registrations = std::move(initial);
 }
@@ -828,7 +830,7 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 					}
 				}
 			}
-			else if (extension == ".fbx" || extension == ".obj")
+			else if (ModelImporter::IsSupportedSource(source))
 			{
 				auto settings = ModelImporter::Settings(database, source);
 				if (!settings)

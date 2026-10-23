@@ -1,5 +1,7 @@
 #include <Assets/AssetDatabase.hpp>
+#include <Assets/AssetImportPipeline.hpp>
 #include <Assets/ModelImporter.hpp>
+#include <Assets/ProjectAssetImporter.hpp>
 #include <Assets/SceneDraft.hpp>
 #include <Animation/AnimatorComponent.hpp>
 #include <Core/StringInterop.hpp>
@@ -13,6 +15,7 @@
 #include <Serialization/MeshResource.hpp>
 #include <Scene/Scene.hpp>
 #include <Vfs/AssetRoots.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
 #include <Vfs/PakArchive.hpp>
 #include <algorithm>
 #include <cmath>
@@ -146,6 +149,23 @@ void WriteText(const std::filesystem::path& path, const char* text)
 	{
 		throw std::runtime_error("Cannot create the model importer fixture");
 	}
+}
+
+Vector<UInt8> ReadBytes(const std::filesystem::path& path)
+{
+	std::ifstream input(path, std::ios::binary | std::ios::ate);
+	if (!input)
+	{
+		throw std::runtime_error("Cannot read the model import fixture");
+	}
+	Vector<UInt8> bytes(static_cast<Size>(input.tellg()));
+	input.seekg(0);
+	input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+	if (!input)
+	{
+		throw std::runtime_error("Cannot read all bytes from the model import fixture");
+	}
+	return bytes;
 }
 
 bool ContainsPath(const Vector<VirtualPath>& paths, const char* expected)
@@ -578,6 +598,274 @@ void TestObjMaterialDependencies(const std::filesystem::path& root)
 	       "Packaged runtime catalog did not resolve the imported texture without Editor Library data");
 }
 
+void TestGltfExternalDependencies(const std::filesystem::path& root)
+{
+	const auto assetsRoot = root / "Gltf" / "Assets";
+	const auto libraryRoot = root / "Gltf" / "Library";
+	const auto fixtureRoot = std::filesystem::u8path(URSA_ASSIMP_GLTF_EXTERNAL_DIR);
+	const auto modelDirectory = assetsRoot / "Models" / "BoxTextured-glTF";
+	std::filesystem::create_directories(assetsRoot / "Models");
+	std::filesystem::create_directories(libraryRoot);
+	std::filesystem::copy(fixtureRoot, modelDirectory, std::filesystem::copy_options::recursive);
+	VirtualFileSystem filesystem;
+	Expect(static_cast<bool>(filesystem.Mount(projectScheme, assetsRoot, MountAccess::ReadWrite)),
+	       "Cannot mount the external glTF fixture");
+	Expect(static_cast<bool>(filesystem.Mount(editorLibraryScheme, libraryRoot, MountAccess::ReadWrite)),
+	       "Cannot mount the external glTF Library");
+	auto database = AssetDatabase::Open(filesystem);
+	Expect(database && static_cast<bool>(database.value->Refresh()), "Cannot initialize the glTF AssetDatabase");
+	const VirtualPath source = Path("prj:Models/BoxTextured-glTF/BoxTextured.gltf");
+	const VirtualPath bufferPath = Path("prj:Models/BoxTextured-glTF/BoxTextured0.bin");
+	const VirtualPath imagePath = Path("prj:Models/BoxTextured-glTF/CesiumLogoFlat.png");
+	auto imported = ModelImporter::Import(*database.value, source, ModelImportSettings{});
+	Expect(static_cast<bool>(imported), imported ? "" : ToStdString(imported.error).c_str());
+	Expect(ContainsPath(imported.value.dependencies, "prj:Models/BoxTextured-glTF/BoxTextured0.bin") &&
+	           ContainsPath(imported.value.dependencies, "prj:Models/BoxTextured-glTF/CesiumLogoFlat.png"),
+	       "glTF buffer or image was omitted from the persisted import dependencies");
+	auto cached = ModelImporter::Import(*database.value, source, ModelImportSettings{});
+	Expect(cached && cached.value.cacheHit, "Unchanged glTF external dependencies did not reuse the model cache");
+
+	const auto replacementTexture = ReadBytes(std::filesystem::u8path(URSA_DEMO_TEXTURE_PATH));
+	Done(filesystem.WriteAtomic(imagePath, replacementTexture));
+	auto imageReimport = ModelImporter::Import(*database.value, source, ModelImportSettings{});
+	Expect(imageReimport && !imageReimport.value.cacheHit,
+	       "Changing a glTF external image did not invalidate the model import cache");
+
+	auto bufferBytes = Take(filesystem.Read(bufferPath));
+	Expect(bufferBytes.size() > 292, "External glTF buffer fixture is unexpectedly short");
+	auto setCoordinate = [](Vector<UInt8>& bytes, Float32 value, Size offset)
+	{
+		UInt32 bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		for (UInt32 shift = 0; shift < 32; shift += 8)
+		{
+			bytes[offset + shift / 8] = static_cast<UInt8>((bits >> shift) & 0xff);
+		}
+	};
+	Vector<UInt8> changedBuffer = bufferBytes;
+	setCoordinate(changedBuffer, 4.0f, 288);
+	Done(filesystem.WriteAtomic(bufferPath, changedBuffer));
+	auto bufferReimport = ModelImporter::Import(*database.value, source, ModelImportSettings{});
+	Expect(bufferReimport && !bufferReimport.value.cacheHit,
+	       "Changing a glTF external buffer did not invalidate the model import cache");
+	cached = ModelImporter::Import(*database.value, source, ModelImportSettings{});
+	Expect(cached && cached.value.cacheHit, "Reimported glTF dependencies did not become reusable cache inputs");
+
+	const auto previousArtifact = Take(filesystem.Read(imported.value.artifactPath));
+	const auto model = nlohmann::json::from_cbor(previousArtifact.begin(), previousArtifact.end());
+	const auto meshId = model.at("meshLocalFileIds").at(0).get<UInt64>();
+	AssetDatabase* assetDatabase = database.value.get();
+	Vector<ResourceMount> runtimeMounts;
+	for (const VirtualMount& mount : filesystem.Providers())
+	{
+		runtimeMounts.push_back({mount.scheme, {}, mount.access, mount.provider});
+	}
+	auto engineFilesystem = Take(OpenEngineFileSystem());
+	for (const VirtualMount& mount : engineFilesystem.Providers())
+	{
+		runtimeMounts.push_back({mount.scheme, {}, mount.access, mount.provider});
+	}
+	auto session = Take(ResourceSession::Open(runtimeMounts, [assetDatabase](ResourceId guid, UInt64 localFileId)
+	                                          { return assetDatabase->Resolve(guid, localFileId); }));
+	ComponentRegistry registry;
+	Done(RegisterBuiltinComponents(registry));
+	auto sceneDraft = Take(SceneDraft::Create(ResourceKind::Scene, registry, *session));
+	auto sceneModel = Take(sceneDraft->InstantiateModel(imported.value.guid, model));
+	Expect(FindMeshRenderer(sceneModel) != nullptr, "Imported glTF was not instantiated into a Scene");
+	const VirtualPath scenePath = Path("prj:GltfScene.ursascene");
+	Done(sceneDraft->Save(filesystem, scenePath, ResourceId::Generate()));
+	auto reopenedScene = Take(SceneDraft::Load(filesystem, scenePath, ResourceKind::Scene, registry, *session));
+	GameObject::Ptr reopenedModel;
+	for (const auto& sceneRoot : reopenedScene->GetScene().RootGameObjects())
+	{
+		if (FindMeshRenderer(sceneRoot))
+		{
+			reopenedModel = sceneRoot;
+			break;
+		}
+	}
+	Expect(reopenedModel && FindMeshRenderer(reopenedModel)
+	                                ->GetGameObject()
+	                                ->FindComponent<MeshFilterComponent>()
+	                                ->SharedMesh()
+	                                ->AssetIdentity()
+	                                .localFileId == meshId,
+	       "Scene save/reopen lost the imported glTF mesh reference");
+	const auto editorStatus = Take(database.value->CurrentImport(source));
+	const std::string cliImportCommand = std::string("\"") + URSA_ASSET_IMPORT_EXECUTABLE + "\" --project \"" +
+	                                     assetsRoot.parent_path().string() + "\" --engine \"" +
+	                                     URSA_DEMO_ENGINE_ASSET_PATH + "\" --configuration " + URSA_TEST_CONFIGURATION +
+	                                     " --profile Both --no-scripts";
+	Expect(RunProcess(cliImportCommand) == 0, "UrsaAssetImport CLI failed to prepare the isolated glTF project");
+	Done(database.value->ReloadImports());
+	const auto cliStatus = Take(database.value->CurrentImport(source));
+	Expect(editorStatus.dependencies == cliStatus.dependencies &&
+	           editorStatus.artifacts.size() == cliStatus.artifacts.size(),
+	       "Editor and UrsaAssetImport produced different glTF dependency or artifact inventories");
+	for (const auto& editorArtifact : editorStatus.artifacts)
+	{
+		const auto match = std::find_if(cliStatus.artifacts.begin(), cliStatus.artifacts.end(),
+		                                [&](const ImportedArtifactLocation& candidate)
+		                                {
+			                                return candidate.localFileId == editorArtifact.localFileId &&
+			                                       candidate.kind == editorArtifact.kind &&
+			                                       candidate.outputKey == editorArtifact.outputKey &&
+			                                       candidate.contentFingerprint == editorArtifact.contentFingerprint;
+		                                });
+		Expect(match != cliStatus.artifacts.end(),
+		       "Editor and UrsaAssetImport changed a stable glTF sub-asset or artifact fingerprint");
+	}
+	const auto pakPath = BuildPackage(root, assetsRoot, libraryRoot, "GltfPackage");
+	auto archive = Take(PakArchive::Open(pakPath));
+	VirtualFileSystem packagedFilesystem;
+	Done(archive->Mount(packagedFilesystem));
+	Expect(!Take(packagedFilesystem.Exists(source)), "Runtime glTF pak retained its source document");
+	Expect(!Take(packagedFilesystem.Exists(bufferPath)), "Runtime glTF pak retained its external buffer");
+	Expect(!Take(packagedFilesystem.Exists(imagePath)), "Runtime glTF pak retained its source texture image");
+	auto packagedSession = Take(ResourceSession::Open(packagedFilesystem));
+	Expect(Take(packagedSession->LoadMesh(imported.value.guid, meshId))->Snapshot()->data.indices.size() >= 3 &&
+	           Take(packagedSession->LoadMaterial(imported.value.guid,
+	                                              model.at("materialLocalFileIds").at(0).get<UInt64>()))
+	               ->IsValid(),
+	       "Runtime glTF pak could not resolve its Mesh and PBR material without source files");
+
+	const VirtualPath corruptBuffer = Path("prj:Models/BoxTextured-glTF/BoxTextured0.bin");
+	Done(filesystem.WriteAtomic(corruptBuffer, Vector<UInt8>{0, 0, 0, 0}));
+	auto failedReimport = ModelImporter::Import(*database.value, source, ModelImportSettings{});
+	Expect(!failedReimport && !failedReimport.error.empty(),
+	       "Malformed glTF dependency unexpectedly published a new model import");
+	Expect(Take(filesystem.Read(imported.value.artifactPath)) == previousArtifact,
+	       "Failed glTF dependency import replaced the last successful model artifact");
+	Done(filesystem.WriteAtomic(bufferPath, changedBuffer));
+
+	ProjectAssetImporter projectImporter;
+	bool changedDuringConstruction = false;
+	Done(projectImporter.RegisterNativeProcessing(
+	    "ursa.Model", {".gltf"},
+	    [&](AssetDatabase& isolated, const VirtualPath& isolatedSource, bool force)
+	    {
+		    auto candidate = ModelImporter::Import(isolated, isolatedSource, ModelImportSettings{}, force);
+		    if (!candidate)
+		    {
+			    return Result<AssetImportResult>::Failure(candidate.error);
+		    }
+		    if (!changedDuringConstruction)
+		    {
+			    changedDuringConstruction = true;
+			    Vector<UInt8> concurrentChange = changedBuffer;
+			    setCoordinate(concurrentChange, 4.25f, 288);
+			    auto written = filesystem.WriteAtomic(bufferPath, concurrentChange);
+			    if (!written)
+			    {
+				    return Result<AssetImportResult>::Failure(written.error);
+			    }
+		    }
+		    return ProjectAssetImporter::LoadCurrent(isolated, isolatedSource);
+	    }));
+	auto changedSnapshot = projectImporter.Import(*database.value, source, true);
+	Expect(changedDuringConstruction && !changedSnapshot &&
+	           (changedSnapshot.error.find("inputs changed during import") != String::npos ||
+	            changedSnapshot.error.find("inputs changed before candidate publication") != String::npos),
+	       "ProjectAssetImporter published a candidate after its external glTF input changed");
+	Expect(Take(filesystem.Read(imported.value.artifactPath)) == previousArtifact,
+	       "Snapshot rejection changed the last successful glTF model artifact");
+}
+
+void TestGltfPlayerWithoutSources(const std::filesystem::path& root)
+{
+	const auto projectRoot = root / "GltfAnim";
+	const auto assetsRoot = projectRoot / "Assets";
+	const auto libraryRoot = projectRoot / "Library";
+	const auto sourceDirectory = assetsRoot / "Models" / "SimpleSkin";
+	std::filesystem::create_directories(sourceDirectory);
+	std::filesystem::create_directories(libraryRoot);
+	const auto fixture = std::filesystem::u8path(URSA_ASSIMP_GLTF_ANIMATED);
+	std::filesystem::copy(fixture.parent_path(), sourceDirectory, std::filesystem::copy_options::recursive);
+	const auto source = Path("prj:Models/SimpleSkin/simple_skin.gltf");
+	VirtualFileSystem filesystem;
+	Done(filesystem.Mount(projectScheme, assetsRoot, MountAccess::ReadWrite));
+	Done(filesystem.Mount(editorLibraryScheme, libraryRoot, MountAccess::ReadWrite));
+	const String buildMarker = "namespace GltfPlayer { public static class BuildMarker {} }";
+	Done(filesystem.WriteAtomic(Path("prj:BuildMarker.cs"), Vector<UInt8>(buildMarker.begin(), buildMarker.end())));
+	auto database = Take(AssetDatabase::Open(filesystem));
+	Done(database->Refresh());
+	auto imported = Take(ModelImporter::Import(*database, source, ModelImportSettings{}));
+	const auto model = ReadArtifact(filesystem, imported.artifactPath);
+	Expect(!model.at("animationClipLocalFileIds").empty() && !model.at("materialLocalFileIds").empty(),
+	       "Animated glTF player fixture is missing its animation or material");
+	Vector<ResourceMount> mounts;
+	for (const auto& mount : filesystem.Providers())
+	{
+		mounts.push_back({mount.scheme, {}, mount.access, mount.provider});
+	}
+	auto engineFiles = Take(OpenEngineFileSystem());
+	for (const auto& mount : engineFiles.Providers())
+	{
+		mounts.push_back({mount.scheme, {}, mount.access, mount.provider});
+	}
+	auto session = Take(ResourceSession::Open(mounts, [&database](ResourceId guid, UInt64 localFileId)
+	                                          { return database->Resolve(guid, localFileId); }));
+	ComponentRegistry registry;
+	Done(RegisterBuiltinComponents(registry));
+	auto scene = Take(SceneDraft::Create(ResourceKind::Scene, registry, *session));
+	Take(scene->InstantiateModel(imported.guid, model));
+	auto cameraObject = Take(scene->GetScene().CreateGameObject("Camera"));
+	LocalTransform cameraTransform;
+	cameraTransform.position = {0, 0, 4};
+	Done(cameraObject->SetLocalTransform(cameraTransform));
+	const auto camera = Take(cameraObject->AddComponent<CameraComponent>());
+	Done(scene->GetScene().SetActiveCamera(camera->Id()));
+	const auto scenePath = Path("prj:GltfPlayerScene.ursascene");
+	Done(scene->Save(filesystem, scenePath, ResourceId::Generate()));
+
+	const std::string cliImport = std::string("\"") + URSA_ASSET_IMPORT_EXECUTABLE + "\" --project \"" +
+	                              projectRoot.string() + "\" --engine \"" + URSA_DEMO_ENGINE_ASSET_PATH +
+	                              "\" --configuration " + URSA_TEST_CONFIGURATION + " --profile Both";
+	Expect(RunProcess(cliImport) == 0, "UrsaAssetImport failed for the animated glTF Player project");
+	auto workspace = Take(AssetImportPipeline::OpenProject(projectRoot, URSA_DEMO_ENGINE_ASSET_PATH));
+	AssetImportOptions playerOptions;
+	playerOptions.profile = "Player";
+	playerOptions.configuration = URSA_TEST_CONFIGURATION;
+	auto prepared = Take(AssetImportPipeline::Prepare(*workspace, playerOptions));
+	Expect(!Take(prepared.runtimeFiles.Exists(source)) &&
+	           !Take(prepared.runtimeFiles.Exists(Path("prj:Models/SimpleSkin/quad_skin.glb"))),
+	       "Loose glTF Player content retained source model files");
+	const auto looseRoot = root / "GltfAnimatedLooseContent";
+	VirtualFileSystem loose;
+	for (const auto& mapping : Vector<std::pair<String, String>>{{engineScheme, "Engine"}, {projectScheme, "Project"}})
+	{
+		const auto destination =
+		    Take(DirectoryFileProvider::Open(looseRoot / std::filesystem::u8path(ToStdString(mapping.second)), true));
+		Done(loose.MountProvider(mapping.first, destination, MountAccess::ReadWrite));
+		for (const auto& entry : Take(prepared.runtimeFiles.List(mapping.first)))
+		{
+			Done(loose.WriteAtomic(entry.path, Take(prepared.runtimeFiles.Read(entry.path))));
+		}
+	}
+	const auto package = BuildPackage(root, assetsRoot, libraryRoot, "GltfAnimatedPlayerPackage");
+	auto packagedArchive = Take(PakArchive::Open(package));
+	VirtualFileSystem packagedFiles;
+	Done(packagedArchive->Mount(packagedFiles));
+	Expect(!Take(packagedFiles.Exists(source)) &&
+	           !Take(packagedFiles.Exists(Path("prj:Models/SimpleSkin/quad_skin.glb"))) &&
+	           !Take(packagedFiles.Exists(Path("prj:Models/SimpleSkin/simple_skin.bin"))),
+	       "Animated glTF Player package retained model source files");
+	auto packagedSession = Take(ResourceSession::Open(packagedFiles));
+	const auto clipId = model.at("animationClipLocalFileIds").at(0).get<UInt64>();
+	const auto materialId = model.at("materialLocalFileIds").at(0).get<UInt64>();
+	Expect(Take(packagedSession->LoadAnimationClip(imported.guid, clipId))->durationSeconds > 0 &&
+	           Take(packagedSession->LoadMaterial(imported.guid, materialId))->IsValid(),
+	       "Source-free glTF Player package lost its animation or material");
+	std::filesystem::remove_all(sourceDirectory);
+	const auto sceneArgument = " --scene GltfPlayerScene.ursascene --hidden --frames 4";
+	Expect(RunProcess(std::string("\"") + URSA_SCRIPT_PLAYER_EXECUTABLE + "\" --content \"" + looseRoot.string() +
+	                  "\"" + sceneArgument) == 0,
+	       "Player failed to run loose cooked glTF content after source removal");
+	Expect(RunProcess(std::string("\"") + URSA_SCRIPT_PLAYER_EXECUTABLE + "\" --pak \"" + package.string() + "\"" +
+	                  sceneArgument) == 0,
+	       "Player failed to run packaged glTF content after source removal");
+}
+
 void TestEmbeddedTexture(const std::filesystem::path& root)
 {
 	const auto assetsRoot = root / "Embedded" / "Assets";
@@ -760,6 +1048,8 @@ void TestSkeletalAnimationImport(const std::filesystem::path& root)
 	       "Instantiated skinned mesh has no vertex joint influences");
 	auto clonedSkin = Take(FindSkinnedMeshRenderer(modelRoot)->SharedMesh()->Clone());
 	const auto skinSource = clonedSkin->Snapshot()->data.skeletonReference;
+	const auto skinJointIndices = clonedSkin->Snapshot()->data.skinJointIndices;
+	const auto skinInverseBindMatrices = clonedSkin->Snapshot()->data.skinInverseBindMatrices;
 	const auto standaloneSkinId = ResourceId::Generate();
 	const auto standaloneSkinPath = Path("prj:Meshes/IndependentSkin.ursamesh");
 	Done(SaveMeshResource(filesystem, standaloneSkinPath, standaloneSkinId, *clonedSkin));
@@ -776,8 +1066,10 @@ void TestSkeletalAnimationImport(const std::filesystem::path& root)
 	auto savedSkin = Take(LoadMeshResource(filesystem, standaloneSkinPath, skinContext));
 	Expect(savedSkin.mesh->AssetIdentity().guid == standaloneSkinId &&
 	           savedSkin.mesh->Snapshot()->data.skeletonReference.guid == skinSource.guid &&
-	           savedSkin.mesh->Snapshot()->data.skeletonReference.localFileId == skinSource.localFileId,
-	       "Standalone skinned Mesh lost its independent geometry identity or original skeleton binding");
+	           savedSkin.mesh->Snapshot()->data.skeletonReference.localFileId == skinSource.localFileId &&
+	           savedSkin.mesh->Snapshot()->data.skinJointIndices == skinJointIndices &&
+	           savedSkin.mesh->Snapshot()->data.skinInverseBindMatrices.size() == skinInverseBindMatrices.size(),
+	       "Standalone skinned Mesh lost its identity, skeleton reference or versioned per-skin binding");
 	Done(database.value->Refresh());
 	Done(session->Index().Rebuild());
 	Done(FindSkinnedMeshRenderer(modelRoot)->SetSharedMesh(savedSkin.mesh));
@@ -885,6 +1177,8 @@ int main()
 		std::filesystem::create_directories(root);
 		TestProvidedFbx(root);
 		TestObjMaterialDependencies(root);
+		TestGltfExternalDependencies(root);
+		TestGltfPlayerWithoutSources(root);
 		TestEmbeddedTexture(root);
 		TestSkeletalAnimationImport(root);
 		std::filesystem::remove_all(root);

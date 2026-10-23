@@ -84,7 +84,8 @@ Result<void> Mesh::Validate(const MeshData& data)
 	if (!add(count, sizeof(Vec3)) || !add(data.normals.size(), sizeof(Vec3)) || !add(data.uv0.size(), sizeof(Vec2)) ||
 	    !add(data.colors.size(), sizeof(Color)) || !add(data.tangents.size(), sizeof(Vec4)) ||
 	    !add(data.indices.size(), sizeof(UInt32)) || !add(data.subMeshes.size(), sizeof(SubMesh)) ||
-	    !add(data.skinInfluences.size(), sizeof(MeshSkinInfluence)))
+	    !add(data.skinInfluences.size(), sizeof(MeshSkinInfluence)) ||
+	    !add(data.skinJointIndices.size(), sizeof(UInt16)) || !add(data.skinInverseBindMatrices.size(), sizeof(Mat4)))
 	{
 		return Result<void>::Failure("Mesh decoded data exceeds 256 MiB");
 	}
@@ -162,7 +163,11 @@ Result<void> Mesh::Validate(const MeshData& data)
 	{
 		if (!data.skeletonReference.localFileId || !data.skeleton ||
 		    data.skeleton->modelGuid != data.skeletonReference.guid ||
-		    data.skeleton->localFileId != data.skeletonReference.localFileId || data.skinInfluences.size() != count)
+		    data.skeleton->localFileId != data.skeletonReference.localFileId || data.skinInfluences.size() != count ||
+		    (!data.skinJointIndices.empty() && data.skinJointIndices.size() != data.skinInverseBindMatrices.size()) ||
+		    (!data.skinInverseBindMatrices.empty() &&
+		     data.skinInverseBindMatrices.size() !=
+		         (data.skinJointIndices.empty() ? data.skeleton->joints.size() : data.skinJointIndices.size())))
 		{
 			return Result<void>::Failure("Mesh skin binding does not match skeleton or vertex count");
 		}
@@ -173,7 +178,9 @@ Result<void> Mesh::Validate(const MeshData& data)
 			{
 				const Float32 weight = data.skinInfluences[i].weights[j];
 				if (!std::isfinite(weight) || weight < 0.0f ||
-				    (weight > 0.0f && data.skinInfluences[i].jointIndices[j] >= data.skeleton->joints.size()))
+				    (weight > 0.0f &&
+				     data.skinInfluences[i].jointIndices[j] >=
+				         (data.skinJointIndices.empty() ? data.skeleton->joints.size() : data.skinJointIndices.size())))
 				{
 					return Result<void>::Failure(IndexedError("skin influence", i));
 				}
@@ -184,8 +191,29 @@ Result<void> Mesh::Validate(const MeshData& data)
 				return Result<void>::Failure(IndexedError("skin weight sum", i));
 			}
 		}
+		for (UInt16 jointIndex : data.skinJointIndices)
+		{
+			if (jointIndex >= data.skeleton->joints.size())
+			{
+				return Result<void>::Failure("Mesh skin binding refers to an invalid skeleton joint");
+			}
+		}
+		for (const Mat4& inverseBind : data.skinInverseBindMatrices)
+		{
+			for (Int32 row = 0; row < 4; ++row)
+			{
+				for (Int32 column = 0; column < 4; ++column)
+				{
+					if (!std::isfinite(inverseBind.At(row, column)))
+					{
+						return Result<void>::Failure("Mesh contains a non-finite skin inverse bind matrix");
+					}
+				}
+			}
+		}
 	}
-	else if (data.skeletonReference.localFileId || data.skeleton || !data.skinInfluences.empty())
+	else if (data.skeletonReference.localFileId || data.skeleton || !data.skinInfluences.empty() ||
+	         !data.skinJointIndices.empty() || !data.skinInverseBindMatrices.empty())
 	{
 		return Result<void>::Failure("Mesh skin data requires a skeleton asset reference");
 	}

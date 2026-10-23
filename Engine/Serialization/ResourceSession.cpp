@@ -20,6 +20,28 @@ namespace
 {
 using Json = nlohmann::json;
 
+Result<AnimationInterpolation> ReadAnimationInterpolation(const Json& value, const String& location)
+{
+	if (!value.is_string())
+	{
+		return Result<AnimationInterpolation>::Failure("Invalid animation interpolation at " + location);
+	}
+	const String mode = ToUrsaString(value.get<std::string>());
+	if (mode == "LINEAR")
+	{
+		return Result<AnimationInterpolation>::Success(AnimationInterpolation::Linear);
+	}
+	if (mode == "STEP")
+	{
+		return Result<AnimationInterpolation>::Success(AnimationInterpolation::Step);
+	}
+	if (mode == "CUBICSPLINE")
+	{
+		return Result<AnimationInterpolation>::Success(AnimationInterpolation::CubicSpline);
+	}
+	return Result<AnimationInterpolation>::Failure("Unknown animation interpolation at " + location);
+}
+
 String ResourceCacheKey(ResourceId guid, Ursa::UInt64 localFileId)
 {
 	return guid.ToString() + ":" + ToUrsaString(std::to_string(localFileId));
@@ -107,34 +129,53 @@ Result<Mat4> ReadMatrix(const Json& value, const String& location)
 
 Result<AnimationVectorKey> ReadVectorKey(const Json& value, const String& location)
 {
-	if (!value.is_array() || value.size() != 2 || !value[0].is_number())
+	if (!value.is_array() || (value.size() != 2 && value.size() != 4) || !value[0].is_number())
 	{
 		return Result<AnimationVectorKey>::Failure("Invalid animation vector key at " + location);
 	}
 	const Ursa::Float64 timeSeconds = value[0].get<Ursa::Float64>();
 	auto components = ReadFloatVector(value[1], 3, location);
-	if (!std::isfinite(timeSeconds) || timeSeconds < 0.0 || !components)
+	auto inTangent = value.size() == 4 ? ReadFloatVector(value[2], 3, location)
+	                                   : Result<Vector<Ursa::Float32>>::Success({0.0f, 0.0f, 0.0f});
+	auto outTangent = value.size() == 4 ? ReadFloatVector(value[3], 3, location)
+	                                    : Result<Vector<Ursa::Float32>>::Success({0.0f, 0.0f, 0.0f});
+	if (!std::isfinite(timeSeconds) || timeSeconds < 0.0 || !components || !inTangent || !outTangent)
 	{
 		return Result<AnimationVectorKey>::Failure("Invalid animation vector key at " + location);
 	}
-	return Result<AnimationVectorKey>::Success(
-	    {timeSeconds, {components.value[0], components.value[1], components.value[2]}});
+	return Result<AnimationVectorKey>::Success({timeSeconds,
+	                                            {components.value[0], components.value[1], components.value[2]},
+	                                            {inTangent.value[0], inTangent.value[1], inTangent.value[2]},
+	                                            {outTangent.value[0], outTangent.value[1], outTangent.value[2]}});
 }
 
 Result<AnimationRotationKey> ReadRotationKey(const Json& value, const String& location)
 {
-	if (!value.is_array() || value.size() != 2 || !value[0].is_number())
+	if (!value.is_array() || (value.size() != 2 && value.size() != 4) || !value[0].is_number())
 	{
 		return Result<AnimationRotationKey>::Failure("Invalid animation rotation key at " + location);
 	}
 	const Ursa::Float64 timeSeconds = value[0].get<Ursa::Float64>();
 	auto components = ReadFloatVector(value[1], 4, location);
-	if (!std::isfinite(timeSeconds) || timeSeconds < 0.0 || !components)
+	auto inTangent = value.size() == 4 ? ReadFloatVector(value[2], 4, location)
+	                                   : Result<Vector<Ursa::Float32>>::Success({0.0f, 0.0f, 0.0f, 0.0f});
+	auto outTangent = value.size() == 4 ? ReadFloatVector(value[3], 4, location)
+	                                    : Result<Vector<Ursa::Float32>>::Success({0.0f, 0.0f, 0.0f, 0.0f});
+	const Ursa::Float64 magnitudeSquared = components ? Ursa::Float64(components.value[0]) * components.value[0] +
+	                                                        Ursa::Float64(components.value[1]) * components.value[1] +
+	                                                        Ursa::Float64(components.value[2]) * components.value[2] +
+	                                                        Ursa::Float64(components.value[3]) * components.value[3]
+	                                                  : 0.0;
+	if (!std::isfinite(timeSeconds) || timeSeconds < 0.0 || !components || !inTangent || !outTangent ||
+	    magnitudeSquared <= 1e-12)
 	{
 		return Result<AnimationRotationKey>::Failure("Invalid animation rotation key at " + location);
 	}
 	return Result<AnimationRotationKey>::Success(
-	    {timeSeconds, {components.value[0], components.value[1], components.value[2], components.value[3]}});
+	    {timeSeconds,
+	     {components.value[0], components.value[1], components.value[2], components.value[3]},
+	     {inTangent.value[0], inTangent.value[1], inTangent.value[2], inTangent.value[3]},
+	     {outTangent.value[0], outTangent.value[1], outTangent.value[2], outTangent.value[3]}});
 }
 } // namespace
 
@@ -499,8 +540,9 @@ Result<std::shared_ptr<const AnimationClip>> ResourceSession::LoadAnimationClip(
 	{
 		return Result<std::shared_ptr<const AnimationClip>>::Failure(document.error);
 	}
+	const Ursa::UInt32 animationVersion = document.value.value("version", Ursa::UInt32{0});
 	if (document.value.value("format", std::string{}) != "UrsaAnimationClip" ||
-	    document.value.value("version", Ursa::UInt32{0}) != 1 ||
+	    (animationVersion != 1 && animationVersion != 2) ||
 	    document.value.value("localFileId", Ursa::UInt64{0}) != localFileId || !document.value.contains("name") ||
 	    !document.value["name"].is_string() || !document.value.contains("durationSeconds") ||
 	    !document.value["durationSeconds"].is_number() || !document.value.contains("channels") ||
@@ -530,6 +572,31 @@ Result<std::shared_ptr<const AnimationClip>> ResourceSession::LoadAnimationClip(
 		}
 		AnimationNodeChannel channel;
 		channel.nodeLocalFileId = channelDocument["nodeLocalFileId"].get<Ursa::UInt64>();
+		if (animationVersion == 2)
+		{
+			if (!channelDocument.contains("positionInterpolation") ||
+			    !channelDocument.contains("rotationInterpolation") || !channelDocument.contains("scaleInterpolation"))
+			{
+				return Result<std::shared_ptr<const AnimationClip>>::Failure("Missing animation interpolation at " +
+				                                                             path.value.ToString());
+			}
+			auto positionInterpolation =
+			    ReadAnimationInterpolation(channelDocument["positionInterpolation"], path.value.ToString());
+			auto rotationInterpolation =
+			    ReadAnimationInterpolation(channelDocument["rotationInterpolation"], path.value.ToString());
+			auto scaleInterpolation =
+			    ReadAnimationInterpolation(channelDocument["scaleInterpolation"], path.value.ToString());
+			if (!positionInterpolation || !rotationInterpolation || !scaleInterpolation)
+			{
+				return Result<std::shared_ptr<const AnimationClip>>::Failure(
+				    !positionInterpolation   ? positionInterpolation.error
+				    : !rotationInterpolation ? rotationInterpolation.error
+				                             : scaleInterpolation.error);
+			}
+			channel.positionInterpolation = positionInterpolation.value;
+			channel.rotationInterpolation = rotationInterpolation.value;
+			channel.scaleInterpolation = scaleInterpolation.value;
+		}
 		for (const char* field : {"positionKeys", "scaleKeys"})
 		{
 			if (!channelDocument.contains(field) || !channelDocument[field].is_array())
@@ -546,6 +613,15 @@ Result<std::shared_ptr<const AnimationClip>> ResourceSession::LoadAnimationClip(
 				}
 				(field[0] == 'p' ? channel.positions : channel.scales).push_back(std::move(vectorKey.value));
 			}
+			auto& keys = field[0] == 'p' ? channel.positions : channel.scales;
+			for (Ursa::Size keyIndex = 1; keyIndex < keys.size(); ++keyIndex)
+			{
+				if (keys[keyIndex].timeSeconds <= keys[keyIndex - 1].timeSeconds)
+				{
+					return Result<std::shared_ptr<const AnimationClip>>::Failure(
+					    "Animation key times are not strictly increasing at " + path.value.ToString());
+				}
+			}
 		}
 		if (!channelDocument.contains("rotationKeys") || !channelDocument["rotationKeys"].is_array())
 		{
@@ -560,6 +636,14 @@ Result<std::shared_ptr<const AnimationClip>> ResourceSession::LoadAnimationClip(
 				return Result<std::shared_ptr<const AnimationClip>>::Failure(rotationKey.error);
 			}
 			channel.rotations.push_back(std::move(rotationKey.value));
+		}
+		for (Ursa::Size keyIndex = 1; keyIndex < channel.rotations.size(); ++keyIndex)
+		{
+			if (channel.rotations[keyIndex].timeSeconds <= channel.rotations[keyIndex - 1].timeSeconds)
+			{
+				return Result<std::shared_ptr<const AnimationClip>>::Failure(
+				    "Animation key times are not strictly increasing at " + path.value.ToString());
+			}
 		}
 		clip->channels.push_back(std::move(channel));
 	}
