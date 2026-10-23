@@ -7,7 +7,6 @@ using Ursa;
 
 internal static class ScriptableAssetFieldTests
 {
-	[UrsaScriptType("test.serializable-asset", Version = 2)]
 	private sealed class Settings : ScriptableObject
 	{
 		public float exposure = 2.0f;

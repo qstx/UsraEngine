@@ -1,6 +1,6 @@
 # 脚本身份与源元数据
 
-普通脚本直接继承 `Behaviour` 或 `ScriptableObject`，无需声明 `UrsaScriptType`：
+普通脚本直接继承 `Behaviour` 或 `ScriptableObject`。类型身份完全由源文件的 `.meta` 维护：
 
 ```csharp
 using Ursa;
@@ -15,7 +15,7 @@ Editor 在首次成功发现类型时把身份写入 `Mover.cs.meta`。元数据
 
 ## 身份如何保持
 
-原有 GUID 标识源码资产，新增的 `scriptTypes` 表记录文件内各类型的 `Id`、`Version`、`LocalFileId`、当前 `TypeName`、`Primary` 与旧声明兼容标记。这些字段由引擎维护，普通脚本开发不需要编辑它们。旧显式身份进入兼容迁移路径时保留已有组件的 GUID/local file ID 解析行为；自动生成的新身份校验当前 GUID 与 local file ID。
+原有 GUID 标识源码资产，新增的 `scriptTypes` 表记录文件内各类型的 `Id`、`Version`、`LocalFileId`、当前 `TypeName` 与 `Primary`。这些字段由引擎维护，普通脚本开发不需要编辑它们。身份与版本不再通过 C# 特性声明；自动生成的新身份校验当前 GUID 与 local file ID。
 
 单个具体脚本或与文件同名的脚本作为主类型。修改主类型的类名、命名空间，或通过资产操作移动源码和 sidecar 后，目录更新 CLR 类型映射并保留身份。Scene、Prefab 和 ScriptableObject 数据继续使用持久身份；Player 加载旧 CLR 名称的组件时也按当前已验证目录查找类型。
 
@@ -25,11 +25,11 @@ Editor 在首次成功发现类型时把身份写入 `Mover.cs.meta`。元数据
 
 ## 已有项目的迁移
 
-1. 升级 Engine 后保留旧声明，执行一次 Scripts → Compile Scripts 或 `UrsaScriptCompile`，将已有身份写入 `.meta`。
-2. 检查 `.cs.meta` 已有 `scriptTypes`，再移除 `UrsaScriptType`；GUID、旧 ID、版本和 local file ID 保持。
-3. 随源码提交 `.meta` 并重新编译，原场景、Prefab、资产和扩展目标仍使用旧 ID；清理 Library 后重建不需要恢复特性。
+1. 在删除旧类特性前，把已有类型 ID、版本和 local file ID 写入对应 `.cs.meta` 的 `scriptTypes` 表。
+2. 移除源码中的类特性；GUID、旧 ID、版本和 local file ID 由 `.meta` 保持。
+3. 随源码提交 `.meta` 并重新编译，原场景、Prefab、资产和扩展目标仍使用旧 ID；清理 Library 后可直接重建。
 
-旧特性继续兼容既有源码和框架类型。已有未注解脚本首次初始化时沿用 `auto:<源 GUID>:<首次 CLR 类型名>`，保留原序列化身份；该字符串可能包含历史名称，初始化后不随改名重算。
+未迁移的脚本首次发现时会生成 `auto:<源 GUID>:<首次 CLR 类型名>`，并立即写入 `.meta`；该字符串可能包含历史名称，初始化后不随改名重算。框架内建类型身份由目录生成器保留。
 
 数据版本保存在元数据中，默认 1；不是源码修改计数。现有版本及字段兼容性检查仍执行，不兼容版本不会自动转换旧数据。
 

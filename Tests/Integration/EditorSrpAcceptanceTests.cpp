@@ -49,7 +49,6 @@ constexpr const char* pipelineSource = R"(
 using System.Collections.Generic;
 using Ursa;
 using Ursa.Rendering;
-[UrsaScriptType("test.editor-acceptance-pipeline")]
 [CreateAssetMenu(MenuName = "Rendering/SRP Acceptance Pipeline", FileName = "AcceptancePipeline")]
 public sealed class AcceptancePipelineAsset : RenderPipelineAsset
 {

@@ -164,7 +164,6 @@ internal static class Program
 			INamedTypeSymbol? pipelineBase = compilation.GetTypeByMetadataName("Ursa.Rendering.RenderPipelineAsset");
 			INamedTypeSymbol? importerBase = compilation.GetTypeByMetadataName("Ursa.Editor.ScriptedImporter");
 			INamedTypeSymbol? postprocessorBase = compilation.GetTypeByMetadataName("Ursa.Editor.AssetPostprocessor");
-			INamedTypeSymbol? scriptTypeAttribute = compilation.GetTypeByMetadataName("Ursa.UrsaScriptTypeAttribute");
 			INamedTypeSymbol? behaviorType = compilation.GetTypeByMetadataName("Ursa.Behaviour");
 			INamedTypeSymbol? componentType = compilation.GetTypeByMetadataName("Ursa.Component");
 			INamedTypeSymbol? serializeFieldAttribute = compilation.GetTypeByMetadataName("Ursa.SerializeFieldAttribute");
@@ -237,16 +236,11 @@ internal static class Program
 						continue;
 					}
 
-					(string? declaredId, uint declaredVersion) = ReadScriptType(type, scriptTypeAttribute, source);
 					bool hasBuiltInIdentity = builtInIdentities.TryGetValue(
 						type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat), out var builtInIdentity);
-					if (hasBuiltInIdentity)
-					{
-						declaredId = builtInIdentity.Id;
-						declaredVersion = builtInIdentity.Version;
-					}
-					StoredScriptIdentity identity = metadata.Resolve(source, type, sourceTypes, declaredId, declaredVersion,
-						MakeLocalFileId, declaredId != null && !hasBuiltInIdentity);
+					StoredScriptIdentity identity = metadata.Resolve(source, type, sourceTypes,
+						hasBuiltInIdentity ? builtInIdentity.Id : null,
+						hasBuiltInIdentity ? builtInIdentity.Version : 1, MakeLocalFileId);
 					string scriptTypeId = identity.Id;
 					uint version = identity.Version;
 					string origin = hasBuiltInIdentity
@@ -445,37 +439,6 @@ internal static class Program
 		for (INamedTypeSymbol? current = type.BaseType; current != null; current = current.BaseType)
 			names.Add(current.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
 		return names;
-	}
-
-	private static (string? Id, uint Version) ReadScriptType(INamedTypeSymbol type, INamedTypeSymbol? attributeType,
-		SourceEntry source)
-	{
-		if (attributeType != null)
-		{
-			foreach (AttributeData attribute in type.GetAttributes())
-			{
-				if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, attributeType))
-				{
-					continue;
-				}
-				if (attribute.ConstructorArguments.Length != 1 || attribute.ConstructorArguments[0].Value is not string id ||
-				    string.IsNullOrWhiteSpace(id))
-				{
-					throw new InvalidDataException($"Invalid UrsaScriptType attribute on {type.Name} in {source.VirtualPath}.");
-				}
-				uint version = 1;
-				foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
-				{
-					if (argument.Key == "Version" && argument.Value.Value is uint declaredVersion)
-					{
-						version = declaredVersion;
-					}
-				}
-				if (version == 0) throw new InvalidDataException($"Script data version must be positive: {type.Name}.");
-				return (id, version);
-			}
-		}
-		return (null, 1);
 	}
 
 	private static ulong MakeLocalFileId(string id)

@@ -331,9 +331,6 @@ internal static unsafe partial class Program
 	private static void ManagedRenderPipelineLifecycleTests()
 	{
 		Ursa.Rendering.RenderPipelineManager.Reset();
-		Expect(Attribute.GetCustomAttribute(typeof(Ursa.Rendering.ForwardRenderPipelineAsset),
-		       typeof(UrsaScriptTypeAttribute)) == null,
-		       "Framework Forward pipeline type must use catalog metadata instead of UrsaScriptType");
 		var first = Ursa.ScriptableObject.CreateInstance<PipelineProbeAsset>();
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(first);
 		Expect(Ursa.Rendering.RenderPipelineManager.ActivePipeline == null,
@@ -490,6 +487,7 @@ internal static unsafe partial class Program
 
 	private static int Main()
 	{
+		InstallProtocolScriptIdentities();
 		using var runtimeBindings = InstallRuntimeBindings();
 		using var renderingBindings = InstallRenderingBindings();
 		ScriptableObjectTests.Run();
@@ -815,6 +813,39 @@ internal static unsafe partial class Program
 		return 0;
 	}
 
+	private static void InstallProtocolScriptIdentities()
+	{
+		const string sourceGuid = "11111111-1111-4111-8111-111111111111";
+		var declared = new System.Collections.Generic.Dictionary<string, (string Id, uint Version)>(StringComparer.Ordinal)
+		{
+			[typeof(PayloadProbeBehaviour).FullName!] = ("test.payload", 2),
+			[typeof(MigrationProbeBehaviour).FullName!] = ("test.migration", 2),
+			[typeof(ReferenceProbeBehaviour).FullName!] = ("test.reference", 1),
+			[typeof(ScriptableAssetFieldTests).FullName! + "+Settings"] = ("test.texture-settings", 1),
+			[typeof(ShaderFieldTests).FullName! + "+Settings"] = ("demo.render.settings", 1),
+			[typeof(ShaderFieldTests).FullName! + "+Script"] = ("test.shader-behaviour", 1),
+			[typeof(TextureFieldTests).FullName! + "+Settings"] = ("test.texture-settings", 1),
+			[typeof(ScriptableAssetSnapshotTests).FullName! + "+Settings"] = ("test.snapshot-fields", 1),
+			[typeof(ScriptableAssetGraphTests).FullName! + "+Settings"] = ("test.graph-settings", 1),
+			[typeof(ScriptableAssetRecoveryTests).FullName! + "+Before"] = ("test.recoverable-settings", 1),
+			[typeof(ScriptableAssetRecoveryTests).FullName! + "+Renamed"] = ("test.recoverable-settings", 1),
+			[typeof(ScriptableAssetRecoveryTests).FullName! + "+Incompatible"] = ("test.recoverable-settings", 1),
+			[typeof(ScriptableAssetRecoveryTests).FullName! + "+Throwing"] = ("test.recoverable-settings", 1)
+		};
+		var resolved = new System.Collections.Generic.Dictionary<Type, ScriptIdentity>();
+		BehaviourRegistry.identityResolver = type =>
+		{
+			if (!resolved.TryGetValue(type, out ScriptIdentity identity))
+			{
+				(string id, uint version) = declared.TryGetValue(type.FullName ?? type.Name, out var known)
+					? known : ($"auto:{sourceGuid}:{type.FullName ?? type.Name}", 1u);
+				identity = new ScriptIdentity(id, version, sourceGuid, 1000ul + (ulong)resolved.Count);
+				resolved.Add(type, identity);
+			}
+			return identity;
+		};
+	}
+
 	private static NativeHandle ToMockHandle(NativeHandle handle)
 	{
 		return new NativeHandle { sessionId = handle.sessionId, index = handle.index,
@@ -851,7 +882,6 @@ public sealed class ProtocolBehaviour : Behaviour
 	}
 }
 
-[UrsaScriptType("test.serialized-probe", Version = 1)]
 public sealed class SerializedProbeBehaviour : Behaviour
 {
 	public int savedValue;
@@ -909,7 +939,6 @@ public enum PayloadMode : byte
 	Second
 }
 
-[UrsaScriptType("test.payload", Version = 2)]
 public sealed class PayloadProbeBehaviour : Behaviour
 {
 	public int publicValue;
@@ -946,7 +975,6 @@ public sealed class PayloadProbeBehaviour : Behaviour
 	public string GetHiddenValue() => hiddenValue;
 }
 
-[UrsaScriptType("test.reference", Version = 1)]
 public sealed class ReferenceProbeBehaviour : Behaviour
 {
 	public GameObject? targetObject;
@@ -959,7 +987,6 @@ public sealed class ReferenceProbeBehaviour : Behaviour
 	}
 }
 
-[UrsaScriptType("test.migration", Version = 2)]
 public sealed class MigrationProbeBehaviour : Behaviour
 {
 	[FormerlySerializedAs("oldName")]

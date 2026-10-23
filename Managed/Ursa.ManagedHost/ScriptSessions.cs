@@ -206,7 +206,7 @@ internal static class ScriptSessions
 		ScriptableObjectRegistry.graphLoader = LoadScriptableAssetGraph;
 		BehaviourRegistry.typeResolver = session.context.ResolveType;
 		BehaviourRegistry.identityResolver = type => session.identities.TryGetValue(type.FullName ?? type.Name, out ScriptIdentity identity)
-			? identity : BehaviourRegistry.DeclaredIdentity(type);
+			? identity : throw new InvalidOperationException($"Script type is missing from the active catalog: {type.FullName}");
 		BehaviourRegistry.assemblyResolver = () => session.context.assemblies.Values
 			.Append(typeof(Behaviour).Assembly)
 			.Append(typeof(Ursa.Rendering.RenderContextToken).Assembly)
@@ -355,9 +355,6 @@ internal static class ScriptSessions
 			if (string.IsNullOrWhiteSpace(stableId) || version == 0 || !Guid.TryParse(source, out _) || localId == 0 ||
 			    !stableIds.Add(stableId) || !localIds.Add(source + ":" + localId))
 				throw new InvalidOperationException("Invalid or duplicate script asset identity.");
-			UrsaScriptTypeAttribute? declared = type.GetCustomAttribute<UrsaScriptTypeAttribute>();
-			if (declared != null && (declared.Id != stableId || declared.Version != version))
-				throw new InvalidOperationException($"Script identity no longer matches the catalog: {typeName}");
 			session.identities.Add(type.FullName!, new ScriptIdentity(stableId, version, source, localId));
 		}
 		Validate(id);

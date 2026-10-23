@@ -4,7 +4,6 @@ using Ursa;
 
 internal static class ScriptableAssetGraphTests
 {
-	[UrsaScriptType("test.graph-settings")]
 	private sealed class Settings : ScriptableObject
 	{
 		public int amount;

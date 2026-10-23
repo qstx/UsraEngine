@@ -51,7 +51,7 @@ IDE 工程与正式脚本构建的输入模型、生成目录和输出隔离见 
 
 Editor 会在项目的 `Library/ScriptBuild` 下生成 MSBuild 工程、脚本类型目录、编译暂存区和输出，不需要手工维护 `.csproj`。在编辑器中使用 `Scripts > Compile Scripts` 编译 Game 与 Editor 程序集；编译在后台运行，诊断显示在 Script Build 面板。Run 会检查脚本输入指纹；脚本尚未编译或编译后输入有变化时，Run 会后台编译最新输入，成功后才启动运行场景。清空项目 `Library` 后，下一次编译会重新发现脚本、生成目录并构建程序集。
 
-每个公开、非抽象、非泛型的 `Behaviour` 派生类型都会加入 ScriptType 目录。普通脚本无需身份特性，由源 `.meta` 自动维护稳定身份：
+每个公开、非抽象、非泛型的 `Behaviour` 派生类型都会加入 ScriptType 目录。稳定身份由源 `.meta` 自动维护，不在 C# 类上声明：
 
 ```csharp
 using Ursa;

@@ -5,14 +5,12 @@ using Ursa.Rendering;
 
 namespace Ursa.SessionFixtures;
 
-[UrsaScriptType("test.reload-dependency")]
 public sealed class ReloadDependency : ScriptableObject
 {
 	public int value = 7;
 	public ReloadDependency? self;
 }
 
-[UrsaScriptType("test.reload-pipeline")]
 public sealed class ReloadPipelineAsset : RenderPipelineAsset
 {
 	public int tint = 23;
@@ -43,7 +41,6 @@ public sealed class ReloadPipelineAsset : RenderPipelineAsset
 	}
 }
 
-[UrsaScriptType("test.pipeline-reload-probe")]
 public sealed class PipelineReloadProbe : Behaviour
 {
 	public int action;

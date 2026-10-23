@@ -4,7 +4,6 @@ using Ursa.Examples;
 
 namespace Ursa.SessionFixtures;
 
-[UrsaScriptType("test.generated-reader")]
 public sealed class GeneratedFormatReader : Behaviour
 {
 	public string assetGuid = string.Empty;

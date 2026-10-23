@@ -3,13 +3,11 @@ using System;
 
 namespace Ursa.SessionFixtures;
 
-[UrsaScriptType("test.import-child")]
 public sealed class ImportChildAsset : ScriptableObject
 {
 	public int marker = 42;
 }
 
-[UrsaScriptType("test.import-probe")]
 public sealed class ImportProbeAsset : ScriptableObject
 {
 	public Mesh mesh = null!;

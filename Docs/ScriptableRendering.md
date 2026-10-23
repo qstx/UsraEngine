@@ -241,7 +241,7 @@ ctest --test-dir Engine/Build -C Release -R '^(UrsaManagedProtocolTests|UrsaDotN
 
 `UrsaDotNetHostSmoke` 会编译这两个 `Engine/Docs/Examples` 源文件；宿主测试执行经典离屏命令和 `PresentationPipelineAsset`，逐像素检查自定义管线输出。协议测试覆盖替换和销毁实例、回调配对、失败候选保留环境及恢复默认 Forward。管线重载测试覆盖跨 ALC 的未保存字段、循环资产引用、失败恢复和旧句柄失效。
 
-默认 Forward 与 Universal Renderer 现共用新 Lit/Unlit 场景 Pass。托管 Renderer 按 session、宿主输出目标 ID/generation 和尺寸维护 RGBA16F+D32 线性 backing；最多保留 8 个目标，聚合预算为 512 MiB，超过数量或预算时按最近使用顺序回收。目标代数或尺寸变化会重建 backing；相同输出上的相机共享同一 backing。Universal Renderer 先把 HDR 经曝光/Bloom/色调映射/FXAA 写到线性 LDR 临时目标；后处理之后的 Feature 读写该 LDR 目标，最终输出只编码一次。`Camera.OutputIsSrgb` 来自当前 RHI 输出格式：sRGB 附件由硬件编码，其他输出由最终 Shader 编码；NativeForward 使用同一目标判断。内建渲染资产使用脚本目录里的固定身份，不在类上声明 `UrsaScriptType`。SceneView、Game 和 Preview 相机仍经各自宿主相机上下文处理。深度/法线按消费者汇总并惰性生成，Color 按事件组共享快照；相关 GPU 与真实宿主测试命令见本节下方。
+默认 Forward 与 Universal Renderer 现共用新 Lit/Unlit 场景 Pass。托管 Renderer 按 session、宿主输出目标 ID/generation 和尺寸维护 RGBA16F+D32 线性 backing；最多保留 8 个目标，聚合预算为 512 MiB，超过数量或预算时按最近使用顺序回收。目标代数或尺寸变化会重建 backing；相同输出上的相机共享同一 backing。Universal Renderer 先把 HDR 经曝光/Bloom/色调映射/FXAA 写到线性 LDR 临时目标；后处理之后的 Feature 读写该 LDR 目标，最终输出只编码一次。`Camera.OutputIsSrgb` 来自当前 RHI 输出格式：sRGB 附件由硬件编码，其他输出由最终 Shader 编码；NativeForward 使用同一目标判断。内建渲染资产使用脚本目录里的固定身份。SceneView、Game 和 Preview 相机仍经各自宿主相机上下文处理。深度/法线按消费者汇总并惰性生成，Color 按事件组共享快照；相关 GPU 与真实宿主测试命令见本节下方。
 
 `UniversalRenderPipelineAsset` 的配置使用公开序列化字段保存，保存重开不会把运行实例或临时资源写回资产。默认 EV=0、Reinhard、FXAA/Bloom 关闭、Bloom threshold=1、intensity=0.5、scatter=0.7。资产激活前统一校验：`ExposureEV` 在 [-10,10]，`ToneMapping` 为 None/Reinhard，`BloomThreshold`/`BloomIntensity` 是有限非负数，`BloomScatter` 在 [0,1]；无效候选不会先创建 Feature 运行实例。Bloom 阈值按曝光后的线性 HDR 场景颜色计算，并在色调映射前加回。
 

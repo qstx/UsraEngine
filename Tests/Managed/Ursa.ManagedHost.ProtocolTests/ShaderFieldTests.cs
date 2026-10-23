@@ -6,7 +6,6 @@ using Ursa;
 
 internal static class ShaderFieldTests
 {
-	[UrsaScriptType("demo.render.settings", Version = 1)]
 	private sealed class Settings : ScriptableObject
 	{
 		public float exposure = 1.0f;
@@ -18,7 +17,6 @@ internal static class ShaderFieldTests
 		public List<ComputeShader?> kernels = new();
 	}
 
-	[UrsaScriptType("test.shader-behaviour")]
 	private sealed class Script : Behaviour
 	{
 		public Shader? shader = null;

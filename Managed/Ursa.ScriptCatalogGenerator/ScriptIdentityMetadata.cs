@@ -39,25 +39,33 @@ internal sealed class ScriptIdentityMetadata
 			foreach (StoredScriptIdentity entry in table.Types)
 			{
 				if (string.IsNullOrWhiteSpace(entry.TypeName) || string.IsNullOrWhiteSpace(entry.Id) ||
-				    entry.Version == 0 || entry.LocalFileId == 0 || !names.Add(entry.TypeName) ||
-				    !localIds.Add(entry.LocalFileId) || !ids.Add(entry.Id) || (entry.Primary && ++primaryCount > 1))
+				    entry.Version == 0 || entry.LocalFileId == 0)
 					throw new InvalidDataException($"Duplicate or invalid script metadata identity in {source.VirtualPath}.");
+				if (!names.Add(entry.TypeName))
+					throw new InvalidDataException($"Duplicate script metadata type '{entry.TypeName}' in {source.VirtualPath}.");
+				if (!localIds.Add(entry.LocalFileId))
+					throw new InvalidDataException($"Duplicate script metadata local file ID {entry.LocalFileId} in {source.VirtualPath}.");
+				if (ids.Contains(entry.Id))
+					throw new InvalidDataException($"Duplicate ScriptType '{entry.Id}': {origins[entry.Id]}; {entry.TypeName} in {source.VirtualPath}.");
+				ids.Add(entry.Id);
+				if (entry.Primary && ++primaryCount > 1)
+					throw new InvalidDataException($"Multiple primary script identities in {source.VirtualPath}.");
 				origins[entry.Id] = $"{entry.TypeName} in {source.VirtualPath}";
 			}
 		}
 	}
 
 	internal StoredScriptIdentity Resolve(SourceEntry source, INamedTypeSymbol type,
-		IReadOnlyList<INamedTypeSymbol> candidates, string? declaredId, uint declaredVersion,
-		Func<string, ulong> makeLocalFileId, bool legacyIdentity)
+		IReadOnlyList<INamedTypeSymbol> candidates, string? reservedId, uint reservedVersion,
+		Func<string, ulong> makeLocalFileId)
 	{
 		string typeName = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 		string fileName = Path.GetFileNameWithoutExtension(source.Path);
 		bool primary = type.Name == fileName || candidates.Count == 1;
 		List<StoredScriptIdentity> entries = source.Identities.Types;
 		StoredScriptIdentity? identity = entries.SingleOrDefault(entry => entry.TypeName == typeName);
-		if (identity == null && declaredId != null)
-			identity = entries.SingleOrDefault(entry => entry.Id == declaredId);
+		if (identity == null && reservedId != null)
+			identity = entries.SingleOrDefault(entry => entry.Id == reservedId);
 		if (identity == null && primary)
 			identity = entries.SingleOrDefault(entry => entry.Primary);
 		if (identity == null)
@@ -72,22 +80,22 @@ internal sealed class ScriptIdentityMetadata
 		{
 			if (!assigned.Add(identity))
 				throw new InvalidDataException($"Ambiguous script metadata mapping for {typeName} in {source.VirtualPath}.");
-			if (declaredId != null && declaredId != identity.Id)
-				throw new InvalidDataException($"Declared type identity differs from .meta identity for {typeName}; preserve the metadata ID.");
+			if (reservedId != null && reservedId != identity.Id)
+				throw new InvalidDataException($"Reserved type identity differs from .meta identity for {typeName}; preserve the metadata ID.");
 			identity.TypeName = typeName;
-			if (declaredId != null) identity.Version = declaredVersion;
-			identity.Legacy = legacyIdentity;
+			if (reservedId != null) identity.Version = reservedVersion;
+			identity.Legacy = false;
 		}
 		else
 		{
 			// Preserve the old automatic identity on first migration; subsequent lookups use .meta.
-			string id = declaredId ?? $"auto:{source.Guid}:{typeName}";
+			string id = reservedId ?? $"auto:{source.Guid}:{typeName}";
 			if (!ids.Add(id))
 				throw new InvalidDataException($"Duplicate ScriptType '{id}': {origins[id]}; {typeName} in {source.VirtualPath}.");
 			origins[id] = $"{typeName} in {source.VirtualPath}";
 			identity = new StoredScriptIdentity
 			{
-				TypeName = typeName, Id = id, Version = declaredVersion, Legacy = legacyIdentity,
+				TypeName = typeName, Id = id, Version = reservedVersion, Legacy = false,
 				LocalFileId = makeLocalFileId(id)
 			};
 			entries.Add(identity);

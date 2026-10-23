@@ -5,7 +5,6 @@ using Ursa.Rendering;
 
 namespace Ursa.SessionFixtures;
 
-[UrsaScriptType("test.classic-rendering")]
 public sealed class ClassicRenderingProbe : Behaviour
 {
 	public override void Update()
@@ -26,7 +25,6 @@ public sealed class ClassicRenderingProbe : Behaviour
 	}
 }
 
-[UrsaScriptType("test.rendering-failure")]
 public sealed class RenderingFailureProbe : Behaviour
 {
 	private sealed class FailingAsset : RenderPipelineAsset
@@ -71,7 +69,6 @@ public sealed class RenderingFailureProbe : Behaviour
 }
 
 // Deliberately leaves its pipeline and event registered for session-owned cleanup.
-[UrsaScriptType("test.pipeline-lifetime")]
 public sealed class PipelineLifetimeProbe : Behaviour
 {
 	private sealed class LifetimeAsset : RenderPipelineAsset

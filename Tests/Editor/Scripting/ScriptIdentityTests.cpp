@@ -57,6 +57,23 @@ ScriptTypeDescriptor Find(const ScriptBuildService& service, const char* name)
 	}
 	throw std::runtime_error(std::string("Missing script type: ") + name);
 }
+
+void SetIdentity(AssetDatabase& database, const VirtualPath& path, const String& typeName, const String& id,
+				 Ursa::UInt32 version, Ursa::UInt64 localFileId)
+{
+	for (const ScriptSourceAsset& source : database.ScriptSources())
+	{
+		if (source.path != path) continue;
+		auto identities = source.identities;
+		if (!identities.contains("Version")) identities["Version"] = 1;
+		if (!identities.contains("Types")) identities["Types"] = Json::array();
+		identities["Types"].push_back({{"TypeName", ToStdString(typeName)}, {"Id", ToStdString(id)},
+										   {"Version", version}, {"LocalFileId", localFileId}, {"Primary", true}});
+		Done(database.UpdateScriptIdentities(source, identities));
+		return;
+	}
+	throw std::runtime_error("Missing script source for identity fixture");
+}
 } // namespace
 
 int main(int argumentCount, char** arguments)
@@ -73,7 +90,7 @@ int main(int argumentCount, char** arguments)
 		Done(filesystem.Mount(projectScheme, root / "Assets", MountAccess::ReadWrite));
 		Done(filesystem.Mount(editorLibraryScheme, root / "Library", MountAccess::ReadWrite));
 		Write(filesystem, "prj:Mover.cs",
-		      "using Ursa; namespace Old; [UrsaScriptType(\"legacy.mover\", Version=2)] "
+		      "using Ursa; namespace Old; "
 		      "public sealed class Mover : Behaviour { public int value = 7; }");
 		Write(filesystem, "prj:Plain.cs", "public sealed class Plain : Ursa.Behaviour { public int value = 3; }");
 		Write(filesystem, "prj:Settings.cs",
@@ -87,6 +104,8 @@ int main(int argumentCount, char** arguments)
 		      "public sealed class TextureRules : Ursa.Editor.AssetPostprocessor { public override void "
 		      "OnPreprocessTexture() {} }");
 		auto database = Take(AssetDatabase::Open(filesystem));
+		Done(database->Refresh());
+		SetIdentity(*database, Path("prj:Mover.cs"), "Old.Mover", "legacy.mover", 2, 41001);
 		const auto openService = [&]()
 		{
 			return Take(
@@ -204,7 +223,7 @@ int main(int argumentCount, char** arguments)
 		       "Duplicate metadata identities were accepted without a diagnostic");
 		Write(filesystem, "prj:Copy.cs.meta", beforeDuplicate);
 		Take(service->GenerateProjects());
-		std::cout << "Metadata identities: migration, attribute-free rename, Library recovery, copy, stale writes and "
+		std::cout << "Metadata identities: stable rename, Library recovery, copy, stale writes and "
 		             "errors passed\n";
 		return 0;
 	}

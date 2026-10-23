@@ -4,7 +4,6 @@ using Ursa.Rendering;
 
 namespace Ursa.SessionFixtures;
 
-[UrsaScriptType("test.rendering-bindings-probe")]
 public sealed class RenderingBindingsProbe : Behaviour
 {
 	public string shaderGuid = string.Empty;

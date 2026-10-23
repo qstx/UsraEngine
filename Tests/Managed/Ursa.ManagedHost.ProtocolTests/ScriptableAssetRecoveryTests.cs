@@ -4,27 +4,23 @@ using Ursa;
 
 internal static class ScriptableAssetRecoveryTests
 {
-	[UrsaScriptType("test.recoverable-settings")]
 	private sealed class Before : ScriptableObject
 	{
 		public int amount = 5;
 		public Before? other = null;
 	}
 
-	[UrsaScriptType("test.recoverable-settings")]
 	private sealed class Renamed : ScriptableObject
 	{
 		[FormerlySerializedAs("amount")] public int count = 1;
 		public Renamed? other = null;
 	}
 
-	[UrsaScriptType("test.recoverable-settings")]
 	private sealed class Incompatible : ScriptableObject
 	{
 		public string amount = "original";
 	}
 
-	[UrsaScriptType("test.recoverable-settings")]
 	private sealed class Throwing : ScriptableObject
 	{
 		public int amount = 1;

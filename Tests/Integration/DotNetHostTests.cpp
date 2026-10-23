@@ -509,7 +509,7 @@ int main(int argumentCount, char** arguments)
 			               "Ursa.SessionFixtures.AutoIdentityProbe, Ursa.SessionFixtures" &&
 			           automaticIdentityPayload["ScriptType"] ==
 			               "auto:11111111-1111-4111-8111-111111111111:Ursa.SessionFixtures.AutoIdentityProbe",
-			       "A script without UrsaScriptType did not resolve and serialize through its persisted type identity");
+			       "A script did not resolve and serialize through its persisted metadata identity");
 			auto* script = static_cast<ScriptBehaviourComponent*>(runScene.GetComponent(scriptId));
 			const UInt64 previousToken = script->InstanceToken();
 			runScene.BeginFrame();

@@ -39,7 +39,6 @@ VirtualPath Path(const char* path)
 const char* gameSource = R"(using System;
 using Ursa;
 namespace DebugAcceptance;
-[UrsaScriptType("acceptance.debug")]
 public sealed class DebugProbe : Behaviour
 {
     public const int CodeVersion = 1;

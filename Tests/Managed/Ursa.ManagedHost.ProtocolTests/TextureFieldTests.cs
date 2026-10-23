@@ -4,7 +4,6 @@ using Ursa;
 
 internal static class TextureFieldTests
 {
-	[UrsaScriptType("test.texture-settings")]
 	private sealed class Settings : ScriptableObject
 	{
 		public Texture? texture = null;

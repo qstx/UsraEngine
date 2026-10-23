@@ -3,7 +3,6 @@ using Ursa;
 
 namespace Ursa.SessionFixtures;
 
-[UrsaScriptType("test.session-probe")]
 public sealed class SessionProbe : Behaviour
 {
 	private static int counter;
@@ -26,7 +25,6 @@ public sealed class AutoIdentityProbe : Behaviour
 	public override void Awake() => awakeCount++;
 }
 
-[UrsaScriptType("test.serialized-probe")]
 public sealed class LegacySerializedProbe : Behaviour
 {
 	public int savedValue;
@@ -47,7 +45,6 @@ public sealed class LeakingProbe : Behaviour
 	}
 }
 
-[UrsaScriptType("test.spawner")]
 public sealed class SpawnerProbe : Behaviour
 {
 	private bool spawned;
@@ -66,7 +63,6 @@ public sealed class SpawnerProbe : Behaviour
 	}
 }
 
-[UrsaScriptType("test.self-query")]
 public sealed class SelfQueryProbe : Behaviour
 {
 	public bool awakeSeen;
@@ -90,7 +86,6 @@ public enum ProbeMode : byte
 	Second = 3
 }
 
-[UrsaScriptType("test.managed-render-component-probe")]
 public sealed class ManagedRenderComponentProbe : Behaviour
 {
 	public bool verifyTextureBindings;
@@ -178,7 +173,6 @@ public sealed class ManagedRenderComponentProbe : Behaviour
 	}
 }
 
-[UrsaScriptType("test.destroyer")]
 public sealed class DestroyerProbe : Behaviour
 {
 	public override void Update()

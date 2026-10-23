@@ -224,12 +224,12 @@ int main()
 		                          [scriptTextureGuid](MaterialTexturePtr)
 		                          { return Result<ResourceId>::Success(scriptTextureGuid); }));
 		Text(scriptableFiles, Path("prj:Scripts/Settings.cs"),
-		     "using Ursa; using Ursa.Rendering; namespace Demo; [UrsaScriptType(\"demo.render-settings\")] "
+		     "using Ursa; using Ursa.Rendering; namespace Demo; "
 		     "public sealed class RenderSettings : RenderPipelineAsset { public Shader shader = null!; "
 		     "public Material material = null!; public int quality = 3; public int[] weights = new[] { 1, 2 }; "
 		     "protected override RenderPipeline CreatePipeline() => new "
 		     "ForwardRenderPipeline(); } "
-		     "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {}\n");
+		     "public sealed class OtherSettings : ScriptableObject {}\n");
 		const auto shaderPath = Path("prj:Shaders/Dependency.ursashader");
 		const String shaderSource = "Shader \"Tests/Dependency\" { SubShader { Pass { HLSLPROGRAM\n"
 		                            "#pragma vertex VSMain\n#pragma fragment PSMain\n"

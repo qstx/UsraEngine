@@ -4,7 +4,7 @@ set(projectRoot "${TEST_ROOT}/ManagedPackage-${fixtureId}")
 file(MAKE_DIRECTORY "${projectRoot}/Assets/Editor")
 set(gameSource "${projectRoot}/Assets/Probe.cs")
 file(WRITE "${gameSource}"
-  "using Ursa; [UrsaScriptType(\"package.probe\")] public sealed class Probe : Behaviour { public int value = 7; }\n")
+  "using Ursa; public sealed class Probe : Behaviour { public int value = 7; }\n")
 file(WRITE "${projectRoot}/Assets/Editor/Tools.cs"
   "using Ursa.Editor; public static class Tools { [MenuItem(\"Tools/Probe\")] private static void Probe() {} }\n")
 

@@ -4,7 +4,6 @@ using Ursa.Rendering;
 
 namespace Ursa.SessionFixtures;
 
-[UrsaScriptType("test.forward-pipeline")]
 public sealed class ForwardPipelineProbe : Behaviour
 {
 	public CameraComponent? other = null;

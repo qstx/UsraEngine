@@ -1,6 +1,5 @@
 using Ursa;
 
-[UrsaScriptType("demo.move-with-input", Version = 1)]
 public sealed class MoveWithInputBehaviour : Behaviour
 {
 	public float Step = 1.0f;

@@ -19,14 +19,9 @@ internal static class BehaviourRegistry
 	[ThreadStatic] internal static Func<IEnumerable<Assembly>>? assemblyResolver;
 	[ThreadStatic] internal static Func<Type, ScriptIdentity>? identityResolver;
 
-	internal static ScriptIdentity DeclaredIdentity(Type type)
-	{
-		UrsaScriptTypeAttribute identity = type.GetCustomAttribute<UrsaScriptTypeAttribute>() ??
-			throw new InvalidOperationException($"Script '{type.FullName}' has no identity in the session type catalog.");
-		return new ScriptIdentity(identity.Id, identity.Version);
-	}
-
-	internal static ScriptIdentity IdentityFor(Type type) => identityResolver != null ? identityResolver(type) : DeclaredIdentity(type);
+	internal static ScriptIdentity IdentityFor(Type type) => identityResolver != null
+		? identityResolver(type)
+		: throw new InvalidOperationException($"Script '{type.FullName}' requires an active session type catalog.");
 
 	internal static void ResolveSessionReferences(ulong id)
 	{

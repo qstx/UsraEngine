@@ -47,6 +47,44 @@ void WriteSource(const std::filesystem::path& path, const char* text)
 	}
 }
 
+void SetIdentity(AssetDatabase& database, const VirtualPath& path, const char* typeName, const char* id,
+				 Ursa::UInt32 version, Ursa::UInt64 localFileId, bool primary = false)
+{
+	for (const ScriptSourceAsset& source : database.ScriptSources())
+	{
+		if (source.path != path) continue;
+		auto identities = source.identities;
+		if (!identities.contains("Version")) identities["Version"] = 1;
+		if (!identities.contains("Types")) identities["Types"] = nlohmann::json::array();
+		identities["Types"].push_back({{"TypeName", typeName}, {"Id", id}, {"Version", version},
+										   {"LocalFileId", localFileId}, {"Primary", primary}});
+		auto updated = database.UpdateScriptIdentities(source, identities);
+		Expect(static_cast<bool>(updated), "Could not write script identity fixture metadata");
+		return;
+	}
+	throw std::runtime_error("Could not find script source for identity fixture metadata");
+}
+
+void RenameIdentity(AssetDatabase& database, const VirtualPath& path, const char* id, const char* typeName)
+{
+	for (const ScriptSourceAsset& source : database.ScriptSources())
+	{
+		if (source.path != path) continue;
+		auto identities = source.identities;
+		for (auto& identity : identities["Types"])
+		{
+			if (identity.value("Id", std::string{}) == id)
+			{
+				identity["TypeName"] = typeName;
+				auto updated = database.UpdateScriptIdentities(source, identities);
+				Expect(static_cast<bool>(updated), "Could not update renamed script identity metadata");
+				return;
+			}
+		}
+	}
+	throw std::runtime_error("Could not find script identity for metadata rename");
+}
+
 String ReadText(VirtualFileSystem& filesystem, const VirtualPath& path)
 {
 	auto text = filesystem.ReadText(path);
@@ -79,26 +117,26 @@ int main(int argumentCount, char** arguments)
 		}
 		WriteSource(assets / "Scripts" / "GameMover.cs",
 		            "using Ursa; namespace DemoScripts; "
-		            "[UrsaScriptType(\"demo.mover\", Version = 2)] public sealed class GameMover : Behaviour { "
+		            "public sealed class GameMover : Behaviour { "
 		            "public float step = 1.0f; public override void Update() { if (Input.GetKeyDown(KeyCode.Right)) "
 		            "{ Vector3 position = Transform.LocalPosition; position.X += step; Transform.LocalPosition = "
 		            "position; } } } "
-		            "[UrsaScriptType(\"demo.follower\")] public sealed class Follower : Behaviour { } "
+		            "public sealed class Follower : Behaviour { } "
 		            "public abstract class AbstractProbe : Behaviour { } "
 		            "public sealed class GenericProbe<T> : Behaviour { }\n");
 		WriteSource(assets / "Scripts" / "Editor" / "SceneTool.cs",
 		            "using Ursa; namespace DemoScripts.Editor; "
-		            "[UrsaScriptType(\"editor.scene-tool\")] public sealed class SceneTool : Behaviour { } "
+		            "public sealed class SceneTool : Behaviour { } "
 		            "public sealed class EditorUtility { private int unused; }\n");
 		WriteSource(assets / "Scripts" / "Settings.cs",
 		            "using Ursa; using Ursa.Rendering; namespace DemoScripts; "
-		            "[UrsaScriptType(\"demo.settings\")] [CreateAssetMenu(MenuName = \"Demo/Settings\", "
+		            "[CreateAssetMenu(MenuName = \"Demo/Settings\", "
 		            "FileName = \"GameSettings\", Order = 7)] public sealed class Settings : ScriptableObject { "
 		            "public Vector2 size = new(8,4); public Vector4 tint = new(1,2,3,4); "
 		            "public OtherSettings other = null!; public Shader shader = null!; public Material? material; "
 		            "public ComputeShader[] kernels = System.Array.Empty<ComputeShader>(); "
 		            "public System.Collections.Generic.List<Shader> shaders = new(); } "
-		            "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {} "
+		            "public sealed class OtherSettings : ScriptableObject {} "
 		            "[CreateAssetMenu(MenuName = \"Demo/Feature\", FileName = \"Feature\")] "
 		            "public sealed class FeatureSettings : ScriptableRendererFeature { "
 		            "protected override RendererFeature CreateFeature() => new FeatureInstance(); } "
@@ -113,6 +151,15 @@ int main(int argumentCount, char** arguments)
 		Expect(static_cast<bool>(libraryMount), "Could not mount ScriptBuild Library");
 		auto database = AssetDatabase::Open(filesystem);
 		Expect(static_cast<bool>(database), "Could not open ScriptBuild AssetDatabase");
+		Expect(static_cast<bool>(database.value->Refresh()), "Could not discover initial ScriptBuild sources");
+		SetIdentity(*database.value, Path("prj:Scripts/GameMover.cs"), "DemoScripts.GameMover", "demo.mover", 2, 51001, true);
+		SetIdentity(*database.value, Path("prj:Scripts/GameMover.cs"), "DemoScripts.Follower", "demo.follower", 1, 51002);
+		SetIdentity(*database.value, Path("prj:Scripts/Editor/SceneTool.cs"), "DemoScripts.Editor.SceneTool",
+					"editor.scene-tool", 1, 51003, true);
+		SetIdentity(*database.value, Path("prj:Scripts/Settings.cs"), "DemoScripts.Settings", "demo.settings", 1, 51004,
+					true);
+		SetIdentity(*database.value, Path("prj:Scripts/Settings.cs"), "DemoScripts.OtherSettings", "demo.other-settings",
+					1, 51005);
 		auto service =
 		    ScriptBuildService::Open(filesystem, *database.value, std::filesystem::u8path(arguments[1]),
 		                             framework / "Ursa.Runtime.dll", framework / "Ursa.Editor.dll",
@@ -133,7 +180,14 @@ int main(int argumentCount, char** arguments)
 					return type;
 				}
 			}
-			throw std::runtime_error(ToStdString(String("ScriptType is missing from generated catalog: ") + id));
+			String available;
+			for (const ScriptTypeRecord& type : service.value->ScriptTypes())
+			{
+				if (!available.empty()) available += ", ";
+				available += type.scriptType + " (" + type.clrTypeName + ")";
+			}
+			throw std::runtime_error(ToStdString(String("ScriptType is missing from generated catalog: ") + id +
+			                                     "; available: " + available));
 		};
 		const ScriptTypeRecord moverType = findType("demo.mover");
 		const ScriptTypeRecord followerType = findType("demo.follower");
@@ -207,20 +261,20 @@ int main(int argumentCount, char** arguments)
 		WriteSource(
 		    assets / "Scripts" / "Settings.cs",
 		    "using Ursa; namespace DemoScripts; "
-		    "[UrsaScriptType(\"demo.settings\")] public sealed class Settings : ScriptableObject {} "
-		    "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {}\n");
+		    "public sealed class Settings : ScriptableObject {} "
+		    "public sealed class OtherSettings : ScriptableObject {}\n");
 		Expect(static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()) &&
 		           findType("demo.settings").createAssetMenuName.empty(),
 		       "Removed CreateAssetMenu attribute remained registered in the refreshed script catalog");
 		WriteSource(assets / "Scripts" / "Settings.cs",
 		            "using Ursa; namespace DemoScripts; "
-		            "[UrsaScriptType(\"demo.settings\")] [CreateAssetMenu(MenuName = \"Demo/Settings\", "
+		            "[CreateAssetMenu(MenuName = \"Demo/Settings\", "
 		            "FileName = \"GameSettings\", Order = 7)] public sealed class Settings : ScriptableObject { "
 		            "public Vector2 size = new(8,4); public Vector4 tint = new(1,2,3,4); "
 		            "public OtherSettings other = null!; public Shader shader = null!; "
 		            "public ComputeShader[] kernels = System.Array.Empty<ComputeShader>(); "
 		            "public System.Collections.Generic.List<Shader> shaders = new(); } "
-		            "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {} "
+		            "public sealed class OtherSettings : ScriptableObject {} "
 		            "public abstract class AbstractSettings : ScriptableObject {} "
 		            "public sealed class GenericSettings<T> : ScriptableObject {}\n");
 		Expect(static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()) &&
@@ -311,8 +365,8 @@ int main(int argumentCount, char** arguments)
 
 		WriteSource(assets / "Scripts" / "GameMover.cs",
 		            "using Ursa; namespace DemoScripts; "
-		            "[UrsaScriptType(\"demo.mover\", Version = 2)] public sealed class GameMover : Behaviour { } "
-		            "[UrsaScriptType(\"demo.follower\")] public sealed class Follower : Behaviour { }\n");
+		            "public sealed class GameMover : Behaviour { } "
+		            "public sealed class Follower : Behaviour { }\n");
 		const auto gameStagingRoot = library / "ScriptBuild" / "Staging" / "Game";
 		std::set<std::filesystem::path> existingStaging;
 		if (std::filesystem::exists(gameStagingRoot))
@@ -339,9 +393,9 @@ int main(int argumentCount, char** arguments)
 							    WriteSource(
 							        assets / "Scripts" / "GameMover.cs",
 							        "using Ursa; namespace DemoScripts; "
-							        "[UrsaScriptType(\"demo.mover\", Version = 2)] public sealed class GameMover : "
+							        "public sealed class GameMover : "
 							        "Behaviour { } "
-							        "[UrsaScriptType(\"demo.follower\")] public sealed class Follower : Behaviour { } "
+							        "public sealed class Follower : Behaviour { } "
 							        "// changed after build batch started\n");
 							    sourceChangedDuringCompile = true;
 							    return;
@@ -362,8 +416,8 @@ int main(int argumentCount, char** arguments)
 
 		WriteSource(assets / "Scripts" / "GameMover.cs",
 		            "using Ursa; namespace DemoScripts; "
-		            "[UrsaScriptType(\"demo.follower\")] public sealed class Follower : Behaviour { } "
-		            "[UrsaScriptType(\"demo.mover\", Version = 2)] public sealed class RenamedMover : Behaviour { } "
+		            "public sealed class Follower : Behaviour { } "
+		            "public sealed class RenamedMover : Behaviour { } "
 		            "public sealed class GenericProbe<T> : Behaviour { } "
 		            "public abstract class AbstractProbe : Behaviour { }\n");
 		auto staleGameBuild = service.value->IsBuildCurrent(ScriptAssemblyGroup::Game);
@@ -389,23 +443,26 @@ int main(int argumentCount, char** arguments)
 		       "IDE build replaced formal content or made stale formal inputs current");
 		Expect(static_cast<bool>(database.value->Refresh()),
 		       "AssetDatabase could not refresh reordered script declarations");
+		RenameIdentity(*database.value, Path("prj:Scripts/GameMover.cs"), "demo.mover", "DemoScripts.RenamedMover");
 		projects = service.value->GenerateProjects();
 		Expect(projects && findType("demo.mover").localFileId == moverType.localFileId &&
 		           findType("demo.follower").localFileId == followerType.localFileId,
 		       "Script catalog identity changed when declaration order/type name changed");
 
 		WriteSource(assets / "Scripts" / "Duplicate.cs",
-		            "using Ursa; namespace DemoScripts; [UrsaScriptType(\"demo.mover\")] "
-		            "public sealed class DuplicateMover : Behaviour { }\n");
+		            "using Ursa; namespace DemoScripts; public sealed class DuplicateMover : Behaviour { }\n");
 		Expect(static_cast<bool>(database.value->Refresh()),
 		       "AssetDatabase could not discover duplicate ScriptType fixture");
+		SetIdentity(*database.value, Path("prj:Scripts/Duplicate.cs"), "DemoScripts.DuplicateMover", "demo.mover", 1,
+					51006, true);
 		const auto lastGoodCatalog = filesystem.Read(projects.value.typeCatalog);
 		const auto duplicateCatalog = service.value->GenerateProjects();
 		Expect(!service.value->LastDiagnostics().empty() &&
 		           service.value->LastDiagnostics().back().code == "URSA-CATALOG" &&
-		           !service.value->LastDiagnostics().back().source.scheme.empty() &&
-		           service.value->LastDiagnostics().back().line > 0,
-		       "Type catalog validation error has no structured declaration location");
+		           duplicateCatalog.error.find("demo.mover") != String::npos &&
+		           duplicateCatalog.error.find("prj:Scripts/GameMover.cs") != String::npos &&
+		           duplicateCatalog.error.find("prj:Scripts/Duplicate.cs") != String::npos,
+		       "Type catalog identity conflict lost its source metadata diagnostics");
 		Expect(static_cast<bool>(service.value->GenerateIdeProjects()),
 		       "Duplicate stable type identities prevented IDE generation");
 		const auto retainedCatalog = filesystem.Read(projects.value.typeCatalog);
@@ -449,9 +506,11 @@ int main(int argumentCount, char** arguments)
 		       "Script catalog did not recover after invalid CreateAssetMenu removal");
 		WriteSource(assets / "Scripts" / "ForwardCollision.cs",
 		            "using Ursa; namespace DemoScripts; "
-		            "[UrsaScriptType(\"ursa.rendering.forward\")] public sealed class ForwardCollision : "
+		            "public sealed class ForwardCollision : "
 		            "ScriptableObject {}\n");
 		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase missed the framework identity collision");
+		SetIdentity(*database.value, Path("prj:Scripts/ForwardCollision.cs"), "DemoScripts.ForwardCollision",
+					"ursa.rendering.forward", 1, 51007, true);
 		auto reservedIdentity = service.value->GenerateProjects();
 		Expect(!reservedIdentity &&
 		           reservedIdentity.error.find("framework type Ursa.Rendering.ForwardRenderPipelineAsset") !=
@@ -465,10 +524,12 @@ int main(int argumentCount, char** arguments)
 		WriteSource(
 		    assets / "Scripts" / "Settings.cs",
 		    "using Ursa; namespace DemoScripts; "
-		    "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {} "
-		    "[UrsaScriptType(\"demo.settings\")] public sealed partial class RenamedSettings : ScriptableObject {} "
+		    "public sealed class OtherSettings : ScriptableObject {} "
+		    "public sealed partial class RenamedSettings : ScriptableObject {} "
 		    "public sealed partial class RenamedSettings { public int value = 5; }\n");
-		Expect(static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()) &&
+		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase could not refresh renamed settings source");
+		RenameIdentity(*database.value, Path("prj:Scripts/Settings.cs"), "demo.settings", "DemoScripts.RenamedSettings");
+		Expect(static_cast<bool>(service.value->GenerateProjects()) &&
 		           findType("demo.settings").localFileId == settingsType.localFileId &&
 		           findType("demo.settings").sourceGuid == settingsType.sourceGuid,
 		       "ScriptableObject identity changed after a CLR type rename");

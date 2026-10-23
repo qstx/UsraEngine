@@ -4,7 +4,6 @@ using Ursa;
 
 internal static class ScriptableAssetSnapshotTests
 {
-	[UrsaScriptType("test.snapshot-fields")]
 	private sealed class Settings : ScriptableObject
 	{
 		public int amount;
@@ -21,7 +20,9 @@ internal static class ScriptableAssetSnapshotTests
 		try
 		{
 			BehaviourRegistry.assemblyResolver = () => new[] { typeof(Settings).Assembly };
-			BehaviourRegistry.identityResolver = null;
+			BehaviourRegistry.identityResolver = type => type == typeof(Settings)
+				? new ScriptIdentity("test.snapshot-fields", 1)
+				: throw new InvalidOperationException($"No snapshot test identity configured for {type.FullName}.");
 			ScriptableObjectRegistry.SelectSession(source);
 			string payload = JsonSerializer.Serialize(new
 			{

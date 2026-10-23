@@ -257,7 +257,6 @@ public sealed class SecondRules : AssetPostprocessor
 using System.Linq;
 using Ursa;
 using Ursa.Examples;
-[UrsaScriptType("test.workflow-reader")]
 public sealed class WorkflowReader : Behaviour
 {
     public override void Awake()
