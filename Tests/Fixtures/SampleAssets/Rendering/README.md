@@ -8,6 +8,8 @@
 
 `MaterialShowcase` 的方块在 Play 后由 Behaviour 创建；Stop 状态只渲染源场景。材质单击后可打开独立 Material Preview。Shader 的 Unlit 与 PBR 阶段分别使用 `SRPDefaultUnlit`、`UniversalForward`，旧 GUID 和材质引用保持有效。
 
+Universal `ScreenTintFeature` 在 `MaterialShowcase` Play 模式下可按 **C** 运行时切换；样例集成测试在 20 轮缩放/最小化恢复后交替按键并检查画面像素，验证效果开关和资源回收。
+
 `ComputeShowcasePipeline.ursaasset` 使用同一管线实现。它用 Ceramic 替换不透明 RendererList 的材质，并调用 `Pattern.compute` 的 `GeneratePattern` 内核生成 64×64 纹理，再在全屏阶段按 `patternStrength` 混入图案。内核线程组从导入反射读取，C# 按该尺寸计算 Dispatch 数量。计算纹理、替换材质、合成 Shader 及管线资产都随松散内容和 Pak 发布。
 
 多相机示例：在编辑器中选中 `Showcase Camera`，通过 Add Component 添加 `MultiCameraShowcase`，进入 Play。脚本将原相机设为左半视口，并创建右半视口相机，使用不同位置和深度顺序。两个相机独立剔除、维护离屏目标并在自己的区域合成。Stop 后临时相机和运行时设置随运行图回收；源场景只有显式保存的脚本组件变化。

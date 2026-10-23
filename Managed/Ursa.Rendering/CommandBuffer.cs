@@ -8,11 +8,14 @@ namespace Ursa.Rendering;
 
 public sealed class CommandBuffer : IDisposable
 {
+	public const int MaximumGlobalParameterArrayElements = 16;
+
 	private readonly BindingCommandWriter writer = new(RenderingCommands.Hash);
 	private readonly List<RenderResource> recordedResources = new();
 	private readonly List<string> sampleNames = new();
 	private uint recordingGeneration;
 	private readonly HashSet<uint> temporaryTargetIds = new();
+	private int activeTemporaryScopes;
 	private bool disposed;
 	private string name;
 
@@ -161,6 +164,43 @@ public sealed class CommandBuffer : IDisposable
 	public void SetGlobalInt(string name, int value) { Parameter(name); RenderCommands.SetGlobalInt(writer, name, value); }
 	public void SetGlobalVector(string name, Vector4 value) { Parameter(name); Finite(value); RenderCommands.SetGlobalVector(writer, name, value); }
 	public void SetGlobalMatrix(string name, Matrix4x4 value) { Parameter(name); Finite(value); RenderCommands.SetGlobalMatrix(writer, name, value); }
+	public void SetGlobalVectorArray(string name, ReadOnlySpan<Vector4> values)
+	{
+		Parameter(name);
+		ValidateArrayLength(values.Length, nameof(values));
+		foreach (Vector4 value in values) Finite(value);
+		RenderCommands.SetGlobalVectorArray(writer, name, values);
+	}
+	public void SetGlobalMatrixArray(string name, ReadOnlySpan<Matrix4x4> values)
+	{
+		Parameter(name);
+		ValidateArrayLength(values.Length, nameof(values));
+		foreach (Matrix4x4 value in values) Finite(value);
+		RenderCommands.SetGlobalMatrixArray(writer, name, values);
+	}
+	public void SetViewProjectionMatrix(Matrix4x4 worldToClip) => SetGlobalMatrix("_UrsaViewProjection", worldToClip);
+	public void RestoreViewProjectionMatrix(Camera camera)
+	{
+		ArgumentNullException.ThrowIfNull(camera);
+		SetViewProjectionMatrix(camera.ProjectionMatrix * camera.ViewMatrix);
+	}
+
+	/// <summary>Overrides raster depth bias for subsequent scene draws in this camera command segment.</summary>
+	public void SetDepthBias(int constantFactor, float slopeFactor)
+	{
+		EnsureAlive();
+		if (!float.IsFinite(slopeFactor)) throw new ArgumentOutOfRangeException(nameof(slopeFactor));
+		SetGlobalInt("_UrsaDepthBiasOverride", 1);
+		SetGlobalInt("_UrsaDepthBiasConstant", constantFactor);
+		SetGlobalFloat("_UrsaDepthBiasSlope", slopeFactor);
+	}
+
+	/// <summary>Restores the Shader Pass depth bias for subsequent scene draws.</summary>
+	public void RestoreDepthBias()
+	{
+		EnsureAlive();
+		SetGlobalInt("_UrsaDepthBiasOverride", 0);
+	}
 
 	public void SetGlobalTexture(string name, RenderTexture texture)
 	{
@@ -196,10 +236,18 @@ public sealed class CommandBuffer : IDisposable
 		temporaryTargetIds.Add(id);
 	}
 
+	public TemporaryRenderTargetScope CreateTemporaryTargetScope()
+	{
+		EnsureAlive();
+		++activeTemporaryScopes;
+		return new TemporaryRenderTargetScope(this, recordingGeneration);
+	}
+
 	public void ReleaseTemporaryTarget(uint id)
 	{
 		EnsureAlive();
 		if (id == 0) throw new ArgumentOutOfRangeException(nameof(id));
+		if (!temporaryTargetIds.Contains(id)) throw new InvalidOperationException("Temporary target ID is not active in this CommandBuffer.");
 		RenderCommands.ReleaseTemporaryTarget(writer, id);
 		temporaryTargetIds.Remove(id);
 	}
@@ -273,6 +321,11 @@ public sealed class CommandBuffer : IDisposable
 
 	internal uint RecordingGeneration => recordingGeneration;
 	internal bool IsAlive => !disposed;
+	internal void ReleaseTemporaryScope()
+	{
+		if (activeTemporaryScopes <= 0) throw new InvalidOperationException("Temporary target scope accounting is invalid.");
+		--activeTemporaryScopes;
+	}
 	internal void EndSampleIfCurrent(string sampleName, uint generation)
 	{
 		if (disposed || generation != recordingGeneration) return;
@@ -293,12 +346,16 @@ public sealed class CommandBuffer : IDisposable
 	{
 		EnsureAlive();
 		ArgumentNullException.ThrowIfNull(context);
+		if (activeTemporaryScopes != 0)
+			throw new InvalidOperationException("All temporary target scopes must be disposed before executing their CommandBuffer.");
 		context.Submit(BuildBatch(), recordedResources, name);
 	}
 
 	internal byte[] BuildBatch()
 	{
 		EnsureAlive();
+		if (activeTemporaryScopes != 0)
+			throw new InvalidOperationException("All temporary target scopes must be disposed before building their CommandBuffer.");
 		if (sampleNames.Count != 0)
 			throw new InvalidOperationException($"CommandBuffer has {sampleNames.Count} unclosed profiling sample(s).");
 		byte[] batch = writer.ToArray();
@@ -325,6 +382,12 @@ public sealed class CommandBuffer : IDisposable
 
 	private void Retain(RenderTargetIdentifier target) { if (target.Texture != null) recordedResources.Add(target.Texture); }
 	private void EnsureAlive() { if (disposed) throw new ObjectDisposedException(nameof(CommandBuffer)); }
+	private static void ValidateArrayLength(int count, string parameterName)
+	{
+		if (count < 1 || count > MaximumGlobalParameterArrayElements)
+			throw new ArgumentOutOfRangeException(parameterName,
+				$"Uniform arrays must contain between 1 and {MaximumGlobalParameterArrayElements} elements.");
+	}
 	private static void Pass(int pass) { if (pass < -1) throw new ArgumentOutOfRangeException(nameof(pass)); }
 	private void Parameter(string name)
 	{

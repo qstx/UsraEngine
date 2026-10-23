@@ -20,6 +20,23 @@ public sealed class MeshFilterComponent : Component
 
 public abstract class RendererComponent : Component
 {
+	private RendererShadowSettings ShadowSettings
+	{
+		get => NativeRuntimeBindings.GetRendererShadowSettings(NativeHandle);
+		set => NativeRuntimeBindings.SetRendererShadowSettings(NativeHandle, value);
+	}
+
+	public bool CastShadows
+	{
+		get => ShadowSettings.CastShadows;
+		set { var current = ShadowSettings; current.CastShadows = value; ShadowSettings = current; }
+	}
+	public bool ReceiveShadows
+	{
+		get => ShadowSettings.ReceiveShadows;
+		set { var current = ShadowSettings; current.ReceiveShadows = value; ShadowSettings = current; }
+	}
+
 	private Material?[] Get(bool instance, bool first = false)
 	{
 		return NativeResourceBindings.GetMaterialBindings(NativeHandle, instance, first)

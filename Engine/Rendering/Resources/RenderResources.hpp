@@ -19,6 +19,12 @@ struct RenderTextureDescription
 
 struct RenderTextureResource
 {
+	RenderTextureResource();
+	RenderTextureResource(const RenderTextureResource&) = delete;
+	RenderTextureResource& operator=(const RenderTextureResource&) = delete;
+
+	UInt64 identity = 0;
+	UInt64 generation = 1;
 	RenderTextureDescription description;
 	Rhi::TexturePtr color;
 	Rhi::TexturePtr depth;

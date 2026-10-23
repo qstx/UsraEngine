@@ -46,7 +46,7 @@ cmake --build Engine/Build --config Debug --parallel
 
 从 Tracy `v0.14.1` 下载或构建独立的 Tracy Profiler，并确保 Profiler 和 Engine 使用同一版本。先用 `UrsaEditor --project Demo` 或 `UrsaScriptPlayer --project Demo --scene Snake/Snake.ursascene` 启动应用，再在 Tracy Profiler 中连接该进程并开始 capture。默认连接使用本机网络发现；如需跨机器采样，请按 Tracy Profiler 的连接设置配置网络。
 
-CPU 时间线包含 Engine/Editor 帧、场景更新阶段、Renderer3D 录制阶段以及原生到 C# 的生命周期回调边界。Vulkan GPU 时间线标记渲染和计算命令；如果所选队列不支持 Vulkan 时间戳，GPU 区段会跳过，CPU 采样仍可使用。托管回调按脚本类型和回调阶段命名；用户 C# 方法体内部没有单独插桩。
+CPU 时间线包含 Engine/Editor 帧、场景更新阶段、SceneDrawEncoder 录制阶段以及原生到 C# 的生命周期回调边界。Vulkan GPU 时间线标记渲染和计算命令；如果所选队列不支持 Vulkan 时间戳，GPU 区段会跳过，CPU 采样仍可使用。托管回调按脚本类型和回调阶段命名；用户 C# 方法体内部没有单独插桩。
 
 每个完成的主循环帧发送一个默认 `FrameMark`，并保留 `Engine` 或 `Editor` 命名帧标记。默认帧序列供 Profiler 初始 FPS/帧时间显示及客户端全局帧计数使用，命名序列用于区分运行入口。标记位于帧工作完成后的边界；窗口最小化或帧失败退出时不计作完成帧，Editor 未取得交换链图像的分支也不计帧。Editor 的 FPS 是编辑器整帧频率，包含 UI、游戏预览、呈现及等待时间，不能直接视为 Play 模式的逻辑更新频率。
 

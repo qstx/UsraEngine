@@ -4,6 +4,7 @@
 #include <Scripting/Bindings/BindingHandles.hpp>
 #include <Scripting/Bindings/BindingMath.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
+#include <Rendering/Scene/DirectionalShadowCascades.hpp>
 #include <cmath>
 
 namespace Ursa::Scripting::Bindings
@@ -45,6 +46,18 @@ RenderingServices::CameraFrame RenderingServices::WriteCamera(BindingCall& call,
 	CameraFrame result;
 	result.present = 1;
 	result.F_Identity = call.arena.StringValue(camera.identity.ToString());
+	result.F_OutputIdentity = 0;
+	result.F_OutputGeneration = 0;
+	if (api.renderOutput)
+	{
+		result.F_OutputIdentity = api.renderOutput->identity;
+		result.F_OutputGeneration = api.renderOutput->generation ^ (UInt64(api.renderOutputFinalState) << 48);
+	}
+	else if (api.renderWindow)
+	{
+		result.F_OutputIdentity = UInt64(reinterpret_cast<UIntPtr>(api.renderWindow.get()));
+		result.F_OutputGeneration = api.renderWindow->Statistics().rebuilds + 1;
+	}
 	const auto& settings = camera.settings;
 	result.F_Width = settings.targetWidth;
 	result.F_Height = settings.targetHeight;
@@ -54,7 +67,15 @@ RenderingServices::CameraFrame RenderingServices::WriteCamera(BindingCall& call,
 		const auto texture = output->color ? output->color : output->depth;
 		result.F_Width = texture->desc.width;
 		result.F_Height = texture->desc.height;
+		result.F_OutputIsSrgb = texture->desc.format == Ursa::Rhi::Format::RgbA8Srgb;
 	}
+	result.F_View = WriteMatrix<Wire::Value_Ursa_Matrix4x4>(camera.view);
+	result.F_Projection = WriteMatrix<Wire::Value_Ursa_Matrix4x4>(camera.projection);
+	result.F_InverseViewProjection = WriteMatrix<Wire::Value_Ursa_Matrix4x4>(camera.inverseViewProjection);
+	result.F_Position = WriteVector3<Wire::Value_Ursa_Vector3>(camera.position);
+	result.F_NearPlane = camera.nearPlane;
+	result.F_FarPlane = camera.farPlane;
+	result.F_Orthographic = camera.orthographic;
 	result.F_Settings.present = 1;
 	result.F_Settings.F_Type = UInt32(settings.type);
 	result.F_Settings.F_Depth = settings.depth;
@@ -209,6 +230,96 @@ Result<RenderingServices::RenderResult> RenderingServices::Cull(BindingCall& cal
 	}
 	const auto value = TakeBindingResult(api.renderSceneContext.Cull(camera));
 	return Result<RenderResult>::Success({WriteToken(value.context), value.index, value.generation});
+}
+
+Result<RenderingServices::RenderResult> RenderingServices::CullShadowCasters(BindingCall& call, const Token& token,
+                                                                             const Utf8View& identity,
+                                                                             const Matrix& lightViewProjection)
+{
+	auto& api = RenderApi(call);
+	ValidateActive(api, token);
+	const auto& receiverCamera = FindCamera(api, identity);
+	if (!api.activeRenderCamera.empty() && api.activeRenderCamera != receiverCamera.identity.ToString())
+	{
+		return Result<RenderResult>::Failure("Shadow caster culling camera differs from active camera properties");
+	}
+	const auto culled =
+	    TakeBindingResult(api.renderSceneContext.CullShadowCasters(receiverCamera, ReadMatrix(lightViewProjection)));
+	return Result<RenderResult>::Success({WriteToken(culled.context), culled.index, culled.generation});
+}
+
+Result<RenderingServices::VisibleLightsValue> RenderingServices::VisibleLights(BindingCall& call, const Token& token,
+                                                                               const RenderResult& culling)
+{
+	auto& api = RenderApi(call);
+	ValidateActive(api, token);
+	Ursa::Rendering::CullingResults nativeCulling{ReadToken(culling.F_Context), culling.F_Index, culling.F_Generation};
+	const auto lights = TakeBindingResult(api.renderSceneContext.VisibleLightsFor(nativeCulling));
+	VisibleLightsValue result;
+	result.F_Directional = WriteArray<Wire::Value_Ursa_Rendering_DirectionalLightValue>(
+	    call.arena, lights.directional,
+	    [&](const auto& light)
+	    {
+		    Wire::Value_Ursa_Rendering_DirectionalLightValue value;
+		    value.F_Identity = call.arena.StringValue(light.identity.ToString());
+		    value.F_Layer = light.layer;
+		    value.F_Direction = WriteVector3<Wire::Value_Ursa_Vector3>(light.direction);
+		    value.F_Color = WriteColor<Wire::Value_Ursa_Color>(light.color);
+		    value.F_Intensity = light.intensity;
+		    value.F_CastsShadows = light.castsShadows;
+		    value.F_ShadowStrength = light.shadowStrength;
+		    value.F_ShadowBias = light.shadowBias;
+		    value.F_ShadowNormalBias = light.shadowNormalBias;
+		    value.F_SoftShadows = light.softShadows;
+		    return value;
+	    });
+	result.F_Point = WriteArray<Wire::Value_Ursa_Rendering_PointLightValue>(
+	    call.arena, lights.point,
+	    [&](const auto& light)
+	    {
+		    Wire::Value_Ursa_Rendering_PointLightValue value;
+		    value.F_Identity = call.arena.StringValue(light.identity.ToString());
+		    value.F_Layer = light.layer;
+		    value.F_Position = WriteVector3<Wire::Value_Ursa_Vector3>(light.position);
+		    value.F_Color = WriteColor<Wire::Value_Ursa_Color>(light.color);
+		    value.F_Intensity = light.intensity;
+		    value.F_Range = light.range;
+		    return value;
+	    });
+	return Result<VisibleLightsValue>::Success(std::move(result));
+}
+
+Result<DataView> RenderingServices::DirectionalShadowCascades(
+    BindingCall& call, const Token& token, const Utf8View& identity, const Wire::Value_Ursa_Vector3& lightDirection,
+    UInt32 cascadeCount, Float32 shadowDistance, const DataView& splitFractions, UInt32 atlasWidth, UInt32 atlasHeight)
+{
+	auto& api = RenderApi(call);
+	ValidateActive(api, token);
+	Ursa::Rendering::DirectionalShadowCascadeSettings settings;
+	settings.cascadeCount = cascadeCount;
+	settings.shadowDistance = shadowDistance;
+	settings.splitFractions = ReadArray<Float32, Float32>(splitFractions, [](Float32 value) { return value; });
+	settings.atlasWidth = atlasWidth;
+	settings.atlasHeight = atlasHeight;
+	const auto cascades = TakeBindingResult(Ursa::Rendering::ComputeDirectionalShadowCascades(
+	    FindCamera(api, identity), ReadVector3(lightDirection), settings));
+	return Result<DataView>::Success(WriteArray<ShadowCascade>(
+	    call.arena, cascades,
+	    [&](const auto& cascade)
+	    {
+		    ShadowCascade value;
+		    value.F_Index = cascade.index;
+		    value.F_NearDepth = cascade.nearDepth;
+		    value.F_FarDepth = cascade.farDepth;
+		    value.F_WorldUnitsPerTexel = cascade.worldUnitsPerTexel;
+		    value.F_AtlasX = cascade.atlasX;
+		    value.F_AtlasY = cascade.atlasY;
+		    value.F_Resolution = cascade.resolution;
+		    value.F_LightView = WriteMatrix<Wire::Value_Ursa_Matrix4x4>(cascade.lightView);
+		    value.F_LightProjection = WriteMatrix<Wire::Value_Ursa_Matrix4x4>(cascade.lightProjection);
+		    value.F_WorldToShadow = WriteMatrix<Wire::Value_Ursa_Matrix4x4>(cascade.worldToShadow);
+		    return value;
+	    }));
 }
 
 Result<RenderingServices::RenderResult> RenderingServices::CreateRendererList(BindingCall& call, const Token& token,

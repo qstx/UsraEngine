@@ -295,6 +295,18 @@ Result<bool> DrawMeshInspector(Component& component, ProjectWorkspace& workspace
 	}
 	if (auto* renderer = dynamic_cast<RendererComponent*>(&component))
 	{
+		bool castsShadows = renderer->CastShadows();
+		if (ImGui::Checkbox("Cast Shadows", &castsShadows))
+		{
+			renderer->SetCastShadows(castsShadows);
+			changed = true;
+		}
+		bool receiveShadows = renderer->ReceiveShadows();
+		if (ImGui::Checkbox("Receive Shadows", &receiveShadows))
+		{
+			renderer->SetReceiveShadows(receiveShadows);
+			changed = true;
+		}
 		auto materials = renderer->SharedMaterials();
 		int size = int(materials.size());
 		if (ImGui::InputInt("Materials Size", &size) && size >= 0 && size <= int(Mesh::maxSubMeshes))

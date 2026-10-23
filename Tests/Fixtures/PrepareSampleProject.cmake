@@ -1,3 +1,8 @@
+file(TO_CMAKE_PATH "${PROJECT}" project_path)
+if(NOT project_path MATCHES "/TestProjects/Sample/[^/]+$")
+  message(FATAL_ERROR "Refusing to clear a non-test sample Library directory: ${project_path}")
+endif()
+file(REMOVE_RECURSE "${PROJECT}/Library")
 file(MAKE_DIRECTORY "${PROJECT}/Assets")
 execute_process(COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SOURCE}" "${PROJECT}/Assets" RESULT_VARIABLE result)
 if(NOT result EQUAL 0)

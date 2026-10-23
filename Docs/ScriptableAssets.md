@@ -1,12 +1,11 @@
 # ScriptableObject 持久资产
 
 `ScriptableObject` 是项目 C# 定义的配置资产，不挂在 GameObject 上。具体公开类型
-继承 `ScriptableObject`，可用带稳定 ID 的 `UrsaScriptType` 声明身份：
+继承 `ScriptableObject`。脚本导入时，类型目录会在源 `.meta` 中分配并保存稳定身份：
 
 ```csharp
 using Ursa;
 
-[UrsaScriptType("demo.render.settings", Version = 1)]
 public sealed class RenderSettings : ScriptableObject
 {
 	public float exposure = 1.0f;
@@ -24,7 +23,7 @@ ComputeShader、自定义资产引用，以及一维数组和 `List<T>`。Shader
 纹理字段使用 `Texture.Load` 加载已导入资源。`FromReference` 不创建 GPU 程序。游戏对象或组件字段只适用于
 Behaviour，持久资产不得保存场景对象、组件、未保存 ScriptableObject 或临时资源。
 
-类型身份包含脚本源 `.meta` GUID、稳定 `UrsaScriptType` ID、类型版本及由类型 ID
+类型身份包含脚本源 `.meta` GUID、由类型目录持久化的稳定 ID、类型版本及由类型 ID
 确定的 local file ID。CLR 类型名和程序集中的声明顺序不是持久身份。冲突类型或
 不支持的字段会提供诊断；Add Component 只接受 `Behaviour` 类型。
 

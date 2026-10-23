@@ -17,7 +17,7 @@ struct SceneDrawRecord
 	UInt32 subShaderIndex = 0;
 	UInt32 passIndex = 0;
 	bool selectedPass = false;
-	String activePipeline = "UrsaForward";
+	String activePipeline = "UrsaUniversal";
 	std::optional<ResolvedGraphicsPass> resolvedPass;
 };
 

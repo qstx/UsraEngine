@@ -20,6 +20,23 @@ struct PropertyIdScope
 	}
 };
 
+struct ExpectedAssetTypeScope
+{
+	EditorInvocation& scope;
+	String previous;
+
+	ExpectedAssetTypeScope(EditorInvocation& scope, String expected)
+	    : scope(scope), previous(std::move(scope.expectedAssetType))
+	{
+		scope.expectedAssetType = std::move(expected);
+	}
+
+	~ExpectedAssetTypeScope()
+	{
+		scope.expectedAssetType = std::move(previous);
+	}
+};
+
 bool UnsignedEnum(const Json& descriptor)
 {
 	const auto type = descriptor.value("EnumUnderlyingType", std::string{});
@@ -664,10 +681,14 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			value.F_IsNull = !value.F_Reference.present;
 			break;
 		case P::V_AssetReference:
+		{
+			const auto descriptor = Descriptor(scope, scope.revision, path);
+			ExpectedAssetTypeScope expectedAssetType(scope, ToUrsaString(descriptor.value("TypeName", std::string{})));
 			value.F_Reference =
 			    B::TakeBindingResult(AssetField(call, caption, value.F_Reference, state.F_ReferenceKind));
 			value.F_IsNull = !value.F_Reference.present;
 			break;
+		}
 		case P::V_Array:
 		case P::V_List:
 		{
@@ -679,8 +700,33 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			const auto refreshed = B::TakeBindingResult(GetProperty(call, scope.revision, fieldPath));
 			for (Int32 index = 0; index < refreshed.F_Value.F_ArraySize; ++index)
 			{
-				DrawProperty(call, path + "/" + ToUrsaString(std::to_string(index)),
-				             "Element " + ToUrsaString(std::to_string(index)));
+				const String elementPath = path + "/" + ToUrsaString(std::to_string(index));
+				ImGui::PushID(elementPath.c_str());
+				if (index > 0 && ImGui::SmallButton("^"))
+				{
+					auto collection = B::TakeBindingResult(scope.properties->FindProperty(path));
+					Json elements = B::TakeBindingResult(collection.Value());
+					std::swap(elements[index], elements[index - 1]);
+					B::CompleteBindingResult(collection.SetValue(std::move(elements)));
+					ImGui::PopID();
+					return;
+				}
+				if (index + 1 < refreshed.F_Value.F_ArraySize)
+				{
+					ImGui::SameLine();
+					if (ImGui::SmallButton("v"))
+					{
+						auto collection = B::TakeBindingResult(scope.properties->FindProperty(path));
+						Json elements = B::TakeBindingResult(collection.Value());
+						std::swap(elements[index], elements[index + 1]);
+						B::CompleteBindingResult(collection.SetValue(std::move(elements)));
+						ImGui::PopID();
+						return;
+					}
+				}
+				ImGui::SameLine();
+				DrawProperty(call, elementPath, "Element " + ToUrsaString(std::to_string(index)));
+				ImGui::PopID();
 			}
 			return;
 		}

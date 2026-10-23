@@ -36,6 +36,16 @@ return SaveMaterialResource(filesystem, materialPath, materialId, *material, res
 
 The current Unlit/PBR convenience API remains available. Loading a version 1 `.ursamat` maps its type and fields to the built-in Unlit or PBR Shader ID in memory. Loading does not rewrite the file. An explicit successful save writes version 2 with both the Shader reference and typed property overrides, while preserving the resource ID and texture IDs. Unknown property override names remain serialized so Shader edits do not silently discard them.
 
+## Built-in Lit/Unlit schema migration
+
+The built-in Shader IDs and material references remain stable after the Shader sources move to `Shaders/Universal/Unlit.ursashader` and `Shaders/Universal/Lit.ursashader`. Runtime and Editor resolve the compiled metadata from the new paths; the retired `Shaders/Renderer3D/` assets are not a fallback location.
+
+For an Unlit material, schema upgrade moves `_MainTex` to `_BaseMap` in memory. If both names exist with different texture identities/defaults, loading fails with a conflict instead of silently choosing one. Repeating the same upgrade leaves the override map unchanged. PBR material upgrades preserve `_BaseColor`, `_Metallic`, `_Roughness`, `_NormalScale`, `_OcclusionStrength`, `_Emissive`, alpha settings, texture resource IDs, and sampler settings. Unknown fields are retained. The engine does not save upgraded data while loading: inspect the result, then explicitly save to publish schema version 2. Read-only assets remain untouched.
+
+`_MetallicRoughnessMap` retains the packed texture channel contract: B multiplies metallic and G multiplies perceptual roughness; base-color/emission maps are sRGB, and normal/metallic-roughness/occlusion maps are linear data. Ursa's `_Roughness` stores perceptual roughness directly. Converting a smoothness value from URP uses `1 - smoothness`; do not square it or swap the packed channels. See [Shader authoring](ShaderAuthoring.md) for the full fixed-reference mapping and validation commands.
+
+The migration contract is covered by `UrsaMaterialMigrationTests`: old Unlit aliases, PBR scalar/texture/sampler retention, conflict rejection, unknown data, idempotence, read-only inputs, and explicit saving. `UrsaShaderPackageTests` checks stable built-in IDs against the new imported Shader metadata and confirms old runtime paths cannot load.
+
 ## Editor workflow
 
 The Project window lists `.ursashader` source files separately from imported resources. Selecting one opens the read-only source view and its import status. **Reimport Shader** resolves VFS includes, compiles all required Vulkan variants, refreshes compiled metadata, and reports compiler diagnostics with the source path and line. Project Shader assets write their `.ursashaderasset` beside the source. Engine or package-backed sources are compiled in memory; the editor never writes to a read-only mount.

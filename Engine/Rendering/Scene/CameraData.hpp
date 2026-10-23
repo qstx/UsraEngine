@@ -50,5 +50,11 @@ struct CameraData
 	Vec3 position;
 	CameraSettings settings;
 	String debugName;
+	Mat4 view = Mat4::Identity();
+	Mat4 projection = Mat4::Identity();
+	Mat4 inverseViewProjection = Mat4::Identity();
+	Float32 nearPlane = 0.1f;
+	Float32 farPlane = 100.0f;
+	bool orthographic = false;
 };
 } // namespace Ursa::Rendering

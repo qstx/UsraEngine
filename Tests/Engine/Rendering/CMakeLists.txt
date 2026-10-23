@@ -11,6 +11,7 @@ add_test(NAME UrsaRenderFrameTests COMMAND UrsaRenderFrameTests)
 ursa_add_test_executable(UrsaRenderCommandExecutorTests RenderCommandExecutorTests.cpp)
 target_link_libraries(UrsaRenderCommandExecutorTests PRIVATE Ursa::Engine UrsaTestFixtures)
 target_compile_definitions(UrsaRenderCommandExecutorTests PRIVATE
+  URSA_SHADER_LIBRARY_ROOT="${URSA_SOURCE_ROOT}/Assets/Shaders/ShaderLibrary"
   URSA_SHADER_STAGING_ROOT="${URSA_BINARY_ROOT}/ShaderStaging"
   URSA_TEST_DXC_EXECUTABLE="${URSA_DXC_EXECUTABLE}"
   URSA_TEST_SPIRV_VAL_EXECUTABLE="${URSA_SPIRV_VAL_EXECUTABLE}"

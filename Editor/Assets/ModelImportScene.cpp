@@ -65,16 +65,6 @@ Result<GameObject::Ptr> ModelImportScene::Build()
 		for (const auto& material : candidate.materials)
 		{
 			materialIds.emplace(material.second.material.get(), material.first);
-			if (!material.second.material->Shader() &&
-			    (material.second.material->ShaderId() == Shader::BuiltinPbrShaderId() ||
-			     material.second.material->ShaderId() == Shader::BuiltinUnlitShaderId()))
-			{
-				auto schema = material.second.material->ShaderId() == Shader::BuiltinPbrShaderId()
-				                  ? Shader::CreateBuiltinPbrShaderAsset()
-				                  : Shader::CreateBuiltinUnlitShaderAsset();
-				Done(material.second.material->SetShaderAsset(
-				    std::make_shared<const Shader::ShaderAsset>(std::move(schema))));
-			}
 			for (const auto& texture : material.second.textures)
 			{
 				MaterialTexturePtr pixels;

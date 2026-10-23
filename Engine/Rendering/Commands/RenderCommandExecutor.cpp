@@ -81,6 +81,22 @@ UInt32 UniformKind(const String& type)
 	return 0;
 }
 
+UInt32 UniformKind(const Shader::ShaderUniformMember& member)
+{
+	if (member.arrayCount > 1)
+	{
+		if (member.type == "mat4" || member.type == "float4x4")
+		{
+			return 8;
+		}
+		if (member.type == "vec4" || member.type == "float4" || member.type == "half4")
+		{
+			return 9;
+		}
+	}
+	return UniformKind(member.type);
+}
+
 String ComputeScope(const RenderCommand& operation)
 {
 	return operation.shader->id.ToString() + ":" + operation.shader->sourceHash + ":" +
@@ -360,7 +376,7 @@ struct RenderCommandExecutor::Impl
 			{
 				if (member.name == parameter.name)
 				{
-					Require(parameter.kind == UniformKind(member.type) && parameter.bytes.size() == member.byteSize,
+					Require(parameter.kind == UniformKind(member) && parameter.bytes.size() == member.byteSize,
 					        "Compute uniform value kind or size does not match its reflected member");
 					return;
 				}
@@ -773,10 +789,17 @@ Result<void> RenderCommandExecutor::Execute(const Vector<RenderCommand>& command
 					    }
 					    else
 					    {
+						    const bool validMatrixArray =
+						        operation.global.kind == 8 && operation.global.bytes.size() >= 64 &&
+						        operation.global.bytes.size() <= 16 * 64 && operation.global.bytes.size() % 64 == 0;
+						    const bool validVectorArray =
+						        operation.global.kind == 9 && operation.global.bytes.size() >= 16 &&
+						        operation.global.bytes.size() <= 16 * 16 && operation.global.bytes.size() % 16 == 0;
 						    Require((operation.global.kind == 1 && operation.global.bytes.size() == 4) ||
 						                (operation.global.kind == 2 && operation.global.bytes.size() == 16) ||
 						                (operation.global.kind == 5 && operation.global.bytes.size() == 64) ||
-						                (operation.global.kind == 6 && operation.global.bytes.size() == 4),
+						                (operation.global.kind == 6 && operation.global.bytes.size() == 4) ||
+						                validMatrixArray || validVectorArray,
 						            "Global parameter value size is invalid");
 						    for (Size offset = 0; operation.global.kind != 6 && offset < operation.global.bytes.size();
 						         offset += sizeof(Float32))
@@ -1179,7 +1202,7 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 									const auto parameter = parameters.find(member.name);
 									if (parameter != parameters.end())
 									{
-										Require(parameter->second.kind == UniformKind(member.type) &&
+										Require(parameter->second.kind == UniformKind(member) &&
 										            parameter->second.bytes.size() == member.byteSize &&
 										            member.byteOffset <= bytes.size() &&
 										            member.byteSize <= bytes.size() - member.byteOffset,
@@ -1335,11 +1358,18 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 									const auto parameter = globals.find(member.name);
 									if (parameter != globals.end() && !parameter->second.bytes.empty())
 									{
-										Require(parameter->second.kind == UniformKind(member.type) &&
-										            parameter->second.bytes.size() == member.byteSize &&
-										            member.byteOffset <= bytes.size() &&
-										            member.byteSize <= bytes.size() - member.byteOffset,
-										        "Global uniform size does not match Shader reflection");
+										if (parameter->second.kind != UniformKind(member) ||
+										    parameter->second.bytes.size() != member.byteSize ||
+										    member.byteOffset > bytes.size() ||
+										    member.byteSize > bytes.size() - member.byteOffset)
+										{
+											throw std::runtime_error(
+											    "Fullscreen global parameter " + ToStdString(member.name) +
+											    " does not match reflected type " + ToStdString(member.type) +
+											    " (kind " + std::to_string(parameter->second.kind) + ", size " +
+											    std::to_string(parameter->second.bytes.size()) + ", expected " +
+											    std::to_string(member.byteSize) + ")");
+										}
 										Done(Shader::WriteShaderUniformValue(
 										    bytes, member, parameter->second.bytes.data(), member.byteSize));
 									}

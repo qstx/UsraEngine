@@ -52,7 +52,8 @@ bool BootstrapAsset(const AssetRecord& asset)
 {
 	return asset.path.scheme == engineScheme &&
 	       (asset.path.relative.rfind("Shaders/Editor/", 0) == 0 ||
-	        asset.path.relative.rfind("Shaders/Renderer3D/", 0) == 0 ||
+	        asset.path.relative.rfind("Shaders/Universal/", 0) == 0 ||
+	        asset.path.relative.rfind("Shaders/Internal/", 0) == 0 ||
 	        asset.path.relative.rfind("Fonts/Editor/", 0) == 0 || asset.path.relative.rfind("Icons/Editor/", 0) == 0);
 }
 

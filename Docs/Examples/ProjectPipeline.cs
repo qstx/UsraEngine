@@ -4,7 +4,6 @@ using Ursa.Rendering;
 
 namespace Ursa.Examples;
 
-[UrsaScriptType("examples.presentation-pipeline")]
 [CreateAssetMenu(MenuName = "Rendering/Presentation Pipeline", FileName = "PresentationPipeline")]
 public sealed class PresentationPipelineAsset : RenderPipelineAsset
 {

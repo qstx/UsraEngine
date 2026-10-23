@@ -4,6 +4,8 @@
 #include <Assets/AssetImportRules.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceSession.hpp>
+#include <Shader/ShaderBuiltins.hpp>
+#include <Vfs/AssetRoots.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <algorithm>
 #include <filesystem>
@@ -75,14 +77,31 @@ void EditableGraph()
 {
 	auto files = Files();
 	Text(files, "prj:Example.obj", "mtllib Example.mtl\no Triangle\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl Red\nf 1 2 3\n");
-	Text(files, "prj:Example.mtl", "newmtl Red\nKd 1 0 0\n");
+	Text(files, "prj:Example.mtl", "newmtl Red\nKd 1 0 0\nd 0.5\n");
 	auto database = Take(AssetDatabase::Open(files));
 	Done(database->Refresh());
 	const auto source = Path("prj:Example.obj");
 	auto candidate = Take(ModelImporter::BuildCandidate(*database, source, {}));
+	auto rebuiltCandidate = Take(ModelImporter::BuildCandidate(*database, source, {}));
 	Expect(!candidate.nodes.empty() && candidate.meshes.size() == 1 && !candidate.materials.empty() &&
 	           !Take(files.Exists(Path("lib:AssetDatabase/prj.json"))),
 	       "Model construction encoded or published the primary model before postprocessing");
+	Expect(!rebuiltCandidate.materials.empty(), "Repeated model import lost all material outputs");
+	Expect(candidate.materials.begin()->second.material && rebuiltCandidate.materials.begin()->second.material,
+	       "Model import produced an empty material instance");
+	const auto& importedMaterial = *candidate.materials.begin()->second.material;
+	const auto& rebuiltMaterial = *rebuiltCandidate.materials.begin()->second.material;
+	Expect(importedMaterial.IsShaderBacked() && importedMaterial.ShaderId() == Shader::BuiltinPbrShaderId() &&
+	           importedMaterial.Parameters().roughness == 1.0f &&
+	           importedMaterial.Parameters().alphaMode == AlphaMode::Blend &&
+	           importedMaterial.PropertyOverrides().find("_BaseColor") != importedMaterial.PropertyOverrides().end() &&
+	           importedMaterial.PropertyOverrides().find("_Roughness") != importedMaterial.PropertyOverrides().end() &&
+	           importedMaterial.AssetIdentity().guid == candidate.guid &&
+	           importedMaterial.AssetIdentity().localFileId == candidate.materials.begin()->first &&
+	           rebuiltCandidate.materials.begin()->first == candidate.materials.begin()->first &&
+	           rebuiltMaterial.AssetIdentity().guid == importedMaterial.AssetIdentity().guid &&
+	           rebuiltMaterial.AssetIdentity().localFileId == importedMaterial.AssetIdentity().localFileId,
+	       "Model material import lost the new Shader property layout, transparency or stable subasset identity");
 	const auto meshId = candidate.meshOrder.front();
 	const auto materialId = candidate.meshMaterialBindings.at(meshId).at(0);
 	const auto originalNodeId = candidate.rootNodeLocalFileId;
@@ -115,6 +134,17 @@ void EditableGraph()
 	Done(database->PublishImport(source, "ursa.Model", ModelImporter::Version, ModelImporter::ContentTarget,
 	                             ModelImportSettings{}.ToJson(), candidate.dependencies, outputs,
 	                             candidate.mainObjectLocalFileId));
+	auto engineFiles = Take(OpenEngineFileSystem(std::filesystem::u8path(URSA_ENGINE_SHADER_PAK)));
+	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(engineFiles));
+
+	struct EngineFileSystemCleanup
+	{
+		~EngineFileSystemCleanup()
+		{
+			ConfigureEngineFileSystem({});
+		}
+	} engineFileSystemCleanup;
+
 	auto resources = Take(ResourceSession::Open(files, [&](ResourceId guid, UInt64 localId)
 	                                            { return database->Resolve(guid, localId); }));
 	const auto mesh = Take(resources->LoadMesh(candidate.guid, meshId));

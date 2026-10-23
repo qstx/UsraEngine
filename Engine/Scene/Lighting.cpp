@@ -11,6 +11,12 @@ bool ValidLightColor(Ursa::Color color)
 	       color.alpha >= 0.0f && color.alpha <= 1.0f;
 }
 
+bool ValidDirectionalLightShadowSettings(Ursa::Float32 strength, Ursa::Float32 bias, Ursa::Float32 normalBias)
+{
+	return std::isfinite(strength) && strength >= 0.0f && strength <= 1.0f && std::isfinite(bias) && bias >= 0.0f &&
+	       std::isfinite(normalBias) && normalBias >= 0.0f;
+}
+
 Result<void> DirectionalLightComponent::SetColor(Ursa::Color lightColor)
 {
 	if (!ValidLightColor(lightColor))
@@ -28,6 +34,36 @@ Result<void> DirectionalLightComponent::SetIntensity(Ursa::Float32 lightIntensit
 		return Result<void>::Failure("Directional light intensity must be finite and nonnegative");
 	}
 	this->intensity = lightIntensity;
+	return {};
+}
+
+Result<void> DirectionalLightComponent::SetShadowStrength(Ursa::Float32 value)
+{
+	if (!ValidDirectionalLightShadowSettings(value, shadowBias, shadowNormalBias))
+	{
+		return Result<void>::Failure("Directional light shadow strength must be finite and within [0, 1]");
+	}
+	shadowStrength = value;
+	return {};
+}
+
+Result<void> DirectionalLightComponent::SetShadowBias(Ursa::Float32 value)
+{
+	if (!ValidDirectionalLightShadowSettings(shadowStrength, value, shadowNormalBias))
+	{
+		return Result<void>::Failure("Directional light shadow bias must be finite and nonnegative");
+	}
+	shadowBias = value;
+	return {};
+}
+
+Result<void> DirectionalLightComponent::SetShadowNormalBias(Ursa::Float32 value)
+{
+	if (!ValidDirectionalLightShadowSettings(shadowStrength, shadowBias, value))
+	{
+		return Result<void>::Failure("Directional light shadow normal bias must be finite and nonnegative");
+	}
+	shadowNormalBias = value;
 	return {};
 }
 

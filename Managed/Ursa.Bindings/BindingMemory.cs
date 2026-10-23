@@ -235,7 +235,10 @@ public static unsafe class BindingMemory
 		var value = (BindingModuleDescriptor*)descriptor;
 		if (value->Version != 1 || value->Size != sizeof(BindingModuleDescriptor) || value->PointerSize != sizeof(nint) ||
 			value->FunctionCount != functionCount || (functionCount != 0 && value->Functions == 0) || value->ValidateContext == null)
-			throw new InvalidOperationException($"Binding module '{name}' layout/version mismatch.");
+			throw new InvalidOperationException($"Binding module '{name}' layout/version mismatch " +
+				$"(version={value->Version}, size={value->Size}, pointerSize={value->PointerSize}, " +
+				$"functionCount={value->FunctionCount}/{functionCount}, functionsNull={value->Functions == 0}, " +
+				$"validateContextNull={value->ValidateContext == null}).");
 		for (int index = 0; index < 32; ++index)
 			if (value->Hash[index] != Convert.ToByte(hash.Substring(index * 2, 2), 16))
 				throw new InvalidOperationException($"Binding module '{name}' contract mismatch; expected {hash}, received {Convert.ToHexStringLower(new ReadOnlySpan<byte>(value->Hash, 32))}.");

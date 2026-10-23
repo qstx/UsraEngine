@@ -1,0 +1,44 @@
+Shader "Ursa/Internal/Blit"
+{
+	HLSLINCLUDE
+#include "../ShaderLibrary/Textures.hlsl"
+TEXTURE2D(_BlitTexture);
+SAMPLER(sampler_BlitTexture);
+
+struct BlitVaryings
+{
+	float4 positionCS : SV_Position;
+	float2 uv : TEXCOORD0;
+};
+
+BlitVaryings BlitVertex(uint id : SV_VertexID)
+{
+	BlitVaryings output;
+	float2 uv = float2((id << 1) & 2, id & 2);
+	output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+	output.uv = float2(uv.x, 1.0 - uv.y);
+	return output;
+}
+
+float4 BlitFragment(BlitVaryings input) : SV_Target0
+{
+	return SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv);
+}
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaUniversal" }
+		Pass
+		{
+			Name "Blit"
+			Tags { "LightMode" = "UniversalBlit" }
+			Cull Off
+			ZWrite Off
+			ZTest Off
+			HLSLPROGRAM
+#pragma vertex BlitVertex
+#pragma fragment BlitFragment
+ENDHLSL
+		}
+	}
+}

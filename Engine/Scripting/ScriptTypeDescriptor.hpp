@@ -49,5 +49,6 @@ struct ScriptTypeDescriptor
 	String createAssetMenuName;
 	String createAssetFileName;
 	Int32 createAssetMenuOrder = 0;
+	Vector<String> baseTypeNames;
 };
 } // namespace Ursa

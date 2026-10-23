@@ -74,6 +74,16 @@ internal static partial class NativeRuntimeBindings
 	internal static partial CameraRenderingSettings GetCameraRenderingSettings([HandleKind(2)] NativeHandle camera);
 	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::SetCameraRenderingSettings")]
 	internal static partial void SetCameraRenderingSettings([HandleKind(2)] NativeHandle camera, CameraRenderingSettings value);
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::GetDirectionalLightShadowSettings")]
+	internal static partial DirectionalLightShadowSettings GetDirectionalLightShadowSettings([HandleKind(2)] NativeHandle light);
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::SetDirectionalLightShadowSettings")]
+	internal static partial void SetDirectionalLightShadowSettings([HandleKind(2)] NativeHandle light,
+		DirectionalLightShadowSettings value);
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::GetRendererShadowSettings")]
+	internal static partial RendererShadowSettings GetRendererShadowSettings([HandleKind(2)] NativeHandle renderer);
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::SetRendererShadowSettings")]
+	internal static partial void SetRendererShadowSettings([HandleKind(2)] NativeHandle renderer,
+		RendererShadowSettings value);
 
 	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::GetKey")]
 	internal static partial bool GetKey(uint key, uint phase);

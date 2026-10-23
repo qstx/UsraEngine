@@ -1,0 +1,123 @@
+Shader "Ursa/Internal/FinalPost"
+{
+	HLSLINCLUDE
+#include "../ShaderLibrary/Color.hlsl"
+#include "../ShaderLibrary/Textures.hlsl"
+TEXTURE2D(_BlitTexture);
+SAMPLER(sampler_BlitTexture);
+TEXTURE2D(_UrsaBloomTexture);
+SAMPLER(sampler_UrsaBloomTexture);
+
+cbuffer UrsaFinalPostParameters
+{
+	float _UrsaExposureEV;
+	int _UrsaToneMappingMode;
+	int _UrsaFxaaEnabled;
+	int _UrsaFinalPostOutputMode;
+	int _UrsaFinalOutputIsSrgb;
+	float _UrsaBloomIntensity;
+	float4 _UrsaFinalSourceRect;
+	float4 _UrsaFinalSourceSize;
+}
+float UrsaPostLuma(float3 color)
+{
+	return dot(color, float3(0.2126729, 0.7151522, 0.0721750));
+}
+float3 UrsaPostProcessColor(float2 uv)
+{
+	float3 color = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, uv).rgb * exp2(_UrsaExposureEV);
+	if (_UrsaBloomIntensity > 0)
+	{
+		float2 bloomUv = (uv - _UrsaFinalSourceRect.xy) / max(_UrsaFinalSourceRect.zw, 1e-6);
+		color += SAMPLE_TEXTURE2D(_UrsaBloomTexture, sampler_UrsaBloomTexture, bloomUv).rgb * _UrsaBloomIntensity;
+	}
+	if (_UrsaToneMappingMode == 1)
+		color = UrsaReinhard(color);
+	return color;
+}
+float3 UrsaEncodeDisplayOutput(float3 linearColor)
+{
+	linearColor = saturate(linearColor);
+	return _UrsaFinalOutputIsSrgb != 0 ? linearColor : UrsaLinearToSRGB(linearColor);
+}
+float3 UrsaFxaaFetch(float2 uv)
+{
+	float2 halfTexel = _UrsaFinalSourceSize.xy * 0.5;
+	float2 lower = _UrsaFinalSourceRect.xy + halfTexel;
+	float2 upper = _UrsaFinalSourceRect.xy + _UrsaFinalSourceRect.zw - halfTexel;
+	return saturate(UrsaPostProcessColor(clamp(uv, lower, upper)));
+}
+float3 UrsaApplyFxaa(float2 uv, float3 center)
+{
+	float2 texel = _UrsaFinalSourceSize.xy;
+	float3 rgbNW = UrsaFxaaFetch(uv + texel * float2(-1, -1));
+	float3 rgbNE = UrsaFxaaFetch(uv + texel * float2(1, -1));
+	float3 rgbSW = UrsaFxaaFetch(uv + texel * float2(-1, 1));
+	float3 rgbSE = UrsaFxaaFetch(uv + texel * float2(1, 1));
+	center = saturate(center);
+	float lumaNW = UrsaPostLuma(rgbNW);
+	float lumaNE = UrsaPostLuma(rgbNE);
+	float lumaSW = UrsaPostLuma(rgbSW);
+	float lumaSE = UrsaPostLuma(rgbSE);
+	float lumaM = UrsaPostLuma(center);
+	float2 direction = float2(-((lumaNW + lumaNE) - (lumaSW + lumaSE)),
+		(lumaNW + lumaSW) - (lumaNE + lumaSE));
+	float directionReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 / 8.0), 1.0 / 128.0);
+	float reciprocalMin = rcp(min(abs(direction.x), abs(direction.y)) + directionReduce);
+	direction = clamp(direction * reciprocalMin, -8.0, 8.0) * _UrsaFinalSourceSize.xy;
+	float3 rgb03 = UrsaFxaaFetch(uv + direction * (-0.5));
+	float3 rgb13 = UrsaFxaaFetch(uv + direction * (-1.0 / 6.0));
+	float3 rgb23 = UrsaFxaaFetch(uv + direction * (1.0 / 6.0));
+	float3 rgb33 = UrsaFxaaFetch(uv + direction * 0.5);
+	float3 rgbA = 0.5 * (rgb13 + rgb23);
+	float3 rgbB = rgbA * 0.5 + 0.25 * (rgb03 + rgb33);
+	float lumaB = UrsaPostLuma(rgbB);
+	float lumaMin = min(lumaM, min(lumaNW, min(lumaNE, min(lumaSW, lumaSE))));
+	float lumaMax = max(lumaM, max(lumaNW, max(lumaNE, max(lumaSW, lumaSE))));
+	return lumaB < lumaMin || lumaB > lumaMax ? rgbA : rgbB;
+}
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaUniversal" }
+		Pass
+		{
+			Name "FinalPost"
+			Tags { "LightMode" = "UniversalFinalPost" }
+			Cull Off
+			ZWrite Off
+			ZTest Off
+			HLSLPROGRAM
+#pragma vertex FinalPostVertex
+#pragma fragment FinalPostFragment
+struct FinalPostVaryings
+{
+	float4 positionCS : SV_Position;
+	float2 uv : TEXCOORD0;
+};
+
+FinalPostVaryings FinalPostVertex(uint id : SV_VertexID)
+{
+	FinalPostVaryings output;
+	float2 uv = float2((id << 1) & 2, id & 2);
+	output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+	output.uv = float2(uv.x, 1.0 - uv.y) * _UrsaFinalSourceRect.zw + _UrsaFinalSourceRect.xy;
+	return output;
+}
+
+float4 FinalPostFragment(FinalPostVaryings input) : SV_Target0
+{
+	if (_UrsaFinalPostOutputMode == 2)
+	{
+		float3 linearLdr = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv).rgb;
+		return float4(UrsaEncodeDisplayOutput(linearLdr), 1.0);
+	}
+	float3 color = UrsaPostProcessColor(input.uv);
+	if (_UrsaFxaaEnabled != 0) color = UrsaApplyFxaa(input.uv, color);
+	if (_UrsaFinalPostOutputMode == 1) return float4(saturate(color), 1.0);
+	return float4(UrsaEncodeDisplayOutput(color), 1.0);
+}
+ENDHLSL
+		}
+	}
+}

@@ -230,9 +230,18 @@ void Run()
 	const auto submitBatch = [&](const Token& token, const Vector<UInt8>& bytes)
 	{
 		const B::DataView data{bytes.data(), bytes.size(), 1, 0};
-		return InvokeVoid(G::NativeRenderingBindings_EnqueueBatch, api, &token, &data);
+		const auto name = StringView("");
+		return InvokeVoid(G::NativeRenderingBindings_EnqueueBatch, api, &token, &data, &name);
 	};
-	const auto end = [&](const Token& token) { Complete(InvokeVoid(G::NativeRenderingBindings_End, api, &token)); };
+	const auto end = [&](const Token& token)
+	{
+		auto result = InvokeVoid(G::NativeRenderingBindings_End, api, &token);
+		if (!result)
+		{
+			throw std::runtime_error("End render frame " + std::to_string(token.F_frameId) + ": " +
+			                         ToStdString(result.Error()));
+		}
+	};
 	B::BindingCommandWriter commands(C::hash);
 	const auto emptyBatch = commands.Bytes();
 	const auto firstToken = begin(77);
@@ -251,6 +260,7 @@ void Run()
 	std::thread worker([&] { workerRejected = !submitBatch(firstToken, emptyBatch); });
 	worker.join();
 	Expect(workerRejected && sceneApi.AcceptedRenderBatchCount() == 1, "Worker thread submitted a render batch");
+	Complete(InvokeVoid(G::NativeRenderingBindings_Submit, api, &firstToken));
 	end(firstToken);
 
 	const auto parent = Create(api, "父节点");
@@ -311,9 +321,9 @@ void Run()
 	Expect(std::abs(projection.F_VerticalFovRadians - 0.78539816f) < 0.0001f && projection.F_NearPlane == 0.1f &&
 	           projection.F_FarPlane == 100.f,
 	       "Default Camera projection changed");
-	const Projection desiredProjection{1.1f, 0.2f, 80.f};
+	const Projection desiredProjection{1.1f, 0.2f, 80.f, 0, 5.f};
 	Complete(InvokeVoid(R::NativeRuntimeBindings_SetCameraProjection, api, &camera, &desiredProjection));
-	const Projection invalidProjection{1.1f, 0.2f, 0.2f};
+	const Projection invalidProjection{1.1f, 0.2f, 0.2f, 0, 5.f};
 	Expect(!InvokeVoid(R::NativeRuntimeBindings_SetCameraProjection, api, &camera, &invalidProjection),
 	       "Invalid Camera projection was accepted");
 	projection = Value(Invoke<Projection>(R::NativeRuntimeBindings_GetCameraProjection, api, &camera));
@@ -424,6 +434,27 @@ void Run()
 	const auto cameraIdentityView = StringView(cameraIdentity);
 	const auto cull = [&](const Token& token)
 	{ return Value(Invoke<RenderResult>(G::NativeRenderingBindings_Cull, api, &token, &cameraIdentityView)); };
+	const auto wireMatrix = [](const Mat4& matrix)
+	{
+		W::Value_Ursa_Matrix4x4 value;
+		value.F_M00 = matrix.At(0, 0);
+		value.F_M10 = matrix.At(1, 0);
+		value.F_M20 = matrix.At(2, 0);
+		value.F_M30 = matrix.At(3, 0);
+		value.F_M01 = matrix.At(0, 1);
+		value.F_M11 = matrix.At(1, 1);
+		value.F_M21 = matrix.At(2, 1);
+		value.F_M31 = matrix.At(3, 1);
+		value.F_M02 = matrix.At(0, 2);
+		value.F_M12 = matrix.At(1, 2);
+		value.F_M22 = matrix.At(2, 2);
+		value.F_M32 = matrix.At(3, 2);
+		value.F_M03 = matrix.At(0, 3);
+		value.F_M13 = matrix.At(1, 3);
+		value.F_M23 = matrix.At(2, 3);
+		value.F_M33 = matrix.At(3, 3);
+		return value;
+	};
 	const B::Utf8View tags[]{StringView("SRPDefaultUnlit")};
 	W::Value_Ursa_Rendering_DrawingSettingsValue drawing;
 	drawing.F_ShaderTags = {tags, 1, 1, 0};
@@ -442,10 +473,17 @@ void Run()
 	const auto firstList = Value(list(first, firstCulling));
 	Expect(firstList.F_Context.F_frameId == first.F_frameId && firstList.F_Generation != 0,
 	       "RendererList lost frame identity");
+	const auto shadowViewProjection = wireMatrix(Mat4::Perspective(1.0f, 1.0f, 0.1f, 100.0f));
+	const auto shadowCulling = Value(Invoke<RenderResult>(G::NativeRenderingBindings_CullShadowCasters, api, &first,
+	                                                      &cameraIdentityView, &shadowViewProjection));
+	Expect(Value(list(first, shadowCulling)).F_Generation != 0,
+	       "Shadow caster culling did not return a usable same-frame RendererList");
+	Complete(InvokeVoid(G::NativeRenderingBindings_Submit, api, &first));
 	end(first);
 	const auto second = begin(2);
 	Expect(!list(second, firstCulling), "Previous-frame culling was accepted");
 	Expect(Value(list(second, cull(second))).F_Generation != 0, "Current-frame RendererList failed");
+	Complete(InvokeVoid(G::NativeRenderingBindings_Submit, api, &second));
 	end(second);
 
 	description = {8, 8, 0, 0, 0, 1};

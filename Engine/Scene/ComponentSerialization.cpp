@@ -46,6 +46,14 @@ Result<void> CameraComponent::Serialize(ArchiveWriter& writer) const
 	{
 		result = writer.Write("farPlane", Float64(farPlane));
 	}
+	if (result)
+	{
+		result = writer.Write("orthographic", orthographic);
+	}
+	if (result)
+	{
+		result = writer.Write("orthographicSize", Float64(orthographicSize));
+	}
 	if (!result)
 	{
 		return result;
@@ -71,6 +79,10 @@ Result<void> CameraComponent::Deserialize(const ArchiveReader& reader, Serializa
 	auto fov = reader.Number("verticalFovRadians");
 	auto nearValue = reader.Number("nearPlane");
 	auto farValue = reader.Number("farPlane");
+	const auto loadedOrthographic =
+	    reader.Contains("orthographic") ? reader.Boolean("orthographic") : Result<bool>::Success(false);
+	const auto loadedOrthographicSize =
+	    reader.Contains("orthographicSize") ? reader.Number("orthographicSize") : Result<Float64>::Success(5.0);
 	Rendering::CameraSettings loadedSettings;
 	if (reader.Contains("rendering"))
 	{
@@ -105,12 +117,15 @@ Result<void> CameraComponent::Deserialize(const ArchiveReader& reader, Serializa
 		}
 	}
 	auto valid = loadedSettings.Validate();
-	if (!valid || !fov || !nearValue || !farValue || fov.value <= 0 || fov.value >= 3.141592653589793 ||
-	    nearValue.value <= 0 || farValue.value <= nearValue.value || !ValidFloat(farValue.value))
+	if (!valid || !fov || !nearValue || !farValue || !loadedOrthographic || !loadedOrthographicSize || fov.value <= 0 ||
+	    fov.value >= 3.141592653589793 || nearValue.value <= 0 || farValue.value <= nearValue.value ||
+	    !ValidFloat(farValue.value) || loadedOrthographicSize.value <= 0 || !ValidFloat(loadedOrthographicSize.value))
 	{
 		return Result<void>::Failure("Invalid Camera component projection");
 	}
 	verticalFovRadians = Float32(fov.value);
+	orthographic = loadedOrthographic.value;
+	orthographicSize = Float32(loadedOrthographicSize.value);
 	nearPlane = Float32(nearValue.value);
 	farPlane = Float32(farValue.value);
 	rendering = loadedSettings;
@@ -120,19 +135,62 @@ Result<void> CameraComponent::Deserialize(const ArchiveReader& reader, Serializa
 Result<void> DirectionalLightComponent::Serialize(ArchiveWriter& writer) const
 {
 	auto result = WriteColor(writer, color);
-	return result ? writer.Write("intensity", Float64(intensity)) : result;
+	if (result)
+	{
+		result = writer.Write("intensity", Float64(intensity));
+	}
+	if (result)
+	{
+		result = writer.Write("castsShadows", castsShadows);
+	}
+	if (result)
+	{
+		result = writer.Write("shadowStrength", Float64(shadowStrength));
+	}
+	if (result)
+	{
+		result = writer.Write("shadowBias", Float64(shadowBias));
+	}
+	if (result)
+	{
+		result = writer.Write("shadowNormalBias", Float64(shadowNormalBias));
+	}
+	if (result)
+	{
+		result = writer.Write("softShadows", softShadows);
+	}
+	return result;
 }
 
 Result<void> DirectionalLightComponent::Deserialize(const ArchiveReader& reader, SerializationContext&)
 {
 	auto loadedColor = ReadColor(reader);
 	auto loadedIntensity = reader.Number("intensity");
-	if (!loadedColor || !loadedIntensity || !ValidLightColor(loadedColor.value) || !ValidFloat(loadedIntensity.value))
+	auto loadedCastsShadows =
+	    reader.Contains("castsShadows") ? reader.Boolean("castsShadows") : Result<bool>::Success(true);
+	auto loadedShadowStrength =
+	    reader.Contains("shadowStrength") ? reader.Number("shadowStrength") : Result<Float64>::Success(1.0);
+	auto loadedShadowBias =
+	    reader.Contains("shadowBias") ? reader.Number("shadowBias") : Result<Float64>::Success(0.001);
+	auto loadedShadowNormalBias =
+	    reader.Contains("shadowNormalBias") ? reader.Number("shadowNormalBias") : Result<Float64>::Success(0.01);
+	auto loadedSoftShadows =
+	    reader.Contains("softShadows") ? reader.Boolean("softShadows") : Result<bool>::Success(false);
+	if (!loadedColor || !loadedIntensity || !loadedCastsShadows || !loadedShadowStrength || !loadedShadowBias ||
+	    !loadedShadowNormalBias || !loadedSoftShadows || !ValidLightColor(loadedColor.value) ||
+	    !ValidFloat(loadedIntensity.value) ||
+	    !ValidDirectionalLightShadowSettings(Float32(loadedShadowStrength.value), Float32(loadedShadowBias.value),
+	                                         Float32(loadedShadowNormalBias.value)))
 	{
 		return Result<void>::Failure("Invalid DirectionalLight component");
 	}
 	color = loadedColor.value;
 	intensity = Float32(loadedIntensity.value);
+	castsShadows = loadedCastsShadows.value;
+	shadowStrength = Float32(loadedShadowStrength.value);
+	shadowBias = Float32(loadedShadowBias.value);
+	shadowNormalBias = Float32(loadedShadowNormalBias.value);
+	softShadows = loadedSoftShadows.value;
 	return {};
 }
 

@@ -241,6 +241,46 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	           Take(LoadScriptableAssetSource(workspace->Index().Filesystem(), assetSource, assetGuid))
 	                   .Payload()["Fields"]["value"] == 11,
 	       "Typed source Inspector did not refresh its fields or expire the previous callback target");
+	const auto rendererDataPath = Path("prj:UniversalRendererData.ursaasset");
+	Done(workspace->Index().Filesystem().WriteAtomic(rendererDataPath, {}));
+	Done(workspace->Database()->Refresh());
+	const auto rendererDataGuid = Take(workspace->Database()->Metadata(rendererDataPath)).guid;
+	ScriptTypeDescriptor rendererDataType;
+	rendererDataType.sourceGuid = Take(ResourceId::Parse("11111111-1111-4111-8111-111111111111"));
+	rendererDataType.localFileId = 42;
+	rendererDataType.scriptType = "ursa.rendering.universal-renderer-data";
+	rendererDataType.version = 1;
+	rendererDataType.kind = ScriptTypeKind::ScriptableObject;
+	rendererDataType.fields.push_back(
+	    {"cascadeSplits", "Array", "FloatingPoint", "System.Single[]", "[0.25,0.75]", "System.Single"});
+	Done(SaveScriptableAssetSource(workspace->Index().Filesystem(), rendererDataPath,
+	                               Take(CreateScriptableAssetWithDefaults(rendererDataGuid, rendererDataType))));
+	auto rendererDataInspector = Take(ScriptableAssetInspector::Open(*workspace, rendererDataPath, rendererDataType));
+	const auto drawRendererData = [&]
+	{
+		ImGui::NewFrame();
+		ImGui::Begin("Renderer asset ordering");
+		auto result = rendererDataInspector->Draw({}, {});
+		ImGui::End();
+		ImGui::Render();
+		return result;
+	};
+	Take(drawRendererData());
+	auto* rendererDataWindow = ImGui::FindWindowByName("Renderer asset ordering");
+	Expect(rendererDataWindow != nullptr, "Renderer data Inspector window was not created");
+	const String splitPath = "/Fields/cascadeSplits";
+	const String secondSplitPath = splitPath + "/1";
+	const ImGuiID splitFieldId = ImHashStr(splitPath.c_str(), 0, rendererDataWindow->ID);
+	const ImGuiID secondSplitId = ImHashStr(secondSplitPath.c_str(), 0, splitFieldId);
+	ImGui::ActivateItemByID(ImHashStr("^", 0, secondSplitId));
+	Expect(Take(drawRendererData()) && rendererDataInspector->Dirty(),
+	       "Renderer data Inspector did not apply an ordered property change or report Dirty");
+	Done(rendererDataInspector->Save());
+	const auto savedRendererData =
+	    Take(LoadScriptableAssetSource(workspace->Index().Filesystem(), rendererDataPath, rendererDataGuid));
+	Expect(savedRendererData.Payload()["Fields"]["cascadeSplits"] == nlohmann::json::array({0.75, 0.25}) &&
+	           !rendererDataInspector->Dirty(),
+	       "Renderer data Inspector did not save and reopen the reordered feature list");
 	context.serializedTarget.reset();
 	context.assetSelection.reset();
 	context.targetIdentity.clear();

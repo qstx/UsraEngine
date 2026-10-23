@@ -1,10 +1,33 @@
 Shader "Ursa/Error"
 {
+	HLSLINCLUDE
+#include "../ShaderLibrary/Core.hlsl"
+ENDHLSL
 	SubShader
 	{
+		Tags { "RenderPipeline" = "UrsaUniversal" }
 		Pass
 		{
 			Name "Error"
+			Tags { "LightMode" = "UniversalForward" }
+			Cull Off
+			ZWrite On
+			HLSLPROGRAM
+#pragma vertex ErrorVertex
+#pragma fragment ErrorFragment
+struct ErrorAttributes
+{
+	float3 positionOS : POSITION;
+};
+float4 ErrorVertex(ErrorAttributes input) : SV_Position
+{
+	return UrsaTransformObjectToHClip(input.positionOS);
+}
+float4 ErrorFragment() : SV_Target0
+{
+	return float4(1.0, 0.0, 1.0, 1.0);
+}
+ENDHLSL
 		}
 	}
 }

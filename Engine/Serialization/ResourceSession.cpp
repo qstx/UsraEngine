@@ -9,6 +9,7 @@
 #include <Serialization/TextureResource.hpp>
 #include <Shader/ShaderAssetResource.hpp>
 #include <Shader/ShaderBuiltins.hpp>
+#include <Vfs/AssetRoots.hpp>
 #include <nlohmann/json.hpp>
 #include <cmath>
 #include <limits>
@@ -586,28 +587,31 @@ Result<std::shared_ptr<const Shader::ShaderAsset>> ResourceSession::LoadShaderIn
 	{
 		return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(cached->second);
 	}
-	if (strictArtifactReads && (id == Shader::BuiltinUnlitShaderId() || id == Shader::BuiltinPbrShaderId()))
-	{
-		auto builtin = std::make_shared<const Shader::ShaderAsset>(id == Shader::BuiltinUnlitShaderId()
-		                                                               ? Shader::CreateBuiltinUnlitShaderAsset()
-		                                                               : Shader::CreateBuiltinPbrShaderAsset());
-		shaders.emplace(key, builtin);
-		return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(std::move(builtin));
-	}
 	auto location = ResolveResource(id);
 	if (!location)
 	{
-		if (id == Shader::BuiltinUnlitShaderId())
+		if (id == Shader::BuiltinUnlitShaderId() || id == Shader::BuiltinPbrShaderId() ||
+		    id == Shader::BuiltinBlitShaderId() || id == Shader::BuiltinFinalPostShaderId())
 		{
-			auto builtin = std::make_shared<const Shader::ShaderAsset>(Shader::CreateBuiltinUnlitShaderAsset());
-			shaders.emplace(key, builtin);
-			return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(std::move(builtin));
-		}
-		if (id == Shader::BuiltinPbrShaderId())
-		{
-			auto builtin = std::make_shared<const Shader::ShaderAsset>(Shader::CreateBuiltinPbrShaderAsset());
-			shaders.emplace(key, builtin);
-			return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(std::move(builtin));
+			auto engineFiles = OpenEngineFileSystem();
+			if (!engineFiles)
+			{
+				return Result<std::shared_ptr<const Shader::ShaderAsset>>::Failure(engineFiles.error);
+			}
+			auto path = VirtualPath::Parse(Shader::BuiltinShaderAssetPath(id));
+			if (!path)
+			{
+				return Result<std::shared_ptr<const Shader::ShaderAsset>>::Failure(path.error);
+			}
+			auto loaded = Shader::LoadShaderAssetResource(engineFiles.value, path.value);
+			if (!loaded || loaded.value.id != id)
+			{
+				return Result<std::shared_ptr<const Shader::ShaderAsset>>::Failure(
+				    loaded ? "Built-in Shader GUID differs from its imported engine asset" : loaded.error);
+			}
+			auto asset = std::make_shared<const Shader::ShaderAsset>(std::move(loaded.value));
+			shaders.emplace(key, asset);
+			return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(std::move(asset));
 		}
 		return Result<std::shared_ptr<const Shader::ShaderAsset>>::Failure(location.error);
 	}

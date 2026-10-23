@@ -243,6 +243,7 @@ public:
 	                              MaterialPropertyValue value);
 
 	Result<void> ValidateAgainstShader(const Shader::ShaderAsset& shader) const;
+	Result<void> UpgradeBuiltinPropertySchema();
 
 	Result<MaterialPropertyValue> PropertyValue(const String& identifier, const Shader::ShaderAsset& shader) const;
 
@@ -297,6 +298,7 @@ private:
 	AssetReference assetIdentity;
 	ResourceId localIdentity = ResourceId::Generate();
 	ResourceId shaderId;
+	UInt32 shaderPropertyVersion = 0;
 	std::shared_ptr<const Shader::ShaderAsset> shaderAsset;
 	MaterialParameters parameters;
 	bool samplerOverridden = false;

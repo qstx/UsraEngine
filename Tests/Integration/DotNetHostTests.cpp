@@ -140,6 +140,14 @@ int main(int argumentCount, char** arguments)
 		     {"Group", "Game"},
 		     {"ClrTypeName", "Ursa.SessionFixtures.ManagedRenderComponentProbe, Ursa.SessionFixtures"},
 		     {"LegacyIdentity", true}});
+		catalog["Scripts"].push_back(
+		    {{"SourceGuid", "11111111-1111-4111-8111-111111111111"},
+		     {"LocalFileId", 12u},
+		     {"Kind", "Behaviour"},
+		     {"ScriptType", "auto:11111111-1111-4111-8111-111111111111:Ursa.SessionFixtures.UniversalPipelineProbe"},
+		     {"Version", 1u},
+		     {"Group", "Game"},
+		     {"ClrTypeName", "Ursa.SessionFixtures.UniversalPipelineProbe, Ursa.SessionFixtures"}});
 		for (const auto& type : Vector<std::pair<String, String>>{
 		         {"ImportProbeAsset", "test.import-probe"},
 		         {"ImportChildAsset", "test.import-child"},
@@ -413,6 +421,7 @@ int main(int argumentCount, char** arguments)
 		TestManagedForward(*host, sessionContentPath);
 		TestDocumentedCustomPipeline(*host, sessionContentPath);
 		TestForwardCameraRegions(*host, sessionContentPath);
+		TestUniversalPostProcessingBacking(*host, sessionContentPath);
 
 #if defined(URSA_DOTNET_TEST_EDITOR)
 		TestEditorExtensions(*host, filesystem, root);

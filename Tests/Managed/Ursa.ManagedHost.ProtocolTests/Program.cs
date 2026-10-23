@@ -169,13 +169,38 @@ internal static unsafe partial class Program
 		commands.SetViewport(0, 0, 640, 480);
 		commands.SetScissor(0, 0, 640, 480);
 		commands.DrawMesh(mesh!, material!, Matrix4x4.Identity);
+		commands.SetViewProjectionMatrix(Matrix4x4.Identity);
+		var originalVectors = new[] { new Vector4(6.25f, -9.5f, 13.75f, 0.125f), new Vector4(-3.5f, 2.25f, 17.5f, -0.75f) };
+		var vectors = (Vector4[])originalVectors.Clone();
+		byte[] originalVectorBytes = MemoryMarshal.AsBytes(originalVectors.AsSpan()).ToArray();
+		var originalMatrices = new[] { new Matrix4x4(new float[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }) };
+		var matrices = (Matrix4x4[])originalMatrices.Clone();
+		byte[] originalMatrixBytes = MemoryMarshal.AsBytes(originalMatrices.AsSpan()).ToArray();
+		commands.SetGlobalVectorArray("_ProbeVectors", vectors);
+		commands.SetGlobalMatrixArray("_ProbeMatrices", matrices);
+		vectors[0] = new Vector4(91.125f, -71.25f, 53.5f, 19.75f);
+		matrices[0] = new Matrix4x4(new float[] { 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166 });
+		bool oversizedVectorArrayRejected = false;
+		try { commands.SetGlobalVectorArray("_TooManyVectors", new Vector4[Ursa.Rendering.CommandBuffer.MaximumGlobalParameterArrayElements + 1]); }
+		catch (ArgumentOutOfRangeException) { oversizedVectorArrayRejected = true; }
+		bool oversizedMatrixArrayRejected = false;
+		try { commands.SetGlobalMatrixArray("_TooManyMatrices", new Matrix4x4[Ursa.Rendering.CommandBuffer.MaximumGlobalParameterArrayElements + 1]); }
+		catch (ArgumentOutOfRangeException) { oversizedMatrixArrayRejected = true; }
+		Expect(Ursa.Rendering.CommandBuffer.MaximumGlobalParameterArrayElements == 16 && oversizedVectorArrayRejected &&
+		       oversizedMatrixArrayRejected, "CommandBuffer accepted an array above its public fixed capacity");
+		commands.SetDepthBias(128, 0.25f);
+		commands.RestoreDepthBias();
 		commands.Execute(context);
 		Expect(submittedRenderBatches.Count > 0, "CommandBuffer did not submit a batch");
 		byte[] executedBatch = submittedRenderBatches[^1];
-		Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(8)) == 5,
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(8)) == 12,
 		       "CommandBuffer did not preserve command count");
 		uint[] expectedOpcodes = { CommandCodec.Opcode_RenderCommands_SetRenderTarget, CommandCodec.Opcode_RenderCommands_ClearTarget,
-			CommandCodec.Opcode_RenderCommands_SetViewport, CommandCodec.Opcode_RenderCommands_SetScissor, CommandCodec.Opcode_RenderCommands_DrawMesh };
+			CommandCodec.Opcode_RenderCommands_SetViewport, CommandCodec.Opcode_RenderCommands_SetScissor,
+			CommandCodec.Opcode_RenderCommands_DrawMesh, CommandCodec.Opcode_RenderCommands_SetGlobalMatrix,
+			CommandCodec.Opcode_RenderCommands_SetGlobalVectorArray, CommandCodec.Opcode_RenderCommands_SetGlobalMatrixArray,
+			CommandCodec.Opcode_RenderCommands_SetGlobalInt, CommandCodec.Opcode_RenderCommands_SetGlobalInt,
+			CommandCodec.Opcode_RenderCommands_SetGlobalFloat, CommandCodec.Opcode_RenderCommands_SetGlobalInt };
 		int offset = BindingCommandWriter.HeaderSize;
 		foreach (uint opcode in expectedOpcodes)
 		{
@@ -183,6 +208,11 @@ internal static unsafe partial class Program
 			       "CommandBuffer changed recorded command order");
 			offset += checked((int)BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(offset + 4)));
 		}
+		Expect(executedBatch.AsSpan().IndexOf(originalVectorBytes) >= 0 &&
+		       executedBatch.AsSpan().IndexOf(originalMatrixBytes) >= 0 &&
+		       executedBatch.AsSpan().IndexOf(MemoryMarshal.AsBytes(vectors.AsSpan()).ToArray()) < 0 &&
+		       executedBatch.AsSpan().IndexOf(MemoryMarshal.AsBytes(matrices.AsSpan()).ToArray()) < 0,
+		       "Global uniform arrays were not copied when the CommandBuffer recorded them");
 		mesh = null;
 		material = null;
 		commands.Clear();
@@ -197,7 +227,7 @@ internal static unsafe partial class Program
 		       BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(BindingCommandWriter.HeaderSize)) == CommandCodec.Opcode_RenderCommands_SetRenderTarget &&
 		       BinaryPrimitives.ReadUInt32LittleEndian(nextBatch.AsSpan(BindingCommandWriter.HeaderSize + 12)) == 13,
 		       "Cleared CommandBuffer did not execute only its newly recorded commands");
-		Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(8)) == 5,
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(executedBatch.AsSpan(8)) == 12,
 		       "Clearing a CommandBuffer mutated a previously submitted batch");
 		commands.Clear();
 		var sourceTexture = Ursa.Rendering.RenderTexture.FromHandle(
@@ -245,24 +275,20 @@ internal static unsafe partial class Program
 			offset += checked((int)BinaryPrimitives.ReadUInt32LittleEndian(resourceBatch.AsSpan(offset + 4)));
 		}
 		commands.Clear();
-		commands.GetTemporaryTarget(88, descriptor);
-		commands.Execute(context);
-		Expect(BinaryPrimitives.ReadUInt32LittleEndian(submittedRenderBatches[^1].AsSpan(8)) == 1,
-		       "Temporary target creation could not be delivered separately from its use");
-		commands.Clear();
-		commands.SetGlobalTexture("_Source", (Ursa.Rendering.RenderTargetIdentifier)88u);
+		commands.GetTemporaryTarget(89, descriptor);
+		commands.SetGlobalTexture("_Source", (Ursa.Rendering.RenderTargetIdentifier)89u);
 		commands.SetGlobalInt("_Mode", 3);
 		commands.SetGlobalMatrix("_Transform", Matrix4x4.Identity);
 		commands.SetGlobalBuffer("_Data", sourceBuffer);
-		commands.Blit(88u, Ursa.Rendering.RenderTargetIdentifier.CameraTarget, blitMaterial!);
+		commands.Blit(89u, Ursa.Rendering.RenderTargetIdentifier.CameraTarget, blitMaterial!);
 		commands.SetRenderTarget(Ursa.Rendering.RenderTargetIdentifier.CameraTarget);
 		commands.SetRenderTargets(new Ursa.Rendering.RenderTargetIdentifier[] {sourceTexture, destinationTexture});
 		commands.DrawFullscreen(blitMaterial!);
 		commands.CopyTexture((Ursa.Rendering.RenderTargetIdentifier)sourceTexture,
 		                     (Ursa.Rendering.RenderTargetIdentifier)destinationTexture);
-		commands.ReleaseTemporaryTarget(88);
+		commands.ReleaseTemporaryTarget(89);
 		commands.Execute(context);
-		Expect(BinaryPrimitives.ReadUInt32LittleEndian(submittedRenderBatches[^1].AsSpan(8)) == 10,
+		Expect(BinaryPrimitives.ReadUInt32LittleEndian(submittedRenderBatches[^1].AsSpan(8)) == 11,
 		       "Extended target/global/fullscreen commands were not delivered");
 		commands.Clear();
 		var compute = ComputeShader.FromReference(new AssetReference("12345678-1234-5678-9012-345678901234"));
@@ -305,10 +331,9 @@ internal static unsafe partial class Program
 	private static void ManagedRenderPipelineLifecycleTests()
 	{
 		Ursa.Rendering.RenderPipelineManager.Reset();
-		var defaultTypeIdentity = (UrsaScriptTypeAttribute?)Attribute.GetCustomAttribute(
-			typeof(Ursa.Rendering.ForwardRenderPipelineAsset), typeof(UrsaScriptTypeAttribute));
-		Expect(defaultTypeIdentity?.Id == "ursa.rendering.forward" && defaultTypeIdentity.Version == 1,
-		       "Framework Forward pipeline type did not expose its stable identity");
+		Expect(Attribute.GetCustomAttribute(typeof(Ursa.Rendering.ForwardRenderPipelineAsset),
+		       typeof(UrsaScriptTypeAttribute)) == null,
+		       "Framework Forward pipeline type must use catalog metadata instead of UrsaScriptType");
 		var first = Ursa.ScriptableObject.CreateInstance<PipelineProbeAsset>();
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(first);
 		Expect(Ursa.Rendering.RenderPipelineManager.ActivePipeline == null,
@@ -473,7 +498,12 @@ internal static unsafe partial class Program
 		TestImporterRegistration();
 		TestPostprocessorRegistration();
 		RenderCommandProtocolTests.Run();
+		RendererInputContractTests.Run();
+		RenderOutputBackingCacheTests.Run();
 		ScriptableAssetFieldTests.Run();
+		UniversalPipelineAssetSettingsTests.Run();
+		UniversalPipelineFeatureTests.Run();
+		TemporaryRenderTargetScopeTests.Run();
 		ShaderFieldTests.Run();
 		ScriptableAssetGraphTests.Run();
 		ScriptableAssetRecoveryTests.Run();
@@ -597,7 +627,7 @@ internal static unsafe partial class Program
 		byte[] renderBatch = emptyCommandWriter.ToArray();
 		Ursa.Rendering.RenderContextToken renderToken = Ursa.Rendering.NativeRenderingBindings.Begin(9, 1);
 		int submissionsBeforeProtocol = renderBatchSubmissions;
-		Ursa.Rendering.RenderCommandProtocol.Submit(renderToken, renderBatch);
+		Ursa.Rendering.RenderCommandProtocol.Submit(renderToken, renderBatch, "Protocol test");
 		Expect(renderBatchSubmissions == submissionsBeforeProtocol + 1,
 		       "Managed RenderCommandProtocol did not submit its fixed-layout batch");
 		Ursa.Rendering.NativeRenderingBindings.End(renderToken);

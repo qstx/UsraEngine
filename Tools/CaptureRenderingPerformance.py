@@ -18,12 +18,10 @@ import time
 
 CPU_REGIONS = (
     "Engine.Frame", "Engine.GameFrame", "Engine.RenderPreparation",
-    "Renderer3D.Record.BuildPasses", "Renderer3D.Record.BuildBindGroups",
-    "Renderer3D.Record.ResolveItems", "Renderer3D.WaitPrevious.Fence",
-    "Renderer3D.SwapchainAcquire", "Renderer3D.SwapchainPresent",
+    "Rendering.FrameSlotWait", "Rendering.SwapchainAcquire", "Rendering.SwapchainPresent",
+    "SceneDrawEncoder.CacheMaintenance",
     "SceneDrawEncoder.Record", "SceneDrawEncoder.Record.BuildPasses",
     "SceneDrawEncoder.Record.BuildBindGroups", "SceneDrawEncoder.Record.EncodeCommands",
-    "Rendering.FrameSlotWait", "Rendering.SwapchainAcquire", "Rendering.SwapchainPresent",
 )
 
 

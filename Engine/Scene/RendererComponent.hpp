@@ -33,6 +33,26 @@ public:
 
 	Result<void> SetMaterials(Vector<std::shared_ptr<MaterialInstance>> values);
 
+	bool CastShadows() const
+	{
+		return castShadows;
+	}
+
+	void SetCastShadows(bool value)
+	{
+		castShadows = value;
+	}
+
+	bool ReceiveShadows() const
+	{
+		return receiveShadows;
+	}
+
+	void SetReceiveShadows(bool value)
+	{
+		receiveShadows = value;
+	}
+
 	Result<std::shared_ptr<MaterialInstance>> Material();
 
 	Result<Vector<std::shared_ptr<MaterialInstance>>> Materials();
@@ -44,5 +64,7 @@ private:
 	friend class Rendering::RenderScene;
 	Vector<std::shared_ptr<MaterialInstance>> materials;
 	Vector<bool> instantiated;
+	bool castShadows = true;
+	bool receiveShadows = true;
 };
 } // namespace Ursa

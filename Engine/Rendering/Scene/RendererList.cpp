@@ -42,6 +42,39 @@ bool Visible(const Bounds& bounds, const Mat4& projection)
 	return true;
 }
 
+bool SphereVisible(Vec3 center, Float32 radius, const Mat4& projection)
+{
+	if (!std::isfinite(radius) || radius < 0)
+	{
+		return false;
+	}
+	// A sphere's support distance along each normalized frustum plane is exactly its radius.
+	for (UInt32 plane = 0; plane < 6; ++plane)
+	{
+		Array<Float32, 4> coefficients{};
+		for (Int32 column = 0; column < 4; ++column)
+		{
+			coefficients[column] =
+			    plane == 4 ? projection.At(2, column)
+			               : projection.At(3, column) + (plane % 2 == 0 ? 1.0f : -1.0f) *
+			                                                projection.At(plane == 5 ? 2 : Int32(plane / 2), column);
+		}
+		const Float32 normalLength = std::sqrt(coefficients[0] * coefficients[0] + coefficients[1] * coefficients[1] +
+		                                       coefficients[2] * coefficients[2]);
+		if (normalLength <= 1e-8f)
+		{
+			continue;
+		}
+		const Float32 signedDistance =
+		    coefficients[0] * center.x + coefficients[1] * center.y + coefficients[2] * center.z + coefficients[3];
+		if (signedDistance < -radius * normalLength - 1e-5f)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 Int32 Queue(const RenderObject& object)
 {
 	if (object.shader)
@@ -154,13 +187,34 @@ Result<bool> Pass(const std::shared_ptr<const Shader::ShaderAsset>& shaderAsset,
                   UInt32& subShaderIndex, UInt32& passIndex, std::optional<ResolvedGraphicsPass>& resolved,
                   Map<String, ShaderPassSelectionCacheEntry>& cache)
 {
+	const String requiredInputPass =
+	    drawing.shaderTags.size() == 1 &&
+	            (drawing.shaderTags.front().name == "DepthOnly" || drawing.shaderTags.front().name == "DepthNormals")
+	        ? drawing.shaderTags.front().name
+	        : String{};
+	auto missingInputPass = [&]()
+	{
+		const String shaderName = shaderAsset ? shaderAsset->name : String("<missing shader>");
+		const std::string shaderLabel = ToStdString(shaderName);
+		return Result<bool>::Failure(ToUrsaString(
+		    "Shader '" + shaderLabel + "' (" + (shaderAsset ? ToStdString(shaderAsset->id.ToString()) : "no asset") +
+		    ") is missing required Shader Pass '" + ToStdString(requiredInputPass) + "' for the camera input prepass"));
+	};
 	if (!shaderAsset)
 	{
+		if (!requiredInputPass.empty())
+		{
+			return missingInputPass();
+		}
 		return Result<bool>::Success(true);
 	}
 	const String key = PassSelectionKey(*shaderAsset, drawing);
 	if (const auto found = cache.find(key); found != cache.end())
 	{
+		if (!found->second.matched && !requiredInputPass.empty())
+		{
+			return missingInputPass();
+		}
 		subShaderIndex = found->second.subShaderIndex;
 		passIndex = found->second.passIndex;
 		resolved = found->second.resolvedPass;
@@ -179,6 +233,10 @@ Result<bool> Pass(const std::shared_ptr<const Shader::ShaderAsset>& shaderAsset,
 	if (!selected)
 	{
 		return Result<bool>::Failure(selected.error);
+	}
+	if (!selected.value && !requiredInputPass.empty())
+	{
+		return missingInputPass();
 	}
 	ShaderPassSelectionCacheEntry selection;
 	selection.matched = selected.value.has_value();
@@ -280,6 +338,8 @@ Result<CullingResults> RenderSceneContext::Cull(const CameraData& camera)
 	}
 	auto& output = *visibility[visibilityCount];
 	output.indices.clear();
+	output.directionalLightIndices.clear();
+	output.pointLightIndices.clear();
 	output.indices.reserve(scene->Objects().size());
 	if (++output.generation == 0)
 	{
@@ -289,6 +349,75 @@ Result<CullingResults> RenderSceneContext::Cull(const CameraData& camera)
 	{
 		const auto& object = scene->Objects()[index];
 		if ((camera.settings.cullingMask & (1u << object.layer)) && Visible(object.worldBounds, camera.viewProjection))
+		{
+			output.indices.push_back(UInt32(index));
+		}
+	}
+	for (Size index = 0; index < scene->Lighting().directional.size(); ++index)
+	{
+		const auto& light = scene->Lighting().directional[index];
+		if (light.layer < 32 && (camera.settings.cullingMask & (1u << light.layer)))
+		{
+			output.directionalLightIndices.push_back(UInt32(index));
+		}
+	}
+	for (Size index = 0; index < scene->Lighting().point.size(); ++index)
+	{
+		const auto& light = scene->Lighting().point[index];
+		if (light.layer >= 32 || !(camera.settings.cullingMask & (1u << light.layer)))
+		{
+			continue;
+		}
+		if (SphereVisible(light.position, light.range, camera.viewProjection))
+		{
+			output.pointLightIndices.push_back(UInt32(index));
+		}
+	}
+	return Result<CullingResults>::Success({context, UInt32(visibilityCount++), output.generation});
+}
+
+Result<CullingResults> RenderSceneContext::CullShadowCasters(const CameraData& receiverCamera,
+                                                             const Mat4& lightViewProjection)
+{
+	auto valid = Validate(context);
+	if (!valid)
+	{
+		return Result<CullingResults>::Failure(valid.error);
+	}
+	valid = receiverCamera.settings.Validate();
+	if (!valid)
+	{
+		return Result<CullingResults>::Failure(valid.error);
+	}
+	for (Float32 value : lightViewProjection.values)
+	{
+		if (!std::isfinite(value))
+		{
+			return Result<CullingResults>::Failure("Shadow culling matrix must be finite");
+		}
+	}
+	if (visibilityCount == maxFrameResults)
+	{
+		return Result<CullingResults>::Failure("Frame culling result budget exceeded");
+	}
+	if (visibilityCount == visibility.size())
+	{
+		visibility.push_back(MakeUnique<Visibility>(Memory::MemoryTag::Renderer));
+	}
+	auto& output = *visibility[visibilityCount];
+	output.indices.clear();
+	output.directionalLightIndices.clear();
+	output.pointLightIndices.clear();
+	output.indices.reserve(scene->Objects().size());
+	if (++output.generation == 0)
+	{
+		return Result<CullingResults>::Failure("Culling result generation exhausted");
+	}
+	for (Size index = 0; index < scene->Objects().size(); ++index)
+	{
+		const auto& object = scene->Objects()[index];
+		if (object.castShadows && object.layer < 32 && (receiverCamera.settings.cullingMask & (1u << object.layer)) &&
+		    Visible(object.worldBounds, lightViewProjection))
 		{
 			output.indices.push_back(UInt32(index));
 		}
@@ -304,6 +433,30 @@ Result<const Vector<UInt32>*> RenderSceneContext::VisibleObjects(CullingResults 
 		return Result<const Vector<UInt32>*>::Failure(valid ? "Invalid culling result generation" : valid.error);
 	}
 	return Result<const Vector<UInt32>*>::Success(&visibility[results.index]->indices);
+}
+
+Result<Ursa::Rendering::VisibleLights> RenderSceneContext::VisibleLightsFor(CullingResults results) const
+{
+	auto valid = Validate(results.context);
+	if (!valid || results.index >= visibilityCount || visibility[results.index]->generation != results.generation)
+	{
+		return Result<Ursa::Rendering::VisibleLights>::Failure(valid ? "Invalid culling result generation"
+		                                                             : valid.error);
+	}
+	const auto& visible = *visibility[results.index];
+	const auto& source = scene->Lighting();
+	Ursa::Rendering::VisibleLights result;
+	result.directional.reserve(visible.directionalLightIndices.size());
+	for (UInt32 index : visible.directionalLightIndices)
+	{
+		result.directional.push_back(source.directional[index]);
+	}
+	result.point.reserve(visible.pointLightIndices.size());
+	for (UInt32 index : visible.pointLightIndices)
+	{
+		result.point.push_back(source.point[index]);
+	}
+	return Result<Ursa::Rendering::VisibleLights>::Success(std::move(result));
 }
 
 Result<RendererList> RenderSceneContext::CreateRendererList(CullingResults results, const DrawingSettings& drawing,

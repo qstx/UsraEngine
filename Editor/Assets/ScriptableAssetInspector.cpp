@@ -152,12 +152,14 @@ Result<void> ScriptableAssetInspector::Save()
 }
 
 Result<bool> ScriptableAssetInspector::Draw(const std::function<void(const VirtualPath&)>& requestImport,
-                                            const AssetImporterInspector::CustomDraw& custom)
+                                            const AssetImporterInspector::CustomDraw& custom,
+                                            const Vector<ScriptTypeDescriptor>* scriptTypes)
 {
 	try
 	{
 		ManagedEditorContext context;
 		context.workspace = workspace;
+		context.scriptTypes = scriptTypes;
 		context.serializedTarget = Properties();
 		context.targetUsesDocument = false;
 		context.assetSelection = AssetReference{asset.SourceGuid(), asset.LocalFileId()};

@@ -1,0 +1,46 @@
+Shader "Ursa/Demo/ScreenTint"
+{
+	HLSLINCLUDE
+#include "../ShaderLibrary/Textures.hlsl"
+TEXTURE2D(_BlitTexture);
+SAMPLER(sampler_BlitTexture);
+cbuffer ScreenTintParameters
+{
+	float4 _UrsaDemoScreenTint;
+}
+struct ScreenTintVaryings
+{
+	float4 positionCS : SV_Position;
+	float2 uv : TEXCOORD0;
+};
+ScreenTintVaryings ScreenTintVertex(uint id : SV_VertexID)
+{
+	ScreenTintVaryings output;
+	float2 uv = float2((id << 1) & 2, id & 2);
+	output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+	output.uv = float2(uv.x, 1.0 - uv.y);
+	return output;
+}
+float4 ScreenTintFragment(ScreenTintVaryings input) : SV_Target0
+{
+	float4 source = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv);
+	return float4(source.rgb * _UrsaDemoScreenTint.rgb, source.a);
+}
+	ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaUniversal" }
+		Pass
+		{
+			Name "ScreenTint"
+			Tags { "LightMode" = "UniversalFeatureScreenTint" }
+			Cull Off
+			ZWrite Off
+			ZTest Off
+			HLSLPROGRAM
+#pragma vertex ScreenTintVertex
+#pragma fragment ScreenTintFragment
+			ENDHLSL
+		}
+	}
+}

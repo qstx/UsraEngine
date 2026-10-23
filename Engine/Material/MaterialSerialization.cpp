@@ -4,6 +4,7 @@
 #include <Serialization/ResourceSession.hpp>
 #include <Serialization/MaterialResource.hpp>
 #include <Serialization/AssetReference.hpp>
+#include <limits>
 
 namespace Ursa
 {
@@ -331,6 +332,10 @@ Result<void> MaterialInstance::Serialize(ArchiveWriter& writer) const
 	if (result && IsShaderBacked())
 	{
 		result = WriteAssetReference(writer, "shaderId", {shaderId, 0});
+		if (result)
+		{
+			result = writer.Write("shaderPropertyVersion", UInt64(shaderPropertyVersion));
+		}
 	}
 	auto fields = writer.Object("parameters");
 	if (!fields)
@@ -499,6 +504,16 @@ Result<void> MaterialInstance::Deserialize(const ArchiveReader& reader, Serializ
 		return restoredLegacy;
 	}
 	candidate.shaderId = shaderReference.value.guid;
+	if (reader.Contains("shaderPropertyVersion"))
+	{
+		auto schemaVersion = reader.Unsigned("shaderPropertyVersion");
+		if (!schemaVersion || schemaVersion.value > std::numeric_limits<UInt32>::max())
+		{
+			return Result<void>::Failure(schemaVersion ? "Material Shader property version is out of range"
+			                                           : schemaVersion.error);
+		}
+		candidate.shaderPropertyVersion = UInt32(schemaVersion.value);
+	}
 	auto names = overrides.value.Fields();
 	if (!names)
 	{
@@ -517,6 +532,11 @@ Result<void> MaterialInstance::Deserialize(const ArchiveReader& reader, Serializ
 			return Result<void>::Failure("Material property " + propertyName + ": " + value.error);
 		}
 		candidate.propertyOverrides.emplace(propertyName, std::move(value.value));
+	}
+	auto upgradedSchema = candidate.UpgradeBuiltinPropertySchema();
+	if (!upgradedSchema)
+	{
+		return upgradedSchema;
 	}
 	for (const ArchiveReader& keywordReader : keywordReaders.value)
 	{

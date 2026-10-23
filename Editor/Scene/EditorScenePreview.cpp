@@ -35,8 +35,13 @@ Result<void> EditorScenePreview::Render(const Scene& scene,
 	data.settings.type = Rendering::CameraType::SceneView;
 	data.debugName = "Scene View Preview";
 	data.position = camera.position;
-	data.viewProjection =
-	    camera.ViewProjection(Float32(target->description.width) / Float32(target->description.height));
+	const Float32 aspect = Float32(target->description.width) / Float32(target->description.height);
+	data.view = camera.View();
+	data.projection = camera.Projection(aspect);
+	data.viewProjection = data.projection * data.view;
+	data.inverseViewProjection = data.viewProjection.Inverse();
+	data.nearPlane = camera.nearPlane;
+	data.farPlane = camera.farPlane;
 	return renderer->RenderOffscreen(scene, target, finalState, Rendering::CameraType::SceneView, data);
 }
 

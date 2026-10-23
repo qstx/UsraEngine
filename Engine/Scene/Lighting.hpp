@@ -3,6 +3,7 @@
 #include <Core/Containers.hpp>
 #include <Material/Color.hpp>
 #include <Math/Vec3.hpp>
+#include <Serialization/ResourceId.hpp>
 #include <Scene/Component.hpp>
 #include <cstdint>
 
@@ -13,6 +14,13 @@ struct DirectionalLightData
 	Vec3 direction{0.0f, 0.0f, -1.0f};
 	Color color{};
 	Ursa::Float32 intensity = 1.0f;
+	bool castsShadows = true;
+	Ursa::Float32 shadowStrength = 1.0f;
+	Ursa::Float32 shadowBias = 0.001f;
+	Ursa::Float32 shadowNormalBias = 0.01f;
+	bool softShadows = false;
+	ResourceId identity;
+	Ursa::UInt32 layer = 0;
 };
 
 struct PointLightData
@@ -21,6 +29,8 @@ struct PointLightData
 	Color color{};
 	Ursa::Float32 intensity = 1.0f;
 	Ursa::Float32 range = 10.0f;
+	ResourceId identity;
+	Ursa::UInt32 layer = 0;
 };
 
 struct SceneLighting
@@ -50,6 +60,49 @@ public:
 
 	Result<void> SetIntensity(Ursa::Float32 lightIntensity);
 
+	Result<void> SetCastsShadows(bool value)
+	{
+		castsShadows = value;
+		return {};
+	}
+
+	Result<void> SetShadowStrength(Ursa::Float32 value);
+
+	Result<void> SetShadowBias(Ursa::Float32 value);
+
+	Result<void> SetShadowNormalBias(Ursa::Float32 value);
+
+	Result<void> SetSoftShadows(bool value)
+	{
+		softShadows = value;
+		return {};
+	}
+
+	bool CastsShadows() const
+	{
+		return castsShadows;
+	}
+
+	Ursa::Float32 ShadowStrength() const
+	{
+		return shadowStrength;
+	}
+
+	Ursa::Float32 ShadowBias() const
+	{
+		return shadowBias;
+	}
+
+	Ursa::Float32 ShadowNormalBias() const
+	{
+		return shadowNormalBias;
+	}
+
+	bool SoftShadows() const
+	{
+		return softShadows;
+	}
+
 	Ursa::Color Color() const
 	{
 		return color;
@@ -63,6 +116,11 @@ public:
 private:
 	Ursa::Color color{};
 	Ursa::Float32 intensity = 1.0f;
+	bool castsShadows = true;
+	Ursa::Float32 shadowStrength = 1.0f;
+	Ursa::Float32 shadowBias = 0.001f;
+	Ursa::Float32 shadowNormalBias = 0.01f;
+	bool softShadows = false;
 };
 
 class PointLightComponent final : public Component
@@ -105,4 +163,5 @@ private:
 };
 
 bool ValidLightColor(Ursa::Color color);
+bool ValidDirectionalLightShadowSettings(Ursa::Float32 strength, Ursa::Float32 bias, Ursa::Float32 normalBias);
 } // namespace Ursa

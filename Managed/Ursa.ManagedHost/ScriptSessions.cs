@@ -73,6 +73,22 @@ internal static class ScriptSessions
 				result = assembly.GetTypes().FirstOrDefault(type => type.FullName?.Replace('+', '.') == fullName || type.Name == fullName);
 				if (result != null) return result;
 			}
+			Assembly?[] sharedAssemblies =
+			{
+				typeof(Behaviour).Assembly,
+				typeof(ScriptSessions).Assembly,
+				typeof(Ursa.Bindings.BindingModuleAttribute).Assembly,
+				typeof(Ursa.Rendering.RenderContextToken).Assembly,
+				sharedEditorAssembly
+			};
+			foreach (Assembly? assembly in sharedAssemblies)
+			{
+				if (assembly == null || (assemblyName != null && assembly.GetName().Name != assemblyName)) continue;
+				Type? result = assembly.GetType(fullName, throwOnError: false);
+				if (result != null) return result;
+				result = assembly.GetTypes().FirstOrDefault(type => type.FullName?.Replace('+', '.') == fullName || type.Name == fullName);
+				if (result != null) return result;
+			}
 			return null;
 		}
 	}
@@ -191,7 +207,12 @@ internal static class ScriptSessions
 		BehaviourRegistry.typeResolver = session.context.ResolveType;
 		BehaviourRegistry.identityResolver = type => session.identities.TryGetValue(type.FullName ?? type.Name, out ScriptIdentity identity)
 			? identity : BehaviourRegistry.DeclaredIdentity(type);
-		BehaviourRegistry.assemblyResolver = () => session.context.assemblies.Values.Append(typeof(Behaviour).Assembly);
+		BehaviourRegistry.assemblyResolver = () => session.context.assemblies.Values
+			.Append(typeof(Behaviour).Assembly)
+			.Append(typeof(Ursa.Rendering.RenderContextToken).Assembly)
+			.Append(typeof(Ursa.Bindings.BindingModuleAttribute).Assembly)
+			.Concat(sharedEditorAssembly == null ? Array.Empty<Assembly>() : new[] { sharedEditorAssembly })
+			.Distinct();
 	}
 
 	private static IReadOnlyList<ScriptableAssetData> LoadScriptableAssetGraph(AssetReference reference)

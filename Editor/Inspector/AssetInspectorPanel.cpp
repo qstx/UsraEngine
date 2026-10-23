@@ -283,7 +283,7 @@ void AssetInspectorPanel::Draw(
 			if (scriptableInspector)
 			{
 				ImGui::Text("Script Type: %s", scriptableInspector->Asset().TypeId().c_str());
-				scriptableInspector->Draw(requestImport, custom);
+				scriptableInspector->Draw(requestImport, custom, scriptTypes);
 			}
 			if (!scriptableDiagnostic.empty())
 			{

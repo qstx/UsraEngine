@@ -1,7 +1,10 @@
 #include <Core/Types.hpp>
 #include <Math/Mat4.hpp>
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 
 namespace Ursa
@@ -87,6 +90,27 @@ Mat4 Mat4::Perspective(Ursa::Float32 verticalFovRadians, Ursa::Float32 aspect, U
 	return result;
 }
 
+Mat4 Mat4::Orthographic(Ursa::Float32 verticalSize, Ursa::Float32 aspect, Ursa::Float32 nearPlane,
+                        Ursa::Float32 farPlane)
+{
+	if (!std::isfinite(verticalSize) || verticalSize <= 0.0f || !std::isfinite(aspect) || aspect <= 0.0f ||
+	    !std::isfinite(nearPlane) || nearPlane <= 0.0f || !std::isfinite(farPlane) || farPlane <= nearPlane)
+	{
+		throw std::invalid_argument("Invalid orthographic camera parameters");
+	}
+	const Ursa::Float32 width = verticalSize * aspect;
+	if (!std::isfinite(width) || width <= 0.0f)
+	{
+		throw std::invalid_argument("Invalid orthographic camera width");
+	}
+	Mat4 result = Identity();
+	result.At(0, 0) = 2.0f / width;
+	result.At(1, 1) = 2.0f / verticalSize;
+	result.At(2, 2) = 1.0f / (nearPlane - farPlane);
+	result.At(2, 3) = nearPlane / (nearPlane - farPlane);
+	return result;
+}
+
 Mat4 Mat4::LookAt(Vec3 eye, Vec3 target, Vec3 up)
 {
 	const Vec3 forward = Normalized(target - eye);
@@ -141,6 +165,71 @@ Mat4 Mat4::InverseAffine() const
 		for (int column = 0; column < 3; ++column)
 		{
 			result.At(row, 3) -= result.At(row, column) * At(column, 3);
+		}
+	}
+	return result;
+}
+
+Mat4 Mat4::Inverse() const
+{
+	std::array<std::array<Float64, 8>, 4> matrix{};
+	for (Size row = 0; row < 4; ++row)
+	{
+		for (Size column = 0; column < 4; ++column)
+		{
+			const Float64 value = At(Int32(row), Int32(column));
+			if (!std::isfinite(value))
+			{
+				throw std::invalid_argument("Matrix contains a non-finite value");
+			}
+			matrix[row][column] = value;
+		}
+		matrix[row][row + 4] = 1.0;
+	}
+	for (Size column = 0; column < 4; ++column)
+	{
+		Size pivot = column;
+		for (Size row = column + 1; row < 4; ++row)
+		{
+			if (std::abs(matrix[row][column]) > std::abs(matrix[pivot][column]))
+			{
+				pivot = row;
+			}
+		}
+		if (std::abs(matrix[pivot][column]) < 1.0e-12)
+		{
+			throw std::invalid_argument("Matrix is not invertible");
+		}
+		std::swap(matrix[pivot], matrix[column]);
+		const Float64 scale = matrix[column][column];
+		for (Float64& value : matrix[column])
+		{
+			value /= scale;
+		}
+		for (Size row = 0; row < 4; ++row)
+		{
+			if (row == column)
+			{
+				continue;
+			}
+			const Float64 factor = matrix[row][column];
+			for (Size index = 0; index < 8; ++index)
+			{
+				matrix[row][index] -= factor * matrix[column][index];
+			}
+		}
+	}
+	Mat4 result;
+	for (Size row = 0; row < 4; ++row)
+	{
+		for (Size column = 0; column < 4; ++column)
+		{
+			const Float64 value = matrix[row][column + 4];
+			if (!std::isfinite(value) || std::abs(value) > (std::numeric_limits<Float32>::max)())
+			{
+				throw std::invalid_argument("Inverse matrix is outside the floating-point range");
+			}
+			result.At(Int32(row), Int32(column)) = Float32(value);
 		}
 	}
 	return result;

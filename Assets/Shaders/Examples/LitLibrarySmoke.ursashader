@@ -1,0 +1,71 @@
+Shader "Ursa/Examples/Lit Library"
+{
+	Properties
+	{
+		_BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+		_Metallic ("Metallic", Range(0, 1)) = 0
+		_Roughness ("Roughness", Range(0, 1)) = 0.5
+		_NormalScale ("Normal Scale", Float) = 1
+		_OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
+		[HDR] _Emissive ("Emissive", Color) = (0, 0, 0, 1)
+		_AlphaMode ("Alpha Mode", Int) = 0
+		_AlphaCutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
+		_BaseMap ("Base Map", 2D) = "white" {}
+		_MetallicRoughnessMap ("Metallic Roughness Map", 2D) = "white" {}
+		[Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
+		_OcclusionMap ("Occlusion Map", 2D) = "white" {}
+		_EmissiveMap ("Emissive Map", 2D) = "white" {}
+	}
+	HLSLINCLUDE
+#include "../ShaderLibrary/SurfaceInput.hlsl"
+#include "../ShaderLibrary/Lighting.hlsl"
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaUniversal" }
+		Pass
+		{
+			Name "Forward"
+			Tags { "LightMode" = "UniversalForward" }
+			Cull Back
+			ZWrite On
+			ZTest LEqual
+			HLSLPROGRAM
+#pragma vertex LitLibrarySmokeVertex
+#pragma fragment LitLibrarySmokeFragment
+struct LitLibrarySmokeAttributes
+{
+	float3 positionOS : POSITION;
+	float3 normalOS : NORMAL;
+	float2 uv : TEXCOORD0;
+};
+
+struct LitLibrarySmokeVaryings
+{
+	float4 positionCS : SV_Position;
+	float2 uv : TEXCOORD0;
+	float3 positionWS : TEXCOORD1;
+	float3 normalWS : TEXCOORD2;
+};
+
+LitLibrarySmokeVaryings LitLibrarySmokeVertex(LitLibrarySmokeAttributes input)
+{
+	LitLibrarySmokeVaryings output;
+	output.positionWS = UrsaTransformObjectToWorld(input.positionOS);
+	output.positionCS = UrsaTransformWorldToHClip(output.positionWS);
+	output.normalWS = UrsaTransformObjectToWorldNormal(input.normalOS);
+	output.uv = input.uv;
+	return output;
+}
+
+float4 LitLibrarySmokeFragment(LitLibrarySmokeVaryings input) : SV_Target0
+{
+	UrsaSurfaceData surface = UrsaSampleSurfaceData(input.uv);
+	float alpha = UrsaResolveAlpha(surface);
+	UrsaInputData inputData = UrsaInitializeInputData(input.positionWS, input.normalWS, _UrsaCameraPosition.xyz);
+	return float4(UrsaEvaluateLighting(surface, inputData), alpha);
+}
+ENDHLSL
+		}
+	}
+}

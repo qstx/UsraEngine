@@ -21,8 +21,8 @@ Result<VirtualPath> VirtualPath::Parse(const String& text)
 	const auto colon = text.find(':');
 	if (colon == String::npos)
 	{
-		return Result<VirtualPath>::Failure(
-		    "Resource path needs a scheme, such as ursa:Shaders/Renderer3D/Cube.vert: " + text);
+		return Result<VirtualPath>::Failure("Resource path needs a scheme, such as ursa:Shaders/Examples/Cube.vert: " +
+		                                    text);
 	}
 	if (colon == 0)
 	{

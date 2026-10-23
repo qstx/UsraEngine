@@ -3,30 +3,24 @@ Shader "Ursa/Examples/Unlit"
 	Properties
 	{
 		_Tint ("Tint", Color) = (1, 1, 1, 1)
-		[NoScaleOffset] _MainTex ("Base Map", 2D) = "white" {}
+		[NoScaleOffset] _BaseMap ("Base Map", 2D) = "white" {}
 	}
 	HLSLINCLUDE
-#include "../Includes/UrsaCore.hlsli"
-#include "Common.hlsli"
-cbuffer UrsaPerObject
-{
-	float4x4 _UrsaViewProjection;
-	float4x4 _UrsaModel;
-}
+#include "../ShaderLibrary/Core.hlsl"
 cbuffer MaterialData
 {
 	float4 _Tint;
 }
-TEXTURE2D(_MainTex);
-SAMPLER(sampler_MainTex);
+TEXTURE2D(_BaseMap);
+SAMPLER(sampler_BaseMap);
 ENDHLSL
 	SubShader
 	{
-		Tags { "RenderPipeline" = "UrsaForward" }
+		Tags { "RenderPipeline" = "UrsaUniversal" }
 		Pass
 		{
 			Name "Forward"
-			Tags { "LightMode" = "SRPDefaultUnlit" }
+			Tags { "LightMode" = "UniversalForward" }
 			Cull Back
 			ZWrite On
 			ZTest LEqual
@@ -41,13 +35,13 @@ struct VertexOutput
 VertexOutput VSMain(float3 position : POSITION, float2 uv : TEXCOORD0)
 {
 	VertexOutput output;
-	output.position = mul(_UrsaViewProjection, mul(_UrsaModel, float4(position, 1.0)));
+	output.position = UrsaTransformObjectToHClip(position);
 	output.uv = uv;
 	return output;
 }
 float4 PSMain(VertexOutput input) : SV_Target0
 {
-	return ApplyTint(_MainTex.Sample(sampler_MainTex, input.uv), _Tint);
+	return SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv) * _Tint;
 }
 ENDHLSL
 		}

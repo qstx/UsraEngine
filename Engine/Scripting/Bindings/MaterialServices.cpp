@@ -7,7 +7,10 @@
 #include <Scripting/ManagedSceneApi.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Shader/ShaderBuiltins.hpp>
+#include <Shader/ShaderAssetResource.hpp>
+#include <Vfs/AssetRoots.hpp>
 #include <Core/Memory/MemoryFactories.hpp>
+#include <Core/StringInterop.hpp>
 
 namespace Ursa::Scripting::Bindings
 {
@@ -61,11 +64,51 @@ Result<MaterialServices::Handle> MaterialServices::Create(BindingCall& call, Int
 	                                             type == 0 ? MaterialType::Unlit : MaterialType::PbrMetallicRoughness);
 	const auto shaderId = type == 0 ? Shader::BuiltinUnlitShaderId() : Shader::BuiltinPbrShaderId();
 	CompleteBindingResult(material->MigrateLegacyToShader(shaderId));
-	auto shader = !api.CpuBuiltinShaders() && api.Resources()
-	                  ? TakeBindingResult(api.Resources()->LoadShader(shaderId))
-	                  : MakeShared<const Shader::ShaderAsset>(Memory::MemoryTag::Assets,
-	                                                          type == 0 ? Shader::CreateBuiltinUnlitShaderAsset()
-	                                                                    : Shader::CreateBuiltinPbrShaderAsset());
+	if (api.Resources())
+	{
+		CompleteBindingResult(material->SetShaderAsset(TakeBindingResult(api.Resources()->LoadShader(shaderId))));
+	}
+	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMaterial(material, true))));
+}
+
+Result<MaterialServices::Handle> MaterialServices::CreateFromShader(BindingCall& call, const Asset& reference)
+{
+	auto& api = RuntimeServices::SceneApi(call);
+	const auto asset = ReadAssetValue(reference);
+	if (!asset.guid || asset.localFileId != 0)
+	{
+		return Result<Handle>::Failure("A Shader-specific material requires a main Shader asset reference");
+	}
+	std::shared_ptr<const Shader::ShaderAsset> shader;
+	if (api.Resources())
+	{
+		shader = TakeBindingResult(api.Resources()->LoadShader(asset.guid));
+	}
+	else
+	{
+		const char* builtInPath = Shader::BuiltinShaderAssetPath(asset.guid);
+		if (!builtInPath)
+		{
+			return Result<Handle>::Failure("Creating a project Shader material requires a ResourceSession");
+		}
+		auto engineFiles = OpenEngineFileSystem();
+		if (!engineFiles)
+		{
+			return Result<Handle>::Failure(engineFiles.error);
+		}
+		auto shaderPath = VirtualPath::Parse(builtInPath);
+		if (!shaderPath)
+		{
+			return Result<Handle>::Failure(shaderPath.error);
+		}
+		auto loaded = Shader::LoadShaderAssetResource(engineFiles.value, shaderPath.value);
+		if (!loaded)
+		{
+			return Result<Handle>::Failure(loaded.error);
+		}
+		shader = std::make_shared<Shader::ShaderAsset>(std::move(loaded.value));
+	}
+	auto material = MakeShared<MaterialInstance>(Memory::MemoryTag::Assets, MaterialType::Unlit);
 	CompleteBindingResult(material->SetShaderAsset(std::move(shader)));
 	return Result<Handle>::Success(WriteManagedHandle<Handle>(TakeBindingResult(api.RegisterMaterial(material, true))));
 }

@@ -127,6 +127,15 @@ int main()
 		Expect(!Take(player.runtimeFiles.Exists(Path("ursa:Icons/Editor/EditorIcons.png"))),
 		       "Player content unexpectedly includes Editor icon resources");
 		Expect(first.importedAssets == 4, "Cold import did not prepare builtin and native project assets");
+		const auto materialImport = Take(workspace->Database()->CurrentImport(Path("prj:Color.ursamat")));
+		Expect(materialImport.target ==
+		           "native-v1/material-migration-v" + ToUrsaString(std::to_string(materialMigrationVersion)),
+		       "Material migration version was omitted from the imported resource target fingerprint");
+		const auto nextMaterialMigration =
+		    Take(workspace->Database()->CheckImport(Path("prj:Color.ursamat"), "ursa.Default", 1,
+		                                            materialImport.target + "-next", nlohmann::json::object(), {}));
+		Expect(!nextMaterialMigration.upToDate,
+		       "Changing the material migration version did not invalidate its imported artifact cache");
 		auto resources = Take(ResourceSession::Open(first.runtimeFiles));
 		auto oldMaterial = Take(resources->LoadMaterial(materialGuid));
 		Expect(oldMaterial->Texture(MaterialTextureSlot::BaseColor)->GetPixels()[0] == 255,
@@ -325,6 +334,16 @@ int main()
 		           Take(scriptableFiles.Read(settingsSourcePath)) == selectedSettingsBytes,
 		       "Selecting a non-pipeline ScriptableObject replaced the valid configuration");
 		auto scriptableImport = Take(AssetImportPipeline::Prepare(*scriptableWorkspace, options));
+		const auto scriptableStatus = Take(scriptableWorkspace->Database()->CurrentImport(settingsPath));
+		Expect(scriptableStatus.settings.contains("typeFieldSchemaFingerprint"),
+		       "ScriptableAsset import omitted its serialized field schema from the cache fingerprint");
+		auto changedSchemaSettings = scriptableStatus.settings;
+		changedSchemaSettings["typeFieldSchemaFingerprint"] = "changed-schema";
+		const auto changedSchemaImport = Take(scriptableWorkspace->Database()->CheckImport(
+		    settingsPath, scriptableStatus.importer, scriptableStatus.importerVersion, scriptableStatus.target,
+		    changedSchemaSettings, scriptableStatus.dependencies));
+		Expect(!changedSchemaImport.upToDate,
+		       "Changing a ScriptableAsset field schema did not invalidate its imported artifact");
 		Expect(Take(Rendering::ReadGraphicsSettings(scriptableImport.runtimeFiles, true)).renderPipeline.guid ==
 		           settingsMetadata.guid,
 		       "Loose publication omitted the selected pipeline GUID");

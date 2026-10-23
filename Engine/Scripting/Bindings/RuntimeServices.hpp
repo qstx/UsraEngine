@@ -17,6 +17,8 @@ struct RuntimeServices
 	using VectorValue = Wire::Value_Ursa_Vector3;
 	using Projection = Wire::Value_Ursa_CameraProjection;
 	using CameraSettingsValue = Wire::Value_Ursa_CameraRenderingSettings;
+	using DirectionalLightShadowSettings = Wire::Value_Ursa_DirectionalLightShadowSettings;
+	using RendererShadowSettings = Wire::Value_Ursa_RendererShadowSettings;
 	static ManagedSceneApi& SceneApi(BindingCall& call);
 	static Result<Handle> CreateGameObject(BindingCall& call, const Utf8View& name);
 	static Result<Utf8View> GetName(BindingCall& call, const Handle& handle);
@@ -52,6 +54,13 @@ struct RuntimeServices
 	static Result<CameraSettingsValue> GetCameraRenderingSettings(BindingCall& call, const Handle& camera);
 	static Result<void> SetCameraRenderingSettings(BindingCall& call, const Handle& camera,
 	                                               const CameraSettingsValue& value);
+	static Result<DirectionalLightShadowSettings> GetDirectionalLightShadowSettings(BindingCall& call,
+	                                                                                const Handle& light);
+	static Result<void> SetDirectionalLightShadowSettings(BindingCall& call, const Handle& light,
+	                                                      const DirectionalLightShadowSettings& value);
+	static Result<RendererShadowSettings> GetRendererShadowSettings(BindingCall& call, const Handle& renderer);
+	static Result<void> SetRendererShadowSettings(BindingCall& call, const Handle& renderer,
+	                                              const RendererShadowSettings& value);
 	static BindingHostAccess HostApi(BindingCall& call);
 	static Result<bool> GetKey(BindingCall& call, UInt32 key, UInt32 phase);
 	static Result<Wire::Value_Ursa_TimeState> GetTime(BindingCall& call);

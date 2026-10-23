@@ -22,6 +22,7 @@ public sealed class ShowcasePipelineAsset : RenderPipelineAsset
 public sealed class ShowcasePipeline : RenderPipeline
 {
 	private readonly CommandBuffer commands = new("Demo offscreen and composite");
+	private readonly RenderTexture neutralShadowAtlas;
 	private readonly Dictionary<Camera, Target> targets = new();
 	private readonly Material composite;
 	private readonly Vector4 tint;
@@ -57,6 +58,7 @@ public sealed class ShowcasePipeline : RenderPipeline
 		this.tint = tint;
 		this.patternShader = patternShader;
 		this.patternStrength = patternStrength;
+		neutralShadowAtlas = RenderTexture.Create(new RenderTextureDescriptor(1, 1, GraphicsFormat.D32_SFloat));
 		opaqueDrawing.OverrideMaterial = replacementMaterial;
 		if (patternShader != null)
 		{
@@ -71,6 +73,11 @@ public sealed class ShowcasePipeline : RenderPipeline
 
 	public override void Render(ScriptableRenderContext context, List<Camera> cameras)
 	{
+		commands.SetRenderTarget(neutralShadowAtlas);
+		commands.SetViewport(0, 0, 1, 1);
+		commands.SetScissor(0, 0, 1, 1);
+		commands.ClearTarget(false, true, false, default);
+		Execute(context);
 		if (patternShader != null && pattern != null)
 		{
 			commands.SetComputeTexture(patternShader, patternKernel, "_Output", pattern);
@@ -83,6 +90,8 @@ public sealed class ShowcasePipeline : RenderPipeline
 			RenderPipelineManager.BeginCamera(context, camera);
 			try
 			{
+				commands.SetGlobalTexture("_UrsaDirectionalShadowAtlas", neutralShadowAtlas);
+				commands.SetGlobalInt("_UrsaDirectionalShadowCascadeCount", 0);
 				// Both scene stages use the same snapshot and exactly one culling result.
 				CullingResults culling = context.Cull(camera);
 				RendererList opaque = context.CreateRendererList(culling, opaqueDrawing, opaqueFiltering);
@@ -148,6 +157,7 @@ public sealed class ShowcasePipeline : RenderPipeline
 		if (!disposing) return;
 		commands.Dispose();
 		pattern?.Dispose();
+		neutralShadowAtlas.Dispose();
 		foreach (Target target in targets.Values) target.Texture.Dispose();
 		targets.Clear();
 	}

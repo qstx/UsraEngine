@@ -45,6 +45,7 @@ internal sealed class ScriptRecord
 	public List<ScriptFieldRecord> Fields { get; set; } = new();
 	public string Kind { get; set; } = "Behaviour";
 	public bool IsRenderPipeline { get; set; }
+	public List<string> BaseTypeNames { get; set; } = new();
 	public string CreateAssetMenuName { get; set; } = string.Empty;
 	public string CreateAssetFileName { get; set; } = string.Empty;
 	public int CreateAssetMenuOrder { get; set; }
@@ -176,19 +177,19 @@ internal static class Program
 			var typeIds = new Dictionary<string, string>(StringComparer.Ordinal);
 			var localIds = new Dictionary<ulong, string>();
 			var assetMenuNames = new Dictionary<string, string>(StringComparer.Ordinal);
-			INamedTypeSymbol? forwardPipeline = compilation.GetTypeByMetadataName("Ursa.Rendering.ForwardRenderPipelineAsset");
-			if (forwardPipeline != null && scriptTypeAttribute != null)
+			var builtInIdentities = new Dictionary<string, (string Id, uint Version, string Origin)>(StringComparer.Ordinal)
 			{
-				AttributeData? identity = forwardPipeline.GetAttributes().FirstOrDefault(attribute =>
-					SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, scriptTypeAttribute));
-				if (identity?.ConstructorArguments.FirstOrDefault().Value is string builtInId &&
-				    !string.IsNullOrWhiteSpace(builtInId))
-				{
-					string origin = "framework type Ursa.Rendering.ForwardRenderPipelineAsset";
-					ulong localFileId = MakeLocalFileId(builtInId);
-					typeIds.Add(builtInId, origin);
-					localIds.Add(localFileId, origin);
-				}
+				["Ursa.Rendering.ForwardRenderPipelineAsset"] =
+					("ursa.rendering.forward", 1, "framework type Ursa.Rendering.ForwardRenderPipelineAsset"),
+				["Ursa.Rendering.UniversalRenderPipelineAsset"] =
+					("ursa.rendering.universal-pipeline", 2, "framework type Ursa.Rendering.UniversalRenderPipelineAsset"),
+				["Ursa.Rendering.UniversalRendererData"] =
+					("ursa.rendering.universal-renderer-data", 1, "framework type Ursa.Rendering.UniversalRendererData")
+			};
+			foreach ((string id, uint _, string origin) in builtInIdentities.Values)
+			{
+				typeIds.Add(id, origin);
+				localIds.Add(MakeLocalFileId(id), origin);
 			}
 			var declaredTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 			foreach (SyntaxTree tree in trees)
@@ -237,11 +238,20 @@ internal static class Program
 					}
 
 					(string? declaredId, uint declaredVersion) = ReadScriptType(type, scriptTypeAttribute, source);
+					bool hasBuiltInIdentity = builtInIdentities.TryGetValue(
+						type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat), out var builtInIdentity);
+					if (hasBuiltInIdentity)
+					{
+						declaredId = builtInIdentity.Id;
+						declaredVersion = builtInIdentity.Version;
+					}
 					StoredScriptIdentity identity = metadata.Resolve(source, type, sourceTypes, declaredId, declaredVersion,
-						MakeLocalFileId);
+						MakeLocalFileId, declaredId != null && !hasBuiltInIdentity);
 					string scriptTypeId = identity.Id;
 					uint version = identity.Version;
-					string origin = $"{type.ToDisplayString()} in {source.VirtualPath}";
+					string origin = hasBuiltInIdentity
+						? builtInIdentity.Origin
+						: $"{type.ToDisplayString()} in {source.VirtualPath}";
 					(string menuName, string fileName, int menuOrder) = ReadCreateAssetMenu(createMenu, type, source);
 					if (!string.IsNullOrEmpty(menuName) && assetMenuNames.TryGetValue(menuName, out string? previousMenu))
 					{
@@ -252,17 +262,17 @@ internal static class Program
 					{
 						assetMenuNames.Add(menuName, origin);
 					}
-					if (typeIds.TryGetValue(scriptTypeId, out string? previousType))
+					if (typeIds.TryGetValue(scriptTypeId, out string? previousType) && previousType != origin)
 					{
 						throw new InvalidDataException($"Duplicate ScriptType '{scriptTypeId}': {previousType}; {origin}.");
 					}
-					typeIds.Add(scriptTypeId, origin);
+					typeIds[scriptTypeId] = origin;
 					ulong localFileId = identity.LocalFileId;
-					if (localIds.TryGetValue(localFileId, out string? previousLocalId))
+					if (localIds.TryGetValue(localFileId, out string? previousLocalId) && previousLocalId != origin)
 					{
 						throw new InvalidDataException($"Duplicate ScriptType local file ID {localFileId}: {previousLocalId}; {origin}.");
 					}
-					localIds.Add(localFileId, origin);
+					localIds[localFileId] = origin;
 					var fields = DescribeFields(type, compilation, behaviorType, componentType, assetBase, serializeFieldAttribute,
 					                            formerlySerializedAsAttribute, nonSerializedAttribute);
 					if (createMenu != null && fields.Any(field => field.Kind == "Unsupported" ||
@@ -285,12 +295,89 @@ internal static class Program
 						Group = source.Group,
 						Kind = isPostprocessor ? "AssetPostprocessor" : isImporter ? "ScriptedImporter" : isAsset ? "ScriptableObject" : "Behaviour",
 						IsRenderPipeline = pipelineBase != null && DerivesFrom(type, pipelineBase),
+						BaseTypeNames = BaseTypeNames(type),
 						CreateAssetMenuName = menuName,
 						CreateAssetFileName = fileName,
 						CreateAssetMenuOrder = menuOrder,
 						Fields = fields
 					});
 				}
+			}
+
+			const string frameworkSourceGuid = "c3db9aad-cd0d-4d07-a4dd-4f8a056a7410";
+			var frameworkSource = new SourceEntry
+			{
+				Guid = frameworkSourceGuid,
+				VirtualPath = "framework:Ursa.Rendering",
+				Group = "Game"
+			};
+			foreach (var framework in builtInIdentities)
+			{
+				INamedTypeSymbol type = compilation.GetTypeByMetadataName(framework.Key) ??
+				                        throw new InvalidDataException($"Framework asset type is not available: {framework.Key}.");
+				if (!DerivesFrom(type, assetBase) || type.IsAbstract || type.Arity != 0)
+					throw new InvalidDataException($"Framework catalog type is not a concrete ScriptableObject: {framework.Key}.");
+				string scriptTypeId = framework.Value.Id;
+				ulong localFileId = MakeLocalFileId(scriptTypeId);
+				string origin = framework.Value.Origin;
+				if (typeIds.GetValueOrDefault(scriptTypeId) != origin || localIds.GetValueOrDefault(localFileId) != origin)
+					throw new InvalidDataException($"Framework script identity is not reserved: {scriptTypeId}.");
+				AttributeData? createMenu = createAssetMenuAttribute == null
+					                            ? null
+					                            : type.GetAttributes().FirstOrDefault(attribute =>
+						                                  SymbolEqualityComparer.Default.Equals(attribute.AttributeClass,
+						                                                                          createAssetMenuAttribute));
+				(string menuName, string fileName, int menuOrder) = ReadCreateAssetMenu(createMenu, type, frameworkSource);
+				var fields = DescribeFields(type, compilation, behaviorType, componentType, assetBase,
+				                           serializeFieldAttribute, formerlySerializedAsAttribute, nonSerializedAttribute);
+				var frameworkDefaults = framework.Key switch
+				{
+					"Ursa.Rendering.UniversalRenderPipelineAsset" => new Dictionary<string, string>(StringComparer.Ordinal)
+					{
+						["MainLightShadowsEnabled"] = "true",
+						["MainLightShadowCascadeCount"] = "2",
+						["MainLightShadowDistance"] = "50",
+						["MainLightShadowSplitFractions"] = "[0.25]",
+						["MainLightShadowAtlasWidth"] = "2048",
+						["MainLightShadowAtlasHeight"] = "1024",
+						["ExposureEV"] = "0",
+						["ToneMapping"] = "1",
+						["FxaaEnabled"] = "false",
+						["BloomEnabled"] = "false",
+						["BloomThreshold"] = "1",
+						["BloomIntensity"] = "0.5",
+						["BloomScatter"] = "0.7"
+					},
+					"Ursa.Rendering.UniversalRendererData" => new Dictionary<string, string>(StringComparer.Ordinal)
+					{
+						["Features"] = "[]"
+					},
+					_ => new Dictionary<string, string>(StringComparer.Ordinal)
+				};
+				foreach (ScriptFieldRecord field in fields)
+					if (frameworkDefaults.TryGetValue(field.Name, out string? defaultValue))
+						field.DefaultValueJson = defaultValue;
+				if (createMenu != null && fields.Any(field => field.Kind == "Unsupported" ||
+				                                             ((field.Kind is "Array" or "List") &&
+				                                              field.ElementKind == "Unsupported")))
+					throw new InvalidDataException($"Framework CreateAssetMenu type has unsupported fields: {framework.Key}.");
+				catalog.Scripts.Add(new ScriptRecord
+				{
+					SourceGuid = frameworkSourceGuid,
+					ScriptType = scriptTypeId,
+					Version = framework.Value.Version,
+					LocalFileId = localFileId,
+					ClrTypeName = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) + ", Ursa.Rendering",
+					VirtualPath = frameworkSource.VirtualPath,
+					Group = "Game",
+					Kind = "ScriptableObject",
+					IsRenderPipeline = pipelineBase != null && DerivesFrom(type, pipelineBase),
+					BaseTypeNames = BaseTypeNames(type),
+					CreateAssetMenuName = menuName,
+					CreateAssetFileName = fileName,
+					CreateAssetMenuOrder = menuOrder,
+					Fields = fields
+				});
 			}
 
 			activeDeclaration = null;
@@ -350,6 +437,14 @@ internal static class Program
 			}
 		}
 		return false;
+	}
+
+	private static List<string> BaseTypeNames(INamedTypeSymbol type)
+	{
+		var names = new List<string>();
+		for (INamedTypeSymbol? current = type.BaseType; current != null; current = current.BaseType)
+			names.Add(current.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
+		return names;
 	}
 
 	private static (string? Id, uint Version) ReadScriptType(INamedTypeSymbol type, INamedTypeSymbol? attributeType,
@@ -553,6 +648,10 @@ internal static class Program
 
 	private static string DefaultValueJson(IFieldSymbol field, Compilation compilation, string kind)
 	{
+		if (field.Name == "Enabled" &&
+		    field.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ==
+		        "Ursa.Rendering.ScriptableRendererFeature")
+			return "true";
 		foreach (SyntaxReference reference in field.DeclaringSyntaxReferences)
 		{
 			if (reference.GetSyntax() is not VariableDeclaratorSyntax variable || variable.Initializer == null)

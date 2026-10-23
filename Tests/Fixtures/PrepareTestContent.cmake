@@ -1,4 +1,10 @@
 # Test fixtures are explicit execution steps, never dependencies of compilation.
+file(TO_CMAKE_PATH "${PROJECT}" project_path)
+get_filename_component(configuration "${PROJECT}" NAME)
+if(NOT project_path MATCHES "/TestProjects/Runtime/${configuration}$")
+  message(FATAL_ERROR "Refusing to clear a non-test content Library directory: ${project_path}")
+endif()
+file(REMOVE_RECURSE "${PROJECT}/Library")
 file(MAKE_DIRECTORY "${PROJECT}/Assets")
 execute_process(COMMAND "${IMPORTER}" --project "${PROJECT}" --configuration "${CONFIGURATION}" --no-scripts
   RESULT_VARIABLE result)

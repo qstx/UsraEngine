@@ -65,7 +65,7 @@ String BuiltinTextureProperty(ResourceId shaderId, MaterialTextureSlot slot)
 {
 	if (shaderId == Shader::BuiltinUnlitShaderId())
 	{
-		return slot == MaterialTextureSlot::BaseColor ? "_MainTex" : String{};
+		return slot == MaterialTextureSlot::BaseColor ? "_BaseMap" : String{};
 	}
 	if (shaderId != Shader::BuiltinPbrShaderId())
 	{
@@ -208,6 +208,7 @@ Result<void> MaterialInstance::SetShader(ResourceId id)
 		return MigrateLegacyToShader(id);
 	}
 	shaderId = id;
+	shaderPropertyVersion = 0;
 	shaderAsset.reset();
 	++version;
 	return {};
@@ -223,13 +224,27 @@ Result<void> MaterialInstance::SetShaderAsset(std::shared_ptr<const Shader::Shad
 	{
 		return Result<void>::Failure("Shader asset ID does not match the material Shader reference");
 	}
+	const ResourceId previousShaderId = shaderId;
 	if (!shaderId)
 	{
 		shaderId = asset->id;
 	}
+	auto previousOverrides = propertyOverrides;
+	const UInt32 previousPropertyVersion = shaderPropertyVersion;
+	auto upgraded = UpgradeBuiltinPropertySchema();
+	if (!upgraded)
+	{
+		propertyOverrides = std::move(previousOverrides);
+		shaderPropertyVersion = previousPropertyVersion;
+		shaderId = previousShaderId;
+		return upgraded;
+	}
 	auto valid = ValidateAgainstShader(*asset);
 	if (!valid)
 	{
+		propertyOverrides = std::move(previousOverrides);
+		shaderPropertyVersion = previousPropertyVersion;
+		shaderId = previousShaderId;
 		return valid;
 	}
 	shaderAsset = std::move(asset);
@@ -260,7 +275,7 @@ Result<void> MaterialInstance::MigrateLegacyToShader(ResourceId id)
 		overrides.emplace("_OcclusionStrength", MaterialPropertyValue::Range(parameters.occlusionStrength));
 		overrides.emplace("_Emissive", MaterialPropertyValue::ColorValue(parameters.emissive));
 	}
-	const Array<String, 5> unlitTextureNames{"_MainTex", {}, {}, {}, {}};
+	const Array<String, 5> unlitTextureNames{"_BaseMap", {}, {}, {}, {}};
 	const Array<String, 5> pbrTextureNames{"_BaseMap", "_MetallicRoughnessMap", "_NormalMap", "_OcclusionMap",
 	                                       "_EmissiveMap"};
 	for (Ursa::Size slot = 0; slot < textures.size(); ++slot)
@@ -280,16 +295,53 @@ Result<void> MaterialInstance::MigrateLegacyToShader(ResourceId id)
 		}
 	}
 	shaderId = id;
-	if (id == Shader::BuiltinUnlitShaderId())
-	{
-		shaderAsset = std::make_shared<const Shader::ShaderAsset>(Shader::CreateBuiltinUnlitShaderAsset());
-	}
-	else if (id == Shader::BuiltinPbrShaderId())
-	{
-		shaderAsset = std::make_shared<const Shader::ShaderAsset>(Shader::CreateBuiltinPbrShaderAsset());
-	}
+	shaderPropertyVersion = (id == Shader::BuiltinUnlitShaderId() || id == Shader::BuiltinPbrShaderId()) ? 1 : 0;
+	shaderAsset.reset();
 	propertyOverrides = std::move(overrides);
 	++version;
+	return {};
+}
+
+Result<void> MaterialInstance::UpgradeBuiltinPropertySchema()
+{
+	if (shaderId == Shader::BuiltinUnlitShaderId())
+	{
+		if (shaderPropertyVersion > 1)
+		{
+			return Result<void>::Failure("Unlit material property schema version is newer than this engine");
+		}
+		const auto legacy = propertyOverrides.find("_MainTex");
+		const auto current = propertyOverrides.find("_BaseMap");
+		if (legacy != propertyOverrides.end() && current != propertyOverrides.end())
+		{
+			const auto& oldValue = legacy->second;
+			const auto& newValue = current->second;
+			const bool same = oldValue.type == newValue.type && oldValue.textureId == newValue.textureId &&
+			                  oldValue.textureLocalFileId == newValue.textureLocalFileId &&
+			                  oldValue.textureDefault == newValue.textureDefault &&
+			                  (oldValue.textureId ? true : oldValue.texture == newValue.texture);
+			if (!same)
+			{
+				return Result<void>::Failure("Unlit material has conflicting _MainTex and _BaseMap values");
+			}
+			propertyOverrides.erase(legacy);
+		}
+		else if (legacy != propertyOverrides.end())
+		{
+			propertyOverrides.emplace("_BaseMap", std::move(legacy->second));
+			propertyOverrides.erase(legacy);
+		}
+		shaderPropertyVersion = 1;
+		return {};
+	}
+	if (shaderId == Shader::BuiltinPbrShaderId())
+	{
+		if (shaderPropertyVersion > 1)
+		{
+			return Result<void>::Failure("Lit material property schema version is newer than this engine");
+		}
+		shaderPropertyVersion = 1;
+	}
 	return {};
 }
 

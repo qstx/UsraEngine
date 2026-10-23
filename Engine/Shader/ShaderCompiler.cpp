@@ -244,6 +244,20 @@ Result<void> WriteText(VirtualFileSystem& filesystem, const VirtualPath& path, c
 	return filesystem.WriteAtomic(path, bytes, true);
 }
 
+Result<void> EnsureTemporaryParent(const std::filesystem::path& temporaryRoot, const VirtualPath& path)
+{
+	std::error_code error;
+	const std::filesystem::path relative = PathFromUrsaString(path.relative);
+	std::filesystem::create_directories(
+	    (temporaryRoot / std::filesystem::u8path(ToStdString(path.scheme)) / relative).parent_path(), error);
+	if (error)
+	{
+		return Result<void>::Failure("Cannot create temporary shader source directory: " +
+		                             ToUrsaString(error.message()));
+	}
+	return {};
+}
+
 Result<std::filesystem::path> HostPath(const VirtualFileSystem& filesystem, const VirtualPath& path)
 {
 	auto roots = filesystem.Roots(path.scheme);
@@ -392,6 +406,11 @@ Result<CompiledShaderStage> DxcShaderCompiler::Compile(const ShaderCompileReques
 	}
 	source += "#line " + Number(request.entryPoint.location.line) + " \"" + request.sourcePath.ToString() + "\"\n";
 	source += RemoveKeywordPragmas(request.source);
+	auto sourceParentCreated = EnsureTemporaryParent(temporaryPath, sourceVirtualPath.value);
+	if (!sourceParentCreated)
+	{
+		return Result<CompiledShaderStage>::Failure(Diagnostic(request, sourceParentCreated.error));
+	}
 	auto sourceWritten = WriteText(temporaryFiles, sourceVirtualPath.value, source);
 	if (!sourceWritten)
 	{
@@ -408,6 +427,11 @@ Result<CompiledShaderStage> DxcShaderCompiler::Compile(const ShaderCompileReques
 		if (!includeVirtualPath)
 		{
 			return Result<CompiledShaderStage>::Failure(Diagnostic(request, includeVirtualPath.error));
+		}
+		auto parentCreated = EnsureTemporaryParent(temporaryPath, includeVirtualPath.value);
+		if (!parentCreated)
+		{
+			return Result<CompiledShaderStage>::Failure(Diagnostic(request, parentCreated.error));
 		}
 		auto written = WriteText(temporaryFiles, includeVirtualPath.value, include.source);
 		if (!written)

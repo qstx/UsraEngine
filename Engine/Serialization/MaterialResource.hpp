@@ -12,6 +12,8 @@ namespace Ursa
 {
 class ResourceSession;
 
+inline constexpr UInt32 materialMigrationVersion = 1;
+
 using TextureIdResolver = std::function<Result<ResourceId>(MaterialTexturePtr)>;
 using TextureResourceLoader = std::function<Result<MaterialTexturePtr>(ResourceId)>;
 

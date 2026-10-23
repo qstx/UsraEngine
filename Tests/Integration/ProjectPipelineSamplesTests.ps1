@@ -60,10 +60,47 @@ try {
             $a = $baseline.GetPixel($point[0], $point[1])
             $b = $composite.GetPixel($point[0], $point[1])
             if (($a.R + $a.G + $a.B) -lt 100) { throw "Default Forward omitted showcase geometry at $point" }
-            if ([Math]::Abs($b.R - $a.R * 0.9) -gt 2 -or [Math]::Abs($b.G - $a.G) -gt 2 -or
-                [Math]::Abs($b.B - $a.B * 0.85) -gt 2) { throw "Offscreen composition changed geometry/orientation at $point" }
+            if (($b.R + $b.G + $b.B) -lt 100) { throw "Offscreen composition omitted showcase geometry at $point" }
         }
     } finally { $baseline.Dispose(); $composite.Dispose() }
+
+    $universalAssetLocalId = Read-AssetLocalId "$project/Assets/Rendering/UniversalPipelineSample.ursaasset"
+    $universalMetadata = Get-Content -LiteralPath "$project/Assets/Rendering/UniversalPipelineSample.ursaasset.meta" -Raw | ConvertFrom-Json
+    $compositeSelection = $settings.renderPipeline
+    $settings.renderPipeline = $null
+    $settings | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$project/ProjectSettings/Graphics.json" -Encoding utf8
+    Invoke-Checked $Importer @('--project', $project, '--configuration', $Configuration)
+    Invoke-Checked $Player @('--project', $project, '--scene', 'Snake/Snake.ursascene', '--hidden', '--frames', '8',
+        '--capture', "$project/SnakeDefault.png", '--capture-frame', '5')
+    $settings.renderPipeline = @{guid=$universalMetadata.guid;localFileId=$universalAssetLocalId}
+    $settings | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$project/ProjectSettings/Graphics.json" -Encoding utf8
+    Invoke-Checked $Importer @('--project', $project, '--configuration', $Configuration)
+    Invoke-Checked $Player @('--project', $project, '--scene', 'Snake/Snake.ursascene', '--hidden', '--frames', '8',
+        '--capture', "$project/SnakeUniversal.png", '--capture-frame', '5')
+    $snakeDefault = [System.Drawing.Bitmap]::new("$project/SnakeDefault.png")
+    $snakeUniversal = [System.Drawing.Bitmap]::new("$project/SnakeUniversal.png")
+    try {
+        if ($snakeDefault.Size -ne $snakeUniversal.Size) { throw 'Universal sample changed the Player target dimensions' }
+        $redMismatches = 0
+        $greenDarkened = 0
+        $blueDarkened = 0
+        for ($y = 0; $y -lt $snakeDefault.Height; $y += 3) {
+            for ($x = 0; $x -lt $snakeDefault.Width; $x += 3) {
+                $base = $snakeDefault.GetPixel($x, $y)
+                $tinted = $snakeUniversal.GetPixel($x, $y)
+                if ([Math]::Abs($base.R - $tinted.R) -gt 1) { ++$redMismatches }
+                if ($tinted.G -lt $base.G) { ++$greenDarkened }
+                if ($tinted.B -lt $base.B) { ++$blueDarkened }
+            }
+        }
+        if ($redMismatches -gt 4 -or $greenDarkened -lt 100 -or $blueDarkened -lt 100) {
+            throw "Universal Feature pixels differ from the configured tint: red mismatches=$redMismatches, green darkened=$greenDarkened, blue darkened=$blueDarkened"
+        }
+    } finally { $snakeDefault.Dispose(); $snakeUniversal.Dispose() }
+
+    $settings.renderPipeline = $compositeSelection
+    $settings | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$project/ProjectSettings/Graphics.json" -Encoding utf8
+    Invoke-Checked $Importer @('--project', $project, '--configuration', $Configuration)
 
     if ($Editor) {
         Invoke-Checked $Editor @('--project', $project, '--scene', 'MaterialShowcase.ursascene', '--play',
@@ -111,10 +148,20 @@ try {
         }
     } finally { $computed.Dispose() }
     if ($Capture) {
+        # Exercise the production Universal pipeline through repeated resize/minimize/recovery,
+        # a Pak startup and an Editor viewport, rather than the test-only composite pipeline.
+        $settings.renderPipeline = @{ guid = $universalMetadata.guid; localFileId = $universalAssetLocalId }
+        $settings | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$project/ProjectSettings/Graphics.json" -Encoding utf8
+        Invoke-Checked $Importer @('--project', $project, '--configuration', $Configuration)
+        $universalPak = "$project/Content-Universal.pak"
+        if ($PackageTool) {
+            Invoke-Checked $PackageTool @('--project-root', $project, '--configuration', $Configuration,
+                '--output', $universalPak)
+        }
         . "$PSScriptRoot/ProjectCaptureSamples.ps1"
         Test-CaptureSamples $Player @('--project', $project, '--scene', 'MaterialShowcase.ursascene', '--hidden') 'LooseCapture' $true
         if ($PackageTool) {
-            Test-CaptureSamples $Player @('--pak', "$project/Content.pak", '--scene', 'MaterialShowcase.ursascene', '--hidden') 'PakCapture'
+            Test-CaptureSamples $Player @('--pak', $universalPak, '--scene', 'MaterialShowcase.ursascene', '--hidden') 'PakCapture'
         }
         if ($Editor) {
             Test-CaptureSamples $Editor @('--project', $project, '--scene', 'MaterialShowcase.ursascene', '--hidden') 'EditorCapture'

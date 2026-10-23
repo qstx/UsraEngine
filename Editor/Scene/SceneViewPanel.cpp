@@ -795,6 +795,11 @@ Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play,
 		settings.targetHeight = sceneTarget.size.height;
 		Rendering::CameraData camera{sceneViewCameraId, editorCamera.ViewProjection(aspect), editorCamera.position,
 		                             settings};
+		camera.view = editorCamera.View();
+		camera.projection = editorCamera.Projection(aspect);
+		camera.inverseViewProjection = camera.viewProjection.Inverse();
+		camera.nearPlane = editorCamera.nearPlane;
+		camera.farPlane = editorCamera.farPlane;
 		camera.debugName = "Scene View";
 		auto rendered = renderViewport(scene, sceneTarget.output, Rendering::CameraType::SceneView,
 		                               std::optional<Rendering::CameraData>{std::move(camera)});

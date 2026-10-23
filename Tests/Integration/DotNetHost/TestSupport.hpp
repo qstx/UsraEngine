@@ -51,6 +51,7 @@ void TestPipelineAssetReload(DotNetHost& host, VirtualFileSystem& filesystem, co
 void TestManagedForward(DotNetHost& host, const VirtualPath& content);
 void TestDocumentedCustomPipeline(DotNetHost& host, const VirtualPath& content);
 void TestForwardCameraRegions(DotNetHost& host, const VirtualPath& content);
+void TestUniversalPostProcessingBacking(DotNetHost& host, const VirtualPath& content);
 void TestManagedImportSession(DotNetHost& host, VirtualFileSystem& filesystem, const ManagedHostFiles& files,
                               const VirtualPath& content);
 void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSystem& filesystem,

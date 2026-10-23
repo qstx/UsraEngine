@@ -21,6 +21,17 @@ internal static partial class NativeRenderingBindings
 	internal static partial CameraFrameValue SetupCamera(RenderContextToken context, string identity);
 	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::Cull")]
 	internal static partial RenderResultValue Cull(RenderContextToken context, string identity);
+	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::CullShadowCasters")]
+	internal static partial RenderResultValue CullShadowCasters(RenderContextToken context, string identity,
+		Matrix4x4 lightViewProjection);
+	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::VisibleLights")]
+	internal static partial VisibleLightsValue GetVisibleLights(RenderContextToken context, RenderResultValue culling);
+	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::VisibleLights")]
+	internal static partial VisibleLightsValue VisibleLights(RenderContextToken context, RenderResultValue culling);
+	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::DirectionalShadowCascades")]
+	internal static partial DirectionalShadowCascadeValue[] DirectionalShadowCascades(RenderContextToken context,
+		string identity, Vector3 lightDirection, uint cascadeCount, float shadowDistance,
+		ReadOnlySpan<float> splitFractions, uint atlasWidth, uint atlasHeight);
 	[NativeMethod("Ursa::Scripting::Bindings::RenderingServices::CreateRendererList")]
 	internal static partial RenderResultValue CreateRendererList(RenderContextToken context, RenderResultValue culling,
 		DrawingSettingsValue drawing, FilteringSettings filtering);
@@ -46,6 +57,54 @@ internal struct RenderResultValue
 	public RenderContextToken Context;
 	public uint Index;
 	public uint Generation;
+}
+
+[WireValue]
+internal struct DirectionalLightValue
+{
+	public string Identity;
+	public uint Layer;
+	public Vector3 Direction;
+	public Color Color;
+	public float Intensity;
+	public bool CastsShadows;
+	public float ShadowStrength;
+	public float ShadowBias;
+	public float ShadowNormalBias;
+	public bool SoftShadows;
+}
+
+[WireValue]
+internal struct PointLightValue
+{
+	public string Identity;
+	public uint Layer;
+	public Vector3 Position;
+	public Color Color;
+	public float Intensity;
+	public float Range;
+}
+
+[WireValue]
+internal struct VisibleLightsValue
+{
+	public DirectionalLightValue[] Directional;
+	public PointLightValue[] Point;
+}
+
+[WireValue]
+internal struct DirectionalShadowCascadeValue
+{
+	public uint Index;
+	public float NearDepth;
+	public float FarDepth;
+	public float WorldUnitsPerTexel;
+	public uint AtlasX;
+	public uint AtlasY;
+	public uint Resolution;
+	public Matrix4x4 LightView;
+	public Matrix4x4 LightProjection;
+	public Matrix4x4 WorldToShadow;
 }
 
 [WireValue]

@@ -1,0 +1,90 @@
+Shader "Ursa/Internal/Bloom"
+{
+	HLSLINCLUDE
+#include "../ShaderLibrary/Textures.hlsl"
+TEXTURE2D(_BlitTexture);
+SAMPLER(sampler_BlitTexture);
+TEXTURE2D(_UrsaBloomLowMip);
+SAMPLER(sampler_UrsaBloomLowMip);
+cbuffer UrsaBloomParameters
+{
+	float _UrsaBloomThreshold;
+	float _UrsaBloomExposureEV;
+	float2 _UrsaBloomPadding0;
+	float4 _UrsaBloomTexelSize;
+	float4 _UrsaBloomSourceRect;
+	float _UrsaBloomScatter;
+	float3 _UrsaBloomPadding1;
+}
+struct BloomVaryings { float4 positionCS : SV_Position; float2 uv : TEXCOORD0; };
+BloomVaryings BloomVertex(uint id : SV_VertexID)
+{
+	BloomVaryings output;
+	float2 uv = float2((id << 1) & 2, id & 2);
+	output.positionCS = float4(uv * 2.0 - 1.0, 0, 1);
+	output.uv = float2(uv.x, 1.0 - uv.y) * _UrsaBloomSourceRect.zw + _UrsaBloomSourceRect.xy;
+	return output;
+}
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaUniversal" }
+		Pass
+		{
+			Name "BloomPrefilter"
+			Tags { "LightMode" = "UniversalBloomPrefilter" }
+			Cull Off
+			ZWrite Off
+			ZTest Off
+			HLSLPROGRAM
+#pragma vertex BloomVertex
+#pragma fragment BloomPrefilterFragment
+float4 BloomPrefilterFragment(BloomVaryings input) : SV_Target0
+{
+	float3 color = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv).rgb * exp2(_UrsaBloomExposureEV);
+	float brightness = max(color.r, max(color.g, color.b));
+	return float4(color * (max(brightness - _UrsaBloomThreshold, 0.0) / max(brightness, 1e-5)), 1);
+}
+ENDHLSL
+		}
+		Pass
+		{
+			Name "BloomDownsample"
+			Tags { "LightMode" = "UniversalBloomDownsample" }
+			Cull Off
+			ZWrite Off
+			ZTest Off
+			HLSLPROGRAM
+#pragma vertex BloomVertex
+#pragma fragment BloomDownsampleFragment
+float4 BloomDownsampleFragment(BloomVaryings input) : SV_Target0
+{
+	float2 texel = _UrsaBloomTexelSize.xy;
+	float3 color = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv + texel * float2(-0.5, -0.5)).rgb;
+	color += SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv + texel * float2(0.5, -0.5)).rgb;
+	color += SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv + texel * float2(-0.5, 0.5)).rgb;
+	color += SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv + texel * float2(0.5, 0.5)).rgb;
+	return float4(color * 0.25, 1);
+}
+ENDHLSL
+		}
+		Pass
+		{
+			Name "BloomUpsample"
+			Tags { "LightMode" = "UniversalBloomUpsample" }
+			Cull Off
+			ZWrite Off
+			ZTest Off
+			HLSLPROGRAM
+#pragma vertex BloomVertex
+#pragma fragment BloomUpsampleFragment
+float4 BloomUpsampleFragment(BloomVaryings input) : SV_Target0
+{
+	float3 high = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv).rgb;
+	float3 low = SAMPLE_TEXTURE2D(_UrsaBloomLowMip, sampler_UrsaBloomLowMip, input.uv).rgb;
+	return float4(high + low * _UrsaBloomScatter, 1);
+}
+ENDHLSL
+		}
+	}
+}

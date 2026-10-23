@@ -25,18 +25,16 @@ public static class ClassicRendering
 			new FilteringSettings { MinimumQueue = 2501 });
 
 		using var commands = new CommandBuffer("Classic offscreen camera");
-		const uint sceneColor = 1;
-		commands.GetTemporaryTarget(sceneColor, new RenderTextureDescriptor(width, height, depthBufferBits: 32));
-		commands.SetRenderTarget(sceneColor);
-		commands.ClearTarget(true, true, false, new Vector4(0, 0, 1, 1));
-		commands.DrawRendererList(opaque, context);
-		commands.DrawRendererList(transparent, context);
-		context.ExecuteCommandBuffer(commands);
-		context.Submit();
-		commands.Clear();
-
-		commands.CopyTexture((RenderTargetIdentifier)sceneColor, RenderTargetIdentifier.CameraTarget);
-		commands.ReleaseTemporaryTarget(sceneColor);
+		using (var targets = commands.CreateTemporaryTargetScope())
+		{
+			RenderTargetIdentifier sceneColor =
+				targets.Allocate(new RenderTextureDescriptor(width, height, depthBufferBits: 32));
+			commands.SetRenderTarget(sceneColor);
+			commands.ClearTarget(true, true, false, new Vector4(0, 0, 1, 1));
+			commands.DrawRendererList(opaque, context);
+			commands.DrawRendererList(transparent, context);
+			commands.CopyTexture(sceneColor, RenderTargetIdentifier.CameraTarget);
+		}
 		context.ExecuteCommandBuffer(commands);
 		context.Submit();
 		commands.Clear();

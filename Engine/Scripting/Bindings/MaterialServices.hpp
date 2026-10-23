@@ -20,6 +20,7 @@ struct MaterialServices
 	static Result<void> SetProperty(BindingCall& call, const Handle& material, const Utf8View& name,
 	                                MaterialPropertyValue value);
 	static Result<Handle> Create(BindingCall& call, Int32 type);
+	static Result<Handle> CreateFromShader(BindingCall& call, const Asset& shader);
 	static Result<Handle> Load(BindingCall& call, const Asset& reference);
 	static Result<Handle> Clone(BindingCall& call, const Handle& material);
 	static Result<void> Destroy(BindingCall& call, const Handle& material);

@@ -12,6 +12,13 @@ public static class CaptureTestWindow
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    public static bool SendKey(IntPtr window, uint key, bool pressed)
+    {
+        uint message = pressed ? 0x0100u : 0x0101u;
+        IntPtr data = pressed ? new IntPtr(1) : new IntPtr(unchecked((int)0xC0000001));
+        return PostMessage(window, message, new IntPtr(key), data);
+    }
     public static IntPtr Find(uint pid)
     {
         IntPtr found = IntPtr.Zero;
@@ -108,7 +115,9 @@ function Test-CaptureSamples([string]$Executable, [string[]]$Arguments, [string]
             }
             $resized = Invoke-CaptureSample $process "$project/$Name-Resized.png"
             if ($resized.Width -eq $second.Width -and $resized.Height -eq $second.Height) { throw 'Resize did not change captured dimensions' }
-            foreach ($cycle in 1..3) {
+            $memorySamples = [System.Collections.Generic.List[object]]::new()
+            $previousEffectPixel = $null
+            foreach ($cycle in 1..20) {
                 $null = [CaptureTestWindow]::ShowWindow($handle, 6)
                 Wait-CaptureCondition {
                     if ($process.HasExited) { throw "Capture target exited while minimizing; see $project/$Name.stderr.log" }
@@ -119,6 +128,49 @@ function Test-CaptureSamples([string]$Executable, [string[]]$Arguments, [string]
                 Wait-CaptureCondition { -not [CaptureTestWindow]::IsIconic($handle) }
                 $null = [CaptureTestWindow]::ShowWindow($handle, 0)
                 $null = Invoke-CaptureSample $process "$project/$Name-Restored.png"
+                if (-not [CaptureTestWindow]::SendKey($handle, 0x43, $true)) { throw 'Could not send effect toggle key down' }
+                Start-Sleep -Milliseconds 75
+                if (-not [CaptureTestWindow]::SendKey($handle, 0x43, $false)) { throw 'Could not send effect toggle key up' }
+                Start-Sleep -Milliseconds 75
+                $null = Invoke-CaptureSample $process "$project/$Name-EffectCycle.png"
+                $effectBitmap = [Drawing.Bitmap]::new("$project/$Name-EffectCycle.png")
+                try {
+                    $pixel = $effectBitmap.GetPixel([int]($effectBitmap.Width / 2), [int]($effectBitmap.Height / 2))
+                    if ($null -ne $previousEffectPixel -and
+                        ([Math]::Abs($pixel.R - $previousEffectPixel.R) +
+                         [Math]::Abs($pixel.G - $previousEffectPixel.G) +
+                         [Math]::Abs($pixel.B - $previousEffectPixel.B)) -lt 4) {
+                        throw "Screen Tint did not alternate on effect cycle $cycle"
+                    }
+                    $previousEffectPixel = $pixel
+                } finally { $effectBitmap.Dispose() }
+                $process.Refresh()
+                $memorySamples.Add([ordered]@{
+                    cycle = $cycle
+                    effectRgb = @([int]$pixel.R, [int]$pixel.G, [int]$pixel.B)
+                    privateBytes = $process.PrivateMemorySize64
+                    workingSetBytes = $process.WorkingSet64
+                })
+            }
+            $baselinePrivateBytes = [long]$memorySamples[0].privateBytes
+            $peakPrivateBytes = $baselinePrivateBytes
+            foreach ($sample in $memorySamples) {
+                $samplePrivateBytes = [long]$sample['privateBytes']
+                if ($samplePrivateBytes -gt $peakPrivateBytes) { $peakPrivateBytes = $samplePrivateBytes }
+            }
+            $finalPrivateBytes = [long]$memorySamples[-1].privateBytes
+            $memoryEvidence = [ordered]@{
+                processId = $process.Id
+                windowCycles = $memorySamples.Count
+                baselinePrivateBytes = $baselinePrivateBytes
+                peakPrivateBytes = $peakPrivateBytes
+                finalPrivateBytes = $finalPrivateBytes
+                allowedGrowthBytes = 128MB
+                samples = @($memorySamples)
+            }
+            $memoryEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$project/$Name-Memory.json" -Encoding utf8
+            if (($peakPrivateBytes - $baselinePrivateBytes) -gt 128MB) {
+                throw "Process private memory grew by more than 128 MiB during the 20 window cycles; see $project/$Name-Memory.json"
             }
             Stop-Process -Id $process.Id -Force
             Wait-CaptureCondition { $process.HasExited }

@@ -38,7 +38,7 @@ public sealed class DatasetImporter : ScriptedImporter
 		var texture = new Texture2D(2, 1);
 		texture.SetPixels(new[] { new Color(1, 0, 0, 1), new Color(0, 0, 1, 1) });
 		material.SetTexture(MaterialTextureSlot.BaseColor, texture);
-		material.SetTexture("_MainTex", texture);
+		material.SetTexture("_BaseMap", texture);
 		var data = ScriptableObject.CreateInstance<GeneratedFormatAsset>();
 		data.label = label; data.size = size; data.mesh = mesh; data.material = material; data.texture = texture;
 		var root = GameObject.Create(label);

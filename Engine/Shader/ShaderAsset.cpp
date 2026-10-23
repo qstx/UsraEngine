@@ -117,7 +117,9 @@ Result<String> LayoutIdentity(const ShaderAsset& shader, const ShaderVariantAsse
 			members.push_back({{"name", ToStdString(member.name)},
 			                   {"type", ToStdString(member.type)},
 			                   {"offset", member.byteOffset},
-			                   {"size", member.byteSize}});
+			                   {"size", member.byteSize},
+			                   {"arrayCount", member.arrayCount},
+			                   {"arrayStride", member.arrayStride}});
 		}
 		layout["uniformBuffers"].push_back({{"binding", buffer.binding},
 		                                    {"size", buffer.byteSize},

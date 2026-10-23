@@ -50,6 +50,10 @@ internal static partial class RenderCommands
 	[RecordedCommand]
 	internal static partial void SetGlobalMatrix(BindingCommandWriter writer, string name, Matrix4x4 value);
 	[RecordedCommand]
+	internal static partial void SetGlobalVectorArray(BindingCommandWriter writer, string name, ReadOnlySpan<Vector4> values);
+	[RecordedCommand]
+	internal static partial void SetGlobalMatrixArray(BindingCommandWriter writer, string name, ReadOnlySpan<Matrix4x4> values);
+	[RecordedCommand]
 	internal static partial void SetGlobalTexture(BindingCommandWriter writer, string name, RenderTargetValue value);
 	[RecordedCommand]
 	internal static partial void SetGlobalBuffer(BindingCommandWriter writer, string name, [HandleKind(7)] NativeHandle value);

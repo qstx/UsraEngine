@@ -9,6 +9,8 @@ public abstract class RenderPipelineAsset : ScriptableObject
 {
 	protected abstract RenderPipeline CreatePipeline();
 
+	internal virtual ulong GetConfigurationRevision() => ValidationRevision;
+
 	internal RenderPipeline CreatePipelineInstance()
 	{
 		RequireValid();
@@ -153,7 +155,7 @@ public static class RenderPipelineManager
 		RenderPipelineAsset? candidate = hasPendingSelection ? pendingAsset : activeAsset;
 		candidate?.RequireValid();
 		if (activePipeline != null && !activePipeline.IsDisposed && ReferenceEquals(activeAsset, candidate) &&
-		    (candidate?.ValidationRevision ?? 0) == activeRevision)
+			(candidate?.GetConfigurationRevision() ?? 0) == activeRevision)
 		{
 			pendingAsset = null;
 			hasPendingSelection = false;
@@ -178,7 +180,7 @@ public static class RenderPipelineManager
 		RenderPipeline? previous = activePipeline;
 		activeAsset = candidate;
 		activePipeline = next;
-		activeRevision = candidate?.ValidationRevision ?? 0;
+		activeRevision = candidate?.GetConfigurationRevision() ?? 0;
 		previous?.Dispose();
 	}
 

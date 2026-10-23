@@ -11,6 +11,15 @@ const char* RendererComponent::UniquenessGroup() const
 
 Result<void> RendererComponent::Serialize(ArchiveWriter& writer) const
 {
+	auto shadowResult = writer.Write("castShadows", castShadows);
+	if (shadowResult)
+	{
+		shadowResult = writer.Write("receiveShadows", receiveShadows);
+	}
+	if (!shadowResult)
+	{
+		return shadowResult;
+	}
 	auto array = writer.Array("materials");
 	if (!array)
 	{
@@ -38,6 +47,14 @@ Result<void> RendererComponent::Serialize(ArchiveWriter& writer) const
 
 Result<void> RendererComponent::Deserialize(const ArchiveReader& reader, SerializationContext& context)
 {
+	const auto loadedCastShadows =
+	    reader.Contains("castShadows") ? reader.Boolean("castShadows") : Result<bool>::Success(true);
+	const auto loadedReceiveShadows =
+	    reader.Contains("receiveShadows") ? reader.Boolean("receiveShadows") : Result<bool>::Success(true);
+	if (!loadedCastShadows || !loadedReceiveShadows)
+	{
+		return Result<void>::Failure("Invalid Renderer shadow settings");
+	}
 	auto array = reader.Array("materials");
 	if (!array || array.value.size() > Mesh::maxSubMeshes)
 	{
@@ -64,6 +81,8 @@ Result<void> RendererComponent::Deserialize(const ArchiveReader& reader, Seriali
 	if (result)
 	{
 		instantiated = std::move(flags);
+		castShadows = loadedCastShadows.value;
+		receiveShadows = loadedReceiveShadows.value;
 	}
 	return result;
 }

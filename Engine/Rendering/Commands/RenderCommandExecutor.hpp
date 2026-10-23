@@ -28,7 +28,7 @@ struct RenderCommand
 	CameraData camera;
 	String debugName;
 	SceneLighting lighting;
-	String activePipeline = "UrsaForward";
+	String activePipeline = "UrsaUniversal";
 	RenderGlobalParameter global;
 	Color color;
 	UInt32 clearFlags = 0;

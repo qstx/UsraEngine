@@ -22,6 +22,12 @@ Texture2D<float4> _Source;
 Texture2D<float4> _Pattern;
 SamplerState sourceSampler;
 cbuffer CompositeParameters { float4 _DemoTint; float _DemoPatternStrength; }
+float3 LinearToSRGB(float3 color)
+{
+	float3 low = color * 12.92;
+	float3 high = 1.055 * pow(max(color, 0.0), 1.0 / 2.4) - 0.055;
+	return lerp(high, low, color <= 0.0031308);
+}
 struct Varyings { float4 position : SV_Position; float2 uv : TEXCOORD0; };
 Varyings VSMain(uint id : SV_VertexID)
 {
@@ -35,7 +41,7 @@ float4 PSMain(Varyings input) : SV_Target0
 {
 	float2 edge = min(input.uv, 1 - input.uv);
 	if (min(edge.x, edge.y) < 0.015) return float4(0.1, 0.8, 0.3, 1);
-	float3 color = _Source.Sample(sourceSampler, input.uv).rgb * _DemoTint.rgb;
+	float3 color = LinearToSRGB(_Source.Sample(sourceSampler, input.uv).rgb) * _DemoTint.rgb;
 	float3 pattern = _Pattern.Sample(sourceSampler, input.uv).rgb;
 	return float4(lerp(color, color * pattern, _DemoPatternStrength), 1);
 }

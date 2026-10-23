@@ -91,7 +91,7 @@ int main(int argumentCount, char** arguments)
 		            "[UrsaScriptType(\"editor.scene-tool\")] public sealed class SceneTool : Behaviour { } "
 		            "public sealed class EditorUtility { private int unused; }\n");
 		WriteSource(assets / "Scripts" / "Settings.cs",
-		            "using Ursa; namespace DemoScripts; "
+		            "using Ursa; using Ursa.Rendering; namespace DemoScripts; "
 		            "[UrsaScriptType(\"demo.settings\")] [CreateAssetMenu(MenuName = \"Demo/Settings\", "
 		            "FileName = \"GameSettings\", Order = 7)] public sealed class Settings : ScriptableObject { "
 		            "public Vector2 size = new(8,4); public Vector4 tint = new(1,2,3,4); "
@@ -99,6 +99,10 @@ int main(int argumentCount, char** arguments)
 		            "public ComputeShader[] kernels = System.Array.Empty<ComputeShader>(); "
 		            "public System.Collections.Generic.List<Shader> shaders = new(); } "
 		            "[UrsaScriptType(\"demo.other-settings\")] public sealed class OtherSettings : ScriptableObject {} "
+		            "[CreateAssetMenu(MenuName = \"Demo/Feature\", FileName = \"Feature\")] "
+		            "public sealed class FeatureSettings : ScriptableRendererFeature { "
+		            "protected override RendererFeature CreateFeature() => new FeatureInstance(); } "
+		            "public sealed class FeatureInstance : RendererFeature {} "
 		            "public abstract class AbstractSettings : ScriptableObject {} "
 		            "public sealed class GenericSettings<T> : ScriptableObject {}\n");
 
@@ -118,8 +122,8 @@ int main(int argumentCount, char** arguments)
 		       "IDE generation required a successful first Game build");
 		auto projects = service.value->GenerateProjects();
 		Expect(static_cast<bool>(projects), "ScriptBuild did not generate its projects");
-		Expect(service.value->ScriptTypes().size() == 5,
-		       "Roslyn script catalog included abstract/generic types or missed a concrete Behaviour");
+		Expect(service.value->ScriptTypes().size() == 9,
+		       "Script catalog missed project types or the built-in rendering asset types");
 		const auto findType = [&service](const char* id) -> ScriptTypeRecord
 		{
 			for (const ScriptTypeRecord& type : service.value->ScriptTypes())
@@ -136,6 +140,48 @@ int main(int argumentCount, char** arguments)
 		const ScriptTypeRecord editorType = findType("editor.scene-tool");
 		const ScriptTypeRecord settingsType = findType("demo.settings");
 		const ScriptTypeRecord otherSettingsType = findType("demo.other-settings");
+		const ScriptTypeRecord universalPipelineType = findType("ursa.rendering.universal-pipeline");
+		const ScriptTypeRecord universalRendererType = findType("ursa.rendering.universal-renderer-data");
+		const auto featureSettingsType =
+		    std::find_if(service.value->ScriptTypes().begin(), service.value->ScriptTypes().end(), [](const auto& type)
+		                 { return type.clrTypeName.find("DemoScripts.FeatureSettings") != String::npos; });
+		Expect(featureSettingsType != service.value->ScriptTypes().end(),
+		       "ScriptableRendererFeature asset type was omitted from the project catalog");
+		const auto featureEnabled = std::find_if(featureSettingsType->fields.begin(), featureSettingsType->fields.end(),
+		                                         [](const auto& field) { return field.name == "Enabled"; });
+		Expect(featureEnabled != featureSettingsType->fields.end() && featureEnabled->defaultValueJson == "true",
+		       "New Renderer Feature assets did not default to enabled");
+		const auto pipelineField = [&](const String& name) -> const ScriptFieldTypeDescriptor&
+		{
+			const auto field = std::find_if(universalPipelineType.fields.begin(), universalPipelineType.fields.end(),
+			                                [&](const auto& item) { return item.name == name; });
+			if (field == universalPipelineType.fields.end())
+			{
+				throw std::runtime_error("Universal pipeline catalog is missing field: " + ToStdString(name));
+			}
+			return *field;
+		};
+		const auto featureList = std::find_if(universalRendererType.fields.begin(), universalRendererType.fields.end(),
+		                                      [](const auto& field) { return field.name == "Features"; });
+		Expect(universalPipelineType.isRenderPipeline && universalPipelineType.version == 2 &&
+		           universalPipelineType.createAssetMenuName == "Rendering/Universal Pipeline" &&
+		           universalPipelineType.sourceGuid && universalPipelineType.localFileId != 0 &&
+		           universalRendererType.createAssetMenuName == "Rendering/Universal Renderer Data" &&
+		           featureList != universalRendererType.fields.end() && featureList->kind == "Array" &&
+		           featureList->elementKind == "ScriptableObjectReference" &&
+		           featureList->elementTypeName == "Ursa.Rendering.ScriptableRendererFeature" &&
+		           pipelineField("MainLightShadowCascadeCount").defaultValueJson == "2" &&
+		           pipelineField("MainLightShadowSplitFractions").defaultValueJson == "[0.25]" &&
+		           pipelineField("ToneMapping").defaultValueJson == "1" &&
+		           pipelineField("BloomThreshold").defaultValueJson == "1" &&
+		           pipelineField("BloomIntensity").defaultValueJson == "0.5" &&
+		           pipelineField("BloomScatter").defaultValueJson == "0.7",
+		       "Built-in Universal pipeline and RendererData assets are not selectable with typed Feature references");
+		Expect(std::find(settingsType.baseTypeNames.begin(), settingsType.baseTypeNames.end(),
+		                 "Ursa.ScriptableObject") != settingsType.baseTypeNames.end() &&
+		           std::find(otherSettingsType.baseTypeNames.begin(), otherSettingsType.baseTypeNames.end(),
+		                     "Ursa.ScriptableObject") != otherSettingsType.baseTypeNames.end(),
+		       "Script type catalog did not preserve base-type identities for typed asset references");
 		const auto settingsField = [&](const String& name) -> const ScriptFieldTypeDescriptor&
 		{
 			for (const auto& field : settingsType.fields)

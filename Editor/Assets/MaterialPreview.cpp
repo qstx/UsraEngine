@@ -318,9 +318,14 @@ Result<void> MaterialPreview::RenderScene(Scene& scene, const Camera& camera,
 	settings.background = {0.035f, 0.045f, 0.065f, 1};
 	settings.targetWidth = color->desc.width;
 	settings.targetHeight = color->desc.height;
-	Rendering::CameraData data{identity ? identity : cameraIdentity,
-	                           camera.ViewProjection(Float32(color->desc.width) / Float32(color->desc.height)),
-	                           camera.position, settings};
+	const Float32 aspect = Float32(color->desc.width) / Float32(color->desc.height);
+	Rendering::CameraData data{identity ? identity : cameraIdentity, camera.ViewProjection(aspect), camera.position,
+	                           settings};
+	data.view = camera.View();
+	data.projection = camera.Projection(aspect);
+	data.inverseViewProjection = data.viewProjection.Inverse();
+	data.nearPlane = camera.nearPlane;
+	data.farPlane = camera.farPlane;
 	return renderViewport(scene, output, Rendering::CameraType::Preview, data);
 }
 } // namespace Ursa::Editor

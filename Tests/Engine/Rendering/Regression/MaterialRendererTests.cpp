@@ -117,7 +117,11 @@ void TestUvAndColorSpace(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRe
 	done(unlit->SetTexture(Ursa::MaterialTextureSlot::BaseColor,
 	                       Texture(1, 1, Ursa::TextureColorSpace::Srgb, {128, 128, 128, 255})));
 	const auto gray = pixel(ReadFrame(device, renderer, {box({}, {1, 1, 1}, unlit)}), 32, 32);
-	Expect(gray[0] >= 123 && gray[0] <= 133, "sRGB material texture was not decoded and encoded correctly");
+	if (gray[0] < 52 || gray[0] > 58)
+	{
+		throw std::runtime_error(
+		    "sRGB material texture was not decoded to linear scene color (red=" + std::to_string(gray[0]) + ")");
+	}
 }
 
 void TestPbrMapsAndLighting(const Ursa::Rhi::DevicePtr& device, Ursa::Test::SceneRenderer& renderer)
@@ -125,7 +129,7 @@ void TestPbrMapsAndLighting(const Ursa::Rhi::DevicePtr& device, Ursa::Test::Scen
 	auto pbr = Material(Ursa::MaterialType::PbrMetallicRoughness, {0.8f, 0.3f, 0.15f, 1});
 	auto render = [&](const Ursa::SceneLighting& lighting)
 	{ return pixel(ReadFrame(device, renderer, {box({}, {1.5f, 1.5f, 1}, pbr)}, lighting), 32, 32); };
-	const auto directional = sun();
+	const auto directional = sun(0.5f);
 	const auto original = render(directional);
 	done(pbr->SetBaseColor({0.15f, 0.3f, 0.8f, 1}));
 	const auto blue = render(directional);
@@ -137,15 +141,43 @@ void TestPbrMapsAndLighting(const Ursa::Rhi::DevicePtr& device, Ursa::Test::Scen
 	done(pbr->SetTexture(Ursa::MaterialTextureSlot::MetallicRoughness,
 	                     Texture(1, 1, Ursa::TextureColorSpace::Linear, {0, 255, 0, 255})));
 	const auto mappedMetal = render(directional);
-	Expect(Difference(metal, mappedMetal) > 10, "Metallic-roughness texture had no visible effect");
+	if (Difference(metal, mappedMetal) <= 10)
+	{
+		throw std::runtime_error("Metallic-roughness texture had no visible effect (metal=" + std::to_string(metal[0]) +
+		                         "," + std::to_string(metal[1]) + "," + std::to_string(metal[2]) +
+		                         "; mapped=" + std::to_string(mappedMetal[0]) + "," + std::to_string(mappedMetal[1]) +
+		                         "," + std::to_string(mappedMetal[2]) + ")");
+	}
+	const Ursa::Float32 sourceSmoothness = 0.75f;
+	const Ursa::Float32 expectedPerceptualRoughness = 1.0f - sourceSmoothness;
+	const Ursa::Float32 channel = 128.0f / 255.0f;
+	done(pbr->SetMetallic(0.5f));
+	done(pbr->SetRoughness(expectedPerceptualRoughness));
+	done(pbr->SetTexture(Ursa::MaterialTextureSlot::MetallicRoughness,
+	                     Texture(1, 1, Ursa::TextureColorSpace::Linear, {0, 128, 128, 255})));
+	const auto mappedChannels = render(directional);
+	done(pbr->SetMetallic(0.5f * channel));
+	done(pbr->SetRoughness(expectedPerceptualRoughness * channel));
 	done(pbr->SetTexture(Ursa::MaterialTextureSlot::MetallicRoughness, {}));
+	Expect(Difference(mappedChannels, render(directional)) <= 1,
+	       "Metallic-roughness map did not use G for roughness, B for metallic, or URP smoothness-to-roughness "
+	       "conversion");
+	done(pbr->SetMetallic(1.0f));
+	done(pbr->SetRoughness(0.2f));
 	auto angled = directional;
 	angled.directional[0].direction = {-0.55f, 0, -0.84f};
+	angled.directional[0].intensity = 8.0f;
 	const auto flatNormal = render(angled);
 	done(pbr->SetTexture(Ursa::MaterialTextureSlot::Normal,
 	                     Texture(1, 1, Ursa::TextureColorSpace::Linear, {220, 128, 220, 255})));
 	const auto tiltedNormal = render(angled);
-	Expect(Difference(flatNormal, tiltedNormal) > 10, "Tangent-space normal map had no visible effect");
+	if (Difference(flatNormal, tiltedNormal) <= 10)
+	{
+		throw std::runtime_error("Tangent-space normal map had no visible effect (flat=" +
+		                         std::to_string(flatNormal[0]) + "," + std::to_string(flatNormal[1]) + "," +
+		                         std::to_string(flatNormal[2]) + "; tilted=" + std::to_string(tiltedNormal[0]) + "," +
+		                         std::to_string(tiltedNormal[1]) + "," + std::to_string(tiltedNormal[2]) + ")");
+	}
 	done(pbr->SetTexture(Ursa::MaterialTextureSlot::Normal, {}));
 	Ursa::SceneLighting ambient;
 	ambient.ambientIntensity = 1.0f;
@@ -242,7 +274,7 @@ void TestLegacyPbrMaterialBackingReuse(const Ursa::Rhi::DevicePtr& device, Ursa:
 	};
 	for (Ursa::UInt32 frame = 0; frame < 24; ++frame)
 	{
-		const auto image = ReadFrame(device, renderer, boxes, sun());
+		const auto image = ReadFrame(device, renderer, boxes, sun(0.5f));
 		const auto ceramicPixel = pixel(image, 20, 32);
 		const auto goldPixel = pixel(image, 44, 32);
 		Expect(ceramicPixel[2] > ceramicPixel[0] && goldPixel[0] > goldPixel[2],

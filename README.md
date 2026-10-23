@@ -203,8 +203,8 @@ Code uses the repository's `.clang-format` rules, including one blank line betwe
 `<Vfs/VirtualFileSystem.hpp>` addresses runtime content through `scheme:relative/path` virtual paths. The directory provider is used in Editor and loose development runs; a Pak provider serves packaged content. Reads, range reads, listing, atomic writes, and appends all pass through the VFS provider interface. `VirtualPath::Parse` rejects host drive letters, absolute paths, and any `..` segment. The directory provider checks canonical paths against its mount root, including Windows junctions.
 
 ```text
-ursa:Shaders/Renderer3D/Unlit.ursashader       -> Engine/Assets
-ursa:Shaders/Renderer3D/Unlit.ursashaderasset  -> <project>/Library/Artifacts/<fingerprint>
+ursa:Shaders/Universal/Unlit.ursashader       -> Engine/Assets
+ursa:Shaders/Universal/Unlit.ursashaderasset  -> <project>/Library/Artifacts/<fingerprint>
 prj:Snake/Snake.ursascene              -> selected project's Assets directory
 user:Logs/UrsaEditor.log                 -> per-user application data directory
 ```
@@ -229,7 +229,7 @@ Ursa::Result<void> OpenEditorResources(const std::filesystem::path &engineAssets
     if (!vfs)
         return Ursa::Result<void>::Failure(vfs.error);
 
-    auto shader = Ursa::VirtualPath::Parse("ursa:Shaders/Renderer3D/Unlit.ursashaderasset");
+    auto shader = Ursa::VirtualPath::Parse("ursa:Shaders/Universal/Unlit.ursashaderasset");
     if (!shader)
         return Ursa::Result<void>::Failure(shader.error);
     auto bytes = vfs.value.Read(shader.value);
@@ -374,7 +374,7 @@ The fixed step defaults to 1/60 second and at most five steps per frame. `config
 
 为 GameObject 添加 `MeshFilterComponent` 和 `MeshRendererComponent`，设置共享 Mesh 与材质；蒙皮对象使用 `SkinnedMeshRendererComponent`。`CameraComponent` 沿本地负 Z 观察，并提供 depth、LayerMask、清除和 viewport 设置。每个渲染批次采集一次 `RenderScene`，多个相机共享对象快照，再分别剔除和创建绘制列表。
 
-旧 `Renderer3D`、`ModelBoxInstance`、隐式多 Pass 绘制及直接提交入口已删除。显式多 Pass 由管线按顺序录制命令。`Scene::CollectRenderData` 与 `CollectPreviewRenderData` 是使用同一 `RenderScene` 的单相机兼容查询，返回 `objects`，其中世界矩阵为 `world`；生产渲染入口使用完整快照。内置 Shader 源路径保留 `ursa:Shaders/Renderer3D/`，以维持资产身份和依赖兼容。
+旧单体 `Renderer3D`、`ModelBoxInstance`、隐式多 Pass 绘制及直接提交入口已删除。显式多 Pass 由管线按顺序录制命令。`Scene::CollectRenderData` 与 `CollectPreviewRenderData` 是使用同一 `RenderScene` 的单相机兼容查询，返回 `objects`，其中世界矩阵为 `world`；生产渲染入口使用完整快照。内置 Lit/Unlit Shader 保留资产 GUID，源与编译资源位于 `Shaders/Universal/`；旧 Shader 路径不再提供兼容 fallback。
 
 ## Scene lighting
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Shader/ShaderAsset.hpp>
+#include <Serialization/ResourceId.hpp>
 
 namespace Ursa::Shader
 {
@@ -8,7 +8,10 @@ ResourceId BuiltinUnlitShaderId();
 
 ResourceId BuiltinPbrShaderId();
 
-ShaderAsset CreateBuiltinUnlitShaderAsset();
+ResourceId BuiltinBlitShaderId();
 
-ShaderAsset CreateBuiltinPbrShaderAsset();
+ResourceId BuiltinFinalPostShaderId();
+ResourceId BuiltinBloomShaderId();
+
+const char* BuiltinShaderAssetPath(ResourceId id);
 } // namespace Ursa::Shader

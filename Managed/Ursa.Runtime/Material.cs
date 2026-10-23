@@ -20,6 +20,8 @@ public class Material : RenderResource
 	internal static Material? FromHandle(NativeHandle handle) => Wrap(handle, value => new Material(value));
 
 	public static Material Create(MaterialType type = MaterialType.Unlit) => FromHandle(NativeMaterialBindings.Create(type))!;
+	public static Material Create(AssetReference shader) =>
+		FromHandle(NativeMaterialBindings.CreateFromShader(NativeAssetReference.From(shader)))!;
 
 	public static Material Load(AssetReference reference) => FromHandle(NativeMaterialBindings.Load(NativeAssetReference.From(reference)))!;
 

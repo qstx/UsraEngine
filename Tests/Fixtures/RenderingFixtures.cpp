@@ -3,6 +3,7 @@
 #include <Shader/ShaderBuiltins.hpp>
 #include <Core/StringInterop.hpp>
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 
 namespace Ursa::Test
@@ -47,6 +48,7 @@ Result<std::unique_ptr<SceneRenderer>> SceneRenderer::Create(Rhi::DevicePtr sele
 	auto result = std::make_unique<SceneRenderer>();
 	result->device = std::move(selectedDevice);
 	result->executor = std::move(commands.value);
+	result->neutralShadowAtlas = Take(Rendering::CreateRenderTexture(*result->device, {1, 1, 2}));
 	return Result<std::unique_ptr<SceneRenderer>>::Success(std::move(result));
 }
 
@@ -57,6 +59,18 @@ Result<void> SceneRenderer::Record(const Mat4& viewProjection, const Vector<Mesh
 	RenderCommand clear;
 	clear.opcode = RenderCommandOpcode::ClearTarget;
 	clear.clearFlags = 3;
+	RenderCommand shadowAtlas;
+	shadowAtlas.opcode = RenderCommandOpcode::SetGlobalParameters;
+	shadowAtlas.global.name = "_UrsaDirectionalShadowAtlas";
+	shadowAtlas.global.kind = 3;
+	shadowAtlas.global.texture.texture = neutralShadowAtlas;
+	RenderCommand shadowCount;
+	shadowCount.opcode = RenderCommandOpcode::SetGlobalParameters;
+	shadowCount.global.name = "_UrsaDirectionalShadowCascadeCount";
+	shadowCount.global.kind = 6;
+	shadowCount.global.bytes.resize(sizeof(Int32));
+	const Int32 noShadowCascades = 0;
+	std::memcpy(shadowCount.global.bytes.data(), &noShadowCascades, sizeof(noShadowCascades));
 	clear.color = {0.035f, 0.055f, 0.09f, 1};
 	RenderCommand command;
 	command.opcode = RenderCommandOpcode::DrawMesh;
@@ -93,7 +107,7 @@ Result<void> SceneRenderer::Record(const Mat4& viewProjection, const Vector<Mesh
 			                                                 ? Shader::BuiltinPbrShaderId()
 			                                                 : Shader::BuiltinUnlitShaderId()));
 		}
-		const auto passes = Take(OrderedGraphicsPasses(shader, "UrsaForward"));
+		const auto passes = Take(OrderedGraphicsPasses(shader, "UrsaUniversal"));
 		for (const auto& pass : passes)
 		{
 			const auto& tags = pass.programShader->subShaders[pass.subShaderIndex].passes[pass.passIndex].tags;
@@ -122,7 +136,7 @@ Result<void> SceneRenderer::Record(const Mat4& viewProjection, const Vector<Mesh
 			command.draws.push_back(std::move(record));
 		}
 	}
-	Done(executor->Execute({clear, command}));
+	Done(executor->Execute({clear, shadowAtlas, shadowCount, command}));
 	return executor->Submit();
 }
 

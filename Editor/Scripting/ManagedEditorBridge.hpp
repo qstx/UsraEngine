@@ -3,6 +3,7 @@
 #include <Scene/ComponentEditors.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Scripting/DotNet/DotNetHost.hpp>
+#include <Scripting/ScriptTypeDescriptor.hpp>
 #include <Serialization/SerializedObject.hpp>
 #include <Scene/ViewportLayout.hpp>
 #include <optional>
@@ -19,6 +20,7 @@ struct ManagedEditorContext
 	EditorDocument* document = nullptr;
 	EditorDocuments* documents = nullptr;
 	ProjectWorkspace* workspace = nullptr;
+	const Vector<ScriptTypeDescriptor>* scriptTypes = nullptr;
 	ComponentRegistry* registry = nullptr;
 	Component* target = nullptr;
 	std::shared_ptr<MaterialInstance> targetMaterial;

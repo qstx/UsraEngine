@@ -23,6 +23,7 @@ ursa_add_test_executable(UrsaScenePersistenceTests ScenePersistenceTests.cpp)
 target_link_libraries(UrsaScenePersistenceTests PRIVATE Ursa::Engine)
 
 add_test(NAME UrsaScenePersistenceTests COMMAND UrsaScenePersistenceTests)
+ursa_require_test_content(UrsaScenePersistenceTests UrsaScenePersistenceTests)
 
 ursa_add_test_executable(UrsaCustomComponentTests CustomComponentTests.cpp)
 target_link_libraries(UrsaCustomComponentTests PRIVATE Ursa::Engine)
@@ -33,4 +34,5 @@ ursa_add_test_executable(UrsaPrefabTests PrefabTests.cpp)
 target_link_libraries(UrsaPrefabTests PRIVATE Ursa::Engine)
 
 add_test(NAME UrsaPrefabTests COMMAND UrsaPrefabTests)
+ursa_require_test_content(UrsaPrefabTests UrsaPrefabTests)
 ursa_finalize_test_directory()

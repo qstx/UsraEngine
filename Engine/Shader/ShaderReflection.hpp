@@ -20,6 +20,8 @@ struct ShaderUniformMember
 	String type;
 	UInt32 byteOffset = 0;
 	UInt32 byteSize = 0;
+	UInt32 arrayCount = 1;
+	UInt32 arrayStride = 0;
 	UInt32 matrixStride = 0;
 	bool spirvRowMajor = false;
 };

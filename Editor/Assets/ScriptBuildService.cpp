@@ -442,6 +442,20 @@ Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input
 				}
 				fields.push_back(std::move(descriptor));
 			}
+			Vector<String> baseTypeNames;
+			const Json declaredBaseTypes = item.value("BaseTypeNames", Json::array());
+			if (!declaredBaseTypes.is_array())
+			{
+				return Result<void>::Failure("ScriptCatalog contains an invalid base type list");
+			}
+			for (const Json& baseType : declaredBaseTypes)
+			{
+				if (!baseType.is_string() || baseType.get<std::string>().empty())
+				{
+					return Result<void>::Failure("ScriptCatalog contains an invalid base type name");
+				}
+				baseTypeNames.push_back(ToUrsaString(baseType.get<std::string>()));
+			}
 			records.push_back(
 			    {guid.value, scriptType, item["Version"].get<Ursa::UInt32>(), localFileId,
 			     ToUrsaString(item["ClrTypeName"].get<std::string>()), sourcePath.value,
@@ -452,7 +466,7 @@ Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input
 			                                  : ScriptTypeKind::Behaviour,
 			     item.value("IsRenderPipeline", false), ToUrsaString(item.value("CreateAssetMenuName", std::string{})),
 			     ToUrsaString(item.value("CreateAssetFileName", std::string{})),
-			     item.value("CreateAssetMenuOrder", Int32{0})});
+			     item.value("CreateAssetMenuOrder", Int32{0}), std::move(baseTypeNames)});
 		}
 		if (!document.contains("SourceMetadata") || !document["SourceMetadata"].is_array() ||
 		    document["SourceMetadata"].size() != sources.size())

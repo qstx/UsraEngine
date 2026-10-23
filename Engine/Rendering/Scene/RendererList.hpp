@@ -32,7 +32,7 @@ struct DrawingSettings
 	SortingSettings sorting;
 	std::shared_ptr<MaterialInstance> overrideMaterial;
 	Int32 overrideMaterialPass = -1;
-	String activePipeline = "UrsaForward";
+	String activePipeline = "UrsaUniversal";
 };
 
 struct FilteringSettings
@@ -47,6 +47,12 @@ struct CullingResults
 	RenderContextToken context;
 	UInt32 index = 0;
 	UInt32 generation = 0;
+};
+
+struct VisibleLights
+{
+	Vector<DirectionalLightData> directional;
+	Vector<PointLightData> point;
 };
 
 struct RendererList
@@ -64,7 +70,7 @@ struct RendererListEntry
 	UInt32 passIndex = 0;
 	Int32 renderQueue = 2000;
 	Float32 distanceSquared = 0;
-	String activePipeline = "UrsaForward";
+	String activePipeline = "UrsaUniversal";
 	std::optional<ResolvedGraphicsPass> resolvedPass;
 };
 
@@ -87,10 +93,14 @@ public:
 
 	Result<CullingResults> Cull(const CameraData& camera);
 
+	Result<CullingResults> CullShadowCasters(const CameraData& receiverCamera, const Mat4& lightViewProjection);
+
 	Result<RendererList> CreateRendererList(CullingResults results, const DrawingSettings& drawing,
 	                                        const FilteringSettings& filtering);
 
 	Result<const Vector<UInt32>*> VisibleObjects(CullingResults results) const;
+
+	Result<Ursa::Rendering::VisibleLights> VisibleLightsFor(CullingResults results) const;
 
 	Result<const Vector<RendererListEntry>*> Entries(RendererList list) const;
 
@@ -105,6 +115,8 @@ private:
 	struct Visibility
 	{
 		Vector<UInt32> indices;
+		Vector<UInt32> directionalLightIndices;
+		Vector<UInt32> pointLightIndices;
 		UInt32 generation = 0;
 	};
 

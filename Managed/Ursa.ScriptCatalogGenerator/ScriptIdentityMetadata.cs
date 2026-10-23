@@ -49,7 +49,7 @@ internal sealed class ScriptIdentityMetadata
 
 	internal StoredScriptIdentity Resolve(SourceEntry source, INamedTypeSymbol type,
 		IReadOnlyList<INamedTypeSymbol> candidates, string? declaredId, uint declaredVersion,
-		Func<string, ulong> makeLocalFileId)
+		Func<string, ulong> makeLocalFileId, bool legacyIdentity)
 	{
 		string typeName = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 		string fileName = Path.GetFileNameWithoutExtension(source.Path);
@@ -73,13 +73,10 @@ internal sealed class ScriptIdentityMetadata
 			if (!assigned.Add(identity))
 				throw new InvalidDataException($"Ambiguous script metadata mapping for {typeName} in {source.VirtualPath}.");
 			if (declaredId != null && declaredId != identity.Id)
-				throw new InvalidDataException($"Legacy UrsaScriptType differs from .meta identity for {typeName}; preserve the metadata ID.");
+				throw new InvalidDataException($"Declared type identity differs from .meta identity for {typeName}; preserve the metadata ID.");
 			identity.TypeName = typeName;
-			if (declaredId != null)
-			{
-				identity.Version = declaredVersion;
-				identity.Legacy = true;
-			}
+			if (declaredId != null) identity.Version = declaredVersion;
+			identity.Legacy = legacyIdentity;
 		}
 		else
 		{
@@ -90,7 +87,7 @@ internal sealed class ScriptIdentityMetadata
 			origins[id] = $"{typeName} in {source.VirtualPath}";
 			identity = new StoredScriptIdentity
 			{
-				TypeName = typeName, Id = id, Version = declaredVersion, Legacy = declaredId != null,
+				TypeName = typeName, Id = id, Version = declaredVersion, Legacy = legacyIdentity,
 				LocalFileId = makeLocalFileId(id)
 			};
 			entries.Add(identity);

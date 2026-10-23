@@ -26,6 +26,8 @@ public:
 	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
 
 	Ursa::Float32 verticalFovRadians = 0.78539816f;
+	bool orthographic = false;
+	Ursa::Float32 orthographicSize = 5.0f;
 	Ursa::Float32 nearPlane = 0.1f;
 	Ursa::Float32 farPlane = 100.0f;
 	Rendering::CameraSettings rendering;

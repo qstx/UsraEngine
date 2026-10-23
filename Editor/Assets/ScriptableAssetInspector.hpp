@@ -13,7 +13,8 @@ public:
 	SerializedTargetAdapter Properties();
 	Result<void> Save();
 	Result<bool> Draw(const std::function<void(const VirtualPath&)>& requestImport,
-	                  const AssetImporterInspector::CustomDraw& custom = {});
+	                  const AssetImporterInspector::CustomDraw& custom = {},
+	                  const Vector<ScriptTypeDescriptor>* scriptTypes = nullptr);
 
 	bool Dirty() const
 	{

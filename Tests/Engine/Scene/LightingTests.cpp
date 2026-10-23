@@ -2,6 +2,9 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Containers.hpp>
 #include <Scene/Scene.hpp>
+#include <Scene/RenderingComponents.hpp>
+#include <Serialization/ArchiveFields.hpp>
+#include <Serialization/SerializationContext.hpp>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -60,8 +63,61 @@ void TestValidation()
 	       "Invalid point light settings changed the light");
 }
 
+void TestLegacyShadowDefaultsAndInvalidArchive()
+{
+	Ursa::ArchiveWriter legacyLight;
+	done(Ursa::WriteNumbers(legacyLight, "color", {1.0, 1.0, 1.0, 1.0}));
+	done(legacyLight.Write("intensity", 1.0));
+	auto legacyLightBytes = Take(Ursa::JsonArchive::Encode(legacyLight));
+	auto legacyLightReader = Take(Ursa::JsonArchive::Decode(legacyLightBytes));
+	Ursa::DirectionalLightComponent light;
+	Ursa::SerializationContext context;
+	done(light.Deserialize(legacyLightReader, context));
+	Expect(light.CastsShadows() && light.ShadowStrength() == 1.0f && light.ShadowBias() == 0.001f &&
+	           light.ShadowNormalBias() == 0.01f && !light.SoftShadows(),
+	       "Legacy directional light did not receive compatible shadow defaults");
+
+	Ursa::ArchiveWriter invalidLight;
+	done(Ursa::WriteNumbers(invalidLight, "color", {1.0, 1.0, 1.0, 1.0}));
+	done(invalidLight.Write("intensity", 1.0));
+	done(invalidLight.Write("shadowStrength", 1.1));
+	auto invalidLightReader = Take(Ursa::JsonArchive::Encode(invalidLight));
+	auto invalidLightArchive = Take(Ursa::JsonArchive::Decode(invalidLightReader));
+	Expect(!light.Deserialize(invalidLightArchive, context) && light.ShadowStrength() == 1.0f,
+	       "Directional light accepted an invalid serialized shadow strength");
+
+	Ursa::ArchiveWriter legacyRenderer;
+	auto materials = Take(legacyRenderer.Array("materials"));
+	(void)materials;
+	auto legacyRendererBytes = Take(Ursa::JsonArchive::Encode(legacyRenderer));
+	auto legacyRendererReader = Take(Ursa::JsonArchive::Decode(legacyRendererBytes));
+	Ursa::MeshRendererComponent renderer;
+	done(renderer.Deserialize(legacyRendererReader, context));
+	Expect(renderer.CastShadows() && renderer.ReceiveShadows(),
+	       "Legacy Renderer did not default to casting and receiving shadows");
+}
+
 void TestWorldSnapshotAndCapacity()
 {
+	Ursa::Scene directionalCapacityScene;
+	const auto capacityCameraNode = Take(directionalCapacityScene.CreateGameObject());
+	const auto capacityCamera = Take(directionalCapacityScene.AddComponent<Ursa::CameraComponent>(capacityCameraNode));
+	done(directionalCapacityScene.SetActiveCamera(capacityCamera));
+	for (Ursa::UInt32 index = 0; index < Ursa::SceneLighting::maxDirectionalLights; ++index)
+	{
+		const auto node = Take(directionalCapacityScene.CreateGameObject());
+		Take(directionalCapacityScene.AddComponent<Ursa::DirectionalLightComponent>(node));
+	}
+	Expect(Take(directionalCapacityScene.CollectRenderData(1.0f)).lighting.directional.size() ==
+	           Ursa::SceneLighting::maxDirectionalLights,
+	       "Directional light capacity boundary failed");
+	const auto extraDirectional = Take(directionalCapacityScene.CreateGameObject());
+	Take(directionalCapacityScene.AddComponent<Ursa::DirectionalLightComponent>(extraDirectional));
+	const auto directionalOverflow = directionalCapacityScene.CollectRenderData(1.0f);
+	Expect(!directionalOverflow && directionalOverflow.error.find("5") != Ursa::String::npos &&
+	           directionalOverflow.error.find("4") != Ursa::String::npos,
+	       "Directional light overflow lacked counts and capacity");
+
 	Ursa::Scene scene;
 	const auto cameraNode = Take(scene.CreateGameObject());
 	const auto cameraId = Take(scene.AddComponent<Ursa::CameraComponent>(cameraNode));
@@ -116,6 +172,7 @@ int main()
 	try
 	{
 		TestValidation();
+		TestLegacyShadowDefaultsAndInvalidArchive();
 		TestWorldSnapshotAndCapacity();
 		return 0;
 	}

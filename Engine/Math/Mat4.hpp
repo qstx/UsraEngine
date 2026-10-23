@@ -26,9 +26,14 @@ struct Mat4
 	static Mat4 Perspective(Ursa::Float32 verticalFovRadians, Ursa::Float32 aspect, Ursa::Float32 nearPlane,
 	                        Ursa::Float32 farPlane);
 
+	static Mat4 Orthographic(Ursa::Float32 verticalSize, Ursa::Float32 aspect, Ursa::Float32 nearPlane,
+	                         Ursa::Float32 farPlane);
+
 	static Mat4 LookAt(Vec3 eye, Vec3 target, Vec3 up);
 
 	Mat4 InverseAffine() const;
+
+	Mat4 Inverse() const;
 };
 
 Mat4 operator*(const Mat4& a, const Mat4& b);

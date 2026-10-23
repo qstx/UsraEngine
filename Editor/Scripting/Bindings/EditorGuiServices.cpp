@@ -350,6 +350,33 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 			{
 				continue;
 			}
+			if (kind == K::V_ScriptableObject)
+			{
+				const String& expectedType = scope.expectedAssetType;
+				if (!expectedType.empty())
+				{
+					if (!scope.source.scriptTypes)
+					{
+						continue;
+					}
+					const auto candidate =
+					    std::find_if(scope.source.scriptTypes->begin(), scope.source.scriptTypes->end(),
+					                 [&](const auto& type) { return type.scriptType == asset.reference.typeId; });
+					if (candidate == scope.source.scriptTypes->end() ||
+					    candidate->kind != ScriptTypeKind::ScriptableObject)
+					{
+						continue;
+					}
+					const Size separator = candidate->clrTypeName.find(',');
+					const String concreteType = candidate->clrTypeName.substr(0, separator);
+					if (concreteType != expectedType &&
+					    std::find(candidate->baseTypeNames.begin(), candidate->baseTypeNames.end(), expectedType) ==
+					        candidate->baseTypeNames.end())
+					{
+						continue;
+					}
+				}
+			}
 			const String key = asset.reference.asset.guid.ToString() + ":" +
 			                   ToUrsaString(std::to_string(asset.reference.asset.localFileId));
 			ImGui::PushID(key.c_str());

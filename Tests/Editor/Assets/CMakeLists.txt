@@ -36,8 +36,11 @@ if(URSA_BUILD_EDITOR)
   target_link_libraries(UrsaModelImportCandidateTests PRIVATE Ursa::Editor)
   target_compile_definitions(UrsaModelImportCandidateTests PRIVATE
     URSA_CANDIDATE_ANIMATED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/animation_with_skeleton.fbx"
-    URSA_CANDIDATE_EMBEDDED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/embedded_ascii/box_embedded_texture_fragmented.fbx")
+    URSA_CANDIDATE_EMBEDDED_FBX="${URSA_SOURCE_ROOT}/ThirdParty/assimp/test/models/FBX/embedded_ascii/box_embedded_texture_fragmented.fbx"
+    URSA_ENGINE_SHADER_PAK="${URSA_SHADER_TEST_PAK}")
+  add_dependencies(UrsaModelImportCandidateTests UrsaPak)
   add_test(NAME UrsaModelImportCandidateTests COMMAND UrsaModelImportCandidateTests)
+  set_tests_properties(UrsaModelImportCandidateTests PROPERTIES FIXTURES_REQUIRED UrsaShaderContentPak)
 
   ursa_add_test_executable(UrsaAssetPreviewPanelTests AssetPreviewPanelTests.cpp)
   target_link_libraries(UrsaAssetPreviewPanelTests PRIVATE Ursa::Editor Ursa::StbImage)
@@ -94,6 +97,7 @@ if(URSA_BUILD_EDITOR)
   target_compile_definitions(UrsaAssetImportPipelineTests PRIVATE URSA_TEST_ENGINE_SOURCE="${URSA_SOURCE_ROOT}/Assets")
 
   add_test(NAME UrsaAssetImportPipelineTests COMMAND UrsaAssetImportPipelineTests)
+  ursa_require_test_content(UrsaAssetImportPipelineTests UrsaAssetImportPipelineTests)
 
   ursa_add_test_executable(UrsaProjectShaderImportTests ProjectShaderImportTests.cpp)
   target_link_libraries(UrsaProjectShaderImportTests PRIVATE Ursa::Editor)

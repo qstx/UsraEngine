@@ -152,9 +152,9 @@ public sealed class ManagedRenderComponentProbe : Behaviour
 		{
 		var texture = TextureAsset.Load(new AssetReference("34567890-0000-4000-8000-000000000001"));
 		material.SetTexture(MaterialTextureSlot.BaseColor, texture);
-		material.SetTexture("_MainTex", texture);
+		material.SetTexture("_BaseMap", texture);
 		if (material.GetTexture(MaterialTextureSlot.BaseColor)?.Reference.Guid != texture.Reference.Guid ||
-		    material.GetTexture("_MainTex")?.Reference.Guid != texture.Reference.Guid)
+		    material.GetTexture("_BaseMap")?.Reference.Guid != texture.Reference.Guid)
 			throw new InvalidOperationException("Material texture references were not preserved.");
 		var before = material.Color;
 		bool invalidPropertyRejected = false;

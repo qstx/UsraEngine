@@ -14,7 +14,7 @@ inline constexpr const char* editorLibraryScheme = "lib";
 inline constexpr const char* projectSettingsScheme = "settings";
 
 // A resource address of the form "<scheme>:<relative-path>", for example
-// "ursa:Shaders/Renderer3D/Cube.vert" or "prj:Snake/Snake.ursascene".
+// "ursa:Shaders/Examples/Cube.vert" or "prj:Snake/Snake.ursascene".
 // The scheme names a mount; the relative path never escapes that mount.
 struct VirtualPath
 {

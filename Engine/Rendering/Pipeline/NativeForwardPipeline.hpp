@@ -21,6 +21,12 @@ private:
 	                          const Rhi::SwapchainPtr& window, Rhi::ResourceState finalState, FrameCapture* capture,
 	                          std::optional<CameraType> filter, std::optional<CameraData> cameraOverride);
 	std::unique_ptr<RenderCommandExecutor> executor;
+	Rhi::DevicePtr device;
+	std::shared_ptr<MaterialInstance> finalOutputMaterial;
+	std::shared_ptr<RenderTextureResource> neutralShadowAtlas;
+	std::shared_ptr<RenderTextureResource> sceneBacking;
+	String sceneBackingKey;
+	bool sceneBackingInitialized = false;
 	RenderScene snapshot;
 	RenderSceneContext context;
 	Vector<RenderCommand> commands;

@@ -2,11 +2,14 @@
 #include <limits>
 #include <Core/StringInterop.hpp>
 #include <stdexcept>
+#include <atomic>
 
 namespace Ursa::Rendering
 {
 namespace
 {
+std::atomic<UInt64> nextRenderTextureIdentity{1};
+
 template <class T> T Take(Result<T> result)
 {
 	if (!result)
@@ -24,6 +27,14 @@ void Done(Result<void> result)
 	}
 }
 } // namespace
+
+RenderTextureResource::RenderTextureResource() : identity(nextRenderTextureIdentity.fetch_add(1))
+{
+	if (!identity)
+	{
+		throw std::overflow_error("RenderTexture resource identity space is exhausted");
+	}
+}
 
 bool RenderTextureDescription::operator==(const RenderTextureDescription& other) const
 {

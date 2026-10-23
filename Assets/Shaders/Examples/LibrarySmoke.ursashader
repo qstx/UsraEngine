@@ -1,0 +1,53 @@
+Shader "Ursa/Examples/ShaderLibrary"
+{
+	Properties
+	{
+		_LibrarySmokeMap ("Library Smoke Map", 2D) = "white" {}
+	}
+	HLSLINCLUDE
+#include "../ShaderLibrary/Core.hlsl"
+TEXTURE2D(_LibrarySmokeMap);
+SAMPLER(sampler_LibrarySmokeMap);
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaUniversal" }
+		Pass
+		{
+			Name "Forward"
+			Tags { "LightMode" = "UniversalForward" }
+			Cull Back
+			ZWrite On
+			ZTest LEqual
+			HLSLPROGRAM
+#pragma vertex LibrarySmokeVertex
+#pragma fragment LibrarySmokeFragment
+struct LibrarySmokeAttributes
+{
+	float3 positionOS : POSITION;
+	float2 uv : TEXCOORD0;
+};
+
+struct LibrarySmokeVaryings
+{
+	float4 positionCS : SV_Position;
+	float2 uv : TEXCOORD0;
+};
+
+LibrarySmokeVaryings LibrarySmokeVertex(LibrarySmokeAttributes input)
+{
+	LibrarySmokeVaryings output;
+	output.positionCS = UrsaTransformObjectToHClip(input.positionOS);
+	output.uv = input.uv;
+	return output;
+}
+
+float4 LibrarySmokeFragment(LibrarySmokeVaryings input) : SV_Target0
+{
+	float4 sampled = SAMPLE_TEXTURE2D(_LibrarySmokeMap, sampler_LibrarySmokeMap, input.uv);
+	return sampled;
+}
+ENDHLSL
+		}
+	}
+}

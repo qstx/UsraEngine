@@ -74,6 +74,7 @@ struct GpuPointLight
 struct GpuFrameHeader
 {
 	Ursa::Float32 viewProjection[16]{};
+	Ursa::Float32 view[16]{};
 	Ursa::Float32 cameraPosition[4]{};
 	Ursa::Float32 ambient[4]{};
 	Ursa::Int32 counts[4]{};
@@ -81,7 +82,7 @@ struct GpuFrameHeader
 	GpuPointLight point[SceneLighting::maxPointLights]{};
 };
 
-static_assert(sizeof(GpuFrameHeader) == 496, "Unexpected frame layout");
+static_assert(sizeof(GpuFrameHeader) == 560, "Unexpected frame layout");
 
 void WriteColor(Ursa::Float32 (&out)[4], Color color)
 {
@@ -91,10 +92,12 @@ void WriteColor(Ursa::Float32 (&out)[4], Color color)
 	out[3] = color.alpha;
 }
 
-GpuFrameHeader BuildFrameHeader(const Mat4& viewProjection, const SceneLighting& lighting, Vec3 cameraPosition)
+GpuFrameHeader BuildFrameHeader(const Mat4& viewProjection, const Mat4& view, const SceneLighting& lighting,
+                                Vec3 cameraPosition)
 {
 	GpuFrameHeader frame{};
 	std::memcpy(frame.viewProjection, viewProjection.values.data(), sizeof(frame.viewProjection));
+	std::memcpy(frame.view, view.values.data(), sizeof(frame.view));
 	frame.cameraPosition[0] = cameraPosition.x;
 	frame.cameraPosition[1] = cameraPosition.y;
 	frame.cameraPosition[2] = cameraPosition.z;
@@ -177,18 +180,23 @@ struct ShaderPipelineKey
 	Vector<String> renderStates;
 	Vector<Rhi::Format> colorFormats;
 	bool hasDepth = true;
+	bool depthBiasOverride = false;
+	Int32 depthBiasConstant = 0;
+	Float32 depthBiasSlope = 0;
 
 	bool operator<(const ShaderPipelineKey& other) const
 	{
 		const auto left =
 		    std::tie(propertyShaderId, programShaderId, propertySourceFormatVersion, programSourceFormatVersion,
 		             propertySourceHash, programSourceHash, compilerVersion, passIdentity, layoutIdentity,
-		             subShaderIndex, passIndex, activePipeline, colorFormat, depthFormat, alphaMode, hasDepth);
-		const auto right = std::tie(other.propertyShaderId, other.programShaderId, other.propertySourceFormatVersion,
-		                            other.programSourceFormatVersion, other.propertySourceHash, other.programSourceHash,
-		                            other.compilerVersion, other.passIdentity, other.layoutIdentity,
-		                            other.subShaderIndex, other.passIndex, other.activePipeline, other.colorFormat,
-		                            other.depthFormat, other.alphaMode, other.hasDepth);
+		             subShaderIndex, passIndex, activePipeline, colorFormat, depthFormat, alphaMode, hasDepth,
+		             depthBiasOverride, depthBiasConstant, depthBiasSlope);
+		const auto right =
+		    std::tie(other.propertyShaderId, other.programShaderId, other.propertySourceFormatVersion,
+		             other.programSourceFormatVersion, other.propertySourceHash, other.programSourceHash,
+		             other.compilerVersion, other.passIdentity, other.layoutIdentity, other.subShaderIndex,
+		             other.passIndex, other.activePipeline, other.colorFormat, other.depthFormat, other.alphaMode,
+		             other.hasDepth, other.depthBiasOverride, other.depthBiasConstant, other.depthBiasSlope);
 		if (left < right)
 		{
 			return true;
@@ -405,9 +413,14 @@ struct SceneDrawEncoder::Impl
 			throw std::runtime_error(ToStdString(engineFiles.error));
 		}
 		builtinUnlit = std::make_shared<ShaderAsset>(Take(LoadShaderAssetResource(
-		    engineFiles.value, Take(VirtualPath::Parse("ursa:Shaders/Renderer3D/Unlit.ursashaderasset")))));
+		    engineFiles.value,
+		    Take(VirtualPath::Parse(Shader::BuiltinShaderAssetPath(Shader::BuiltinUnlitShaderId()))))));
 		builtinPbr = std::make_shared<ShaderAsset>(Take(LoadShaderAssetResource(
-		    engineFiles.value, Take(VirtualPath::Parse("ursa:Shaders/Renderer3D/Pbr.ursashaderasset")))));
+		    engineFiles.value,
+		    Take(VirtualPath::Parse(Shader::BuiltinShaderAssetPath(Shader::BuiltinPbrShaderId()))))));
+		builtinFinalPost = std::make_shared<ShaderAsset>(Take(LoadShaderAssetResource(
+		    engineFiles.value,
+		    Take(VirtualPath::Parse(Shader::BuiltinShaderAssetPath(Shader::BuiltinFinalPostShaderId()))))));
 	}
 
 	GpuModelMesh& MeshFor(const MeshPtr& mesh, const std::shared_ptr<const MeshSnapshot>& selected)
@@ -513,7 +526,7 @@ struct SceneDrawEncoder::Impl
 		key.layoutIdentity = variant.layoutIdentity;
 		key.subShaderIndex = plan.subShaderIndex;
 		key.passIndex = plan.passIndex;
-		key.activePipeline = "UrsaForward";
+		key.activePipeline = "UrsaUniversal";
 		if (activeDraws)
 		{
 			key.activePipeline = (*activeDraws)[currentDrawOrdinal].activePipeline;
@@ -525,7 +538,37 @@ struct SceneDrawEncoder::Impl
 			{
 				key.colorFormats.push_back(attachment.texture->desc.format);
 			}
+			if (activeEncoding->globals)
+			{
+				const auto overrideValue = activeEncoding->globals->find("_UrsaDepthBiasOverride");
+				if (overrideValue != activeEncoding->globals->end())
+				{
+					if (overrideValue->second.kind != 6 || overrideValue->second.bytes.size() != sizeof(Int32))
+					{
+						throw std::runtime_error("Depth bias override flag has an invalid type or size");
+					}
+					Int32 enabled = 0;
+					std::memcpy(&enabled, overrideValue->second.bytes.data(), sizeof(enabled));
+					if (enabled != 0)
+					{
+						const auto constantValue = activeEncoding->globals->find("_UrsaDepthBiasConstant");
+						const auto slopeValue = activeEncoding->globals->find("_UrsaDepthBiasSlope");
+						if (constantValue == activeEncoding->globals->end() || constantValue->second.kind != 6 ||
+						    constantValue->second.bytes.size() != sizeof(Int32) ||
+						    slopeValue == activeEncoding->globals->end() || slopeValue->second.kind != 1 ||
+						    slopeValue->second.bytes.size() != sizeof(Float32))
+						{
+							throw std::runtime_error("Depth bias override requires constant and slope values");
+						}
+						key.depthBiasOverride = true;
+						std::memcpy(&key.depthBiasConstant, constantValue->second.bytes.data(), sizeof(Int32));
+						std::memcpy(&key.depthBiasSlope, slopeValue->second.bytes.data(), sizeof(Float32));
+					}
+				}
+			}
 		}
+		const bool depthOnly = activeEncoding && key.colorFormats.empty() && !activeEncoding->target.color &&
+		                       (activeEncoding->target.depthAttachment.texture || activeEncoding->target.depth);
 		key.colorFormat = colorFormat;
 		key.depthFormat = depthFormat;
 		key.alphaMode = material.Parameters().alphaMode;
@@ -567,6 +610,11 @@ struct SceneDrawEncoder::Impl
 			}
 		}
 		ApplyGraphicsRenderStates(description, plan.renderStates);
+		if (key.depthBiasOverride)
+		{
+			description.depthBiasConstant = key.depthBiasConstant;
+			description.depthBiasSlope = key.depthBiasSlope;
+		}
 		if (activeEncoding && (description.depthTest || description.stencil.enabled) && !key.hasDepth)
 		{
 			throw std::runtime_error("Scene drawing Pass requires a missing depth/stencil attachment");
@@ -613,9 +661,11 @@ struct SceneDrawEncoder::Impl
 				fragment = std::move(created);
 			}
 		}
-		if (!vertex || !fragment)
+		if (!vertex || (!fragment && (!depthOnly || material.Parameters().alphaMode == AlphaMode::Mask)))
 		{
-			throw std::runtime_error("Forward Shader Pass requires vertex and fragment stages");
+			throw std::runtime_error(
+			    depthOnly ? "Depth-only Shader Pass requires a vertex stage and an alpha-test fragment when masked"
+			              : "Forward Shader Pass requires vertex and fragment stages");
 		}
 		description.vertex = vertex;
 		description.fragment = fragment;
@@ -630,14 +680,48 @@ struct SceneDrawEncoder::Impl
 	                                 const ShaderPipelineCache& cache, const ShaderPassPlan& plan,
 	                                 const ShaderVariantAsset& variant,
 	                                 const std::shared_ptr<MaterialInstance>& material, const Mat4& viewProjection,
-	                                 const RenderObject& item, const GpuFrameHeader& frame,
+	                                 const Mat4& view, const RenderObject& item, const GpuFrameHeader& frame,
 	                                 const Rhi::CommandListPtr& command)
 	{
 		const Mat4& model = item.world;
 		bool cacheableMaterialGroup = true;
 		if (activeEncoding && activeEncoding->globals && !activeEncoding->globals->empty())
 		{
-			cacheableMaterialGroup = false;
+			for (const Rhi::LayoutBinding& descriptor : cache.reflection.descriptors)
+			{
+				if (descriptor.type == Rhi::BindingType::UniformBuffer)
+				{
+					auto uniform = std::find_if(
+					    cache.reflection.uniformBuffers.begin(), cache.reflection.uniformBuffers.end(),
+					    [&](const ShaderUniformBufferLayout& value) { return value.binding == descriptor.binding; });
+					if (uniform != cache.reflection.uniformBuffers.end() &&
+					    std::any_of(uniform->members.begin(), uniform->members.end(),
+					                [&](const ShaderUniformMember& member)
+					                {
+						                const auto global = activeEncoding->globals->find(member.name);
+						                return global != activeEncoding->globals->end() &&
+						                       !global->second.bytes.empty();
+					                }))
+					{
+						cacheableMaterialGroup = false;
+						break;
+					}
+				}
+				else if (descriptor.type == Rhi::BindingType::SampledTexture ||
+				         descriptor.type == Rhi::BindingType::CombinedImageSampler)
+				{
+					const auto name = cache.reflection.resourceNames.find(descriptor.binding);
+					if (name != cache.reflection.resourceNames.end())
+					{
+						const auto global = activeEncoding->globals->find(name->second);
+						if (global != activeEncoding->globals->end() && global->second.texture.texture)
+						{
+							cacheableMaterialGroup = false;
+							break;
+						}
+					}
+				}
+			}
 		}
 		for (const Rhi::LayoutBinding& descriptor : cache.reflection.descriptors)
 		{
@@ -785,6 +869,8 @@ struct SceneDrawEncoder::Impl
 				bool perCamera = false;
 				bool perFrame = false;
 				Mat4 inverseModel = model.InverseAffine();
+				const Ursa::Float32 objectData[4] = {item.castShadows ? 1.0f : 0.0f, item.receiveShadows ? 1.0f : 0.0f,
+				                                     0.0f, 0.0f};
 				Mat4 normalMatrix;
 				for (int row = 0; row < 4; ++row)
 				{
@@ -801,6 +887,11 @@ struct SceneDrawEncoder::Impl
 						source = viewProjection.values.data();
 						perCamera = true;
 					}
+					else if (member.name == "_UrsaView")
+					{
+						source = view.values.data();
+						perCamera = true;
+					}
 					else if (member.name == "_UrsaModel")
 					{
 						source = model.values.data();
@@ -808,6 +899,10 @@ struct SceneDrawEncoder::Impl
 					else if (member.name == "_UrsaNormal")
 					{
 						source = normalMatrix.values.data();
+					}
+					else if (member.name == "_UrsaObjectData")
+					{
+						source = objectData;
 					}
 					else if (member.name == "_UrsaCameraPosition")
 					{
@@ -837,6 +932,7 @@ struct SceneDrawEncoder::Impl
 					if (source)
 					{
 						const Ursa::Size copySize = (perFrame || perCamera) && member.byteSize != 0 ? member.byteSize
+						                            : member.name == "_UrsaObjectData"              ? sizeof(objectData)
 						                            : member.name == "_UrsaCounts"      ? sizeof(frame.counts)
 						                            : member.name == "_UrsaDirectional" ? sizeof(frame.directional)
 						                            : member.name == "_UrsaPoint"       ? sizeof(frame.point)
@@ -1101,7 +1197,7 @@ struct SceneDrawEncoder::Impl
 		const auto& viewProjection = camera.viewProjection;
 		const auto color = activeEncoding->target.colors.empty() ? activeEncoding->target.color
 		                                                         : activeEncoding->target.colors.front().texture;
-		const GpuFrameHeader frame = BuildFrameHeader(viewProjection, lighting, camera.position);
+		const GpuFrameHeader frame = BuildFrameHeader(viewProjection, camera.view, lighting, camera.position);
 
 		struct RecordedPass
 		{
@@ -1150,7 +1246,7 @@ struct SceneDrawEncoder::Impl
 					{
 						URSA_PROFILE_SCOPE("SceneDrawEncoder.Record.BuildBindGroups");
 						group = ShaderGroupFor(shader, cache, plan, *variant, item.material, viewProjection,
-						                       *item.object, frame, command);
+						                       camera.view, *item.object, frame, command);
 					}
 					recordedPasses.push_back({itemIndex, cache.pipeline, std::move(group)});
 				}
@@ -1216,6 +1312,7 @@ struct SceneDrawEncoder::Impl
 	UInt64 materialGroupCreates = 0;
 	std::shared_ptr<const ShaderAsset> builtinUnlit;
 	std::shared_ptr<const ShaderAsset> builtinPbr;
+	std::shared_ptr<const ShaderAsset> builtinFinalPost;
 	Map<ShaderPipelineKey, ShaderPipelineCache> shaderPipelines;
 	Map<String, Rhi::BindGroupPtr> materialGroups;
 	Map<String, Vector<UInt8>> materialUniformBacking;
@@ -1295,6 +1392,10 @@ Result<std::shared_ptr<const Shader::ShaderAsset>> SceneDrawEncoder::ResolveBuil
 	if (id == Shader::BuiltinPbrShaderId())
 	{
 		return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(impl->builtinPbr);
+	}
+	if (id == Shader::BuiltinFinalPostShaderId())
+	{
+		return Result<std::shared_ptr<const Shader::ShaderAsset>>::Success(impl->builtinFinalPost);
 	}
 	return Result<std::shared_ptr<const Shader::ShaderAsset>>::Failure("Unknown builtin Shader " + id.ToString());
 }

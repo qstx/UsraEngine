@@ -198,13 +198,25 @@ Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& obj
 			const Float32 targetAspect = camera->rendering.targetWidth ? Float32(camera->rendering.targetWidth) /
 			                                                                 Float32(camera->rendering.targetHeight)
 			                                                           : aspect;
-			cameras.push_back(
-			    {camera->PersistentId(),
-			     Mat4::Perspective(camera->verticalFovRadians, targetAspect * viewport.width / viewport.height,
-			                       camera->nearPlane, camera->farPlane) *
-			         world.InverseAffine(),
-			     {world.At(0, 3), world.At(1, 3), world.At(2, 3)},
-			     camera->rendering});
+			const Mat4 view = world.InverseAffine();
+			const Float32 cameraAspect = targetAspect * viewport.width / viewport.height;
+			const Mat4 projection =
+			    camera->orthographic
+			        ? Mat4::Orthographic(camera->orthographicSize * 2.0f, cameraAspect, camera->nearPlane,
+			                             camera->farPlane)
+			        : Mat4::Perspective(camera->verticalFovRadians, cameraAspect, camera->nearPlane, camera->farPlane);
+			CameraData frameCamera;
+			frameCamera.identity = camera->PersistentId();
+			frameCamera.view = view;
+			frameCamera.projection = projection;
+			frameCamera.viewProjection = projection * view;
+			frameCamera.inverseViewProjection = world * projection.Inverse();
+			frameCamera.position = {world.At(0, 3), world.At(1, 3), world.At(2, 3)};
+			frameCamera.nearPlane = camera->nearPlane;
+			frameCamera.farPlane = camera->farPlane;
+			frameCamera.orthographic = camera->orthographic;
+			frameCamera.settings = camera->rendering;
+			cameras.push_back(std::move(frameCamera));
 			if (const auto gameObject = camera->GetGameObject())
 			{
 				auto name = gameObject->Name();
@@ -308,11 +320,12 @@ Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& obj
 					output.meshSnapshot = snapshot;
 					output.material = material;
 					output.shader = material ? material->Shader() : nullptr;
-					if (resolveBuiltin && output.shader && output.shader->subShaders.empty() &&
-					    (output.shader->id == Shader::BuiltinUnlitShaderId() ||
-					     output.shader->id == Shader::BuiltinPbrShaderId()))
+					if (resolveBuiltin && material && material->IsShaderBacked() &&
+					    (material->ShaderId() == Shader::BuiltinUnlitShaderId() ||
+					     material->ShaderId() == Shader::BuiltinPbrShaderId()) &&
+					    (!output.shader || output.shader->subShaders.empty()))
 					{
-						auto resolved = resolveBuiltin(output.shader->id);
+						auto resolved = resolveBuiltin(material->ShaderId());
 						if (!resolved)
 						{
 							return Result<void>::Failure(resolved.error);
@@ -323,18 +336,36 @@ Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& obj
 					output.parameters = material ? material->Parameters() : MaterialParameters{};
 					output.jointPalette = palette;
 					output.subMesh = subMesh;
+					output.castShadows = renderer->CastShadows();
+					output.receiveShadows = renderer->ReceiveShadows();
 				}
 			}
 		}
 		if (auto* directional = dynamic_cast<DirectionalLightComponent*>(component))
 		{
-			lighting.directional.push_back({Normalized({-world.At(0, 2), -world.At(1, 2), -world.At(2, 2)}),
-			                                directional->Color(), directional->Intensity()});
+			DirectionalLightData light;
+			light.direction = Normalized({-world.At(0, 2), -world.At(1, 2), -world.At(2, 2)});
+			light.color = directional->Color();
+			light.intensity = directional->Intensity();
+			light.castsShadows = directional->CastsShadows();
+			light.shadowStrength = directional->ShadowStrength();
+			light.shadowBias = directional->ShadowBias();
+			light.shadowNormalBias = directional->ShadowNormalBias();
+			light.softShadows = directional->SoftShadows();
+			light.identity = directional->PersistentId();
+			light.layer = layer.value;
+			lighting.directional.push_back(std::move(light));
 		}
 		if (auto* point = dynamic_cast<PointLightComponent*>(component))
 		{
-			lighting.point.push_back(
-			    {{world.At(0, 3), world.At(1, 3), world.At(2, 3)}, point->Color(), point->Intensity(), point->Range()});
+			PointLightData light;
+			light.position = {world.At(0, 3), world.At(1, 3), world.At(2, 3)};
+			light.color = point->Color();
+			light.intensity = point->Intensity();
+			light.range = point->Range();
+			light.identity = point->PersistentId();
+			light.layer = layer.value;
+			lighting.point.push_back(std::move(light));
 		}
 	}
 	for (const auto& child : object->children)

@@ -1,16 +1,17 @@
 Shader "Ursa/Internal/ImGui"
 {
 	HLSLINCLUDE
-#include "../Includes/UrsaCore.hlsli"
+#include "../ShaderLibrary/Textures.hlsl"
 TEXTURE2D(imageTexture);
 SAMPLER(imageSampler);
 ENDHLSL
 	SubShader
 	{
-		Tags { "RenderPipeline" = "UrsaForward" }
+		Tags { "RenderPipeline" = "UrsaUniversal" }
 		Pass
 		{
 			Name "ImGui"
+			Tags { "LightMode" = "UniversalForward" }
 			Cull Off
 			ZWrite Off
 			ZTest Off

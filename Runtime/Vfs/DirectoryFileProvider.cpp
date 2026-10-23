@@ -7,6 +7,7 @@
 #include <cwctype>
 #include <fstream>
 #include <limits>
+#include <thread>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -330,25 +331,58 @@ Result<void> DirectoryFileProvider::WriteAtomic(const String& relativePath, cons
 		}
 	}
 #ifdef _WIN32
-	const DWORD attributes = GetFileAttributesW(target.value.c_str());
 	bool replaced = false;
-	if (attributes != INVALID_FILE_ATTRIBUTES)
+	DWORD systemError = ERROR_SUCCESS;
+	for (UInt32 attempt = 0; attempt < 8 && !replaced; ++attempt)
 	{
-		replaced = ReplaceFileW(target.value.c_str(), temporary.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS,
-		                        nullptr, nullptr) != 0;
-	}
-	else
-	{
-		const DWORD queryError = GetLastError();
-		replaced = (queryError == ERROR_FILE_NOT_FOUND || queryError == ERROR_PATH_NOT_FOUND) &&
-		           MoveFileExW(temporary.c_str(), target.value.c_str(), MOVEFILE_WRITE_THROUGH) != 0;
+		const DWORD attributes = GetFileAttributesW(target.value.c_str());
+		if (attributes != INVALID_FILE_ATTRIBUTES)
+		{
+			replaced = ReplaceFileW(target.value.c_str(), temporary.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS,
+			                        nullptr, nullptr) != 0;
+			if (!replaced)
+			{
+				systemError = GetLastError();
+				if (systemError == ERROR_ACCESS_DENIED || systemError == ERROR_UNABLE_TO_REMOVE_REPLACED)
+				{
+					replaced = MoveFileExW(temporary.c_str(), target.value.c_str(),
+					                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+					if (!replaced)
+					{
+						systemError = GetLastError();
+					}
+				}
+			}
+		}
+		else
+		{
+			const DWORD queryError = GetLastError();
+			if (queryError == ERROR_FILE_NOT_FOUND || queryError == ERROR_PATH_NOT_FOUND)
+			{
+				replaced = MoveFileExW(temporary.c_str(), target.value.c_str(), MOVEFILE_WRITE_THROUGH) != 0;
+				if (!replaced)
+				{
+					systemError = GetLastError();
+				}
+			}
+			else
+			{
+				systemError = queryError;
+			}
+		}
+		const bool transient = systemError == ERROR_ACCESS_DENIED || systemError == ERROR_SHARING_VIOLATION ||
+		                       systemError == ERROR_LOCK_VIOLATION || systemError == ERROR_UNABLE_TO_REMOVE_REPLACED;
+		if (!replaced && transient && attempt + 1 < 8)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(2u << attempt));
+		}
 	}
 	if (!replaced)
 	{
-		const auto systemError = GetLastError();
 		std::filesystem::remove(temporary, error);
 		return Result<void>::Failure("Cannot atomically replace " + relativePath + ": Windows error " +
-		                             ToUrsaString(std::to_string(systemError)));
+		                             ToUrsaString(std::to_string(systemError)) + "; target " +
+		                             PathToUrsaString(target.value) + "; temporary " + PathToUrsaString(temporary));
 	}
 #else
 	std::filesystem::rename(temporary, target.value, error);

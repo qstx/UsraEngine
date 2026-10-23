@@ -9,6 +9,7 @@
 #include <Serialization/SerializedObject.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Scene/RenderingComponents.hpp>
+#include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <imgui.h>
 #include <algorithm>
@@ -80,7 +81,8 @@ bool DrawAddComponentBrowser(ComponentEditors& componentEditors, ComponentInspec
 
 bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const String& elementKind,
                                const nlohmann::json& descriptor, const ProjectWorkspace& workspace,
-                               const ComponentInspectorContext& context);
+                               const ComponentInspectorContext& context,
+                               const Vector<ScriptTypeDescriptor>* scriptTypes);
 
 bool DrawSerializedReference(nlohmann::json& value, const String& kind, const ComponentInspectorContext& context)
 {
@@ -150,6 +152,47 @@ bool DrawSerializedReference(nlohmann::json& value, const String& kind, const Co
 	return changed;
 }
 
+bool DrawDirectionalShadowControls(DirectionalLightComponent& light, String& diagnostic)
+{
+	bool changed = false;
+	bool castsShadows = light.CastsShadows();
+	if (ImGui::Checkbox("Casts Shadows", &castsShadows))
+	{
+		auto set = light.SetCastsShadows(castsShadows);
+		diagnostic = set ? String{} : set.error;
+		changed |= static_cast<bool>(set);
+	}
+	Float32 strength = light.ShadowStrength();
+	if (ImGui::DragFloat("Shadow Strength", &strength, 0.01f, 0.0f, 1.0f))
+	{
+		auto set = light.SetShadowStrength(strength);
+		diagnostic = set ? String{} : set.error;
+		changed |= static_cast<bool>(set);
+	}
+	Float32 bias = light.ShadowBias();
+	if (ImGui::DragFloat("Shadow Bias", &bias, 0.0001f, 0.0f, 1.0f))
+	{
+		auto set = light.SetShadowBias(bias);
+		diagnostic = set ? String{} : set.error;
+		changed |= static_cast<bool>(set);
+	}
+	Float32 normalBias = light.ShadowNormalBias();
+	if (ImGui::DragFloat("Shadow Normal Bias", &normalBias, 0.001f, 0.0f, 10.0f))
+	{
+		auto set = light.SetShadowNormalBias(normalBias);
+		diagnostic = set ? String{} : set.error;
+		changed |= static_cast<bool>(set);
+	}
+	bool softShadows = light.SoftShadows();
+	if (ImGui::Checkbox("Soft Shadows (3x3 PCF)", &softShadows))
+	{
+		auto set = light.SetSoftShadows(softShadows);
+		diagnostic = set ? String{} : set.error;
+		changed |= static_cast<bool>(set);
+	}
+	return changed;
+}
+
 bool DrawSerializedAssetReference(nlohmann::json& value, const ProjectWorkspace& workspace)
 {
 	ResourceId currentId;
@@ -192,9 +235,125 @@ bool DrawSerializedAssetReference(nlohmann::json& value, const ProjectWorkspace&
 	return changed;
 }
 
+bool DrawSerializedScriptableObjectReference(nlohmann::json& value, const String& expectedType,
+                                             const ProjectWorkspace& workspace,
+                                             const Vector<ScriptTypeDescriptor>* scriptTypes)
+{
+	ResourceId currentGuid;
+	UInt64 currentLocalFileId = 0;
+	if (value.is_object() && value.contains("$ursaReference") && value["$ursaReference"].is_object())
+	{
+		const auto& reference = value["$ursaReference"];
+		const auto binding = reference.find("Resource");
+		if (binding != reference.end() && binding->is_object() && binding->value("kind", std::string{}) == "asset" &&
+		    binding->contains("asset") && (*binding)["asset"].is_object())
+		{
+			auto parsed = ResourceId::Parse(ToUrsaString((*binding)["asset"].value("guid", std::string{})));
+			if (parsed)
+			{
+				currentGuid = parsed.value;
+				currentLocalFileId = (*binding)["asset"].value("localFileId", UInt64{0});
+			}
+		}
+	}
+	String preview = currentGuid ? currentGuid.ToString() : String("None");
+	const auto labelFor = [&](const AssetRecord& asset)
+	{ return asset.path.FileName() + "##" + asset.metadata.guid.ToString(); };
+	for (const AssetDatabase* database : {workspace.Database(), workspace.BuiltinDatabase()})
+	{
+		if (!database || !currentGuid)
+		{
+			continue;
+		}
+		for (const AssetRecord& asset : database->Assets())
+		{
+			if (asset.metadata.guid == currentGuid)
+			{
+				preview = asset.path.FileName();
+				break;
+			}
+		}
+	}
+	if (!ImGui::BeginCombo("##ScriptableAsset", preview.c_str()))
+	{
+		return false;
+	}
+	bool changed = false;
+	if (Icons::Selectable(Icons::Icon::Close, "None", !currentGuid))
+	{
+		value = nullptr;
+		changed = true;
+	}
+	const auto chooseDatabaseAssets = [&](const AssetDatabase* database)
+	{
+		if (!database)
+		{
+			return;
+		}
+		for (const AssetRecord& record : database->Assets())
+		{
+			if (record.metadata.folder || PathFromUrsaString(record.path.relative).extension() != ".ursaasset")
+			{
+				continue;
+			}
+			auto asset = LoadScriptableAssetSource(workspace.Index().Filesystem(), record.path, record.metadata.guid);
+			if (!asset)
+			{
+				continue;
+			}
+			if (!expectedType.empty())
+			{
+				if (!scriptTypes)
+				{
+					continue;
+				}
+				const auto candidate = std::find_if(scriptTypes->begin(), scriptTypes->end(),
+				                                    [&](const auto& type)
+				                                    {
+					                                    return type.kind == ScriptTypeKind::ScriptableObject &&
+					                                           type.scriptType == asset.value.TypeId();
+				                                    });
+				if (candidate == scriptTypes->end())
+				{
+					continue;
+				}
+				const Size separator = candidate->clrTypeName.find(',');
+				const String concreteType = candidate->clrTypeName.substr(0, separator);
+				if (concreteType != expectedType &&
+				    std::find(candidate->baseTypeNames.begin(), candidate->baseTypeNames.end(), expectedType) ==
+				        candidate->baseTypeNames.end())
+				{
+					continue;
+				}
+			}
+			const String label = labelFor(record);
+			if (Icons::Selectable(Icons::Icon::Link, label.c_str(),
+			                      record.metadata.guid == currentGuid &&
+			                          asset.value.LocalFileId() == currentLocalFileId))
+			{
+				value = {{"$ursaReference",
+				          {{"Kind", "ScriptableObject"},
+				           {"Id", ""},
+				           {"Resource",
+				            {{"kind", "asset"},
+				             {"asset", AssetReferenceToJson({record.metadata.guid, asset.value.LocalFileId()})}}}}}};
+				changed = true;
+			}
+		}
+	};
+	chooseDatabaseAssets(workspace.Database());
+	if (workspace.BuiltinDatabase() != workspace.Database())
+	{
+		chooseDatabaseAssets(workspace.BuiltinDatabase());
+	}
+	ImGui::EndCombo();
+	return changed;
+}
+
 bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const String& elementKind,
                                const nlohmann::json& descriptor, const ProjectWorkspace& workspace,
-                               const ComponentInspectorContext& context)
+                               const ComponentInspectorContext& context,
+                               const Vector<ScriptTypeDescriptor>* scriptTypes)
 {
 	if (kind == "Boolean")
 	{
@@ -301,6 +460,14 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 	{
 		return DrawSerializedAssetReference(value, workspace);
 	}
+	else if (kind == "ScriptableObjectReference")
+	{
+		const bool collection =
+		    descriptor.value("Kind", std::string{}) == "Array" || descriptor.value("Kind", std::string{}) == "List";
+		const String expectedType =
+		    ToUrsaString(descriptor.value(collection ? "ElementTypeName" : "TypeName", std::string{}));
+		return DrawSerializedScriptableObjectReference(value, expectedType, workspace, scriptTypes);
+	}
 	else if (kind == "MeshReference" || kind == "MaterialReference")
 	{
 		const auto expected = kind == "MeshReference" ? ResourceKind::Mesh : ResourceKind::Material;
@@ -374,8 +541,31 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 			ImGui::PushID(static_cast<int>(index));
 			ImGui::Text("[%u]", static_cast<unsigned int>(index));
 			Icons::SameLine();
-			changed |= DrawSerializedScriptValue(value[index], elementKind, {}, descriptor, workspace, context);
+			changed |=
+			    DrawSerializedScriptValue(value[index], elementKind, {}, descriptor, workspace, context, scriptTypes);
 			Icons::SameLine();
+			if (index > 0)
+			{
+				if (Icons::SmallButton("^"))
+				{
+					std::swap(value[index], value[index - 1]);
+					changed = true;
+					ImGui::PopID();
+					break;
+				}
+				Icons::SameLine();
+			}
+			if (index + 1 < value.size())
+			{
+				if (Icons::SmallButton("v"))
+				{
+					std::swap(value[index], value[index + 1]);
+					changed = true;
+					ImGui::PopID();
+					break;
+				}
+				Icons::SameLine();
+			}
 			if (Icons::SmallButton("-"))
 			{
 				value.erase(value.begin() + static_cast<std::ptrdiff_t>(index));
@@ -521,7 +711,7 @@ bool DrawSerializedScriptFields(Scripting::ScriptBehaviourComponent& component, 
 		ImGui::SameLine(150.0f);
 		ImGui::SetNextItemWidth(-1.0f);
 		nlohmann::json candidate = field.value();
-		if (DrawSerializedScriptValue(candidate, kind, elementKind, descriptor, workspace, context))
+		if (DrawSerializedScriptValue(candidate, kind, elementKind, descriptor, workspace, context, scriptTypes))
 		{
 			auto set = property.value.SetValue(std::move(candidate));
 			if (!set)
@@ -732,6 +922,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 							light->SetIntensity(intensity);
 							changed = true;
 						}
+						changed |= DrawDirectionalShadowControls(*light, diagnostic);
 					}
 					else if (auto* pointLight = dynamic_cast<PointLightComponent*>(component))
 					{
@@ -1182,6 +1373,7 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 							diagnostic = set ? String{} : set.error;
 							changed |= static_cast<bool>(set);
 						}
+						changed |= DrawDirectionalShadowControls(*directional, diagnostic);
 					}
 					else if (auto* point = dynamic_cast<PointLightComponent*>(object))
 					{

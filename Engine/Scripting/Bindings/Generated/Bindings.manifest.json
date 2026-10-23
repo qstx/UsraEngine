@@ -2076,8 +2076,8 @@
     {
       "Id": 1878535983750053602,
       "Name": "Rendering",
-      "Hash": "9fcadf4291f2dc7f3741c91fac9d47ef52a01c1d569df4a9b504dcc03113fb73",
-      "CommandHash": "4f9ba8eb8ef7e8f9e5be0fb1e6b47a7fe4bfbbf165a94c0bb2467228dc834117",
+      "Hash": "4ea661d2bfddf6bc2636c6bf84ab9930a837440385c7610793dd6c45c1068693",
+      "CommandHash": "e81a6f16e7ca7231ce725bdcd285da0a42b43d194460c5127b5062ff6575588f",
       "Required": true,
       "CallScoped": false,
       "Dependencies": [
@@ -2232,6 +2232,90 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.CullShadowCasters",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.RenderResultValue",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "identity",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "lightViewProjection",
+              "Type": "global::Ursa.Matrix4x4",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.DirectionalShadowCascades",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.DirectionalShadowCascadeValue[]",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "identity",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "lightDirection",
+              "Type": "global::Ursa.Vector3",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "cascadeCount",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "shadowDistance",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "splitFractions",
+              "Type": "global::System.ReadOnlySpan\u003Cfloat\u003E",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "atlasWidth",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "atlasHeight",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Rendering.NativeRenderingBindings.End",
           "Direction": "NativeMethod",
           "Return": "void",
@@ -2266,6 +2350,27 @@
             {
               "Name": "name",
               "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.GetVisibleLights",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.VisibleLightsValue",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "culling",
+              "Type": "global::Ursa.Rendering.RenderResultValue",
               "HandleKind": 0,
               "Session": false
             }
@@ -2374,6 +2479,27 @@
             {
               "Name": "context",
               "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.NativeRenderingBindings.VisibleLights",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Rendering.VisibleLightsValue",
+          "Parameters": [
+            {
+              "Name": "context",
+              "Type": "global::Ursa.Rendering.RenderContextToken",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "culling",
+              "Type": "global::Ursa.Rendering.RenderResultValue",
               "HandleKind": 0,
               "Session": false
             }
@@ -2978,6 +3104,27 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Rendering.RenderCommands.SetGlobalMatrixArray",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "global::System.ReadOnlySpan\u003Cglobal::Ursa.Matrix4x4\u003E",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Rendering.RenderCommands.SetGlobalTexture",
           "Direction": "RecordedCommand",
           "Return": "void",
@@ -3012,6 +3159,27 @@
             {
               "Name": "value",
               "Type": "global::Ursa.Vector4",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Rendering.RenderCommands.SetGlobalVectorArray",
+          "Direction": "RecordedCommand",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "values",
+              "Type": "global::System.ReadOnlySpan\u003Cglobal::Ursa.Vector4\u003E",
               "HandleKind": 0,
               "Session": false
             }
@@ -3138,7 +3306,7 @@
     {
       "Id": 11788884058683052816,
       "Name": "Runtime",
-      "Hash": "fd0fe3325559283c0bc0817c338bd10507182dd0833c56ab63f2b56b4bbc7b35",
+      "Hash": "1c8dd3d60ee55ae5ceb252bbcf5efd14430ff821e2fc88b34891d3267139ba43",
       "CommandHash": "",
       "Required": true,
       "CallScoped": false,
@@ -3167,6 +3335,21 @@
             {
               "Name": "type",
               "Type": "global::Ursa.MaterialType",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.CreateFromShader",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle",
+          "Parameters": [
+            {
+              "Name": "shader",
+              "Type": "global::Ursa.NativeAssetReference",
               "HandleKind": 0,
               "Session": false
             }
@@ -4626,6 +4809,21 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.NativeRuntimeBindings.GetDirectionalLightShadowSettings",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.DirectionalLightShadowSettings",
+          "Parameters": [
+            {
+              "Name": "light",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.NativeRuntimeBindings.GetGameObjectPersistentId",
           "Direction": "NativeMethod",
           "Return": "string",
@@ -4715,6 +4913,21 @@
               "Name": "handle",
               "Type": "global::Ursa.NativeHandle",
               "HandleKind": 1,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.GetRendererShadowSettings",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.RendererShadowSettings",
+          "Parameters": [
+            {
+              "Name": "renderer",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
               "Session": false
             }
           ],
@@ -4925,6 +5138,27 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.NativeRuntimeBindings.SetDirectionalLightShadowSettings",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "light",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.DirectionalLightShadowSettings",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.NativeRuntimeBindings.SetLayer",
           "Direction": "NativeMethod",
           "Return": "void",
@@ -5001,6 +5235,27 @@
             {
               "Name": "parent",
               "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeRuntimeBindings.SetRendererShadowSettings",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "renderer",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 2,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "global::Ursa.RendererShadowSettings",
               "HandleKind": 0,
               "Session": false
             }

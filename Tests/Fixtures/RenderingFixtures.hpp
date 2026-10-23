@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Rendering/Commands/RenderCommandExecutor.hpp>
+#include <Rendering/Resources/RenderResources.hpp>
 #include <Math/Camera.hpp>
 #include <Math/Transform.hpp>
 
@@ -61,6 +62,7 @@ private:
 	                    Vec3 cameraPosition);
 	Rhi::DevicePtr device;
 	std::unique_ptr<Rendering::RenderCommandExecutor> executor;
+	std::shared_ptr<Rendering::RenderTextureResource> neutralShadowAtlas;
 	std::shared_ptr<Rendering::RenderTextureResource> output;
 };
 } // namespace Ursa::Test

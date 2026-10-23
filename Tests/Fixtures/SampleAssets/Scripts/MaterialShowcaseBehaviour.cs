@@ -24,6 +24,11 @@ public sealed class MaterialShowcaseBehaviour : Behaviour
 		ownedMaterials.Add(floorMaterial);
 	}
 
+	public override void Update()
+	{
+		if (Input.GetKeyDown(KeyCode.C)) Ursa.Demo.Rendering.ScreenTintFeatureAsset.ToggleTint();
+	}
+
 	private void AddMaterialBox(string name, float x, MaterialAsset material, Color color)
 	{
 		GameObject item = GameObject.CreatePrimitive();

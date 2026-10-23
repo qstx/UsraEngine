@@ -15,14 +15,18 @@ struct Table
 	Int32 (*NativeRenderingBindings_CreateRenderTexture)(void*, const Wire::Value_Ursa_Rendering_RenderTextureValue*, Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_CreateRendererList)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Wire::Value_Ursa_Rendering_RenderResultValue*, const Wire::Value_Ursa_Rendering_DrawingSettingsValue*, const Wire::Value_Ursa_Rendering_FilteringSettings*, Wire::Value_Ursa_Rendering_RenderResultValue*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_Cull)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Utf8View*, Wire::Value_Ursa_Rendering_RenderResultValue*, BindingOutcome*) = nullptr;
+	Int32 (*NativeRenderingBindings_CullShadowCasters)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Utf8View*, const Wire::Value_Ursa_Matrix4x4*, Wire::Value_Ursa_Rendering_RenderResultValue*, BindingOutcome*) = nullptr;
+	Int32 (*NativeRenderingBindings_DirectionalShadowCascades)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Utf8View*, const Wire::Value_Ursa_Vector3*, UInt32, Float32, const DataView*, UInt32, UInt32, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_End)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_EnqueueBatch)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const DataView*, const Utf8View*, BindingOutcome*) = nullptr;
+	Int32 (*NativeRenderingBindings_GetVisibleLights)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Wire::Value_Ursa_Rendering_RenderResultValue*, Wire::Value_Ursa_Rendering_VisibleLightsValue*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_ReadGraphicsBuffer)(void*, const Wire::Value_Ursa_NativeHandle*, UInt64, UInt64, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_ReadRenderTexture)(void*, const Wire::Value_Ursa_NativeHandle*, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_ReleaseGraphicsBuffer)(void*, const Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_ReleaseRenderTexture)(void*, const Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_SetupCamera)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Utf8View*, Wire::Value_Ursa_Rendering_CameraFrameValue*, BindingOutcome*) = nullptr;
 	Int32 (*NativeRenderingBindings_Submit)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, BindingOutcome*) = nullptr;
+	Int32 (*NativeRenderingBindings_VisibleLights)(void*, const Wire::Value_Ursa_Rendering_RenderContextToken*, const Wire::Value_Ursa_Rendering_RenderResultValue*, Wire::Value_Ursa_Rendering_VisibleLightsValue*, BindingOutcome*) = nullptr;
 };
 // Contract: Ursa.Rendering/NativeRendering.bindings.cs:15
 #line 15 "Ursa.Rendering/NativeRendering.bindings.cs"
@@ -71,8 +75,8 @@ inline Int32 NativeRenderingBindings_Cameras(void* context, const Wire::Value_Ur
 	});
 }
 #line 1 "Rendering.generated.hpp"
-// Contract: Ursa.Rendering/NativeRendering.bindings.cs:36
-#line 36 "Ursa.Rendering/NativeRendering.bindings.cs"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:47
+#line 47 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_CreateGraphicsBuffer(void* context, UInt32 p_target, UInt32 p_count, UInt32 p_stride, Wire::Value_Ursa_NativeHandle* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -88,8 +92,8 @@ inline Int32 NativeRenderingBindings_CreateGraphicsBuffer(void* context, UInt32 
 	});
 }
 #line 1 "Rendering.generated.hpp"
-// Contract: Ursa.Rendering/NativeRendering.bindings.cs:30
-#line 30 "Ursa.Rendering/NativeRendering.bindings.cs"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:41
+#line 41 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_CreateRenderTexture(void* context, const Wire::Value_Ursa_Rendering_RenderTextureValue* p_descriptor, Wire::Value_Ursa_NativeHandle* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -104,8 +108,8 @@ inline Int32 NativeRenderingBindings_CreateRenderTexture(void* context, const Wi
 	});
 }
 #line 1 "Rendering.generated.hpp"
-// Contract: Ursa.Rendering/NativeRendering.bindings.cs:25
-#line 25 "Ursa.Rendering/NativeRendering.bindings.cs"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:36
+#line 36 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_CreateRendererList(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, const Wire::Value_Ursa_Rendering_RenderResultValue* p_culling, const Wire::Value_Ursa_Rendering_DrawingSettingsValue* p_drawing, const Wire::Value_Ursa_Rendering_FilteringSettings* p_filtering, Wire::Value_Ursa_Rendering_RenderResultValue* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -144,6 +148,53 @@ inline Int32 NativeRenderingBindings_Cull(void* context, const Wire::Value_Ursa_
 	});
 }
 #line 1 "Rendering.generated.hpp"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:25
+#line 25 "Ursa.Rendering/NativeRendering.bindings.cs"
+inline Int32 NativeRenderingBindings_CullShadowCasters(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, const Utf8View* p_identity, const Wire::Value_Ursa_Matrix4x4* p_lightViewProjection, Wire::Value_Ursa_Rendering_RenderResultValue* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!p_context) throw std::runtime_error("Null binding parameter: context");
+		Check_Wire_04a0edee134a5c26(*p_context);
+		if (!p_identity) throw std::runtime_error("Null binding parameter: identity");
+		Check_Wire_473287f8298dba71(*p_identity);
+		if (!p_lightViewProjection) throw std::runtime_error("Null binding parameter: lightViewProjection");
+		Check_Wire_a8041d4c1290ab2e(*p_lightViewProjection);
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<Wire::Value_Ursa_Rendering_RenderResultValue> (*)(BindingCall&, const Wire::Value_Ursa_Rendering_RenderContextToken&, const Utf8View&, const Wire::Value_Ursa_Matrix4x4&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::RenderingServices::CullShadowCasters), TargetSignature>, "Native binding target signature mismatch: Ursa.Rendering.NativeRenderingBindings.CullShadowCasters");
+		*result = TakeBindingResult(::Ursa::Scripting::Bindings::RenderingServices::CullShadowCasters(call, *p_context, *p_identity, *p_lightViewProjection));
+		Check_Wire_85aea3c5bd534cc7(*result);
+	});
+}
+#line 1 "Rendering.generated.hpp"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:32
+#line 32 "Ursa.Rendering/NativeRendering.bindings.cs"
+inline Int32 NativeRenderingBindings_DirectionalShadowCascades(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, const Utf8View* p_identity, const Wire::Value_Ursa_Vector3* p_lightDirection, UInt32 p_cascadeCount, Float32 p_shadowDistance, const DataView* p_splitFractions, UInt32 p_atlasWidth, UInt32 p_atlasHeight, DataView* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!p_context) throw std::runtime_error("Null binding parameter: context");
+		Check_Wire_04a0edee134a5c26(*p_context);
+		if (!p_identity) throw std::runtime_error("Null binding parameter: identity");
+		Check_Wire_473287f8298dba71(*p_identity);
+		if (!p_lightDirection) throw std::runtime_error("Null binding parameter: lightDirection");
+		Check_Wire_1c2f48d6e1e2a9c5(*p_lightDirection);
+		Check_Wire_c3f2029bb0eab1c0(p_cascadeCount);
+		Check_Wire_76a7e234dc54e9c6(p_shadowDistance);
+		if (!p_splitFractions) throw std::runtime_error("Null binding parameter: splitFractions");
+		Check_Wire_490f12f22158e999(*p_splitFractions);
+		Check_Wire_c3f2029bb0eab1c0(p_atlasWidth);
+		Check_Wire_c3f2029bb0eab1c0(p_atlasHeight);
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<DataView> (*)(BindingCall&, const Wire::Value_Ursa_Rendering_RenderContextToken&, const Utf8View&, const Wire::Value_Ursa_Vector3&, UInt32, Float32, const DataView&, UInt32, UInt32);
+		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::RenderingServices::DirectionalShadowCascades), TargetSignature>, "Native binding target signature mismatch: Ursa.Rendering.NativeRenderingBindings.DirectionalShadowCascades");
+		*result = TakeBindingResult(::Ursa::Scripting::Bindings::RenderingServices::DirectionalShadowCascades(call, *p_context, *p_identity, *p_lightDirection, p_cascadeCount, p_shadowDistance, *p_splitFractions, p_atlasWidth, p_atlasHeight));
+		CheckOwned_Wire_bdd34d66ef3aba14(*result, call.arena);
+		Check_Wire_bdd34d66ef3aba14(*result);
+	});
+}
+#line 1 "Rendering.generated.hpp"
 // Contract: Ursa.Rendering/NativeRendering.bindings.cs:13
 #line 13 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_End(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, BindingOutcome* outcome) noexcept
@@ -158,8 +209,8 @@ inline Int32 NativeRenderingBindings_End(void* context, const Wire::Value_Ursa_R
 	});
 }
 #line 1 "Rendering.generated.hpp"
-// Contract: Ursa.Rendering/NativeRendering.bindings.cs:28
-#line 28 "Ursa.Rendering/NativeRendering.bindings.cs"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:39
+#line 39 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_EnqueueBatch(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, const DataView* p_batch, const Utf8View* p_name, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -176,8 +227,27 @@ inline Int32 NativeRenderingBindings_EnqueueBatch(void* context, const Wire::Val
 	});
 }
 #line 1 "Rendering.generated.hpp"
-// Contract: Ursa.Rendering/NativeRendering.bindings.cs:40
-#line 40 "Ursa.Rendering/NativeRendering.bindings.cs"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:28
+#line 28 "Ursa.Rendering/NativeRendering.bindings.cs"
+inline Int32 NativeRenderingBindings_GetVisibleLights(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, const Wire::Value_Ursa_Rendering_RenderResultValue* p_culling, Wire::Value_Ursa_Rendering_VisibleLightsValue* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!p_context) throw std::runtime_error("Null binding parameter: context");
+		Check_Wire_04a0edee134a5c26(*p_context);
+		if (!p_culling) throw std::runtime_error("Null binding parameter: culling");
+		Check_Wire_85aea3c5bd534cc7(*p_culling);
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<Wire::Value_Ursa_Rendering_VisibleLightsValue> (*)(BindingCall&, const Wire::Value_Ursa_Rendering_RenderContextToken&, const Wire::Value_Ursa_Rendering_RenderResultValue&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::RenderingServices::VisibleLights), TargetSignature>, "Native binding target signature mismatch: Ursa.Rendering.NativeRenderingBindings.GetVisibleLights");
+		*result = TakeBindingResult(::Ursa::Scripting::Bindings::RenderingServices::VisibleLights(call, *p_context, *p_culling));
+		CheckOwned_Wire_a67a7d7bea5be377(*result, call.arena);
+		Check_Wire_a67a7d7bea5be377(*result);
+	});
+}
+#line 1 "Rendering.generated.hpp"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:51
+#line 51 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_ReadGraphicsBuffer(void* context, const Wire::Value_Ursa_NativeHandle* p_buffer, UInt64 p_offset, UInt64 p_size, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -196,8 +266,8 @@ inline Int32 NativeRenderingBindings_ReadGraphicsBuffer(void* context, const Wir
 	});
 }
 #line 1 "Rendering.generated.hpp"
-// Contract: Ursa.Rendering/NativeRendering.bindings.cs:34
-#line 34 "Ursa.Rendering/NativeRendering.bindings.cs"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:45
+#line 45 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_ReadRenderTexture(void* context, const Wire::Value_Ursa_NativeHandle* p_texture, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -214,8 +284,8 @@ inline Int32 NativeRenderingBindings_ReadRenderTexture(void* context, const Wire
 	});
 }
 #line 1 "Rendering.generated.hpp"
-// Contract: Ursa.Rendering/NativeRendering.bindings.cs:38
-#line 38 "Ursa.Rendering/NativeRendering.bindings.cs"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:49
+#line 49 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_ReleaseGraphicsBuffer(void* context, const Wire::Value_Ursa_NativeHandle* p_buffer, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -229,8 +299,8 @@ inline Int32 NativeRenderingBindings_ReleaseGraphicsBuffer(void* context, const 
 	});
 }
 #line 1 "Rendering.generated.hpp"
-// Contract: Ursa.Rendering/NativeRendering.bindings.cs:32
-#line 32 "Ursa.Rendering/NativeRendering.bindings.cs"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:43
+#line 43 "Ursa.Rendering/NativeRendering.bindings.cs"
 inline Int32 NativeRenderingBindings_ReleaseRenderTexture(void* context, const Wire::Value_Ursa_NativeHandle* p_texture, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -277,6 +347,25 @@ inline Int32 NativeRenderingBindings_Submit(void* context, const Wire::Value_Urs
 	});
 }
 #line 1 "Rendering.generated.hpp"
+// Contract: Ursa.Rendering/NativeRendering.bindings.cs:30
+#line 30 "Ursa.Rendering/NativeRendering.bindings.cs"
+inline Int32 NativeRenderingBindings_VisibleLights(void* context, const Wire::Value_Ursa_Rendering_RenderContextToken* p_context, const Wire::Value_Ursa_Rendering_RenderResultValue* p_culling, Wire::Value_Ursa_Rendering_VisibleLightsValue* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!p_context) throw std::runtime_error("Null binding parameter: context");
+		Check_Wire_04a0edee134a5c26(*p_context);
+		if (!p_culling) throw std::runtime_error("Null binding parameter: culling");
+		Check_Wire_85aea3c5bd534cc7(*p_culling);
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<Wire::Value_Ursa_Rendering_VisibleLightsValue> (*)(BindingCall&, const Wire::Value_Ursa_Rendering_RenderContextToken&, const Wire::Value_Ursa_Rendering_RenderResultValue&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::RenderingServices::VisibleLights), TargetSignature>, "Native binding target signature mismatch: Ursa.Rendering.NativeRenderingBindings.VisibleLights");
+		*result = TakeBindingResult(::Ursa::Scripting::Bindings::RenderingServices::VisibleLights(call, *p_context, *p_culling));
+		CheckOwned_Wire_a67a7d7bea5be377(*result, call.arena);
+		Check_Wire_a67a7d7bea5be377(*result);
+	});
+}
+#line 1 "Rendering.generated.hpp"
 inline const BindingModuleDescriptor& NativeDescriptor()
 {
 	static const Table table
@@ -288,16 +377,20 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeRenderingBindings_CreateRenderTexture,
 		&NativeRenderingBindings_CreateRendererList,
 		&NativeRenderingBindings_Cull,
+		&NativeRenderingBindings_CullShadowCasters,
+		&NativeRenderingBindings_DirectionalShadowCascades,
 		&NativeRenderingBindings_End,
 		&NativeRenderingBindings_EnqueueBatch,
+		&NativeRenderingBindings_GetVisibleLights,
 		&NativeRenderingBindings_ReadGraphicsBuffer,
 		&NativeRenderingBindings_ReadRenderTexture,
 		&NativeRenderingBindings_ReleaseGraphicsBuffer,
 		&NativeRenderingBindings_ReleaseRenderTexture,
 		&NativeRenderingBindings_SetupCamera,
 		&NativeRenderingBindings_Submit,
+		&NativeRenderingBindings_VisibleLights,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 15, &table, &ValidateBindingContext, {0x9f, 0xca, 0xdf, 0x42, 0x91, 0xf2, 0xdc, 0x7f, 0x37, 0x41, 0xc9, 0x1f, 0xac, 0x9d, 0x47, 0xef, 0x52, 0xa0, 0x1c, 0x1d, 0x56, 0x9d, 0xf4, 0xa9, 0xb5, 0x04, 0xdc, 0xc0, 0x31, 0x13, 0xfb, 0x73}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 19, &table, &ValidateBindingContext, {0x4e, 0xa6, 0x61, 0xd2, 0xbf, 0xdd, 0xf6, 0xbc, 0x26, 0x36, 0xc6, 0xbf, 0x84, 0xab, 0x99, 0x30, 0xa8, 0x37, 0x44, 0x03, 0x85, 0xc7, 0x61, 0x07, 0x93, 0xdd, 0x6c, 0x45, 0xc1, 0x06, 0x86, 0x93}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Rendering

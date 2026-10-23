@@ -204,7 +204,7 @@
               1.0
             ]
           },
-          "_MainTex": {
+          "_BaseMap": {
             "textureId": {
               "guid": "55555555-5555-4555-8555-555555555555",
               "localFileId": 0

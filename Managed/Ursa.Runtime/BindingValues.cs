@@ -16,6 +16,25 @@ internal struct CameraProjection
 	public float VerticalFovRadians;
 	public float NearPlane;
 	public float FarPlane;
+	public bool Orthographic;
+	public float OrthographicSize;
+}
+
+[WireValue]
+internal struct DirectionalLightShadowSettings
+{
+	public bool CastsShadows;
+	public float Strength;
+	public float Bias;
+	public float NormalBias;
+	public bool SoftShadows;
+}
+
+[WireValue]
+internal struct RendererShadowSettings
+{
+	public bool CastShadows;
+	public bool ReceiveShadows;
 }
 
 [WireValue]

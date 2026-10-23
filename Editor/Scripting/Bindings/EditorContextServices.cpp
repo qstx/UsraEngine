@@ -665,9 +665,20 @@ Vector<EditorAssetData> EditorServices::AssetChoices(EditorInvocation& scope)
 		{
 			return;
 		}
+		EditorReferenceData reference{kind, {}, asset, true, type};
+		if (kind == K::V_ScriptableObject)
+		{
+			try
+			{
+				reference = Resolve(scope, kind, {}, asset);
+			}
+			catch (const std::exception&)
+			{
+				return;
+			}
+		}
 		result.push_back(
-		    {{kind, {}, asset, true, type},
-		     path,
+		    {std::move(reference), path,
 		     path + (isSubAsset ? " / " + type + " #" + ToUrsaString(std::to_string(asset.localFileId)) : ""),
 		     isSubAsset});
 	};

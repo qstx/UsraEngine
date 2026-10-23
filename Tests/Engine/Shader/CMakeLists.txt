@@ -52,7 +52,9 @@ set(URSA_SHADER_TEST_PAK "${URSA_BINARY_ROOT}/Package/$<CONFIG>/ShaderContent.pa
 
 ursa_add_test_executable(UrsaShaderPackageTests ShaderPackageTests.cpp)
 target_link_libraries(UrsaShaderPackageTests PRIVATE Ursa::Engine)
-target_compile_definitions(UrsaShaderPackageTests PRIVATE URSA_ENGINE_SHADER_PAK="${URSA_SHADER_TEST_PAK}")
+target_compile_definitions(UrsaShaderPackageTests PRIVATE
+  URSA_ENGINE_SHADER_PAK="${URSA_SHADER_TEST_PAK}"
+  URSA_ENGINE_ASSET_SOURCE="${URSA_SOURCE_ROOT}/Assets")
 add_dependencies(UrsaShaderPackageTests UrsaPak)
 
 add_test(NAME UrsaShaderPackageTests COMMAND UrsaShaderPackageTests)

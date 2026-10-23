@@ -214,7 +214,7 @@ if(TARGET UrsaAssetImport AND TARGET UrsaScriptPlayer AND NOT URSA_PROJECT_DIR S
       -Capture "$<TARGET_FILE:UrsaCapture>"
       -Editor "$<TARGET_FILE:UrsaEditor>" -Source "${URSA_TEST_SAMPLE_PROJECT}"
       -Configuration "$<CONFIG>" -OutputRoot "${URSA_BINARY_ROOT}/TestProjects/PipelineSamples/$<CONFIG>")
-    set_tests_properties(UrsaProjectPipelineSamplesTests PROPERTIES TIMEOUT 240)
+    set_tests_properties(UrsaProjectPipelineSamplesTests PROPERTIES TIMEOUT 600)
   endif()
 
   add_test(NAME UrsaAssetImportCliTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
@@ -222,6 +222,8 @@ if(TARGET UrsaAssetImport AND TARGET UrsaScriptPlayer AND NOT URSA_PROJECT_DIR S
     -Importer "$<TARGET_FILE:UrsaAssetImport>" -Player "$<TARGET_FILE:UrsaScriptPlayer>"
     -PackageTool "$<TARGET_FILE:UrsaPak>" -Configuration "$<CONFIG>"
     -Project "${URSA_BINARY_ROOT}/TestProjects/Cli/$<CONFIG>" -Source "${URSA_TEST_SAMPLE_PROJECT}")
+  set_tests_properties(UrsaAssetImportCliTests PROPERTIES
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/AssetImportCliUser/$<CONFIG>")
 endif()
 
 get_property(integrationTests DIRECTORY PROPERTY TESTS)

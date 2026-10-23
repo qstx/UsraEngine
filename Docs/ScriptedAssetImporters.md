@@ -230,4 +230,4 @@ Import 回调可通过 Mesh.Load、Material.Load、Texture2D.Load 和 Scriptable
 已发布 Mesh/Material 的写入、销毁和直接注册为新输出会被拒绝；Clone 后的独立候选可编辑、注册和编码。持久 ScriptableObject 不能重新注册为输出或销毁，回调完成时还会核对其字段，修改持久对象会使整个导入失败并保留此前完整产物。持久引用可以作为新候选的引用保存，使用原 GUID/local file ID。
 
 
-生成的纹理可直接用于生成材质：`material.SetTexture(MaterialTextureSlot.BaseColor, texture)` 或 `material.SetTexture("_MainTex", texture)` 接受本次 `Texture2D` 候选。材质与纹理都需要 `AddObjectToAsset` 注册；最终发布统一解析稳定身份，因此可在注册前绑定，也可在绑定后继续修改像素。外来/过期候选和未注册纹理使整次导入失败；已发布纹理仍使用持久资源引用。可编译 DatasetImporter 示例版本为 5。
+生成的纹理可直接用于生成材质：`material.SetTexture(MaterialTextureSlot.BaseColor, texture)` 或内置 Unlit 的 `material.SetTexture("_BaseMap", texture)` 接受本次 `Texture2D` 候选。材质与纹理都需要 `AddObjectToAsset` 注册；最终发布统一解析稳定身份，因此可在注册前绑定，也可在绑定后继续修改像素。外来/过期候选和未注册纹理使整次导入失败；已发布纹理仍使用持久资源引用。可编译 DatasetImporter 示例版本为 5。

@@ -20,6 +20,8 @@ struct RenderObject
 	MaterialParameters parameters;
 	Vector<Mat4> jointPalette;
 	UInt32 subMesh = 0;
+	bool castShadows = true;
+	bool receiveShadows = true;
 };
 
 } // namespace Ursa::Rendering

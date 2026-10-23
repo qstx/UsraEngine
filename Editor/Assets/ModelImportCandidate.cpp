@@ -329,29 +329,12 @@ Result<Vector<ImportedArtifact>> ModelImportCandidate::Encode() const
 					return Result<Vector<ImportedArtifact>>::Failure(migrated.error);
 				}
 			}
-			const Array<String, 5> textureProperties =
-			    material->Type() == MaterialType::Unlit
-			        ? Array<String, 5>{"_MainTex", {}, {}, {}, {}}
-			        : Array<String, 5>{"_BaseMap", "_MetallicRoughnessMap", "_NormalMap", "_OcclusionMap",
-			                           "_EmissiveMap"};
 			for (const auto& binding : entry.second.textures)
 			{
 				auto bound = material->SetTextureReference(binding.first, binding.second, {});
 				if (!bound)
 				{
 					return Result<Vector<ImportedArtifact>>::Failure(bound.error);
-				}
-				const auto& property = textureProperties[Size(binding.first)];
-				if (property.empty())
-				{
-					continue;
-				}
-				auto value = MaterialPropertyValue::Texture2D(binding.second.guid, {});
-				value.textureLocalFileId = binding.second.localFileId;
-				auto assigned = material->SetPropertyValue(property, *material->Shader(), std::move(value));
-				if (!assigned)
-				{
-					return Result<Vector<ImportedArtifact>>::Failure(assigned.error);
 				}
 			}
 			const VirtualPath materialPath{projectScheme, "Material.ursamat"};

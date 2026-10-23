@@ -27,6 +27,7 @@ public:
 	ManagedEditorContext& source;
 	std::unique_ptr<SerializedObject> properties;
 	UInt64 revision = 1;
+	String expectedAssetType;
 	Int32 groups = 0;
 	bool changed = false;
 

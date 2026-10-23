@@ -79,10 +79,13 @@ internal static unsafe partial class Program
 		});
 
 	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-	private static int BoundEnqueueBatch(nint context, WireRenderToken* token, DataView* batch, BindingOutcome* outcome) =>
+	private static int BoundEnqueueBatch(nint context, WireRenderToken* token, DataView* batch, Utf8View* name,
+		BindingOutcome* outcome) =>
 		BoundCall(context, outcome, _ =>
 		{
 			BoundRenderRequire(*token);
+			string? commandName = BindingMemory.String(*name, false);
+			if (commandName == null) throw new InvalidOperationException("Render batch name is missing.");
 			var bytes = BindingMemory.Array<byte, byte>(*batch, static value => value, false)!;
 			RenderCommandProtocol.Validate(bytes);
 			submittedRenderBatches.Add(bytes);

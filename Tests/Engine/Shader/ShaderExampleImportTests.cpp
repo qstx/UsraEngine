@@ -5,14 +5,18 @@
 #include <Shader/ShaderImporter.hpp>
 #include <Shader/ShaderSourceLibrary.hpp>
 #include <Core/StringInterop.hpp>
+#include <MeshFixtures.hpp>
 #include <RenderingFixtures.hpp>
+#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
 #include <Rhi/RHI.hpp>
+#include <Scene/RenderingComponents.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/PakArchive.hpp>
 #include <Vfs/PakBuilder.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -27,14 +31,7 @@ void Done(Result<void> result);
 
 void ConfigureBuiltinShaderResources()
 {
-	auto files = std::make_shared<VirtualFileSystem>();
-	auto provider = std::make_shared<MemoryFileProvider>();
-	Done(files->MountProvider("ursa", provider, MountAccess::ReadWrite));
-	Done(SaveShaderAssetResource(*files, Take(VirtualPath::Parse("ursa:Shaders/Renderer3D/Unlit.ursashaderasset")),
-	                             CreateBuiltinUnlitShaderAsset()));
-	Done(SaveShaderAssetResource(*files, Take(VirtualPath::Parse("ursa:Shaders/Renderer3D/Pbr.ursashaderasset")),
-	                             CreateBuiltinPbrShaderAsset()));
-	ConfigureEngineFileSystem(std::move(files));
+	ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(Take(OpenEngineFileSystem())));
 }
 
 template <class T> T Take(Result<T> result)
@@ -105,29 +102,37 @@ void RenderReflectedTexture(const ShaderVariantAsset& variant, const ShaderBindi
 	Ursa::UInt32 objectBinding = 0;
 	Ursa::UInt32 objectBufferSize = 0;
 	Ursa::UInt32 materialBinding = 0;
+	const ShaderUniformBufferLayout* objectUniform = nullptr;
 	for (const ShaderUniformBufferLayout& uniform : bindings.uniformBuffers)
 	{
 		if (uniform.binding == 0)
 		{
 			objectBinding = uniform.binding;
 			objectBufferSize = uniform.byteSize;
+			objectUniform = &uniform;
 		}
 		else
 		{
 			materialBinding = uniform.binding;
 		}
 	}
-	Expect(objectBufferSize != 0 && materialBinding != 0, "UrsaPerObject or material uniform block was not reflected");
-	Array<Float32, 32> objectData{};
-	for (Ursa::Size matrix = 0; matrix < 2; ++matrix)
+	Expect(objectBufferSize != 0 && objectUniform && materialBinding != 0,
+	       "UrsaPerObject or material uniform block was not reflected");
+	Vector<UInt8> objectData(objectBufferSize, 0);
+	Array<Float32, 16> identity{};
+	for (Ursa::Size diagonal = 0; diagonal < 4; ++diagonal)
 	{
-		for (Ursa::Size diagonal = 0; diagonal < 4; ++diagonal)
+		identity[diagonal * 5] = 1.0f;
+	}
+	for (const ShaderUniformMember& member : objectUniform->members)
+	{
+		if (member.type == "mat4" || member.type == "float4x4")
 		{
-			objectData[matrix * 16 + diagonal * 5] = 1.0f;
+			Done(WriteShaderUniformValue(objectData, member, identity.data(), member.byteSize));
 		}
 	}
 	auto objectBuffer = Take(device->CreateBuffer({objectBufferSize, Rhi::BufferUsage::Uniform, Rhi::Memory::Upload}));
-	Done(objectBuffer->Write(0, objectData.data(), objectBufferSize));
+	Done(objectBuffer->Write(0, objectData.data(), objectData.size()));
 	auto materialBuffer =
 	    Take(device->CreateBuffer({uniformBytes.size(), Rhi::BufferUsage::Uniform, Rhi::Memory::Upload}));
 	Done(materialBuffer->Write(0, uniformBytes.data(), uniformBytes.size()));
@@ -139,7 +144,7 @@ void RenderReflectedTexture(const ShaderVariantAsset& variant, const ShaderBindi
 	    {sourceTexture->GetPixels().size(), Rhi::BufferUsage::TransferSource, Rhi::Memory::Upload}));
 	Done(textureUpload->Write(0, sourceTexture->GetPixels().data(), sourceTexture->GetPixels().size()));
 	auto sampler = Take(device->CreateSampler({false, false}));
-	const auto textureBinding = bindings.properties.find("_MainTex");
+	const auto textureBinding = bindings.properties.find("_BaseMap");
 	Expect(textureBinding != bindings.properties.end(), "Reflected base texture binding was not found");
 	Ursa::UInt32 samplerBinding = 0;
 	for (const Rhi::LayoutBinding& binding : bindings.descriptors)
@@ -229,7 +234,7 @@ ShaderAsset BuildPassOrderShader(const DxcShaderCompiler& compiler)
 	shader.subShaders.push_back(std::move(incompatible));
 
 	ShaderSubShaderAsset forward;
-	forward.tags.push_back({"RenderPipeline", "UrsaForward"});
+	forward.tags.push_back({"RenderPipeline", "UrsaUniversal"});
 	const String vertex = "float4 VSMain(float3 position : POSITION) : SV_Position { return float4(position, 1.0); }";
 	const auto addPass = [&](const String& name, const String& lightMode, const String& fragmentSource,
 	                         Vector<RenderStateDeclaration> states)
@@ -375,10 +380,10 @@ void TestMaterialBackingReuse(const DxcShaderCompiler& compiler)
 	tint.defaultVector = {1, 1, 1, 1};
 	shader->properties.push_back(tint);
 	ShaderSubShaderAsset subShader;
-	subShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	subShader.tags.push_back({"RenderPipeline", "UrsaUniversal"});
 	ShaderPassAsset pass;
 	pass.name = "Forward";
-	pass.tags.push_back({"LightMode", "Forward"});
+	pass.tags.push_back({"LightMode", "UniversalForward"});
 	ShaderVariantAsset variant;
 	variant.stages.push_back(
 	    CompileTestStage(compiler, ProgramStage::Vertex, "VSMain",
@@ -431,8 +436,20 @@ void TestMaterialBackingReuse(const DxcShaderCompiler& compiler)
 		return false;
 	};
 	const auto first = render();
-	Expect(hasColor(first, 255, 0, 0) && device->bindGroupCreates == 1,
-	       "The first Shader material did not render its tint with one backing");
+	if (!hasColor(first, 255, 0, 0) || device->bindGroupCreates != 1)
+	{
+		UInt8 maximumRed = 0, maximumGreen = 0, maximumBlue = 0;
+		for (Size index = 0; index < first.size(); index += 4)
+		{
+			maximumRed = std::max(maximumRed, first[index]);
+			maximumGreen = std::max(maximumGreen, first[index + 1]);
+			maximumBlue = std::max(maximumBlue, first[index + 2]);
+		}
+		throw std::runtime_error(
+		    "The first Shader material did not render its tint with one backing (max=" + std::to_string(maximumRed) +
+		    "," + std::to_string(maximumGreen) + "," + std::to_string(maximumBlue) +
+		    "; bind groups=" + std::to_string(device->bindGroupCreates) + ")");
+	}
 	boxes[0].material = right;
 	const auto second = render();
 	Expect(hasColor(second, 0, 0, 255) && device->bindGroupCreates == 2,
@@ -467,7 +484,7 @@ void TestBonePaletteReuse(const DxcShaderCompiler& compiler)
 	                      "{ return mul(_UrsaBones[0], float4(position, 1.0)); }";
 	const String fragment = "float4 PSMain() : SV_Target0 { return float4(0.4, 0.7, 0.2, 1.0); }";
 	ShaderSubShaderAsset subShader;
-	subShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	subShader.tags.push_back({"RenderPipeline", "UrsaUniversal"});
 	for (const char* lightMode : {"Forward", "SRPDefaultUnlit"})
 	{
 		ShaderPassAsset pass;
@@ -668,7 +685,7 @@ void RenderShaderPasses(const DxcShaderCompiler& compiler)
 	sharedShader->sourceHash = "shared-pass-v1";
 	sharedShader->compilerVersion = "DXC test";
 	ShaderSubShaderAsset sharedSubShader;
-	sharedSubShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	sharedSubShader.tags.push_back({"RenderPipeline", "UrsaUniversal"});
 	ShaderPassAsset sharedPass;
 	sharedPass.name = "Blue";
 	sharedPass.tags.push_back({"LightMode", "Forward"});
@@ -686,7 +703,7 @@ void RenderShaderPasses(const DxcShaderCompiler& compiler)
 	usePassShader->name = "Tests/UsePass";
 	usePassShader->sourceHash = "use-pass-v1";
 	ShaderSubShaderAsset usePassSubShader;
-	usePassSubShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	usePassSubShader.tags.push_back({"RenderPipeline", "UrsaUniversal"});
 	usePassSubShader.passOrder.push_back({0, "Tests/SharedPass/Blue", true});
 	usePassShader->subShaders.push_back(std::move(usePassSubShader));
 	usePassShader->resolvedReferences.push_back({{sharedShader->name, sharedShader->id, "Blue", false}, sharedShader});
@@ -728,7 +745,7 @@ void TestUnsupportedComputeStage(const DxcShaderCompiler& compiler)
 	shader->id = Take(ResourceId::Parse("5403c8ea-669d-4b64-8c30-6d63d128de02"));
 	shader->name = "Tests/ComputePass";
 	ShaderSubShaderAsset subShader;
-	subShader.tags.push_back({"RenderPipeline", "UrsaForward"});
+	subShader.tags.push_back({"RenderPipeline", "UrsaUniversal"});
 	ShaderPassAsset pass;
 	pass.name = "ComputeOnly";
 	pass.tags.push_back({"LightMode", "Forward"});
@@ -760,22 +777,24 @@ Array<UInt8, 4> RenderImportedShader(const std::shared_ptr<const ShaderAsset>& s
 	description.validation = true;
 #endif
 	auto device = Take(CreateDevice(description));
-	auto renderer = Take(Test::SceneRenderer::Create(device));
-	auto color = Take(device->CreateTexture(
-	    {64, 64, Format::RgbA8Unorm, TextureUsage::ColorAttachment | TextureUsage::TransferSource}));
-	Vector<Test::MeshDraw> boxes{{Mat4::Identity(), {}, material}};
-	Done(Take(renderer->DrawOffscreen(color, Mat4::Identity(), boxes))->Wait());
-	auto readback = Take(device->CreateBuffer({64 * 64 * 4, BufferUsage::TransferDestination, Rhi::Memory::Readback}));
-	auto command = Take(device->CreateCommandList());
-	Done(command->Begin());
-	Done(command->Barrier(readback, ResourceState::Undefined, ResourceState::TransferDestination));
-	Done(command->CopyTextureToBuffer(color, readback));
-	Done(command->End());
-	Done(Take(device->Submit(command))->Wait());
-	Array<UInt8, 4> center{};
-	Done(readback->Read((32 * 64 + 32) * 4, center.data(), center.size()));
-	Done(device->WaitIdle());
-	return center;
+	auto renderer = Take(Rendering::NativeForwardPipeline::Create(device));
+	Scene scene;
+	auto cameraObject = Take(scene.CreateGameObject("Imported Shader Camera"));
+	LocalTransform cameraTransform;
+	cameraTransform.position = {0, 0, 4};
+	Done(scene.SetLocalTransform(cameraObject, cameraTransform));
+	auto* camera = Take(cameraObject->AddComponent<CameraComponent>());
+	Done(scene.SetActiveCamera(camera->Id()));
+	auto object = Take(scene.CreateGameObject("Imported Shader Geometry"));
+	Take(Test::AddRenderer(scene, object));
+	Done(object->FindComponent<MeshRendererComponent>()->SetMaterial(material));
+	auto color = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
+	Done(renderer->RenderOffscreen(scene, color, ResourceState::TransferSource));
+	const auto pixels = Take(Rendering::ReadRenderTexture(*device, *color));
+	const Size center = (32 * 64 + 32) * 4;
+	Array<UInt8, 4> result{};
+	std::copy_n(pixels.data() + center, result.size(), result.data());
+	return result;
 }
 } // namespace
 
@@ -805,10 +824,21 @@ int main()
 			}
 			return false;
 		};
-		Expect(static_cast<bool>(dependencies) && dependencies.value.includes.size() == 2 &&
-		           hasInclude("ursa:Shaders/Examples/Common.hlsli") &&
-		           hasInclude("ursa:Shaders/Includes/UrsaCore.hlsli"),
+		Expect(static_cast<bool>(dependencies) && hasInclude("ursa:Shaders/ShaderLibrary/Core.hlsl") &&
+		           hasInclude("ursa:Shaders/ShaderLibrary/SpaceTransforms.hlsl") &&
+		           hasInclude("ursa:Shaders/ShaderLibrary/Textures.hlsl"),
 		       "Documented shader include did not resolve");
+		const bool hasLitMaterialInclude =
+		    dependencies && std::any_of(dependencies.value.includes.begin(), dependencies.value.includes.end(),
+		                                [](const VirtualPath& path)
+		                                {
+			                                const String value = path.ToString();
+			                                return value.find("/SurfaceData.hlsl") != String::npos ||
+			                                       value.find("/SurfaceInput.hlsl") != String::npos ||
+			                                       value.find("/InputData.hlsl") != String::npos;
+		                                });
+		Expect(!hasLitMaterialInclude,
+		       "The standalone Unlit shader unexpectedly depends on Lit surface material declarations");
 		const ShaderSourceAsset* asset = library.value.Find("Ursa/Examples/Unlit");
 		Expect(asset != nullptr, "Documented Unlit Shader was not indexed");
 		Vector<ProgramBlock> sharedBlocks;
@@ -869,19 +899,23 @@ int main()
 		auto bindingLayout = BuildShaderBindingLayout(shaderAsset.value, variant);
 		Expect(static_cast<bool>(bindingLayout), "Actual DXC reflection did not produce a material resource layout");
 		Expect(bindingLayout.value.properties.find("_Tint") != bindingLayout.value.properties.end() &&
-		           bindingLayout.value.properties.find("_MainTex") != bindingLayout.value.properties.end(),
+		           bindingLayout.value.properties.find("_BaseMap") != bindingLayout.value.properties.end(),
 		       "Actual reflection did not map Shader properties to uniform and texture bindings");
 		MaterialInstance material(MaterialType::Unlit);
 		Expect(static_cast<bool>(material.SetShader(shaderAsset.value.id)) &&
 		           static_cast<bool>(material.SetPropertyValue(
 		               "_Tint", shaderAsset.value, MaterialPropertyValue::ColorValue({0.25f, 0.5f, 0.75f, 1.0f}))),
 		       "Could not set reflected material properties");
-		auto tintBuffer = PackMaterialUniformBuffer(shaderAsset.value, bindingLayout.value, material, 1);
+		const auto tintBinding = bindingLayout.value.properties.find("_Tint");
+		Expect(tintBinding != bindingLayout.value.properties.end() && tintBinding->second.uniformMember,
+		       "Tint property did not retain its reflected material uniform binding");
+		auto tintBuffer =
+		    PackMaterialUniformBuffer(shaderAsset.value, bindingLayout.value, material, tintBinding->second.binding);
 		Expect(static_cast<bool>(tintBuffer), "Material values could not be packed using actual reflection offsets");
 		auto texture = MaterialTexture::Create(1, 1, TextureColorSpace::Srgb, {0, 255, 0, 255});
 		Expect(static_cast<bool>(texture) &&
 		           static_cast<bool>(material.SetPropertyValue(
-		               "_MainTex", shaderAsset.value,
+		               "_BaseMap", shaderAsset.value,
 		               MaterialPropertyValue::Texture2D(ResourceId::Generate(), texture.value))),
 		       "Could not assign reflected material texture");
 		auto textureBindings = BuildMaterialTextureBindings(shaderAsset.value, bindingLayout.value, material);
@@ -894,11 +928,11 @@ int main()
 		           static_cast<bool>(runtimeMaterial->SetPropertyValue(
 		               "_Tint", *runtimeShader, MaterialPropertyValue::ColorValue({0.25f, 0.5f, 0.75f, 1.0f}))) &&
 		           static_cast<bool>(runtimeMaterial->SetPropertyValue(
-		               "_MainTex", *runtimeShader,
+		               "_BaseMap", *runtimeShader,
 		               MaterialPropertyValue::Texture2D(ResourceId::Generate(), texture.value))),
-		       "Cannot create a Shader-backed material for Renderer3D");
+		       "Cannot create a Shader-backed material for Universal rendering");
 		const auto renderedSample = RenderImportedShader(runtimeShader, runtimeMaterial);
-		Expect(renderedSample[0] == 0 && renderedSample[1] >= 120 && renderedSample[1] <= 136 &&
+		Expect(renderedSample[0] == 0 && renderedSample[1] >= 150 && renderedSample[1] <= 162 &&
 		           renderedSample[2] == 0 && renderedSample[3] == 255,
 		       "Imported Unlit Shader did not render through the runtime Vulkan renderer");
 		RenderShaderPasses(compiler);

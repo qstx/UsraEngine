@@ -15,6 +15,9 @@ struct RenderingServices
 	using Token = Wire::Value_Ursa_Rendering_RenderContextToken;
 	using RenderResult = Wire::Value_Ursa_Rendering_RenderResultValue;
 	using CameraFrame = Wire::Value_Ursa_Rendering_CameraFrameValue;
+	using VisibleLightsValue = Wire::Value_Ursa_Rendering_VisibleLightsValue;
+	using ShadowCascade = Wire::Value_Ursa_Rendering_DirectionalShadowCascadeValue;
+	using Matrix = Wire::Value_Ursa_Matrix4x4;
 	using Drawing = Wire::Value_Ursa_Rendering_DrawingSettingsValue;
 	using Filtering = Wire::Value_Ursa_Rendering_FilteringSettings;
 	using TextureDescription = Wire::Value_Ursa_Rendering_RenderTextureValue;
@@ -30,6 +33,14 @@ struct RenderingServices
 	static Result<DataView> Cameras(BindingCall& call, const Token& token);
 	static Result<CameraFrame> SetupCamera(BindingCall& call, const Token& token, const Utf8View& identity);
 	static Result<RenderResult> Cull(BindingCall& call, const Token& token, const Utf8View& identity);
+	static Result<RenderResult> CullShadowCasters(BindingCall& call, const Token& token, const Utf8View& identity,
+	                                              const Matrix& lightViewProjection);
+	static Result<VisibleLightsValue> VisibleLights(BindingCall& call, const Token& token, const RenderResult& culling);
+	static Result<DataView> DirectionalShadowCascades(BindingCall& call, const Token& token, const Utf8View& identity,
+	                                                  const Wire::Value_Ursa_Vector3& lightDirection,
+	                                                  UInt32 cascadeCount, Float32 shadowDistance,
+	                                                  const DataView& splitFractions, UInt32 atlasWidth,
+	                                                  UInt32 atlasHeight);
 	static Result<RenderResult> CreateRendererList(BindingCall& call, const Token& token, const RenderResult& culling,
 	                                               const Drawing& drawing, const Filtering& filtering);
 	static Result<void> EnqueueBatch(BindingCall& call, const Token& token, const DataView& batch,

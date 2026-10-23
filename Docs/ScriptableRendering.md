@@ -53,6 +53,50 @@ foreach (Ursa.Rendering.Camera camera in cameras)
 
 托管协议测试覆盖两台相机的列表句柄、录制顺序、逐段提交和 Clear 后重录；原生上下文会拒绝跨会话或过期列表 token。每台相机设置前必须提交上一台相机的命令；设置相机时目标、全局参数、计算参数、Viewport 和 Scissor 恢复初始状态。
 
+### 相机投影、可见灯光和阴影组件
+
+`CameraComponent` 默认使用透视投影，可通过 `Orthographic` 和 `OrthographicSize` 选择正交投影；正交尺寸是视口半高。SetupCameraProperties 更新托管 Camera 的 View/Projection、InverseViewProjection、世界位置、近远平面和投影类型。这些字段和投影矩阵来自同一不可变帧快照。
+
+```csharp
+using Ursa;
+using Ursa.Rendering;
+
+var cameraComponent = GameObject.GetComponent<CameraComponent>()!;
+cameraComponent.Orthographic = true;
+cameraComponent.OrthographicSize = 5;
+Camera camera = Camera.FromComponent(cameraComponent);
+context.SetupCameraProperties(camera);
+Matrix4x4 viewProjection = camera.ProjectionMatrix * camera.ViewMatrix;
+CullingResults culling = context.Cull(camera);
+foreach (VisibleLight light in context.GetVisibleLights(culling))
+{
+    // Identity、Layer、位置/方向和灯光参数与该次剔除结果一一对应。
+}
+```
+
+`GetVisibleLights` 每次调用批量传回该相机 CullingMask 内的方向光，以及范围球与视锥相交的点光。结果受当前 RenderContext、帧和代数约束；上下文结束或切换后，旧剔除结果不能再查询。容量保持每帧最多 4 个方向光与 8 个点光。
+
+本段相机/灯光职责按本地固定参考 Unity Graphics 提交 `6034ecf6489af2ac1d543f9de25a76b8e91a78cb`（SRP Core/URP 12.1.16）核对：
+
+| 官方入口 | Ursa 对应实现 | 采用与适配 | 验证证据 |
+| --- | --- | --- | --- |
+| [URP `UniversalRenderPipeline.InitializeCameraData`](../../References/UnityGraphics-2021.3/Packages/com.unity.render-pipelines.universal/Runtime/UniversalRenderPipeline.cs#L747)、`CameraData.SetViewAndProjectionMatrix`（同文件 #L978） | [`RenderScene::Capture`](../Engine/Rendering/Scene/RenderScene.cpp)、[`CameraData`](../Engine/Engine/Rendering/Scene/CameraData.hpp)、`RenderingServices::SetupCamera` | 采用每相机单一 camera-data 快照；Ursa 将 view、projection、inverse、位置、近远平面和正交标记保存在同帧快照中，不引入 URP 堆叠相机、XR 或 Volume 状态。 | `UrsaRenderSceneTests` 检查透视/正交投影、逆矩阵、近远平面和帧内不可变性；`UrsaDotNetHostSmoke` 用真实 .NET 宿主查询托管 `Camera`。 |
+| [URP `InitializeRenderingData` 与 `GetMainLightIndex`](../../References/UnityGraphics-2021.3/Packages/com.unity.render-pipelines.universal/Runtime/UniversalRenderPipeline.cs#L983、#L1204) | [`RenderSceneContext::Cull`/`VisibleLightsFor`](../Engine/Engine/Rendering/Scene/RendererList.cpp)、[`ScriptableRenderContext.GetVisibleLights`](../Managed/Ursa.Rendering/ScriptableRenderContext.cs)、`RenderingServices::VisibleLights` | 采用剔除结果批量提供可见灯光；Ursa 保留最多 4 个方向光/8 个点光，并用点光范围球裁剪。参考支持 `RenderSettings.sun` 优先；Ursa 尚无 Sun 设置，选择最强方向光，强度相同时以稳定身份排序，选中的主光不投影时不回退到较弱灯。 | `UrsaRenderSceneTests` 覆盖视锥、范围球、稳定身份、过期代数；`UrsaLightingTests` 检查 4/8 容量；`UrsaDotNetHostSmoke` 对比 native snapshot 与托管批量查询中的身份、强度、阴影参数及点光范围。 |
+
+上表中的回归入口可在仓库根目录执行：`ctest --test-dir Engine/Build -C Release -R "^(UrsaRenderSceneTests|UrsaLightingTests|UrsaDotNetHostSmoke|UrsaBindingsGeneratorTests|UrsaBindingsSignatureTests|UrsaManagedProtocolTests)$" --output-on-failure`。本地参考包版本和提交由 [`References/README.md`](../../References/README.md) 及 [`unity-graphics-reference.json`](../../References/unity-graphics-reference.json) 锁定；该对照只描述参考职责和 Ursa 实际适配，不表示已运行 Unity 对照场景。
+
+阴影几何入口 `ComputeDirectionalShadowCascades` 接收相机快照、主光方向及级联数/距离/分割/图集配置，支持 1/2/4 级联。它按相机 view depth 截取透视或正交视锥，创建光空间正交矩阵，将中心吸附到每级联的世界纹素网格，并返回 atlas 区域和 world-to-atlas 矩阵。图集要求按级联布局划分为相同正方形瓦片；错误切分、平面、方向或尺寸会返回失败结果，不会静默改变级联质量。
+
+阴影视角可用 `CullShadowCasters(receiverCamera, lightViewProjection)` 以接收相机的 Layer 掩码对光空间范围重新剔除，并在同一上下文建立 `ShadowCaster` RendererList。命令缓冲的 `SetViewProjectionMatrix(lightViewProjection)` 将光空间矩阵录入该位置的绘制参数；每个图块分别设置 viewport/scissor 与材质需要的 shadow/normal bias，完成后以 `RestoreViewProjectionMatrix(camera)` 恢复接收相机。此计算参考固定 URP 12.1.16 `MainLightShadowCasterPass` 的 cascade setup 与 `ShadowUtils.ExtractDirectionalLightMatrix`/`ApplySliceTransform`；Ursa 按自身矩阵、图集瓦片及原生快照适配。
+
+通用管线资产的 Main Light Shadows 设置支持 1/2/4 级联、分割比例、阴影距离与图集大小；图集必须能按级联数均分成等尺寸方形瓦片，因此默认双级联图集为 2048×1024，四级联为 2048×2048。无效布局在管线创建时拒绝。Universal Renderer 按最强方向光选主光，强度并列时按稳定身份排序；主光未开启阴影时不会改选其他灯。每台相机创建一张临时 D32 图集，按级联设置深度附件、viewport/scissor、光空间矩阵和同帧阴影 RendererList，绘制后恢复接收相机。临时目标在相机命令批次内按作用域释放；无主光/无阴影时绑定并清深度的 1×1 中性纹理且将级联数设为 0。
+
+`ShaderLibrary/Shadows.hlsl` 依据 view depth 选择级联，提供硬比较和手动 3×3 PCF，并把 taps 限制在当前图块。相邻级联以各自较短覆盖区间的 10% 做连续过渡，最远一级在阴影距离末段淡出到全亮。`Passes/ShadowCasterPass.hlsl` 与新 Universal Lit/Unlit 共用蒙皮和 Alpha Clip；Blend 队列不进入阴影列表，Renderer 的 CastShadows 控制投射、ReceiveShadows 控制 Lit 接收。URP `ShadowUtils.RenderShadowSlice` 对应 Ursa 的显式深度目标、viewport/scissor、绘制与相机矩阵恢复；URP `ShaderLibrary/Shadows.hlsl` 对应 Ursa atlas 矩阵、view-depth 级联选择、过渡、淡出与 PCF。采样过滤和过渡宽度按 Ursa 的固定适配验证，不声称与 Unity 的运行画面逐像素一致。
+
+方向光组件提供 `CastsShadows`、`ShadowStrength`、`ShadowBias`、`ShadowNormalBias` 和 `SoftShadows`；Mesh/SkinnedMesh Renderer 各有 `CastShadows` 与 `ReceiveShadows`。强度限定为 `[0,1]`，偏移为有限非负数。旧 Scene/Prefab 缺少这些字段时默认投射、接收和方向光阴影开启，strength 为 1、bias 为 0.001、normal bias 为 0.01、soft shadows 关闭。
+
+URP 12.1.16 的 `MainLightShadowCasterPass`/`ShadowUtils` 通过主光、接收相机和原生级联剔除服务计算图集与投射范围；Ursa 公开的批量灯光快照为项目 Pass 提供输入，但不把相机可见 RendererList 当作完整阴影投射物列表，也不暴露 Unity 的原生 CullingResults。
+
 ## 可编译的经典命令示例
 
 完整源码见 [ClassicRendering.cs](Examples/ClassicRendering.cs)。`DrawCamera` 设置相机，用同一剔除结果创建不透明和透明列表，在临时颜色/深度目标绘制，然后复制颜色到相机输出。两段分别调用 `ExecuteCommandBuffer` 和 `Submit`；交付后立即 Clear 或 Dispose 缓冲不会改变已交付数据。复制要求输入与相机输出的尺寸、格式相同；需要缩放或材质效果时使用 `Blit`。
@@ -66,7 +110,27 @@ cmake --build Engine/Build --config Release --target UrsaDotNetHostTests -- /m:1
 ctest --test-dir Engine/Build -C Release -R '^(UrsaDotNetHostSmoke|UrsaManagedProtocolTests)$' --output-on-failure
 ```
 
-支持范围包括列表/显式子网格与 Pass 绘制、全局 float/int/vector/matrix/纹理/缓冲、Viewport/Scissor、颜色/深度清除、多附件、复制、全屏合成及同队列计算。资源描述限 2D、单采样的 RGBA8、RGBA16F 和 D32，最多八个颜色附件且受设备能力限制。临时 ID 只在当前上下文有效，结束前须 Release；资源/内核缺失、超出容量、读写反馈、过期列表与未提交段均返回诊断。
+支持范围包括列表/显式子网格与 Pass 绘制、全局 float/int/vector/matrix/纹理/缓冲及 vector/matrix 数组、Viewport/Scissor、颜色/深度清除、多附件、复制、全屏合成及同队列计算。全局数组长度固定为 1–16，超出范围或元素含非有限值会在托管记录时拒绝；录制时复制 span 内容，后续修改调用方数组不会改变已记录批次。资源描述限 2D、单采样的 RGBA8、RGBA16F 和 D32，最多八个颜色附件且受设备能力限制。D32 深度专用目标可直接作为 `SetRenderTarget` 的附件，也能在后续采样阶段作为纹理读取。临时 ID 只在当前上下文有效，结束前须 Release；资源/内核缺失、超出容量、读写反馈、过期列表与未提交段均返回诊断。
+
+固定参考 URP 12.1.16 的 [`ShadowUtils.RenderShadowSlice`](../../References/UnityGraphics-2021.3/Packages/com.unity.render-pipelines.universal/Runtime/ShadowUtils.cs#L94) 依次设置图块 viewport、全局深度偏移、光 view/projection，并在绘制后恢复深度偏移；`ScriptableRenderer` 和阴影 Pass 使用 Unity `CommandBuffer.SetGlobalVectorArray`/`SetGlobalMatrixArray` 录制批量 Shader 参数。Ursa 的 ABI 映射为 `CommandBuffer.SetViewport`/`SetScissor`、`SetViewProjectionMatrix(worldToClip)`、`SetDepthBias`/`RestoreDepthBias` 与 `RestoreViewProjectionMatrix(camera)`，数组入口为 `SetGlobalVectorArray`/`SetGlobalMatrixArray`，最大 16 项。Ursa 的矩阵入口接收已合成的 world-to-clip 矩阵；绘制图块后必须显式恢复接收相机矩阵。D32 状态在执行器中从深度附件转换到 ShaderRead，颜色输入也按命令顺序从附件转为采样状态；应用无需插入逐 Pass 等待或手写屏障。同一 Pass 对自身可写颜色/深度附件的采样会被拒绝。
+
+```csharp
+var atlas = RenderTexture.Create(new RenderTextureDescriptor(
+	1024, 1024, GraphicsFormat.D32_SFloat));
+commands.SetRenderTarget(atlas);
+commands.ClearTarget(color: false, depth: true, stencil: false, Vector4.Zero);
+commands.SetViewport(tileX, tileY, tileSize, tileSize);
+commands.SetScissor(tileX, tileY, tileSize, tileSize);
+commands.SetViewProjectionMatrix(lightWorldToClip);
+commands.SetDepthBias(constantBias, slopeBias);
+commands.SetGlobalMatrixArray("_ShadowMatrices", cascadeMatrices); // 1..16 matrices
+// Record shadow-caster draws here.
+commands.RestoreDepthBias();
+commands.RestoreViewProjectionMatrix(camera);
+commands.SetGlobalTexture("_ShadowAtlas", atlas); // sample in a later pass
+```
+
+对应验证在 `Tests/Engine/Rendering/RenderCommandExecutorTests.cpp`（深度写入后采样、颜色 Blit 采样、同 Pass 反馈拒绝、矩阵数组反射与批次原子预检）及 `Tests/Managed/Ursa.ManagedHost.ProtocolTests/RenderCommandProtocolTests.cs`（旧指纹/损坏协议拒绝）。
 
 稳定 Shader 的反射、Pass 选择及结构化管线键缓存按版本失效；材质参数按 PerMaterial 版本更新，物体/骨骼数据按帧上传。资源统计与 Tracy 区域用于验证这些缓存和等待规则。
 
@@ -132,7 +196,6 @@ Application 的原生入口已改用同一批 RenderScene、Cull、RendererList 
 using Ursa;
 using Ursa.Rendering;
 
-[UrsaScriptType("game.presentation-pipeline", Version = 1)]
 [CreateAssetMenu(MenuName = "Rendering/Presentation Pipeline", FileName = "PresentationPipeline", Order = 20)]
 public sealed class PresentationPipelineAsset : RenderPipelineAsset
 {
@@ -178,11 +241,13 @@ ctest --test-dir Engine/Build -C Release -R '^(UrsaManagedProtocolTests|UrsaDotN
 
 `UrsaDotNetHostSmoke` 会编译这两个 `Engine/Docs/Examples` 源文件；宿主测试执行经典离屏命令和 `PresentationPipelineAsset`，逐像素检查自定义管线输出。协议测试覆盖替换和销毁实例、回调配对、失败候选保留环境及恢复默认 Forward。管线重载测试覆盖跨 ALC 的未保存字段、循环资产引用、失败恢复和旧句柄失效。
 
-默认 Forward 保留 Unlit、PBR、透明、静态/蒙皮网格。项目示例覆盖离屏渲染、多个相机、全屏合成及计算输出。SceneView、Game 和 Preview 相机通过同一管线入口渲染，编辑模式不执行 Behaviour 游戏更新。
+默认 Forward 与 Universal Renderer 现共用新 Lit/Unlit 场景 Pass。托管 Renderer 按 session、宿主输出目标 ID/generation 和尺寸维护 RGBA16F+D32 线性 backing；最多保留 8 个目标，聚合预算为 512 MiB，超过数量或预算时按最近使用顺序回收。目标代数或尺寸变化会重建 backing；相同输出上的相机共享同一 backing。Universal Renderer 先把 HDR 经曝光/Bloom/色调映射/FXAA 写到线性 LDR 临时目标；后处理之后的 Feature 读写该 LDR 目标，最终输出只编码一次。`Camera.OutputIsSrgb` 来自当前 RHI 输出格式：sRGB 附件由硬件编码，其他输出由最终 Shader 编码；NativeForward 使用同一目标判断。内建渲染资产使用脚本目录里的固定身份，不在类上声明 `UrsaScriptType`。SceneView、Game 和 Preview 相机仍经各自宿主相机上下文处理。深度/法线按消费者汇总并惰性生成，Color 按事件组共享快照；相关 GPU 与真实宿主测试命令见本节下方。
+
+`UniversalRenderPipelineAsset` 的配置使用公开序列化字段保存，保存重开不会把运行实例或临时资源写回资产。默认 EV=0、Reinhard、FXAA/Bloom 关闭、Bloom threshold=1、intensity=0.5、scatter=0.7。资产激活前统一校验：`ExposureEV` 在 [-10,10]，`ToneMapping` 为 None/Reinhard，`BloomThreshold`/`BloomIntensity` 是有限非负数，`BloomScatter` 在 [0,1]；无效候选不会先创建 Feature 运行实例。Bloom 阈值按曝光后的线性 HDR 场景颜色计算，并在色调映射前加回。
 
 管线回调和相机事件使用 `List<Ursa.Rendering.Camera>`。游戏组件可通过 `Camera.FromComponent` 转为复用包装；Setup 从当前快照取得类型、清除、背景、Layer 掩码、视口及实际输出尺寸。包装只属于创建它的脚本会话，Setup/Cull 会检查组件身份，避免同 GUID 的 Run 克隆接受旧编辑包装。SceneView/Preview 的包装由宿主提供，管线不依赖组件才能识别相机类型。
 
-默认 Forward 复用绘制/过滤设置和 CommandBuffer，对每台相机设置属性、创建不透明/透明列表、设置像素视口与 Scissor、按 ColorAndDepth/Depth/Nothing 清除并 Submit。清除使用 Scissor 对应的 RenderPass render area，保留其他相机区域；缺省背景取相机配置。`UrsaDotNetHostSmoke` 经真实 C# 默认管线连续三帧绘制 Unlit、PBR、纹理、透明、带 baseVertex 的子网格与运动蒙皮，并与既有原生路径逐像素对照；另验证两个相机的分区清除与 Depth/Nothing 保留颜色。
+默认与通用 Renderer 复用绘制/过滤设置和 CommandBuffer，对每台相机设置像素视口与 Scissor，在原始线性 backing 上按 ColorAndDepth/Depth/Nothing 清除并绘制不透明/透明列表，最后只对该 viewport 执行 FinalPost。背后的旧颜色在 HDR backing 中保留，不从已编码输出重复曝光。输出 ID/generation 由宿主相机快照提供：离屏目标使用资源身份及代数，窗口目标使用 Swapchain 身份和重建计数。多相机 clear flags、Depth/Nothing 保留、托管/原生及通用最小配置像素对比已有真实宿主测试；窗口 resize/minimize 恢复与完整编辑器验收仍由 OpenSpec 任务追踪。
 
 RenderGraph、阴影体系、Deferred/Forward+、IBL、TAA、GPU 驱动剔除和异步计算队列留到后续。完整 Unity 文件/API 兼容不属于本轮交付，未支持的资源与命令描述会返回明确诊断。
 
@@ -202,3 +267,36 @@ RenderGraph、阴影体系、Deferred/Forward+、IBL、TAA、GPU 驱动剔除和
 `CommandBuffer.Name` 会作为该次执行的外层 GPU 域；项目可在其内部用 `BeginSample(name)` / `EndSample(name)` 创建自定义嵌套阶段，或用 `ProfilingScope` 在 `using` 结束时配对。样本名称必须非空、有效 UTF-8、无 NUL 且最多 1024 字节。开始/结束必须同名并遵循栈顺序，且都在同一缓冲的一次 Execute 内完成。Clear 会丢弃尚未交付的样本；先前交付的缓冲与名称快照不受改名、Clear 或 Dispose 影响。
 
 `ProfilingSampler` 可以缓存并复用于多个缓冲。首版接口提供 GPU 调试标记，不提供时间统计或 CPU-only 采样。Vulkan 通过可选的 `VK_EXT_debug_utils` 向 RenderDoc 输出标记，独立于 Tracy 与 validation。
+
+## Universal Renderer / Feature 起步契约
+
+通用管线资产通过 `UniversalRenderPipelineAsset.RendererData` 引用独立 `UniversalRendererData`，其中 `Features` 数组按作者顺序保存 `ScriptableRendererFeature` 资产。每个已启用配置在管线实例创建时各自创建运行时 `RendererFeature`；重复资产身份、空引用、未保存的配置、无效或共享的运行实例，以及工厂异常都会使新管线创建失败。创建失败时，已成功创建的运行实例会逆序 Dispose；正常切换管线也会逆序释放实例并继续收集清理错误。配置资产不存放运行缓存，因此同一资产在不同管线实例间不会共享运行时 Feature。
+
+`ScriptableRendererFeature.AddRenderPasses` 在每台相机开始时调用，`ScriptableRenderer.EnqueuePass` 仅接受本相机的队列。`ScriptableRenderPass.RenderPassEvent` 按事件值稳定排序，同一事件保持 Feature 入队顺序；主要事件顺序为 Opaques、AfterOpaques、Transparents、AfterTransparents、BeforePostProcessing、AfterPostProcessing、BeforeFinalOutput、AfterRendering，内置 Opaques/Transparents 是独立事件。FXAA、色调映射及 Bloom 在 BeforePostProcessing 组之后执行，AfterPostProcessing 及之后的项目 Pass 使用 LDR 线性颜色，最后的输出阶段只做 sRGB 编码。`CameraTypeMask` 可以过滤相机类型。队列在相机清理时重置。请求 `Color` 时，Renderer 在该事件组第一个消费者之前复制当前线性颜色，同组消费者共享 `_CameraColorTexture` 快照；AfterPostProcessing 起快照内容是 LDR 线性，之后的事件组会重新快照。请求 `Depth`/`Normal` 时，Renderer 仅在有消费者时分别运行 `DepthOnly`/`DepthNormals` 预处理，生成 `_CameraDepthTexture`/`_CameraNormalsTexture`；深度背景清为 1，法线为世界空间 XYZ、RGBA16F，背景清为 `(0,0,0,0)`。结果在本相机临时目标作用域结束时释放。若不透明 Shader 缺少消费者要求的 Pass，诊断会包含相机、消费者、Shader 名及缺失的 LightMode。
+
+输入阶段在相机命令提交前校验：`Color` 从 `AfterOpaques` 起可用，`Depth`/`Normal` 从 `BeforeOpaques` 起可按需预处理；更早请求、未知阶段或未知输入位会报告相机、Pass、阶段和输入，并丢弃本相机尚未提交的命令。
+
+Feature 收集 Pass 时可读取 `ScriptableRenderer.CameraColorTarget` 并将 Renderer 保存到该相机的 Pass；Pass 执行时通过 `ScriptableRenderContext.CameraColorTarget` 取得当前阶段颜色目标。BeforePostProcessing 时该目标是线性 HDR backing，之后是独立的线性 LDR 临时目标。效果先采样 `_CameraColorTexture` 快照，再写入当前目标或自己的临时目标，可避免颜色附件反馈；目标属性在相机 Pass 外访问会抛出异常。
+
+Pass 的多步操作可用 `CommandBuffer.CreateTemporaryTargetScope()` 取得临时目标。作用域按逆序录制释放，异常路径也会释放；作用域存活时禁止执行该缓冲，确保申请、使用和释放保持在同一录制批次。`CommandBuffer.Clear()` 会使未交付的作用域失效，随后 Dispose 不会对未申请的目标追加释放；CommandBuffer 已 Dispose 时同样只撤销本地作用域状态。低层 Get/Release API 仍可直接使用，但释放 ID 必须先在当前 CommandBuffer 申请。
+
+可运行的示例配置位于 [Demo/Assets/Rendering](../../Demo/Assets/Rendering)：`UniversalPipelineSample.ursaasset` 引用 `UniversalRendererData.ursaasset`，后者按配置顺序引用 `ScreenTintFeature.ursaasset`。Feature 源码见 [ScreenTintFeature.cs](../../Demo/Assets/Scripts/Rendering/ScreenTintFeature.cs)，其运行实例从打包的 [ScreenTint.ursashader](../Assets/Shaders/Examples/ScreenTint.ursashader) 创建并释放自己的材质。选择 UniversalPipelineSample 后，Screen Tint 只为 Game 相机在 AfterTransparents 执行；它使用实际相机目标尺寸分配 RGBA16F 临时目标，保留视口外像素，再将滤色结果写回当前 backing，因此 SceneView 和 Preview 保持原色。用 `UrsaAssetImport --project Demo --configuration Release --force` 发布后，以 `UrsaScriptPlayer --project Demo --scene Snake/Snake.ursascene --hidden --frames 3` 验证了所选管线及 Feature 在 Player 的运行路径。仓库没有在此处声称已执行 Unity 对照场景。
+
+接口职责对照本地固定参考 Unity Graphics `6034ecf6489af2ac1d543f9de25a76b8e91a78cb`（Core/URP 12.1.16）：URP `Runtime/ScriptableRenderer.cs` 对应 Ursa `ScriptableRenderer` 的相机级队列与事件稳定排序及按需输入汇总；`Runtime/ScriptableRendererFeature.cs` 的资产配置/运行期分离对应 `ScriptableRendererFeature`/`RendererFeature`，由 Ursa 管线实例统一创建和 Dispose；`Runtime/Passes/ScriptableRenderPass.cs` 的事件、相机类型与输入声明对应 Ursa `RenderPassEvent`、`CameraTypeMask` 和 `ScriptableRenderPassInput`。Ursa 以颜色快照、深度/法线预处理和作用域临时目标实现消费者输入；颜色按事件组复制，深度与法线使用 Ursa 共享 Pass。仍使用现有 ScriptableObject 资产引用、RenderContext 与显式 CommandBuffer，不引入 Unity API、RenderGraph 或隐式资源图。
+
+### 管线、相机与资源生命周期对照
+
+| 生命周期职责 | 固定参考入口（URP 12.1.16） | Ursa 实现与差异 | 验证 |
+| --- | --- | --- | --- |
+| 候选配置验证与切换 | `Runtime/UniversalRenderPipeline.cs::Render`、`Runtime/ScriptableRenderer.cs::Setup` | `RenderPipelineManager.ApplyPendingChanges` 在渲染边界创建并验证新管线；Universal 配置摘要包含 RendererData 和 Feature 修订。创建成功后交换实例并释放旧实例，失败保留最后有效管线。 | `UniversalPipelineFeatureTests` 覆盖依赖变更、无关资产不重建和失败回滚；`PipelineReload.cpp` 覆盖候选会话失败与旧 AssemblyLoadContext 卸载。 |
+| Feature 配置与运行实例 | `Runtime/ScriptableRendererFeature.cs::Create` / `AddRenderPasses` | `ScriptableRendererFeature` 资产只保存配置；每个管线实例独立调用工厂创建 `RendererFeature`，并在逆序清理时 Dispose。Ursa 在每台相机收集阶段调用 Feature，不复用 Unity 的 Renderer 内部缓存。 | `UniversalPipelineFeatureTests` 覆盖独立实例、重复引用、工厂异常和继续清理。 |
+| Pass 顺序与输入汇总 | `Runtime/ScriptableRenderer.cs::AddRenderPasses`、`GetRenderPassInputs`；`Runtime/Passes/ScriptableRenderPass.cs` | `CameraRenderPassQueue` 以事件值排序，同事件保持入队顺序，并按相机类型过滤。Ursa 按事件组创建共享颜色快照，只有消费者请求时才生成深度/法线；不构建 RenderGraph。 | `RendererInputContractTests` 覆盖事件稳定顺序、类型过滤、相机队列清零和输入可用阶段。 |
+| 相机开始、收尾和资源所有权 | `Runtime/ScriptableRenderer.cs::Setup` / `FinishRendering`；`Runtime/Passes/ScriptableRenderPass.cs` | `ScriptableRenderer.RenderCamera` 在相机开始后创建临时目标作用域；成功路径执行并提交命令后释放，异常路径释放未完成作用域、清空未提交命令、重置 Pass 队列并配对 EndCamera。输出 backing 由有界 LRU 管理，纹理和相机资源由 Universal 管线所有。 | `UrsaManagedProtocolTests` 覆盖清理异常和下一帧恢复；`UrsaDotNetHostSmoke` 验证真实 .NET Host；`UrsaProjectPipelineSamplesTests` 验证 Demo Feature 的 Player/Editor 与 loose/Pak 像素。 |
+
+最小项目 Feature 是 [ScreenTintFeatureAsset](../../Demo/Assets/Scripts/Rendering/ScreenTintFeature.cs)：公开配置资产在 `CreateFeature` 中创建私有运行实例和材质；运行实例为 Game 相机加入 AfterTransparents Pass；Pass 用目标尺寸申请临时纹理并写回当前颜色目标。Release 集成验收命令为 `ctest --test-dir Engine/Build -C Release -R '^UrsaProjectPipelineSamplesTests$' --output-on-failure`。本次运行通过，独立项目证据目录为 `Engine/Build/TestProjects/PipelineSamples/Release/54709628-71d0-4d70-acf9-95a4e01d83c4/`，包含默认/Universal Snake、Editor、Compute、Pak 图像和执行日志；验证的是 Ursa 实际 Host/Player 路径，不代表执行了 Unity 对照场景。
+
+## 分层 ShaderLibrary 起步模块
+
+`Shaders/ShaderLibrary/Core.hlsl` 汇总 Ursa 的 Math、Color、Input、Textures、SpaceTransforms 与 Skinning 入口；场景输入缓冲按 `SceneDrawEncoder` 当前识别的 `_UrsaViewProjection`、`_UrsaModel`、`_UrsaNormal`、灯光与计数名称集中声明。库提供颜色空间转换、亮度、Reinhard 基础函数和对象/世界/裁剪空间变换。`Examples/LibrarySmoke.ursashader` 只声明自身贴图并通过 Core 采样；Ursa 的 sRGB 颜色纹理由 Vulkan sRGB 格式在采样时解码，Shader 不再重复转换。该示例不包含 Lit 材质常量或金属粗糙度资源。
+
+本地参考映射为 Core `ShaderLibrary/Common.hlsl` 与 `SpaceTransforms.hlsl` 对应 `Math.hlsl`/`SpaceTransforms.hlsl`；Core `ShaderLibrary/Color.hlsl` 对应 `Color.hlsl`；URP `ShaderLibrary/Core.hlsl`、`Input.hlsl`、`SurfaceData.hlsl`、`SurfaceInput.hlsl`、`BRDF.hlsl`、`RealtimeLights.hlsl`、`Lighting.hlsl` 与 `Shadows.hlsl` 对应 Ursa 的分层入口。URP `PostProcessPass.SetupBloom`、`Bloom.shader` 与 `FinalPost.shader` 为参考，Ursa 实现了六级以内亮部提取、降采样/散射上采样、EV 曝光、Reinhard 与 LDR FXAA。Ursa 保留自己的 uniform 名、矩阵与 Metallic-Roughness 材质语义；库不是 Unity HLSL 的兼容层。完整固定提交、文件映射、贴图通道/roughness 差异和验证命令见 [Shader authoring](ShaderAuthoring.md)。

@@ -47,9 +47,8 @@ int main()
 		std::filesystem::create_directories(root / "Assets");
 		auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 		done(material->SetBaseColor({0.7f, 0.2f, 0.1f, 1.f}));
-		const auto materialId = ResourceId::Generate();
-		done(SaveMaterialResource(root / "Assets" / "box.ursamat", materialId, *material, {}));
 		auto workspace = Take(Editor::ProjectWorkspace::Open(root));
+		done(workspace->SetRuntimeContentView(workspace->Index().Filesystem()));
 		auto documents = Take(Editor::EditorDocuments::Create(*workspace));
 		ComponentRegistry registry;
 		done(RegisterBuiltinComponents(registry));
@@ -69,8 +68,22 @@ int main()
 		pose.position = {1, 2, 3};
 		done(scene.SetLocalTransform(child, pose));
 		Take(Ursa::Test::AddRenderer(scene, child));
+		auto* sceneRenderer = child->FindComponent<MeshRendererComponent>();
+		Expect(sceneRenderer != nullptr, "Scene mesh renderer was not created");
+		sceneRenderer->SetCastShadows(false);
+		sceneRenderer->SetReceiveShadows(false);
 		Take(scene.AddComponent<DirectionalLightComponent>(last));
-		done(draft->AssignMaterial(child, materialId, documents->Session()));
+		auto* sceneLight = last->FindComponent<DirectionalLightComponent>();
+		Expect(sceneLight != nullptr, "Scene directional light was not created");
+		done(sceneLight->SetCastsShadows(false));
+		done(sceneLight->SetShadowStrength(0.4f));
+		done(sceneLight->SetShadowBias(0.02f));
+		done(sceneLight->SetShadowNormalBias(0.2f));
+		done(sceneLight->SetSoftShadows(true));
+		Expect(!sceneLight->SetShadowStrength(1.1f) && !sceneLight->SetShadowBias(-0.01f) &&
+		           sceneLight->ShadowStrength() == 0.4f && sceneLight->ShadowBias() == 0.02f,
+		       "Directional light Inspector setters accepted invalid shadow values or changed the stored settings");
+		done(sceneRenderer->SetSharedMaterial(material));
 		const auto childId = Take(scene.PersistentId(child));
 		const auto lastId = Take(scene.PersistentId(last));
 		done(documents->RequestOpen(std::move(sceneDocument)));
@@ -87,7 +100,13 @@ int main()
 		Expect(Take(loaded->GetScene().PersistentId(loaded->GetScene().RootGameObjects().back())) == lastId,
 		       "Scene root order or ID changed");
 		const auto* box = loaded->GetScene().FindComponent<MeshRendererComponent>(loadedChild);
-		Expect(box && box->SharedMaterial() && box->SharedMaterial()->Parameters().baseColor.red > 0.6f,
+		const auto loadedLast = Take(loaded->GetScene().GameObjectById(lastId));
+		const auto* loadedLight = loaded->GetScene().FindComponent<DirectionalLightComponent>(loadedLast);
+		Expect(box && !box->CastShadows() && !box->ReceiveShadows() && box->SharedMaterial() &&
+		           box->SharedMaterial()->Parameters().baseColor.red > 0.6f && loadedLight &&
+		           !loadedLight->CastsShadows() && loadedLight->ShadowStrength() == 0.4f &&
+		           loadedLight->ShadowBias() == 0.02f && loadedLight->ShadowNormalBias() == 0.2f &&
+		           loadedLight->SoftShadows(),
 		       "Scene material reference did not round-trip");
 
 		const auto prefabPath = root / "Assets" / "tile.ursaprefab";
@@ -96,6 +115,12 @@ int main()
 		const auto prefabId = prefabDocument->Id();
 		auto prefabDraft = prefabDocument->Payload<Editor::SceneDraft>();
 		const auto prefabRoot = prefabDraft->GetPrefabAsset()->Root();
+		auto prefabLight = Take(prefabRoot->AddComponent<DirectionalLightComponent>());
+		done(prefabLight->SetCastsShadows(false));
+		done(prefabLight->SetShadowStrength(0.65f));
+		done(prefabLight->SetShadowBias(0.015f));
+		done(prefabLight->SetShadowNormalBias(0.12f));
+		done(prefabLight->SetSoftShadows(true));
 		const auto previewRoot = prefabDraft->GetScene().RootGameObjects().front();
 		Expect(prefabRoot->Id() != previewRoot->Id() && !prefabRoot->Parent(),
 		       "Prefab editing graph was attached to its preview Scene");
@@ -111,7 +136,9 @@ int main()
 		done(prefabChild->SetParent(prefabRoot));
 		auto prefabBox = Take(Ursa::Test::AddRenderer(prefabChild));
 		Expect(prefabBox->TryGetScene() == nullptr, "Prefab component unexpectedly attached to its preview Scene");
-		done(prefabDraft->AssignMaterial(prefabChild, materialId, documents->Session()));
+		prefabBox->SetCastShadows(false);
+		prefabBox->SetReceiveShadows(false);
+		done(prefabBox->SetSharedMaterial(material));
 		const auto prefabChildId = prefabChild->Id();
 		done(documents->RequestOpen(std::move(prefabDocument)));
 		done(documents->SaveCurrent());
@@ -121,8 +148,14 @@ int main()
 		auto prefabLoaded = reopenedPrefab->Payload<Editor::SceneDraft>();
 		const auto loadedPrefabRoot = prefabLoaded->GetPrefabAsset()->Root();
 		const auto loadedPrefabChild = loadedPrefabRoot->Children().front();
+		const auto* loadedPrefabLight = loadedPrefabRoot->FindComponent<DirectionalLightComponent>();
+		const auto* loadedPrefabRenderer = loadedPrefabChild->FindComponent<MeshRendererComponent>();
 		Expect(loadedPrefabChild->Id() == prefabChildId && Take(loadedPrefabChild->Name()) == "Prefab child" &&
-		           loadedPrefabChild->FindComponent<MeshRendererComponent>()->SharedMaterial(),
+		           loadedPrefabRenderer && !loadedPrefabRenderer->CastShadows() &&
+		           !loadedPrefabRenderer->ReceiveShadows() && loadedPrefabRenderer->SharedMaterial() &&
+		           loadedPrefabLight && !loadedPrefabLight->CastsShadows() &&
+		           loadedPrefabLight->ShadowStrength() == 0.65f && loadedPrefabLight->ShadowBias() == 0.015f &&
+		           loadedPrefabLight->ShadowNormalBias() == 0.12f && loadedPrefabLight->SoftShadows(),
 		       "Prefab subtree or material reference did not round-trip");
 		auto linkedDocument = Take(Editor::OpenSceneDocument(Take(VirtualPath::Parse("prj:level.ursascene")),
 		                                                     ResourceKind::Scene, registry, documents->Session()));
@@ -140,6 +173,8 @@ int main()
 		done(linkedDraft->GetScene().SetGameObjectName(firstNode, "Instance override"));
 		Take(linkedDraft->GetScene().CreateGameObject(firstNode));
 		done(linkedDraft->SetInstanceProperty(firstInstance, prefabChildId, "/name", "Instance override"));
+		done(linkedDraft->SetInstanceProperty(firstInstance, prefabBox->PersistentId(), "/data/castShadows", true));
+		done(linkedDraft->SetInstanceProperty(firstInstance, prefabBox->PersistentId(), "/data/receiveShadows", true));
 		Expect(Take(linkedDraft->GetScene().GameObjectName(secondNode)) == "Prefab child",
 		       "Editing first placement changed the second placement");
 		const auto sourceBefore = Take(ReadJsonResource(prefabPath, ResourceKind::Prefab));
@@ -152,8 +187,13 @@ int main()
 		auto reloadedDraft = linkedReopened->Payload<Editor::SceneDraft>();
 		const auto reloadedFirst = Take(reloadedDraft->GetScene().GameObjectById(firstScoped));
 		const auto reloadedSecond = Take(reloadedDraft->GetScene().GameObjectById(secondScoped));
+		const auto* reloadedFirstRenderer = reloadedFirst->FindComponent<MeshRendererComponent>();
+		const auto* reloadedSecondRenderer = reloadedSecond->FindComponent<MeshRendererComponent>();
 		Expect(Take(reloadedDraft->GetScene().GameObjectName(reloadedFirst)) == "Instance override" &&
 		           Take(reloadedDraft->GetScene().GameObjectName(reloadedSecond)) == "Prefab child" &&
+		           reloadedFirstRenderer && reloadedFirstRenderer->CastShadows() &&
+		           reloadedFirstRenderer->ReceiveShadows() && reloadedSecondRenderer &&
+		           !reloadedSecondRenderer->CastShadows() && !reloadedSecondRenderer->ReceiveShadows() &&
 		           Take(reloadedDraft->GetScene().ChildrenOf(reloadedFirst)).size() == 1,
 		       "Prefab property or structure overrides did not round-trip");
 		Expect(Take(ReadJsonResource(prefabPath, ResourceKind::Prefab)) == sourceBefore,

@@ -32,6 +32,8 @@ struct ReflectedMember
 	String type;
 	UInt32 offset = 0;
 	UInt32 size = 0;
+	UInt32 arrayCount = 1;
+	UInt32 arrayStride = 0;
 	UInt32 matrixStride = 0;
 	bool spirvRowMajor = false;
 };
@@ -62,6 +64,34 @@ Result<UInt32> ReadUInt(const Json& object, const char* field, UInt32 defaultVal
 		return Result<UInt32>::Failure(String("Reflection field is out of range: ") + field);
 	}
 	return Result<UInt32>::Success(static_cast<UInt32>(integer));
+}
+
+Result<UInt32> ReadArrayCount(const Json& member)
+{
+	if (!member.contains("array"))
+	{
+		return Result<UInt32>::Success(1);
+	}
+	const Json& dimensions = member["array"];
+	if (!dimensions.is_array() || dimensions.empty())
+	{
+		return Result<UInt32>::Failure("Reflection uniform array has invalid dimensions");
+	}
+	UInt32 count = 1;
+	for (const Json& dimension : dimensions)
+	{
+		if (!dimension.is_number_unsigned() && !dimension.is_number_integer())
+		{
+			return Result<UInt32>::Failure("Reflection uniform array dimension is not an integer");
+		}
+		const Int64 value = dimension.get<Int64>();
+		if (value <= 0 || value > 16 || count > 16u / UInt32(value))
+		{
+			return Result<UInt32>::Failure("Reflection uniform array exceeds the 16 element limit");
+		}
+		count *= UInt32(value);
+	}
+	return Result<UInt32>::Success(count);
 }
 
 UInt32 StageMask(ProgramStage stage)
@@ -326,6 +356,12 @@ Result<void> AddUniformBlocks(const Json& reflection, UInt32 stageMask, Map<Stri
 			{
 				return Result<void>::Failure(offset.error);
 			}
+			auto arrayCount = ReadArrayCount(member);
+			auto arrayStride = ReadUInt(member, "array_stride");
+			if (!arrayCount || !arrayStride)
+			{
+				return Result<void>::Failure(!arrayCount ? arrayCount.error : arrayStride.error);
+			}
 			UInt32 memberSize = 0;
 			if (member.contains("size"))
 			{
@@ -336,6 +372,14 @@ Result<void> AddUniformBlocks(const Json& reflection, UInt32 stageMask, Map<Stri
 				}
 				memberSize = parsedSize.value;
 			}
+			if (arrayCount.value > 1)
+			{
+				if (!arrayStride.value || arrayStride.value > std::numeric_limits<UInt32>::max() / arrayCount.value)
+				{
+					return Result<void>::Failure("Reflected uniform array is missing a valid element stride");
+				}
+				memberSize = arrayStride.value * arrayCount.value;
+			}
 			auto matrixStride = ReadUInt(member, "matrix_stride");
 			if (!matrixStride || (member.contains("row_major") && !member["row_major"].is_boolean()))
 			{
@@ -343,7 +387,8 @@ Result<void> AddUniformBlocks(const Json& reflection, UInt32 stageMask, Map<Stri
 			}
 			block.members.push_back({ToUrsaString(member["name"].get<std::string>()),
 			                         ToUrsaString(member["type"].get<std::string>()), offset.value, memberSize,
-			                         matrixStride.value, member.value("row_major", false)});
+			                         arrayCount.value, arrayStride.value, matrixStride.value,
+			                         member.value("row_major", false)});
 		}
 		const String key = BindingKey(set.value, binding.value);
 		auto found = blocks.find(key);
@@ -362,7 +407,8 @@ Result<void> AddUniformBlocks(const Json& reflection, UInt32 stageMask, Map<Stri
 				const auto& existing = found->second.members[index];
 				const auto& candidate = block.members[index];
 				if (existing.name != candidate.name || existing.type != candidate.type ||
-				    existing.offset != candidate.offset || existing.matrixStride != candidate.matrixStride ||
+				    existing.offset != candidate.offset || existing.arrayCount != candidate.arrayCount ||
+				    existing.arrayStride != candidate.arrayStride || existing.matrixStride != candidate.matrixStride ||
 				    existing.spirvRowMajor != candidate.spirvRowMajor ||
 				    (existing.size && candidate.size && existing.size != candidate.size))
 				{
@@ -504,8 +550,8 @@ Result<ShaderBindingLayout> BuildShaderBindingLayout(const ShaderAsset& shader, 
 			{
 				return Result<ShaderBindingLayout>::Failure("Unsupported reflected Matrix4x4 stride: " + member.name);
 			}
-			uniformBuffer.members.push_back(
-			    {member.name, member.type, member.offset, memberBytes, member.matrixStride, member.spirvRowMajor});
+			uniformBuffer.members.push_back({member.name, member.type, member.offset, memberBytes, member.arrayCount,
+			                                 member.arrayStride, member.matrixStride, member.spirvRowMajor});
 			const auto property =
 			    std::find_if(shader.properties.begin(), shader.properties.end(),
 			                 [&](const PropertyDeclaration& candidate) { return candidate.identifier == member.name; });
@@ -630,23 +676,29 @@ Result<void> WriteShaderUniformValue(Vector<UInt8>& destination, const ShaderUni
 	}
 	if (member.type == "mat4" || member.type == "float4x4")
 	{
-		if (byteSize != 64 || (member.matrixStride != 0 && member.matrixStride != 16))
+		if (byteSize < 64 || byteSize % 64 != 0 || (member.matrixStride != 0 && member.matrixStride != 16))
 		{
-			return Result<void>::Failure("Unsupported Matrix4x4 uniform layout: " + member.name);
+			return Result<void>::Failure("Unsupported Matrix4x4 uniform array layout: " + member.name);
 		}
 		if (!member.spirvRowMajor)
 		{
-			Array<Float32, 16> columnMajor;
-			Array<Float32, 16> rowMajor;
-			std::memcpy(columnMajor.data(), source, sizeof(columnMajor));
-			for (Size row = 0; row < 4; ++row)
+			const Size matrixCount = byteSize / 64;
+			for (Size matrixIndex = 0; matrixIndex < matrixCount; ++matrixIndex)
 			{
-				for (Size column = 0; column < 4; ++column)
+				Array<Float32, 16> columnMajor;
+				Array<Float32, 16> rowMajor;
+				std::memcpy(columnMajor.data(), static_cast<const UInt8*>(source) + matrixIndex * 64,
+				            sizeof(columnMajor));
+				for (Size row = 0; row < 4; ++row)
 				{
-					rowMajor[row * 4 + column] = columnMajor[column * 4 + row];
+					for (Size column = 0; column < 4; ++column)
+					{
+						rowMajor[row * 4 + column] = columnMajor[column * 4 + row];
+					}
 				}
+				std::memcpy(destination.data() + member.byteOffset + matrixIndex * 64, rowMajor.data(),
+				            sizeof(rowMajor));
 			}
-			std::memcpy(destination.data() + member.byteOffset, rowMajor.data(), sizeof(rowMajor));
 			return {};
 		}
 	}

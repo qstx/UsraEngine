@@ -7,6 +7,7 @@
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/RuntimeContent.hpp>
 #include <Vfs/BuildResourceManifest.hpp>
+#include <Serialization/MaterialResource.hpp>
 #include <Serialization/ResourceFile.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Assets/ScriptBuildService.hpp>
@@ -253,6 +254,50 @@ bool ScriptFieldValueMatches(const nlohmann::json& value, const String& kind, co
 	return false;
 }
 
+String ScriptTypeFieldSchemaFingerprint(const ScriptTypeDescriptor& type)
+{
+	nlohmann::json fields = nlohmann::json::array();
+	for (const ScriptFieldTypeDescriptor& field : type.fields)
+	{
+		nlohmann::json enumValues = nlohmann::json::array();
+		for (const String& value : field.enumValues)
+		{
+			enumValues.push_back(ToStdString(value));
+		}
+		nlohmann::json enumNumericValues = nlohmann::json::array();
+		for (const String& value : field.enumNumericValuesJson)
+		{
+			enumNumericValues.push_back(nlohmann::json::parse(ToStdString(value)));
+		}
+		nlohmann::json formerNames = nlohmann::json::array();
+		for (const String& value : field.formerNames)
+		{
+			formerNames.push_back(ToStdString(value));
+		}
+		fields.push_back({{"Name", ToStdString(field.name)},
+		                  {"Kind", ToStdString(field.kind)},
+		                  {"ElementKind", ToStdString(field.elementKind)},
+		                  {"TypeName", ToStdString(field.typeName)},
+		                  {"ElementTypeName", ToStdString(field.elementTypeName)},
+		                  {"DefaultValueJson", ToStdString(field.defaultValueJson)},
+		                  {"EnumUnderlyingType", ToStdString(field.enumUnderlyingType)},
+		                  {"EnumValues", std::move(enumValues)},
+		                  {"EnumNumericValues", std::move(enumNumericValues)},
+		                  {"FormerNames", std::move(formerNames)}});
+	}
+	nlohmann::json baseTypes = nlohmann::json::array();
+	for (const String& typeName : type.baseTypeNames)
+	{
+		baseTypes.push_back(ToStdString(typeName));
+	}
+	const String encoded = ToUrsaString(nlohmann::json{
+	    {"ScriptType", ToStdString(type.scriptType)},
+	    {"Version", type.version},
+	    {"BaseTypeNames", std::move(baseTypes)},
+	    {"Fields", std::move(fields)}}.dump());
+	return BuildResourceFingerprint(Vector<UInt8>(encoded.begin(), encoded.end()));
+}
+
 Result<AssetImportResult> ImportScriptableAsset(AssetDatabase& database, const VirtualPath& source,
                                                 const Vector<ScriptTypeRecord>& types, bool force)
 {
@@ -359,14 +404,18 @@ Result<AssetImportResult> ImportScriptableAsset(AssetDatabase& database, const V
 	{
 		return Result<AssetImportResult>::Failure(references.error);
 	}
-	Vector<VirtualPath> dependencies{type->sourcePath};
-	auto typeMetadata = VirtualPath::Parse(type->sourcePath.ToString() + ".meta");
-	if (typeMetadata && typeMetadata.value != source)
+	Vector<VirtualPath> dependencies;
+	if (type->sourcePath.scheme != "framework")
 	{
-		auto exists = database.Filesystem().Exists(typeMetadata.value);
-		if (exists && exists.value)
+		dependencies.push_back(type->sourcePath);
+		auto typeMetadata = VirtualPath::Parse(type->sourcePath.ToString() + ".meta");
+		if (typeMetadata && typeMetadata.value != source)
 		{
-			dependencies.push_back(typeMetadata.value);
+			auto exists = database.Filesystem().Exists(typeMetadata.value);
+			if (exists && exists.value)
+			{
+				dependencies.push_back(typeMetadata.value);
+			}
 		}
 	}
 	for (AssetReference reference : references.value)
@@ -390,7 +439,8 @@ Result<AssetImportResult> ImportScriptableAsset(AssetDatabase& database, const V
 	const nlohmann::json settings{{"typeId", ToStdString(type->scriptType)},
 	                              {"typeVersion", type->version},
 	                              {"sourceTypeGuid", ToStdString(type->sourceGuid.ToString())},
-	                              {"sourceTypeLocalFileId", type->localFileId}};
+	                              {"sourceTypeLocalFileId", type->localFileId},
+	                              {"typeFieldSchemaFingerprint", ToStdString(ScriptTypeFieldSchemaFingerprint(*type))}};
 	auto cached =
 	    database.CheckImport(source, "ursa.ScriptableAsset", 1, "scriptable-asset-v1", settings, dependencies);
 	if (!cached)
@@ -440,7 +490,10 @@ Result<AssetImportResult> DefaultImport(AssetDatabase& database, const VirtualPa
 		kind = names[static_cast<int>(resourceKind.value)];
 	}
 	const nlohmann::json settings = metadata.value.importSettings;
-	auto cached = database.CheckImport(source, "ursa.Default", 1, "native-v1", settings, {});
+	const String target =
+	    kind == "Material" ? "native-v1/material-migration-v" + ToUrsaString(std::to_string(materialMigrationVersion))
+	                       : "native-v1";
+	auto cached = database.CheckImport(source, "ursa.Default", 1, target, settings, {});
 	if (!cached)
 	{
 		return Result<AssetImportResult>::Failure(cached.error);
@@ -454,13 +507,12 @@ Result<AssetImportResult> DefaultImport(AssetDatabase& database, const VirtualPa
 	{
 		return Result<AssetImportResult>::Failure(bytes.error);
 	}
-	auto published =
-	    database.PublishImport(source, "ursa.Default", 1, "native-v1", settings, {}, {{0, kind, bytes.value}});
+	auto published = database.PublishImport(source, "ursa.Default", 1, target, settings, {}, {{0, kind, bytes.value}});
 	if (!published)
 	{
 		return Result<AssetImportResult>::Failure(published.error);
 	}
-	auto status = database.CheckImport(source, "ursa.Default", 1, "native-v1", settings, {});
+	auto status = database.CheckImport(source, "ursa.Default", 1, target, settings, {});
 	return status ? Result<AssetImportResult>::Success({metadata.value.guid, status.value.artifacts, {}, false})
 	              : Result<AssetImportResult>::Failure(status.error);
 }

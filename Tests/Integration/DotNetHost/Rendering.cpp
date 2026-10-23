@@ -8,6 +8,8 @@
 #include <ComputeFixtures.hpp>
 #include <Shader/ShaderAssetResource.hpp>
 #include <Rendering/Resources/RenderResources.hpp>
+#include <Rendering/Scene/RenderScene.hpp>
+#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <cmath>
@@ -45,6 +47,7 @@ void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPat
 		Take(Test::AddRenderer(cube, {0, 1, 0, 1}));
 		cubes.push_back(cube);
 	}
+	String stableOutputIdentity;
 	for (UInt64 frameIndex = 1; frameIndex <= 3; ++frameIndex)
 	{
 		FrameContext frame;
@@ -52,14 +55,41 @@ void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPat
 		frame.deltaSeconds = 1.0f / 60.0f;
 		scene.BeginFrame();
 		Done(scene.Update(frame));
-		Expect(Take(camera->Name()) == "ClassicRendering:Submitted", "The compiled documentation example failed");
+		const String outputIdentity = Take(camera->Name());
+		Expect(
+		    outputIdentity.find("ClassicRendering:") == 0 && outputIdentity.size() == 50,
+		    ("The host camera did not expose a complete output identity and generation: " + ToStdString(outputIdentity))
+		        .c_str());
+		if (stableOutputIdentity.empty())
+		{
+			stableOutputIdentity = outputIdentity;
+		}
+		else
+		{
+			Expect(outputIdentity == stableOutputIdentity,
+			       "Stable output identity or generation changed across frames");
+		}
 		const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
 		const Size center = (32 * 64 + 32) * 4;
 		Expect(pixels[center] < 15 && pixels[center + 1] > 240 && pixels[center + 2] < 15 && pixels[0] < 15 &&
 		           pixels[1] < 15 && pixels[2] > 240,
 		       "The C# documentation example did not render green geometry over its blue offscreen clear");
 	}
-	Expect(sceneApi.AcceptedRenderBatchCount() == 6, "The example did not execute two logical segments per frame");
+	auto replacementOutput = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
+	sceneApi.SetRenderOutput(replacementOutput);
+	FrameContext replacementFrame;
+	replacementFrame.frameIndex = 4;
+	replacementFrame.deltaSeconds = 1.0f / 60.0f;
+	scene.BeginFrame();
+	Done(scene.Update(replacementFrame));
+	Expect(Take(camera->Name()) != stableOutputIdentity,
+	       "Replacing an output target did not change the camera's output identity");
+	const auto replacementPixels = Take(Rendering::ReadRenderTexture(*device, *replacementOutput));
+	const Size replacementCenter = (32 * 64 + 32) * 4;
+	Expect(replacementPixels[replacementCenter + 1] > 240 && replacementPixels[0] < 15,
+	       "A replacement output did not receive the rendered scene");
+	sceneApi.SetRenderOutput(output);
+	Expect(sceneApi.AcceptedRenderBatchCount() == 4, "The example did not execute one scoped target chain per frame");
 	Done(scene.DestroyGameObject(camera));
 	for (const auto& cube : cubes)
 	{
@@ -69,7 +99,7 @@ void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPat
 	auto failureCamera = Take(scene.CreateGameObject("Failure Camera"));
 	Take(failureCamera->AddComponent<CameraComponent>());
 	Take(runtime.CreateAndAdd(failureCamera, "Ursa.SessionFixtures.RenderingFailureProbe, Ursa.SessionFixtures"));
-	for (UInt64 frameIndex = 4; frameIndex <= 5; ++frameIndex)
+	for (UInt64 frameIndex = 5; frameIndex <= 6; ++frameIndex)
 	{
 		FrameContext frame;
 		frame.frameIndex = frameIndex;
@@ -81,19 +111,19 @@ void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPat
 		Expect(pixels[0] < 15 && pixels[1] > 240 && pixels[2] < 15,
 		       "A render exception discarded the submitted green segment or executed the unsubmitted red segment");
 	}
-	Expect(sceneApi.AcceptedRenderBatchCount() == 10, "Failed rendering did not exercise both command segments");
+	Expect(sceneApi.AcceptedRenderBatchCount() == 8, "Failed rendering did not exercise both command segments");
 	Done(scene.DestroyGameObject(failureCamera));
 	Done(scene.CommitChanges());
 	auto lifetimeCamera = Take(scene.CreateGameObject("Lifetime Camera"));
 	Take(lifetimeCamera->AddComponent<CameraComponent>());
 	Take(runtime.CreateAndAdd(lifetimeCamera, "Ursa.SessionFixtures.PipelineLifetimeProbe, Ursa.SessionFixtures"));
-	for (UInt64 frameIndex = 6; frameIndex <= 7; ++frameIndex)
+	for (UInt64 frameIndex = 7; frameIndex <= 8; ++frameIndex)
 	{
 		FrameContext frame;
 		frame.frameIndex = frameIndex;
 		scene.BeginFrame();
 		Done(scene.Update(frame));
-		Expect(Take(lifetimeCamera->Name()) == "PipelineLifetime:" + ToUrsaString(std::to_string(frameIndex - 5)),
+		Expect(Take(lifetimeCamera->Name()) == "PipelineLifetime:" + ToUrsaString(std::to_string(frameIndex - 6)),
 		       "The session-owned pipeline or context event did not remain valid across frames");
 		const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
 		Expect(pixels[0] < 15 && pixels[1] < 15 && pixels[2] > 240,
@@ -103,7 +133,7 @@ void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPat
 	Done(scene.CommitChanges());
 	Done(host.CloseScriptSession(session));
 	std::cout << "Compiled classic rendering example: 3 GPU frames passed\n";
-	std::cout << "RendererList batch calls: " << objectCount << " objects, 6 submissions in 3 frames\n";
+	std::cout << "RendererList batch calls: " << objectCount << " objects, 3 submissions in 3 frames\n";
 	std::cout << "Managed rendering exception cleanup: 2 GPU frames passed\n";
 }
 
@@ -150,7 +180,7 @@ void TestManagedMatrixBindings(DotNetHost& host, VirtualFileSystem& filesystem, 
 void TestManagedForward(DotNetHost& host, const VirtualPath& content)
 {
 	auto device = Take(Rhi::CreateDevice({}));
-	auto baseline = Take(Test::SceneRenderer::Create(device));
+	auto baseline = Take(Rendering::NativeForwardPipeline::Create(device));
 	for (UInt32 scenario = 0; scenario < 6; ++scenario)
 	{
 		Scene scene;
@@ -258,16 +288,34 @@ void TestManagedForward(DotNetHost& host, const VirtualPath& content)
 			FrameContext frame;
 			frame.frameIndex = frameIndex;
 			scene.BeginFrame();
-			Done(scene.Update(frame));
+			const auto managedUpdate = scene.Update(frame);
+			if (!managedUpdate)
+			{
+				throw std::runtime_error("Managed Forward update failed in scenario " + std::to_string(scenario) +
+				                         ": " + ToStdString(managedUpdate.error));
+			}
 			Expect(Take(camera->Name()) == "Forward:Rendered", "The C# default Forward callback failed");
-			const auto current = Take(Rendering::ReadRenderTexture(*device, *output));
-			const auto legacy = Take(scene.CollectRenderData(1));
-			auto reference = Take(Rendering::CreateRenderTexture(*device, {64, 64}));
-			Done(Take(baseline->DrawOffscreen(reference->color, legacy.viewProjection, legacy.objects, legacy.lighting,
-			                                  legacy.cameraPosition))
-			         ->Wait());
-			reference->colorState = Rhi::ResourceState::TransferSource;
-			const auto expected = Take(Rendering::ReadRenderTexture(*device, *reference));
+			auto currentResult = Rendering::ReadRenderTexture(*device, *output);
+			if (!currentResult)
+			{
+				throw std::runtime_error("Managed Forward output read failed in scenario " + std::to_string(scenario) +
+				                         ": " + ToStdString(currentResult.error));
+			}
+			const auto& current = currentResult.value;
+			auto reference = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
+			const auto baselineRender = baseline->RenderOffscreen(scene, reference, Rhi::ResourceState::ShaderRead);
+			if (!baselineRender)
+			{
+				throw std::runtime_error("Native Forward baseline failed in scenario " + std::to_string(scenario) +
+				                         ": " + ToStdString(baselineRender.error));
+			}
+			auto expectedResult = Rendering::ReadRenderTexture(*device, *reference);
+			if (!expectedResult)
+			{
+				throw std::runtime_error("Native Forward reference read failed in scenario " +
+				                         std::to_string(scenario) + ": " + ToStdString(expectedResult.error));
+			}
+			const auto& expected = expectedResult.value;
 			UInt32 differing = 0;
 			for (Size index = 0; index < current.size(); ++index)
 			{
@@ -380,13 +428,134 @@ void TestForwardCameraRegions(DotNetHost& host, const VirtualPath& content)
 		Expect(Take(left->Name()) == "Forward:Rendered", "Multi-camera Forward did not complete");
 		const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
 		const Size leftPixel = (32 * 64 + 16) * 4, rightPixel = (32 * 64 + 48) * 4;
-		Expect(pixels[leftPixel] == 0 && pixels[leftPixel + 1] == 255 && pixels[leftPixel + 2] == 0 &&
-		           pixels[rightPixel] == 0 && pixels[rightPixel + 1] == 0 && pixels[rightPixel + 2] == 255,
-		       "Camera clear regions or Depth/Nothing clear flags overwrote another viewport");
+		const bool regionsCorrect = pixels[leftPixel] == 0 && pixels[leftPixel + 1] == 188 &&
+		                            pixels[leftPixel + 2] == 0 && pixels[rightPixel] == 0 &&
+		                            pixels[rightPixel + 1] == 0 && pixels[rightPixel + 2] == 188;
+		if (!regionsCorrect)
+		{
+			throw std::runtime_error(
+			    "Camera clear regions failed in frame " + std::to_string(frameIndex) +
+			    ": left=" + std::to_string(pixels[leftPixel]) + "," + std::to_string(pixels[leftPixel + 1]) + "," +
+			    std::to_string(pixels[leftPixel + 2]) + " right=" + std::to_string(pixels[rightPixel]) + "," +
+			    std::to_string(pixels[rightPixel + 1]) + "," + std::to_string(pixels[rightPixel + 2]));
+		}
 	}
 	scene.Clear();
 	Done(host.CloseScriptSession(session));
 	std::cout << "Managed Forward camera viewport and clear isolation passed\n";
+}
+
+void TestUniversalPostProcessingBacking(DotNetHost& host, const VirtualPath& content)
+{
+	auto device = Take(Rhi::CreateDevice({}));
+	Scene scene;
+	ManagedSceneApi api(scene);
+	api.SetRenderDevice(device);
+	auto output = Take(Rendering::CreateRenderTexture(*device, {32, 32, 0, 32}));
+	api.SetRenderOutput(output);
+	const auto session = Take(host.CreateScriptSession(false, &api));
+	Done(host.LoadScriptContent(session, content));
+	ManagedScriptRuntime runtime(scene, host, api, session);
+	auto colorObject = Take(scene.CreateGameObject("HDR Color Camera"));
+	auto* colorCamera = Take(colorObject->AddComponent<CameraComponent>());
+	Done(scene.SetActiveCamera(colorCamera->Id()));
+	colorCamera->orthographic = true;
+	colorCamera->orthographicSize = 5;
+	colorCamera->nearPlane = 0.25f;
+	colorCamera->farPlane = 42;
+	colorCamera->rendering.viewport = {0, 0, 0.5f, 1};
+	colorCamera->rendering.background = {4, 0, 0, 1};
+	auto directionalObject = Take(scene.CreateGameObject("Snapshot Directional Light"));
+	auto* directional = Take(directionalObject->AddComponent<DirectionalLightComponent>());
+	Done(directional->SetIntensity(3.5f));
+	Done(directional->SetCastsShadows(true));
+	Done(directional->SetShadowStrength(0.6f));
+	Done(directional->SetShadowBias(0.015f));
+	Done(directional->SetShadowNormalBias(0.08f));
+	Done(directional->SetSoftShadows(true));
+	auto pointObject = Take(scene.CreateGameObject("Snapshot Point Light"));
+	auto* point = Take(pointObject->AddComponent<PointLightComponent>());
+	Done(point->SetIntensity(2.25f));
+	Done(point->SetRange(4));
+	LocalTransform pointTransform;
+	pointTransform.position = {0, 0, -5};
+	Done(pointObject->SetLocalTransform(pointTransform));
+	Rendering::RenderScene nativeSnapshot;
+	Done(nativeSnapshot.Capture(scene, 1));
+	Expect(nativeSnapshot.Lighting().directional.size() == 1 &&
+	           nativeSnapshot.Lighting().directional[0].identity == directional->PersistentId() &&
+	           nativeSnapshot.Lighting().directional[0].shadowStrength == 0.6f &&
+	           nativeSnapshot.Lighting().point.size() == 1 &&
+	           nativeSnapshot.Lighting().point[0].identity == point->PersistentId(),
+	       "Native scene snapshot is missing the light values expected from the managed query");
+	const auto nativeCamera =
+	    std::find_if(nativeSnapshot.Cameras().begin(), nativeSnapshot.Cameras().end(),
+	                 [&](const Rendering::CameraData& value) { return value.identity == colorCamera->PersistentId(); });
+	Expect(nativeCamera != nativeSnapshot.Cameras().end() && nativeCamera->orthographic &&
+	           nativeCamera->nearPlane == 0.25f && nativeCamera->farPlane == 42,
+	       "Native camera snapshot is missing the projection values expected from the managed query");
+	auto depthObject = Take(scene.CreateGameObject("Depth Clear Camera"));
+	auto* depthCamera = Take(depthObject->AddComponent<CameraComponent>());
+	depthCamera->rendering.depth = 1;
+	depthCamera->rendering.viewport = {0, 0, 0.5f, 1};
+	depthCamera->rendering.background = {0, 4, 0, 1};
+	depthCamera->rendering.clearFlags = Rendering::CameraClearFlags::Depth;
+	auto nothingObject = Take(scene.CreateGameObject("Nothing Clear Camera"));
+	auto* nothingCamera = Take(nothingObject->AddComponent<CameraComponent>());
+	nothingCamera->rendering.depth = 2;
+	nothingCamera->rendering.viewport = {0, 0, 0.5f, 1};
+	nothingCamera->rendering.background = {0, 0, 4, 1};
+	nothingCamera->rendering.clearFlags = Rendering::CameraClearFlags::Nothing;
+	// The empty UniversalRendererData above selects the pipeline's generic minimal
+	// configuration: EV=0, Reinhard, no shadows, bloom, or FXAA. Compare its complete
+	// display output with the unmanaged implementation before the managed callback
+	// installs the Universal pipeline asset.
+	auto nativeBaseline = Take(Rendering::NativeForwardPipeline::Create(device));
+	auto nativeOutput = Take(Rendering::CreateRenderTexture(*device, {32, 32, 0, 32}));
+	Done(nativeBaseline->RenderOffscreen(scene, nativeOutput, Rhi::ResourceState::ShaderRead));
+	const auto nativePixels = Take(Rendering::ReadRenderTexture(*device, *nativeOutput));
+	const auto component =
+	    Take(runtime.CreateAndAdd(colorObject, "Ursa.SessionFixtures.UniversalPipelineProbe, Ursa.SessionFixtures"));
+	auto* probe = static_cast<ScriptBehaviourComponent*>(scene.GetComponent(component));
+	nlohmann::json probeFields = {
+	    {"depthCamera",
+	     {{"$ursaReference", {{"Kind", "Component"}, {"Id", ToStdString(depthCamera->PersistentId().ToString())}}}}},
+	    {"nothingCamera",
+	     {{"$ursaReference", {{"Kind", "Component"}, {"Id", ToStdString(nothingCamera->PersistentId().ToString())}}}}},
+	    {"expectedDirectionalIdentity", ToStdString(directional->PersistentId().ToString())},
+	    {"expectedPointIdentity", ToStdString(point->PersistentId().ToString())}};
+	nlohmann::json probeState = {
+	    {"FormatVersion", 1u},
+	    {"ScriptType", "auto:11111111-1111-4111-8111-111111111111:Ursa.SessionFixtures.UniversalPipelineProbe"},
+	    {"Version", 1u},
+	    {"Fields", std::move(probeFields)}};
+	Done(host.DeserializeBehaviour(probe->InstanceToken(), ToUrsaString(probeState.dump())));
+	FrameContext frame;
+	frame.frameIndex = 1;
+	scene.BeginFrame();
+	Done(scene.Update(frame));
+	Expect(Take(colorObject->Name()) == "Universal:Rendered", "Universal renderer probe did not finish its frame");
+	const auto pixels = Take(Rendering::ReadRenderTexture(*device, *output));
+	Size differingChannels = 0;
+	for (Size index = 0; index < pixels.size(); ++index)
+	{
+		if (std::abs(Int32(pixels[index]) - Int32(nativePixels[index])) > 2)
+		{
+			++differingChannels;
+		}
+	}
+	Expect(differingChannels < 16,
+	       "Generic minimal Universal configuration differs from the unmanaged Forward baseline");
+	const Size preserved = (16 * 32 + 8) * 4;
+	const Size outsideViewport = (16 * 32 + 24) * 4;
+	Expect(pixels[preserved] >= 229 && pixels[preserved] <= 232 && pixels[preserved + 1] <= 2 &&
+	           pixels[preserved + 2] <= 2,
+	       "Depth/Nothing cameras reprocessed display output instead of the preserved linear HDR backing");
+	Expect(pixels[outsideViewport] == 0 && pixels[outsideViewport + 1] == 0 && pixels[outsideViewport + 2] == 0,
+	       "Universal split-screen processing changed pixels outside the camera viewport");
+	scene.Clear();
+	Done(host.CloseScriptSession(session));
+	std::cout << "Universal postprocessing retained raw linear output through Depth/Nothing cameras\n";
 }
 
 } // namespace Ursa::Test

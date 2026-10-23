@@ -2,6 +2,8 @@
 #include <Scripting/Bindings/BindingHandles.hpp>
 #include <Scripting/Bindings/BindingMath.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
+#include <Scene/RenderingComponents.hpp>
+#include <Scene/RendererComponent.hpp>
 #include <cmath>
 
 namespace Ursa::Scripting::Bindings
@@ -70,14 +72,16 @@ Result<RuntimeServices::Projection> RuntimeServices::GetCameraProjection(Binding
 	{
 		return Result<Projection>::Failure("Projection requires a CameraComponent");
 	}
-	return Result<Projection>::Success({value->verticalFovRadians, value->nearPlane, value->farPlane});
+	return Result<Projection>::Success(
+	    {value->verticalFovRadians, value->nearPlane, value->farPlane, value->orthographic, value->orthographicSize});
 }
 
 Result<void> RuntimeServices::SetCameraProjection(BindingCall& call, const Handle& camera, const Projection& value)
 {
 	if (!std::isfinite(value.F_VerticalFovRadians) || value.F_VerticalFovRadians <= 0 ||
 	    value.F_VerticalFovRadians >= 3.14159265f || !std::isfinite(value.F_NearPlane) || value.F_NearPlane <= 0 ||
-	    !std::isfinite(value.F_FarPlane) || value.F_FarPlane <= value.F_NearPlane)
+	    !std::isfinite(value.F_FarPlane) || value.F_FarPlane <= value.F_NearPlane ||
+	    !std::isfinite(value.F_OrthographicSize) || value.F_OrthographicSize <= 0.0f)
 	{
 		return Result<void>::Failure("Camera projection requires radians in (0, pi) and 0 < near < far");
 	}
@@ -89,6 +93,8 @@ Result<void> RuntimeServices::SetCameraProjection(BindingCall& call, const Handl
 		return Result<void>::Failure("Projection requires a CameraComponent");
 	}
 	target->verticalFovRadians = value.F_VerticalFovRadians;
+	target->orthographic = value.F_Orthographic;
+	target->orthographicSize = value.F_OrthographicSize;
 	target->nearPlane = value.F_NearPlane;
 	target->farPlane = value.F_FarPlane;
 	return {};
@@ -144,6 +150,82 @@ Result<void> RuntimeServices::SetCameraRenderingSettings(BindingCall& call, cons
 		return valid;
 	}
 	target->rendering = candidate;
+	return {};
+}
+
+Result<RuntimeServices::DirectionalLightShadowSettings>
+RuntimeServices::GetDirectionalLightShadowSettings(BindingCall& call, const Handle& light)
+{
+	auto& api = SceneApi(call);
+	const auto* target = dynamic_cast<const DirectionalLightComponent*>(
+	    TakeBindingResult(api.ResolveComponent(ReadManagedHandle(light))));
+	if (!target)
+	{
+		return Result<DirectionalLightShadowSettings>::Failure("Shadow settings require a DirectionalLightComponent");
+	}
+	return Result<DirectionalLightShadowSettings>::Success({target->CastsShadows(), target->ShadowStrength(),
+	                                                        target->ShadowBias(), target->ShadowNormalBias(),
+	                                                        target->SoftShadows()});
+}
+
+Result<void> RuntimeServices::SetDirectionalLightShadowSettings(BindingCall& call, const Handle& light,
+                                                                const DirectionalLightShadowSettings& value)
+{
+	if (!ValidDirectionalLightShadowSettings(value.F_Strength, value.F_Bias, value.F_NormalBias))
+	{
+		return Result<void>::Failure("Directional light shadow strength and biases are invalid");
+	}
+	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
+	auto* target =
+	    dynamic_cast<DirectionalLightComponent*>(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(light))));
+	if (!target)
+	{
+		return Result<void>::Failure("Shadow settings require a DirectionalLightComponent");
+	}
+	if (auto result = target->SetShadowStrength(value.F_Strength); !result)
+	{
+		return result;
+	}
+	if (auto result = target->SetShadowBias(value.F_Bias); !result)
+	{
+		return result;
+	}
+	if (auto result = target->SetShadowNormalBias(value.F_NormalBias); !result)
+	{
+		return result;
+	}
+	target->SetCastsShadows(value.F_CastsShadows);
+	target->SetSoftShadows(value.F_SoftShadows);
+	return {};
+}
+
+Result<RuntimeServices::RendererShadowSettings> RuntimeServices::GetRendererShadowSettings(BindingCall& call,
+                                                                                           const Handle& renderer)
+{
+	auto& api = SceneApi(call);
+	const auto* target =
+	    dynamic_cast<const RendererComponent*>(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(renderer))));
+	if (!target)
+	{
+		return Result<RendererShadowSettings>::Failure("Shadow settings require a RendererComponent");
+	}
+	return Result<RendererShadowSettings>::Success({target->CastShadows(), target->ReceiveShadows()});
+}
+
+Result<void> RuntimeServices::SetRendererShadowSettings(BindingCall& call, const Handle& renderer,
+                                                        const RendererShadowSettings& value)
+{
+	auto& api = SceneApi(call);
+	api.RequireSceneMutation();
+	auto* target =
+	    dynamic_cast<RendererComponent*>(TakeBindingResult(api.ResolveComponent(ReadManagedHandle(renderer))));
+	if (!target)
+	{
+		return Result<void>::Failure("Shadow settings require a RendererComponent");
+	}
+	target->SetCastShadows(value.F_CastShadows);
+	target->SetReceiveShadows(value.F_ReceiveShadows);
 	return {};
 }
 } // namespace Ursa::Scripting::Bindings

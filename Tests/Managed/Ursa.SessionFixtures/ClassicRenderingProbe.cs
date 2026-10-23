@@ -13,8 +13,10 @@ public sealed class ClassicRenderingProbe : Behaviour
 		using var context = new ScriptableRenderContext(1);
 		try
 		{
+			Camera camera = Camera.FromComponent(GameObject.GetComponent<CameraComponent>()!);
+			context.SetupCameraProperties(camera);
 			Ursa.Examples.ClassicRendering.DrawCamera(context, GameObject.GetComponent<CameraComponent>()!, 64, 64);
-			GameObject.Name = "ClassicRendering:Submitted";
+			GameObject.Name = $"ClassicRendering:{camera.OutputTargetIdentity:x16}:{camera.OutputTargetGeneration:x16}";
 		}
 		catch
 		{

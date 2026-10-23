@@ -255,7 +255,7 @@ public sealed class MeshPreviewInspector : Inspector
 		preview.LightIntensity = lightEnabled ? 2 : 0;
 		preview.AmbientIntensity = lightEnabled ? .4f : 0;
 		preview.BeginPreview(rect);
-		preview.DrawMesh((Mesh)Target, material!);
+		preview.DrawMesh((Mesh)Target, material!, scale: new Vector3(1, .7f, .45f));
 		preview.EndPreview();
 	}
 }

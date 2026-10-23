@@ -54,7 +54,7 @@ auto shared = Ursa::MakeShared<MyType>(Ursa::Memory::MemoryTag::Scene, construct
 
 - Application 和 Editor 的可绘制帧、SceneFrameRunner 的一次 Tick 都建立可嵌套临时作用域。窗口最小化分支不会建立更新帧作用域。
 - Scene 的更新和生命周期同步使用临时组件顺序表；阶段或同步结束即回收，包括回调返回失败的路径。回调内从线程临时分配器取得的存储也受当前阶段约束；需要跨 Update、LateUpdate 或下一帧保存的数据应使用持久分配器。
-- Renderer3D 录制中的模型副本、绘制项、Pass 列表和稳定排序缓冲使用临时容器。缺省材质的共享控制块也限定在录制作用域内；持久材质克隆使用 `Assets` 类别。帧对象不会保存在 GPU 缓存中。
+- SceneDrawEncoder 录制中的模型快照、绘制项和 Pass 编码缓冲使用临时容器。缺省材质的共享控制块也限定在录制作用域内；持久材质克隆使用 `Assets` 类别。帧对象不会保存在 GPU 缓存中。
 - ImGuiBridge 录制时的顶点和索引 CPU 拼装使用临时容器，写入 GPU 上传缓冲后即可释放。ImGui 本身的私有分配器不变。
 - Editor 脚本构建的可写 Windows 命令行缓冲通过标准库分配器适配接入线程临时内存；`CreateProcessW` 返回时系统已复制参数，不会保留缓冲地址。
 

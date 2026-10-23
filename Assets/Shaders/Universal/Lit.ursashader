@@ -1,0 +1,132 @@
+Shader "Ursa/Universal/Lit"
+{
+	Properties
+	{
+		_BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+		_Metallic ("Metallic", Range(0, 1)) = 0
+		_Roughness ("Roughness", Range(0, 1)) = 1
+		_NormalScale ("Normal Scale", Float) = 1
+		_OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
+		[HDR] _Emissive ("Emissive", Color) = (0, 0, 0, 1)
+		_AlphaMode ("Alpha Mode", Int) = 0
+		_AlphaCutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
+		_BaseMap ("Base Map", 2D) = "white" {}
+		_MetallicRoughnessMap ("Metallic Roughness", 2D) = "white" {}
+		[Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
+		_OcclusionMap ("Occlusion", 2D) = "white" {}
+		_EmissiveMap ("Emissive Map", 2D) = "white" {}
+	}
+	HLSLINCLUDE
+#include "../ShaderLibrary/SurfaceInput.hlsl"
+#include "../ShaderLibrary/Lighting.hlsl"
+
+void UrsaLitAlphaClip(float2 uv)
+{
+	UrsaResolveAlpha(UrsaSampleSurfaceData(uv));
+}
+
+#define URSA_SHADOW_ALPHA_CLIP(uv) UrsaLitAlphaClip(uv)
+#define URSA_DEPTH_ALPHA_CLIP(uv) UrsaLitAlphaClip(uv)
+ENDHLSL
+	SubShader
+	{
+		Tags { "RenderPipeline" = "UrsaUniversal" }
+		Pass
+		{
+			Name "Forward"
+			Tags { "LightMode" = "UniversalForward" }
+			Cull Back
+			ZWrite On
+			ZTest LEqual
+			HLSLPROGRAM
+#pragma vertex UrsaLitVertex
+#pragma fragment UrsaLitFragment
+struct UrsaLitAttributes
+{
+	float3 positionOS : POSITION;
+	float3 normalOS : NORMAL;
+	float2 uv : TEXCOORD0;
+	float4 tangentOS : TANGENT;
+	uint4 joints : BLENDINDICES;
+	float4 weights : BLENDWEIGHT;
+};
+
+struct UrsaLitVaryings
+{
+	float4 positionCS : SV_Position;
+	float2 uv : TEXCOORD0;
+	float3 positionWS : TEXCOORD1;
+	float3 normalWS : TEXCOORD2;
+	float4 tangentWS : TEXCOORD3;
+};
+
+UrsaLitVaryings UrsaLitVertex(UrsaLitAttributes input)
+{
+	UrsaLitVaryings output;
+	float4x4 skin = UrsaGetSkinMatrix(input.joints, input.weights);
+	float3 positionOS = UrsaSkinPosition(input.positionOS, skin);
+	float3 normalOS = UrsaSkinDirection(input.normalOS, skin);
+	float3 tangentOS = UrsaSkinDirection(input.tangentOS.xyz, skin);
+	output.positionWS = UrsaTransformObjectToWorld(positionOS);
+	output.positionCS = UrsaTransformWorldToHClip(output.positionWS);
+	output.normalWS = UrsaTransformObjectToWorldNormal(normalOS);
+	float3 tangentWS = UrsaTransformObjectToWorldDir(tangentOS);
+	output.tangentWS = float4(normalize(tangentWS), input.tangentOS.w * UrsaGetOddNegativeScale());
+	output.uv = input.uv;
+	return output;
+}
+
+float4 UrsaLitFragment(UrsaLitVaryings input) : SV_Target0
+{
+	UrsaSurfaceData surface = UrsaSampleSurfaceData(input.uv);
+	float alpha = UrsaResolveAlpha(surface);
+	float3 normalWS = normalize(input.normalWS);
+	float3 tangentWS = normalize(input.tangentWS.xyz - normalWS * dot(normalWS, input.tangentWS.xyz));
+	float3 bitangentWS = normalize(cross(normalWS, tangentWS)) * input.tangentWS.w;
+	normalWS = normalize(tangentWS * surface.normalTS.x + bitangentWS * surface.normalTS.y + normalWS * surface.normalTS.z);
+	UrsaInputData inputData = UrsaInitializeInputData(input.positionWS, normalWS, _UrsaCameraPosition.xyz);
+	return float4(UrsaEvaluateLighting(surface, inputData), alpha);
+}
+ENDHLSL
+		}
+		Pass
+		{
+			Name "ShadowCaster"
+			Tags { "LightMode" = "ShadowCaster" }
+			Cull Back
+			ZWrite On
+			ZTest LEqual
+			HLSLPROGRAM
+#pragma vertex UrsaShadowCasterVertex
+#pragma fragment UrsaShadowCasterFragment
+#include "../Passes/ShadowCasterPass.hlsl"
+ENDHLSL
+		}
+		Pass
+		{
+			Name "DepthOnly"
+			Tags { "LightMode" = "DepthOnly" }
+			Cull Back
+			ZWrite On
+			ZTest LEqual
+			HLSLPROGRAM
+#pragma vertex UrsaDepthOnlyVertex
+#pragma fragment UrsaDepthOnlyFragment
+#include "../Passes/DepthOnlyPass.hlsl"
+ENDHLSL
+		}
+		Pass
+		{
+			Name "DepthNormals"
+			Tags { "LightMode" = "DepthNormals" }
+			Cull Back
+			ZWrite On
+			ZTest LEqual
+			HLSLPROGRAM
+#pragma vertex UrsaDepthNormalsVertex
+#pragma fragment UrsaDepthNormalsFragment
+#include "../Passes/DepthNormalsPass.hlsl"
+ENDHLSL
+		}
+	}
+}

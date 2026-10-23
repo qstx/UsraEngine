@@ -8,6 +8,8 @@ internal static partial class NativeMaterialBindings
 {
 	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::Create")]
 	internal static partial NativeHandle Create(MaterialType type);
+	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::CreateFromShader")]
+	internal static partial NativeHandle CreateFromShader(NativeAssetReference shader);
 	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::Load")]
 	internal static partial NativeHandle Load(NativeAssetReference reference);
 	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::Clone")]

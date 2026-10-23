@@ -333,6 +333,45 @@ Result<void> ManagedSceneApi::ExecuteRenderBatch(const UInt8* bytes, Size byteCo
 					    {
 						    setBytes(command, 5, B::ReadMatrix(value.F_value).values);
 					    }
+					    else if constexpr (std::is_same_v<T, C::RenderCommands_SetGlobalMatrixArray>)
+					    {
+						    using Wire = B::Wire::Value_Ursa_Matrix4x4;
+						    B::Validate(value.F_values.data, value.F_values.length, sizeof(Wire),
+						                value.F_values.present, value.F_values.reserved);
+						    if (value.F_values.length > 16)
+						    {
+							    throw std::runtime_error("Global matrix array exceeds capacity");
+						    }
+						    const auto* source = static_cast<const Wire*>(value.F_values.data);
+						    command.global.kind = 8;
+						    command.global.bytes.resize(Size(value.F_values.length) * sizeof(Mat4));
+						    for (Size index = 0; index < Size(value.F_values.length); ++index)
+						    {
+							    const Mat4 matrix = B::ReadMatrix(source[index]);
+							    std::memcpy(command.global.bytes.data() + index * sizeof(Mat4), matrix.values.data(),
+							                sizeof(Mat4));
+						    }
+					    }
+					    else if constexpr (std::is_same_v<T, C::RenderCommands_SetGlobalVectorArray>)
+					    {
+						    using Wire = B::Wire::Value_Ursa_Vector4;
+						    B::Validate(value.F_values.data, value.F_values.length, sizeof(Wire),
+						                value.F_values.present, value.F_values.reserved);
+						    if (value.F_values.length > 16)
+						    {
+							    throw std::runtime_error("Global vector array exceeds capacity");
+						    }
+						    const auto* source = static_cast<const Wire*>(value.F_values.data);
+						    command.global.kind = 9;
+						    command.global.bytes.resize(Size(value.F_values.length) * sizeof(Array<Float32, 4>));
+						    for (Size index = 0; index < Size(value.F_values.length); ++index)
+						    {
+							    const Array<Float32, 4> vector = {source[index].F_X, source[index].F_Y,
+							                                      source[index].F_Z, source[index].F_W};
+							    std::memcpy(command.global.bytes.data() + index * sizeof(vector), vector.data(),
+							                sizeof(vector));
+						    }
+					    }
 					    else if constexpr (std::is_same_v<T, C::RenderCommands_SetGlobalTexture> ||
 					                       std::is_same_v<T, C::RenderCommands_SetComputeTexture>)
 					    {

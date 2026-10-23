@@ -161,6 +161,54 @@ struct Enum_Ursa_Rendering_SortingCriteria
 	static constexpr UInt32 V_CommonTransparent = static_cast<UInt32>(0x0000000000000002ull);
 	static constexpr UInt32 V_None = static_cast<UInt32>(0x0000000000000000ull);
 };
+struct Value_Ursa_Matrix4x4
+{
+	Float32 F_M00{};
+	Float32 F_M10{};
+	Float32 F_M20{};
+	Float32 F_M30{};
+	Float32 F_M01{};
+	Float32 F_M11{};
+	Float32 F_M21{};
+	Float32 F_M31{};
+	Float32 F_M02{};
+	Float32 F_M12{};
+	Float32 F_M22{};
+	Float32 F_M32{};
+	Float32 F_M03{};
+	Float32 F_M13{};
+	Float32 F_M23{};
+	Float32 F_M33{};
+};
+static_assert(sizeof(Value_Ursa_Matrix4x4) == 64, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M00) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M10) == 4, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M20) == 8, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M30) == 12, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M01) == 16, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M11) == 20, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M21) == 24, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M31) == 28, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M02) == 32, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M12) == 36, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M22) == 40, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M32) == 44, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M03) == 48, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M13) == 52, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M23) == 56, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Matrix4x4, F_M33) == 60, "Wire field offset mismatch");
+struct Value_Ursa_Vector4
+{
+	Float32 F_X{};
+	Float32 F_Y{};
+	Float32 F_Z{};
+	Float32 F_W{};
+};
+static_assert(sizeof(Value_Ursa_Vector4) == 16, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_Vector4, F_X) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Vector4, F_Y) == 4, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Vector4, F_Z) == 8, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Vector4, F_W) == 12, "Wire field offset mismatch");
 struct Value_Ursa_AssetPostprocessorInfo
 {
 	Utf8View F_SourceGuid{};
@@ -202,11 +250,15 @@ struct Value_Ursa_CameraProjection
 	Float32 F_VerticalFovRadians{};
 	Float32 F_NearPlane{};
 	Float32 F_FarPlane{};
+	UInt32 F_Orthographic{};
+	Float32 F_OrthographicSize{};
 };
-static_assert(sizeof(Value_Ursa_CameraProjection) == 12, "Wire type size mismatch");
+static_assert(sizeof(Value_Ursa_CameraProjection) == 20, "Wire type size mismatch");
 static_assert(offsetof(Value_Ursa_CameraProjection, F_VerticalFovRadians) == 0, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_CameraProjection, F_NearPlane) == 4, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_CameraProjection, F_FarPlane) == 8, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_CameraProjection, F_Orthographic) == 12, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_CameraProjection, F_OrthographicSize) == 16, "Wire field offset mismatch");
 struct Value_Ursa_Color
 {
 	Float32 F_R{};
@@ -262,6 +314,20 @@ static_assert(sizeof(Value_Ursa_ComputeThreadGroupSize) == 12, "Wire type size m
 static_assert(offsetof(Value_Ursa_ComputeThreadGroupSize, F_X) == 0, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_ComputeThreadGroupSize, F_Y) == 4, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_ComputeThreadGroupSize, F_Z) == 8, "Wire field offset mismatch");
+struct Value_Ursa_DirectionalLightShadowSettings
+{
+	UInt32 F_CastsShadows{};
+	Float32 F_Strength{};
+	Float32 F_Bias{};
+	Float32 F_NormalBias{};
+	UInt32 F_SoftShadows{};
+};
+static_assert(sizeof(Value_Ursa_DirectionalLightShadowSettings) == 20, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_DirectionalLightShadowSettings, F_CastsShadows) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_DirectionalLightShadowSettings, F_Strength) == 4, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_DirectionalLightShadowSettings, F_Bias) == 8, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_DirectionalLightShadowSettings, F_NormalBias) == 12, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_DirectionalLightShadowSettings, F_SoftShadows) == 16, "Wire field offset mismatch");
 struct Value_Ursa_NativeAssetReference
 {
 	Utf8View F_Guid{};
@@ -408,18 +474,6 @@ static_assert(offsetof(Value_Ursa_Editor_PreviewInput, F_ScrollDelta) == 16, "Wi
 static_assert(offsetof(Value_Ursa_Editor_PreviewInput, F_Dragging) == 20, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Editor_PreviewInput, F_Time) == 24, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Editor_PreviewInput, F_DeltaTime) == 32, "Wire field offset mismatch");
-struct Value_Ursa_Vector4
-{
-	Float32 F_X{};
-	Float32 F_Y{};
-	Float32 F_Z{};
-	Float32 F_W{};
-};
-static_assert(sizeof(Value_Ursa_Vector4) == 16, "Wire type size mismatch");
-static_assert(offsetof(Value_Ursa_Vector4, F_X) == 0, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Vector4, F_Y) == 4, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Vector4, F_Z) == 8, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Vector4, F_W) == 12, "Wire field offset mismatch");
 struct Value_Ursa_Editor_SerializedValue
 {
 	UInt32 F_Type{};
@@ -659,42 +713,6 @@ struct Value_Ursa_MaterialSampler
 static_assert(sizeof(Value_Ursa_MaterialSampler) == 8, "Wire type size mismatch");
 static_assert(offsetof(Value_Ursa_MaterialSampler, F_Linear) == 0, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_MaterialSampler, F_Repeat) == 4, "Wire field offset mismatch");
-struct Value_Ursa_Matrix4x4
-{
-	Float32 F_M00{};
-	Float32 F_M10{};
-	Float32 F_M20{};
-	Float32 F_M30{};
-	Float32 F_M01{};
-	Float32 F_M11{};
-	Float32 F_M21{};
-	Float32 F_M31{};
-	Float32 F_M02{};
-	Float32 F_M12{};
-	Float32 F_M22{};
-	Float32 F_M32{};
-	Float32 F_M03{};
-	Float32 F_M13{};
-	Float32 F_M23{};
-	Float32 F_M33{};
-};
-static_assert(sizeof(Value_Ursa_Matrix4x4) == 64, "Wire type size mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M00) == 0, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M10) == 4, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M20) == 8, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M30) == 12, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M01) == 16, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M11) == 20, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M21) == 24, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M31) == 28, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M02) == 32, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M12) == 36, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M22) == 40, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M32) == 44, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M03) == 48, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M13) == 52, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M23) == 56, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Matrix4x4, F_M33) == 60, "Wire field offset mismatch");
 struct Value_Ursa_SubMesh
 {
 	UInt32 F_FirstIndex{};
@@ -763,19 +781,95 @@ static_assert(offsetof(Value_Ursa_Rect, F_X) == 0, "Wire field offset mismatch")
 static_assert(offsetof(Value_Ursa_Rect, F_Y) == 4, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Rect, F_Width) == 8, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Rect, F_Height) == 12, "Wire field offset mismatch");
+struct Value_Ursa_RendererShadowSettings
+{
+	UInt32 F_CastShadows{};
+	UInt32 F_ReceiveShadows{};
+};
+static_assert(sizeof(Value_Ursa_RendererShadowSettings) == 8, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_RendererShadowSettings, F_CastShadows) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_RendererShadowSettings, F_ReceiveShadows) == 4, "Wire field offset mismatch");
 struct Value_Ursa_Rendering_CameraFrameValue
 {
 	UInt32 present = 0;
 	Utf8View F_Identity{};
+	UInt64 F_OutputIdentity{};
+	UInt64 F_OutputGeneration{};
+	UInt32 F_OutputIsSrgb{};
 	UInt32 F_Width{};
 	UInt32 F_Height{};
+	Value_Ursa_Matrix4x4 F_View{};
+	Value_Ursa_Matrix4x4 F_Projection{};
+	Value_Ursa_Matrix4x4 F_InverseViewProjection{};
+	Value_Ursa_Vector3 F_Position{};
+	Float32 F_NearPlane{};
+	Float32 F_FarPlane{};
+	UInt32 F_Orthographic{};
 	Value_Ursa_CameraRenderingSettings F_Settings{};
 };
-static_assert(sizeof(Value_Ursa_Rendering_CameraFrameValue) == 104, "Wire type size mismatch");
+static_assert(sizeof(Value_Ursa_Rendering_CameraFrameValue) == 336, "Wire type size mismatch");
 static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Identity) == 8, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Width) == 32, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Height) == 36, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Settings) == 40, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_OutputIdentity) == 32, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_OutputGeneration) == 40, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_OutputIsSrgb) == 48, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Width) == 52, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Height) == 56, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_View) == 60, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Projection) == 124, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_InverseViewProjection) == 188, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Position) == 252, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_NearPlane) == 264, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_FarPlane) == 268, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Orthographic) == 272, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_CameraFrameValue, F_Settings) == 276, "Wire field offset mismatch");
+struct Value_Ursa_Rendering_DirectionalLightValue
+{
+	Utf8View F_Identity{};
+	UInt32 F_Layer{};
+	Value_Ursa_Vector3 F_Direction{};
+	Value_Ursa_Color F_Color{};
+	Float32 F_Intensity{};
+	UInt32 F_CastsShadows{};
+	Float32 F_ShadowStrength{};
+	Float32 F_ShadowBias{};
+	Float32 F_ShadowNormalBias{};
+	UInt32 F_SoftShadows{};
+};
+static_assert(sizeof(Value_Ursa_Rendering_DirectionalLightValue) == 80, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_Identity) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_Layer) == 24, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_Direction) == 28, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_Color) == 40, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_Intensity) == 56, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_CastsShadows) == 60, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_ShadowStrength) == 64, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_ShadowBias) == 68, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_ShadowNormalBias) == 72, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalLightValue, F_SoftShadows) == 76, "Wire field offset mismatch");
+struct Value_Ursa_Rendering_DirectionalShadowCascadeValue
+{
+	UInt32 F_Index{};
+	Float32 F_NearDepth{};
+	Float32 F_FarDepth{};
+	Float32 F_WorldUnitsPerTexel{};
+	UInt32 F_AtlasX{};
+	UInt32 F_AtlasY{};
+	UInt32 F_Resolution{};
+	Value_Ursa_Matrix4x4 F_LightView{};
+	Value_Ursa_Matrix4x4 F_LightProjection{};
+	Value_Ursa_Matrix4x4 F_WorldToShadow{};
+};
+static_assert(sizeof(Value_Ursa_Rendering_DirectionalShadowCascadeValue) == 220, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_Index) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_NearDepth) == 4, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_FarDepth) == 8, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_WorldUnitsPerTexel) == 12, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_AtlasX) == 16, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_AtlasY) == 20, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_Resolution) == 24, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_LightView) == 28, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_LightProjection) == 92, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_DirectionalShadowCascadeValue, F_WorldToShadow) == 156, "Wire field offset mismatch");
 struct Value_Ursa_Vector3_
 {
 	UInt32 present = 0;
@@ -810,6 +904,22 @@ static_assert(sizeof(Value_Ursa_Rendering_FilteringSettings) == 16, "Wire type s
 static_assert(offsetof(Value_Ursa_Rendering_FilteringSettings, F_MinimumQueue) == 4, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Rendering_FilteringSettings, F_MaximumQueue) == 8, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Rendering_FilteringSettings, F_LayerMask) == 12, "Wire field offset mismatch");
+struct Value_Ursa_Rendering_PointLightValue
+{
+	Utf8View F_Identity{};
+	UInt32 F_Layer{};
+	Value_Ursa_Vector3 F_Position{};
+	Value_Ursa_Color F_Color{};
+	Float32 F_Intensity{};
+	Float32 F_Range{};
+};
+static_assert(sizeof(Value_Ursa_Rendering_PointLightValue) == 64, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_PointLightValue, F_Identity) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_PointLightValue, F_Layer) == 24, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_PointLightValue, F_Position) == 28, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_PointLightValue, F_Color) == 40, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_PointLightValue, F_Intensity) == 56, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_PointLightValue, F_Range) == 60, "Wire field offset mismatch");
 struct Value_Ursa_Rendering_RenderContextToken
 {
 	UInt64 F_sessionId{};
@@ -865,6 +975,14 @@ static_assert(offsetof(Value_Ursa_Rendering_RenderTextureValue, F_ColorFormat) =
 static_assert(offsetof(Value_Ursa_Rendering_RenderTextureValue, F_DepthBufferBits) == 12, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Rendering_RenderTextureValue, F_EnableRandomWrite) == 16, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Rendering_RenderTextureValue, F_MsaaSamples) == 20, "Wire field offset mismatch");
+struct Value_Ursa_Rendering_VisibleLightsValue
+{
+	DataView F_Directional{};
+	DataView F_Point{};
+};
+static_assert(sizeof(Value_Ursa_Rendering_VisibleLightsValue) == 48, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_VisibleLightsValue, F_Directional) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Rendering_VisibleLightsValue, F_Point) == 24, "Wire field offset mismatch");
 struct Value_Ursa_ResourceReferenceArchive
 {
 	UInt32 F_Version{};
@@ -983,6 +1101,73 @@ inline void CheckOwned_Wire_a2e6d7f1f60b4db4(const DataView& value, const Bindin
 	Validate(value.data, value.length, sizeof(UInt8), value.present, value.reserved);
 	arena.RequireOwned(value.data, value.length, sizeof(UInt8));
 }
+inline void Check_Wire_490f12f22158e999(const DataView& value)
+{
+	(void)value;
+	Validate(value.data, value.length, sizeof(Float32), value.present, value.reserved);
+	if (!value.present) throw std::runtime_error("Required binding array is null");
+	const auto* items = static_cast<const Float32*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Check_Wire_76a7e234dc54e9c6(items[index]);
+}
+inline void CheckOwned_Wire_490f12f22158e999(const DataView& value, const BindingArena& arena)
+{
+	Validate(value.data, value.length, sizeof(Float32), value.present, value.reserved);
+	arena.RequireOwned(value.data, value.length, sizeof(Float32));
+}
+inline void Check_Wire_a8041d4c1290ab2e(const Wire::Value_Ursa_Matrix4x4& value)
+{
+	(void)value;
+	Check_Wire_76a7e234dc54e9c6(value.F_M00);
+	Check_Wire_76a7e234dc54e9c6(value.F_M10);
+	Check_Wire_76a7e234dc54e9c6(value.F_M20);
+	Check_Wire_76a7e234dc54e9c6(value.F_M30);
+	Check_Wire_76a7e234dc54e9c6(value.F_M01);
+	Check_Wire_76a7e234dc54e9c6(value.F_M11);
+	Check_Wire_76a7e234dc54e9c6(value.F_M21);
+	Check_Wire_76a7e234dc54e9c6(value.F_M31);
+	Check_Wire_76a7e234dc54e9c6(value.F_M02);
+	Check_Wire_76a7e234dc54e9c6(value.F_M12);
+	Check_Wire_76a7e234dc54e9c6(value.F_M22);
+	Check_Wire_76a7e234dc54e9c6(value.F_M32);
+	Check_Wire_76a7e234dc54e9c6(value.F_M03);
+	Check_Wire_76a7e234dc54e9c6(value.F_M13);
+	Check_Wire_76a7e234dc54e9c6(value.F_M23);
+	Check_Wire_76a7e234dc54e9c6(value.F_M33);
+}
+inline void Check_Wire_0196b8373d0c715d(const DataView& value)
+{
+	(void)value;
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Matrix4x4), value.present, value.reserved);
+	if (!value.present) throw std::runtime_error("Required binding array is null");
+	const auto* items = static_cast<const Wire::Value_Ursa_Matrix4x4*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Check_Wire_a8041d4c1290ab2e(items[index]);
+}
+inline void CheckOwned_Wire_0196b8373d0c715d(const DataView& value, const BindingArena& arena)
+{
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Matrix4x4), value.present, value.reserved);
+	arena.RequireOwned(value.data, value.length, sizeof(Wire::Value_Ursa_Matrix4x4));
+}
+inline void Check_Wire_f917d3288f251ca1(const Wire::Value_Ursa_Vector4& value)
+{
+	(void)value;
+	Check_Wire_76a7e234dc54e9c6(value.F_X);
+	Check_Wire_76a7e234dc54e9c6(value.F_Y);
+	Check_Wire_76a7e234dc54e9c6(value.F_Z);
+	Check_Wire_76a7e234dc54e9c6(value.F_W);
+}
+inline void Check_Wire_c2eec613e8a6a822(const DataView& value)
+{
+	(void)value;
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Vector4), value.present, value.reserved);
+	if (!value.present) throw std::runtime_error("Required binding array is null");
+	const auto* items = static_cast<const Wire::Value_Ursa_Vector4*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Check_Wire_f917d3288f251ca1(items[index]);
+}
+inline void CheckOwned_Wire_c2eec613e8a6a822(const DataView& value, const BindingArena& arena)
+{
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Vector4), value.present, value.reserved);
+	arena.RequireOwned(value.data, value.length, sizeof(Wire::Value_Ursa_Vector4));
+}
 inline void Check_Wire_6da88c34ba124c41(const Int32& value)
 {
 	(void)value;
@@ -1063,6 +1248,8 @@ inline void Check_Wire_925ac8a5951056f2(const Wire::Value_Ursa_CameraProjection&
 	Check_Wire_76a7e234dc54e9c6(value.F_VerticalFovRadians);
 	Check_Wire_76a7e234dc54e9c6(value.F_NearPlane);
 	Check_Wire_76a7e234dc54e9c6(value.F_FarPlane);
+	Check_Wire_b760f44fa5965c24(value.F_Orthographic);
+	Check_Wire_76a7e234dc54e9c6(value.F_OrthographicSize);
 }
 inline void Check_Wire_c8a3e7a55faac410(const UInt32& value)
 {
@@ -1118,6 +1305,15 @@ inline void Check_Wire_6d1e03a760670623(const Wire::Value_Ursa_ComputeThreadGrou
 	Check_Wire_c3f2029bb0eab1c0(value.F_X);
 	Check_Wire_c3f2029bb0eab1c0(value.F_Y);
 	Check_Wire_c3f2029bb0eab1c0(value.F_Z);
+}
+inline void Check_Wire_0ac035762748e71f(const Wire::Value_Ursa_DirectionalLightShadowSettings& value)
+{
+	(void)value;
+	Check_Wire_b760f44fa5965c24(value.F_CastsShadows);
+	Check_Wire_76a7e234dc54e9c6(value.F_Strength);
+	Check_Wire_76a7e234dc54e9c6(value.F_Bias);
+	Check_Wire_76a7e234dc54e9c6(value.F_NormalBias);
+	Check_Wire_b760f44fa5965c24(value.F_SoftShadows);
 }
 inline void Check_Wire_c94f08ee88a24e17(const UInt32& value)
 {
@@ -1379,14 +1575,6 @@ inline void CheckOwned_Wire_27ecbaab65a5f0f1(const Utf8View& value, const Bindin
 {
 	Validate(value.data, value.length, 1, value.present, value.reserved);
 	arena.RequireOwned(value.data, value.length, 1);
-}
-inline void Check_Wire_f917d3288f251ca1(const Wire::Value_Ursa_Vector4& value)
-{
-	(void)value;
-	Check_Wire_76a7e234dc54e9c6(value.F_X);
-	Check_Wire_76a7e234dc54e9c6(value.F_Y);
-	Check_Wire_76a7e234dc54e9c6(value.F_Z);
-	Check_Wire_76a7e234dc54e9c6(value.F_W);
 }
 inline void Check_Wire_b3a7972a3e90b264(const Wire::Value_Ursa_Editor_SerializedValue& value)
 {
@@ -1667,26 +1855,6 @@ inline void Check_Wire_eb4b6c20e2214ede(const Int32& value)
 {
 	(void)value;
 }
-inline void Check_Wire_a8041d4c1290ab2e(const Wire::Value_Ursa_Matrix4x4& value)
-{
-	(void)value;
-	Check_Wire_76a7e234dc54e9c6(value.F_M00);
-	Check_Wire_76a7e234dc54e9c6(value.F_M10);
-	Check_Wire_76a7e234dc54e9c6(value.F_M20);
-	Check_Wire_76a7e234dc54e9c6(value.F_M30);
-	Check_Wire_76a7e234dc54e9c6(value.F_M01);
-	Check_Wire_76a7e234dc54e9c6(value.F_M11);
-	Check_Wire_76a7e234dc54e9c6(value.F_M21);
-	Check_Wire_76a7e234dc54e9c6(value.F_M31);
-	Check_Wire_76a7e234dc54e9c6(value.F_M02);
-	Check_Wire_76a7e234dc54e9c6(value.F_M12);
-	Check_Wire_76a7e234dc54e9c6(value.F_M22);
-	Check_Wire_76a7e234dc54e9c6(value.F_M32);
-	Check_Wire_76a7e234dc54e9c6(value.F_M03);
-	Check_Wire_76a7e234dc54e9c6(value.F_M13);
-	Check_Wire_76a7e234dc54e9c6(value.F_M23);
-	Check_Wire_76a7e234dc54e9c6(value.F_M33);
-}
 inline void Check_Wire_c5ebda6276bb13a6(const DataView& value)
 {
 	(void)value;
@@ -1842,6 +2010,12 @@ inline void Check_Wire_eb7e92ea40e22018(const Wire::Value_Ursa_Rect& value)
 	Check_Wire_76a7e234dc54e9c6(value.F_Width);
 	Check_Wire_76a7e234dc54e9c6(value.F_Height);
 }
+inline void Check_Wire_c2298b84d84017ca(const Wire::Value_Ursa_RendererShadowSettings& value)
+{
+	(void)value;
+	Check_Wire_b760f44fa5965c24(value.F_CastShadows);
+	Check_Wire_b760f44fa5965c24(value.F_ReceiveShadows);
+}
 inline void Check_Wire_a7c792286ffc72a5(const Wire::Value_Ursa_Rendering_CameraFrameValue& value)
 {
 	(void)value;
@@ -1849,8 +2023,18 @@ inline void Check_Wire_a7c792286ffc72a5(const Wire::Value_Ursa_Rendering_CameraF
 	if (!value.present) throw std::runtime_error("Required wire DTO is null");
 	if (!value.present) return;
 	Check_Wire_473287f8298dba71(value.F_Identity);
+	Check_Wire_6ccc44e523c092e7(value.F_OutputIdentity);
+	Check_Wire_6ccc44e523c092e7(value.F_OutputGeneration);
+	Check_Wire_b760f44fa5965c24(value.F_OutputIsSrgb);
 	Check_Wire_c3f2029bb0eab1c0(value.F_Width);
 	Check_Wire_c3f2029bb0eab1c0(value.F_Height);
+	Check_Wire_a8041d4c1290ab2e(value.F_View);
+	Check_Wire_a8041d4c1290ab2e(value.F_Projection);
+	Check_Wire_a8041d4c1290ab2e(value.F_InverseViewProjection);
+	Check_Wire_1c2f48d6e1e2a9c5(value.F_Position);
+	Check_Wire_76a7e234dc54e9c6(value.F_NearPlane);
+	Check_Wire_76a7e234dc54e9c6(value.F_FarPlane);
+	Check_Wire_b760f44fa5965c24(value.F_Orthographic);
 	Check_Wire_59e4658ce124f603(value.F_Settings);
 }
 inline void CheckOwned_Wire_a7c792286ffc72a5(const Wire::Value_Ursa_Rendering_CameraFrameValue& value, const BindingArena& arena)
@@ -1873,6 +2057,66 @@ inline void CheckOwned_Wire_79e778db7ced9baf(const DataView& value, const Bindin
 	arena.RequireOwned(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_CameraFrameValue));
 	const auto* items = static_cast<const Wire::Value_Ursa_Rendering_CameraFrameValue*>(value.data);
 	for (UInt64 index = 0; index < value.length; ++index) CheckOwned_Wire_a7c792286ffc72a5(items[index], arena);
+}
+inline void Check_Wire_681f4392c4149db8(const Wire::Value_Ursa_Rendering_DirectionalLightValue& value)
+{
+	(void)value;
+	Check_Wire_473287f8298dba71(value.F_Identity);
+	Check_Wire_c3f2029bb0eab1c0(value.F_Layer);
+	Check_Wire_1c2f48d6e1e2a9c5(value.F_Direction);
+	Check_Wire_ebbda2771573bdd8(value.F_Color);
+	Check_Wire_76a7e234dc54e9c6(value.F_Intensity);
+	Check_Wire_b760f44fa5965c24(value.F_CastsShadows);
+	Check_Wire_76a7e234dc54e9c6(value.F_ShadowStrength);
+	Check_Wire_76a7e234dc54e9c6(value.F_ShadowBias);
+	Check_Wire_76a7e234dc54e9c6(value.F_ShadowNormalBias);
+	Check_Wire_b760f44fa5965c24(value.F_SoftShadows);
+}
+inline void CheckOwned_Wire_681f4392c4149db8(const Wire::Value_Ursa_Rendering_DirectionalLightValue& value, const BindingArena& arena)
+{
+	CheckOwned_Wire_473287f8298dba71(value.F_Identity, arena);
+}
+inline void Check_Wire_62b49a59436f76fd(const DataView& value)
+{
+	(void)value;
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_DirectionalLightValue), value.present, value.reserved);
+	if (!value.present) throw std::runtime_error("Required binding array is null");
+	const auto* items = static_cast<const Wire::Value_Ursa_Rendering_DirectionalLightValue*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Check_Wire_681f4392c4149db8(items[index]);
+}
+inline void CheckOwned_Wire_62b49a59436f76fd(const DataView& value, const BindingArena& arena)
+{
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_DirectionalLightValue), value.present, value.reserved);
+	arena.RequireOwned(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_DirectionalLightValue));
+	const auto* items = static_cast<const Wire::Value_Ursa_Rendering_DirectionalLightValue*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) CheckOwned_Wire_681f4392c4149db8(items[index], arena);
+}
+inline void Check_Wire_a2f9e4f8d8e95280(const Wire::Value_Ursa_Rendering_DirectionalShadowCascadeValue& value)
+{
+	(void)value;
+	Check_Wire_c3f2029bb0eab1c0(value.F_Index);
+	Check_Wire_76a7e234dc54e9c6(value.F_NearDepth);
+	Check_Wire_76a7e234dc54e9c6(value.F_FarDepth);
+	Check_Wire_76a7e234dc54e9c6(value.F_WorldUnitsPerTexel);
+	Check_Wire_c3f2029bb0eab1c0(value.F_AtlasX);
+	Check_Wire_c3f2029bb0eab1c0(value.F_AtlasY);
+	Check_Wire_c3f2029bb0eab1c0(value.F_Resolution);
+	Check_Wire_a8041d4c1290ab2e(value.F_LightView);
+	Check_Wire_a8041d4c1290ab2e(value.F_LightProjection);
+	Check_Wire_a8041d4c1290ab2e(value.F_WorldToShadow);
+}
+inline void Check_Wire_bdd34d66ef3aba14(const DataView& value)
+{
+	(void)value;
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_DirectionalShadowCascadeValue), value.present, value.reserved);
+	if (!value.present) throw std::runtime_error("Required binding array is null");
+	const auto* items = static_cast<const Wire::Value_Ursa_Rendering_DirectionalShadowCascadeValue*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Check_Wire_a2f9e4f8d8e95280(items[index]);
+}
+inline void CheckOwned_Wire_bdd34d66ef3aba14(const DataView& value, const BindingArena& arena)
+{
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_DirectionalShadowCascadeValue), value.present, value.reserved);
+	arena.RequireOwned(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_DirectionalShadowCascadeValue));
 }
 inline void Check_Wire_7e0cb128ac66901e(const UInt32& value)
 {
@@ -1917,6 +2161,35 @@ inline void Check_Wire_29584fcf0d01852c(const UInt32& value)
 inline void Check_Wire_854530c61973ee62(const UInt32& value)
 {
 	(void)value;
+}
+inline void Check_Wire_fecd3cbc1acfe005(const Wire::Value_Ursa_Rendering_PointLightValue& value)
+{
+	(void)value;
+	Check_Wire_473287f8298dba71(value.F_Identity);
+	Check_Wire_c3f2029bb0eab1c0(value.F_Layer);
+	Check_Wire_1c2f48d6e1e2a9c5(value.F_Position);
+	Check_Wire_ebbda2771573bdd8(value.F_Color);
+	Check_Wire_76a7e234dc54e9c6(value.F_Intensity);
+	Check_Wire_76a7e234dc54e9c6(value.F_Range);
+}
+inline void CheckOwned_Wire_fecd3cbc1acfe005(const Wire::Value_Ursa_Rendering_PointLightValue& value, const BindingArena& arena)
+{
+	CheckOwned_Wire_473287f8298dba71(value.F_Identity, arena);
+}
+inline void Check_Wire_4140c6243932ba8b(const DataView& value)
+{
+	(void)value;
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_PointLightValue), value.present, value.reserved);
+	if (!value.present) throw std::runtime_error("Required binding array is null");
+	const auto* items = static_cast<const Wire::Value_Ursa_Rendering_PointLightValue*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Check_Wire_fecd3cbc1acfe005(items[index]);
+}
+inline void CheckOwned_Wire_4140c6243932ba8b(const DataView& value, const BindingArena& arena)
+{
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_PointLightValue), value.present, value.reserved);
+	arena.RequireOwned(value.data, value.length, sizeof(Wire::Value_Ursa_Rendering_PointLightValue));
+	const auto* items = static_cast<const Wire::Value_Ursa_Rendering_PointLightValue*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) CheckOwned_Wire_fecd3cbc1acfe005(items[index], arena);
 }
 inline void Check_Wire_04a0edee134a5c26(const Wire::Value_Ursa_Rendering_RenderContextToken& value)
 {
@@ -1973,6 +2246,17 @@ inline void Check_Wire_45f92435f7d1faad(const Wire::Value_Ursa_Rendering_RenderT
 	Check_Wire_c3f2029bb0eab1c0(value.F_DepthBufferBits);
 	Check_Wire_b760f44fa5965c24(value.F_EnableRandomWrite);
 	Check_Wire_c3f2029bb0eab1c0(value.F_MsaaSamples);
+}
+inline void Check_Wire_a67a7d7bea5be377(const Wire::Value_Ursa_Rendering_VisibleLightsValue& value)
+{
+	(void)value;
+	Check_Wire_62b49a59436f76fd(value.F_Directional);
+	Check_Wire_4140c6243932ba8b(value.F_Point);
+}
+inline void CheckOwned_Wire_a67a7d7bea5be377(const Wire::Value_Ursa_Rendering_VisibleLightsValue& value, const BindingArena& arena)
+{
+	CheckOwned_Wire_62b49a59436f76fd(value.F_Directional, arena);
+	CheckOwned_Wire_4140c6243932ba8b(value.F_Point, arena);
 }
 inline void Check_Wire_f49daff3ead99a4e(const Wire::Value_Ursa_ResourceReferenceArchive& value)
 {

@@ -5,7 +5,7 @@
 #include <variant>
 namespace Ursa::Scripting::Bindings::Rendering::Commands
 {
-inline constexpr Array<UInt8, 32> hash{0x4f, 0x9b, 0xa8, 0xeb, 0x8e, 0xf7, 0xe8, 0xf9, 0xe5, 0xbe, 0x0f, 0xb1, 0xe6, 0xb4, 0x7a, 0x7f, 0xe4, 0xbf, 0xbb, 0xf1, 0x65, 0xa9, 0x4c, 0x0b, 0xb2, 0x46, 0x72, 0x28, 0xdc, 0x83, 0x41, 0x17};
+inline constexpr Array<UInt8, 32> hash{0xe8, 0x1a, 0x6f, 0x16, 0xe7, 0xca, 0x72, 0x31, 0xce, 0x72, 0x5b, 0xdc, 0xd2, 0x85, 0xda, 0x0a, 0x42, 0xb4, 0x3d, 0x19, 0x44, 0x60, 0xc5, 0x12, 0x7b, 0x50, 0x62, 0xff, 0x65, 0x75, 0x58, 0x8f};
 static_assert(bindingCommandVersion == 1 && bindingCommandHeaderSize == 48 && maximumCommandBytes == 67108864, "Command framing differs from the generated contract");
 inline UInt32 Read_Wire_b760f44fa5965c24(BindingCommandReader& reader, BindingArena& arena)
 {
@@ -30,25 +30,6 @@ inline void Write_Wire_76a7e234dc54e9c6(BindingCommandWriter& writer, const Floa
 {
 	Check_Wire_76a7e234dc54e9c6(value);
 	writer.Scalar(value);
-}
-inline Wire::Value_Ursa_Color Read_Wire_ebbda2771573bdd8(BindingCommandReader& reader, BindingArena& arena)
-{
-	(void)arena;
-	Wire::Value_Ursa_Color value{};
-	value.F_R = Read_Wire_76a7e234dc54e9c6(reader, arena);
-	value.F_G = Read_Wire_76a7e234dc54e9c6(reader, arena);
-	value.F_B = Read_Wire_76a7e234dc54e9c6(reader, arena);
-	value.F_A = Read_Wire_76a7e234dc54e9c6(reader, arena);
-	Check_Wire_ebbda2771573bdd8(value);
-	return value;
-}
-inline void Write_Wire_ebbda2771573bdd8(BindingCommandWriter& writer, const Wire::Value_Ursa_Color& value)
-{
-	Check_Wire_ebbda2771573bdd8(value);
-	Write_Wire_76a7e234dc54e9c6(writer, value.F_R);
-	Write_Wire_76a7e234dc54e9c6(writer, value.F_G);
-	Write_Wire_76a7e234dc54e9c6(writer, value.F_B);
-	Write_Wire_76a7e234dc54e9c6(writer, value.F_A);
 }
 inline Wire::Value_Ursa_Matrix4x4 Read_Wire_a8041d4c1290ab2e(BindingCommandReader& reader, BindingArena& arena)
 {
@@ -92,6 +73,72 @@ inline void Write_Wire_a8041d4c1290ab2e(BindingCommandWriter& writer, const Wire
 	Write_Wire_76a7e234dc54e9c6(writer, value.F_M13);
 	Write_Wire_76a7e234dc54e9c6(writer, value.F_M23);
 	Write_Wire_76a7e234dc54e9c6(writer, value.F_M33);
+}
+inline DataView Read_Wire_0196b8373d0c715d(BindingCommandReader& reader, BindingArena& arena)
+{
+	(void)arena;
+	auto value = reader.ArrayValue<Wire::Value_Ursa_Matrix4x4>(arena, false, 64, [&] { return Read_Wire_a8041d4c1290ab2e(reader, arena); });
+	Check_Wire_0196b8373d0c715d(value);
+	return value;
+}
+inline void Write_Wire_0196b8373d0c715d(BindingCommandWriter& writer, const DataView& value)
+{
+	Check_Wire_0196b8373d0c715d(value);
+	writer.Collection(value.length, value.present, 64);
+	const auto* items = static_cast<const Wire::Value_Ursa_Matrix4x4*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Write_Wire_a8041d4c1290ab2e(writer, items[index]);
+}
+inline Wire::Value_Ursa_Vector4 Read_Wire_f917d3288f251ca1(BindingCommandReader& reader, BindingArena& arena)
+{
+	(void)arena;
+	Wire::Value_Ursa_Vector4 value{};
+	value.F_X = Read_Wire_76a7e234dc54e9c6(reader, arena);
+	value.F_Y = Read_Wire_76a7e234dc54e9c6(reader, arena);
+	value.F_Z = Read_Wire_76a7e234dc54e9c6(reader, arena);
+	value.F_W = Read_Wire_76a7e234dc54e9c6(reader, arena);
+	Check_Wire_f917d3288f251ca1(value);
+	return value;
+}
+inline void Write_Wire_f917d3288f251ca1(BindingCommandWriter& writer, const Wire::Value_Ursa_Vector4& value)
+{
+	Check_Wire_f917d3288f251ca1(value);
+	Write_Wire_76a7e234dc54e9c6(writer, value.F_X);
+	Write_Wire_76a7e234dc54e9c6(writer, value.F_Y);
+	Write_Wire_76a7e234dc54e9c6(writer, value.F_Z);
+	Write_Wire_76a7e234dc54e9c6(writer, value.F_W);
+}
+inline DataView Read_Wire_c2eec613e8a6a822(BindingCommandReader& reader, BindingArena& arena)
+{
+	(void)arena;
+	auto value = reader.ArrayValue<Wire::Value_Ursa_Vector4>(arena, false, 16, [&] { return Read_Wire_f917d3288f251ca1(reader, arena); });
+	Check_Wire_c2eec613e8a6a822(value);
+	return value;
+}
+inline void Write_Wire_c2eec613e8a6a822(BindingCommandWriter& writer, const DataView& value)
+{
+	Check_Wire_c2eec613e8a6a822(value);
+	writer.Collection(value.length, value.present, 16);
+	const auto* items = static_cast<const Wire::Value_Ursa_Vector4*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Write_Wire_f917d3288f251ca1(writer, items[index]);
+}
+inline Wire::Value_Ursa_Color Read_Wire_ebbda2771573bdd8(BindingCommandReader& reader, BindingArena& arena)
+{
+	(void)arena;
+	Wire::Value_Ursa_Color value{};
+	value.F_R = Read_Wire_76a7e234dc54e9c6(reader, arena);
+	value.F_G = Read_Wire_76a7e234dc54e9c6(reader, arena);
+	value.F_B = Read_Wire_76a7e234dc54e9c6(reader, arena);
+	value.F_A = Read_Wire_76a7e234dc54e9c6(reader, arena);
+	Check_Wire_ebbda2771573bdd8(value);
+	return value;
+}
+inline void Write_Wire_ebbda2771573bdd8(BindingCommandWriter& writer, const Wire::Value_Ursa_Color& value)
+{
+	Check_Wire_ebbda2771573bdd8(value);
+	Write_Wire_76a7e234dc54e9c6(writer, value.F_R);
+	Write_Wire_76a7e234dc54e9c6(writer, value.F_G);
+	Write_Wire_76a7e234dc54e9c6(writer, value.F_B);
+	Write_Wire_76a7e234dc54e9c6(writer, value.F_A);
 }
 inline Utf8View Read_Wire_473287f8298dba71(BindingCommandReader& reader, BindingArena& arena)
 {
@@ -318,25 +365,6 @@ inline void Write_Wire_45f92435f7d1faad(BindingCommandWriter& writer, const Wire
 	Write_Wire_c3f2029bb0eab1c0(writer, value.F_DepthBufferBits);
 	Write_Wire_b760f44fa5965c24(writer, value.F_EnableRandomWrite);
 	Write_Wire_c3f2029bb0eab1c0(writer, value.F_MsaaSamples);
-}
-inline Wire::Value_Ursa_Vector4 Read_Wire_f917d3288f251ca1(BindingCommandReader& reader, BindingArena& arena)
-{
-	(void)arena;
-	Wire::Value_Ursa_Vector4 value{};
-	value.F_X = Read_Wire_76a7e234dc54e9c6(reader, arena);
-	value.F_Y = Read_Wire_76a7e234dc54e9c6(reader, arena);
-	value.F_Z = Read_Wire_76a7e234dc54e9c6(reader, arena);
-	value.F_W = Read_Wire_76a7e234dc54e9c6(reader, arena);
-	Check_Wire_f917d3288f251ca1(value);
-	return value;
-}
-inline void Write_Wire_f917d3288f251ca1(BindingCommandWriter& writer, const Wire::Value_Ursa_Vector4& value)
-{
-	Check_Wire_f917d3288f251ca1(value);
-	Write_Wire_76a7e234dc54e9c6(writer, value.F_X);
-	Write_Wire_76a7e234dc54e9c6(writer, value.F_Y);
-	Write_Wire_76a7e234dc54e9c6(writer, value.F_Z);
-	Write_Wire_76a7e234dc54e9c6(writer, value.F_W);
 }
 inline Int32 Read_Wire_6da88c34ba124c41(BindingCommandReader& reader, BindingArena& arena)
 {
@@ -825,6 +853,25 @@ inline void Record_RenderCommands_SetGlobalMatrix(BindingCommandWriter& writer, 
 	}
 	catch (...) { writer.Cancel(); throw; }
 }
+struct RenderCommands_SetGlobalMatrixArray
+{
+	static constexpr UInt32 opcode = 0xc60ba2f4u;
+	Utf8View F_name{};
+	DataView F_values{};
+};
+inline void Record_RenderCommands_SetGlobalMatrixArray(BindingCommandWriter& writer, const RenderCommands_SetGlobalMatrixArray& value)
+{
+	(void)value;
+	writer.RequireIdentity(hash);
+	writer.Begin(RenderCommands_SetGlobalMatrixArray::opcode);
+	try
+	{
+		Write_Wire_473287f8298dba71(writer, value.F_name);
+		Write_Wire_0196b8373d0c715d(writer, value.F_values);
+		writer.End();
+	}
+	catch (...) { writer.Cancel(); throw; }
+}
 struct RenderCommands_SetGlobalTexture
 {
 	static constexpr UInt32 opcode = 0x46f35dc3u;
@@ -859,6 +906,25 @@ inline void Record_RenderCommands_SetGlobalVector(BindingCommandWriter& writer, 
 	{
 		Write_Wire_473287f8298dba71(writer, value.F_name);
 		Write_Wire_f917d3288f251ca1(writer, value.F_value);
+		writer.End();
+	}
+	catch (...) { writer.Cancel(); throw; }
+}
+struct RenderCommands_SetGlobalVectorArray
+{
+	static constexpr UInt32 opcode = 0x34febf38u;
+	Utf8View F_name{};
+	DataView F_values{};
+};
+inline void Record_RenderCommands_SetGlobalVectorArray(BindingCommandWriter& writer, const RenderCommands_SetGlobalVectorArray& value)
+{
+	(void)value;
+	writer.RequireIdentity(hash);
+	writer.Begin(RenderCommands_SetGlobalVectorArray::opcode);
+	try
+	{
+		Write_Wire_473287f8298dba71(writer, value.F_name);
+		Write_Wire_c2eec613e8a6a822(writer, value.F_values);
 		writer.End();
 	}
 	catch (...) { writer.Cancel(); throw; }
@@ -949,7 +1015,7 @@ inline void Record_RenderCommands_SetViewport(BindingCommandWriter& writer, cons
 	}
 	catch (...) { writer.Cancel(); throw; }
 }
-using Command = std::variant<RenderCommands_BeginSample, RenderCommands_Blit, RenderCommands_ClearTarget, RenderCommands_CopyBuffer, RenderCommands_CopyTexture, RenderCommands_DispatchCompute, RenderCommands_DrawFullscreen, RenderCommands_DrawMesh, RenderCommands_DrawRendererList, RenderCommands_EndSample, RenderCommands_GetTemporaryTarget, RenderCommands_ReleaseTemporaryTarget, RenderCommands_ResetCameraState, RenderCommands_SetComputeBuffer, RenderCommands_SetComputeFloat, RenderCommands_SetComputeInt, RenderCommands_SetComputeMatrix, RenderCommands_SetComputeTexture, RenderCommands_SetComputeVector, RenderCommands_SetGlobalBuffer, RenderCommands_SetGlobalFloat, RenderCommands_SetGlobalInt, RenderCommands_SetGlobalMatrix, RenderCommands_SetGlobalTexture, RenderCommands_SetGlobalVector, RenderCommands_SetRenderTarget, RenderCommands_SetRenderTargets, RenderCommands_SetScissor, RenderCommands_SetViewport>;
+using Command = std::variant<RenderCommands_BeginSample, RenderCommands_Blit, RenderCommands_ClearTarget, RenderCommands_CopyBuffer, RenderCommands_CopyTexture, RenderCommands_DispatchCompute, RenderCommands_DrawFullscreen, RenderCommands_DrawMesh, RenderCommands_DrawRendererList, RenderCommands_EndSample, RenderCommands_GetTemporaryTarget, RenderCommands_ReleaseTemporaryTarget, RenderCommands_ResetCameraState, RenderCommands_SetComputeBuffer, RenderCommands_SetComputeFloat, RenderCommands_SetComputeInt, RenderCommands_SetComputeMatrix, RenderCommands_SetComputeTexture, RenderCommands_SetComputeVector, RenderCommands_SetGlobalBuffer, RenderCommands_SetGlobalFloat, RenderCommands_SetGlobalInt, RenderCommands_SetGlobalMatrix, RenderCommands_SetGlobalMatrixArray, RenderCommands_SetGlobalTexture, RenderCommands_SetGlobalVector, RenderCommands_SetGlobalVectorArray, RenderCommands_SetRenderTarget, RenderCommands_SetRenderTargets, RenderCommands_SetScissor, RenderCommands_SetViewport>;
 inline Vector<Command> Decode(const void* bytes, Size size, BindingArena& arena, bool allowNativeOnly = false)
 {
 	(void)arena;
@@ -1167,6 +1233,14 @@ inline Vector<Command> Decode(const void* bytes, Size size, BindingArena& arena,
 				result.emplace_back(std::move(value));
 				break;
 			}
+			case RenderCommands_SetGlobalMatrixArray::opcode:
+			{
+				RenderCommands_SetGlobalMatrixArray value;
+				value.F_name = Read_Wire_473287f8298dba71(reader, arena);
+				value.F_values = Read_Wire_0196b8373d0c715d(reader, arena);
+				result.emplace_back(std::move(value));
+				break;
+			}
 			case RenderCommands_SetGlobalTexture::opcode:
 			{
 				RenderCommands_SetGlobalTexture value;
@@ -1180,6 +1254,14 @@ inline Vector<Command> Decode(const void* bytes, Size size, BindingArena& arena,
 				RenderCommands_SetGlobalVector value;
 				value.F_name = Read_Wire_473287f8298dba71(reader, arena);
 				value.F_value = Read_Wire_f917d3288f251ca1(reader, arena);
+				result.emplace_back(std::move(value));
+				break;
+			}
+			case RenderCommands_SetGlobalVectorArray::opcode:
+			{
+				RenderCommands_SetGlobalVectorArray value;
+				value.F_name = Read_Wire_473287f8298dba71(reader, arena);
+				value.F_values = Read_Wire_c2eec613e8a6a822(reader, arena);
 				result.emplace_back(std::move(value));
 				break;
 			}

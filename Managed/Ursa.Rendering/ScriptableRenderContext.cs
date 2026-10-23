@@ -18,7 +18,7 @@ public sealed class DrawingSettings
 	public string[] ShaderTags { get; set; } = Array.Empty<string>();
 	public SortingCriteria Sorting { get; set; } = SortingCriteria.CommonOpaque;
 	public Vector3? CameraPosition { get; set; }
-	public string ActivePipeline { get; set; } = "UrsaForward";
+	public string ActivePipeline { get; set; } = "UrsaUniversal";
 	public int OverrideMaterialPass { get; set; } = -1;
 	public Material? OverrideMaterial { get; set; }
 }
@@ -59,12 +59,80 @@ public readonly struct RendererList
 	}
 }
 
+public enum VisibleLightType : uint { Directional, Point }
+
+public readonly struct VisibleLight
+{
+	public string Identity { get; }
+	public uint Layer { get; }
+	public VisibleLightType Type { get; }
+	public Vector3 Position { get; }
+	public Vector3 Direction { get; }
+	public Color Color { get; }
+	public float Intensity { get; }
+	public float Range { get; }
+	public bool CastsShadows { get; }
+	public float ShadowStrength { get; }
+	public float ShadowBias { get; }
+	public float ShadowNormalBias { get; }
+	public bool SoftShadows { get; }
+
+	internal VisibleLight(DirectionalLightValue value)
+	{
+		Identity = value.Identity;
+		Layer = value.Layer;
+		Type = VisibleLightType.Directional;
+		Position = default;
+		Direction = value.Direction;
+		Color = value.Color;
+		Intensity = value.Intensity;
+		Range = 0;
+		CastsShadows = value.CastsShadows;
+		ShadowStrength = value.ShadowStrength;
+		ShadowBias = value.ShadowBias;
+		ShadowNormalBias = value.ShadowNormalBias;
+		SoftShadows = value.SoftShadows;
+	}
+
+	internal VisibleLight(PointLightValue value)
+	{
+		Identity = value.Identity;
+		Layer = value.Layer;
+		Type = VisibleLightType.Point;
+		Position = value.Position;
+		Direction = default;
+		Color = value.Color;
+		Intensity = value.Intensity;
+		Range = value.Range;
+		CastsShadows = false;
+		ShadowStrength = 0;
+		ShadowBias = 0;
+		ShadowNormalBias = 0;
+		SoftShadows = false;
+	}
+}
+
 public sealed class ScriptableRenderContext : IDisposable
 {
 	private static long nextFrameId;
 	private readonly RenderContextToken context;
 	private readonly List<RenderResource[]> retainedResources = new();
+	private RenderTargetIdentifier cameraColorTarget;
+	private bool hasCameraColorTarget;
 	private bool disposed;
+	internal ulong SessionId => context.sessionId;
+
+	/// <summary>Gets the linear color target for the camera pass currently being executed.</summary>
+	public RenderTargetIdentifier CameraColorTarget
+	{
+		get
+		{
+			RequireValid();
+			if (!hasCameraColorTarget)
+				throw new InvalidOperationException("The camera color target is only available while executing a camera pass.");
+			return cameraColorTarget;
+		}
+	}
 
 	public ScriptableRenderContext(float aspect)
 	{
@@ -80,6 +148,47 @@ public sealed class ScriptableRenderContext : IDisposable
 		RequireValid();
 		var payload = NativeRenderingBindings.Cull(context, camera.PersistentId);
 		return new CullingResults(context, payload.Index, payload.Generation);
+	}
+
+	public CullingResults CullShadowCasters(Camera receiverCamera, Matrix4x4 lightViewProjection)
+	{
+		ArgumentNullException.ThrowIfNull(receiverCamera);
+		RequireValid();
+		var payload = NativeRenderingBindings.CullShadowCasters(context, receiverCamera.PersistentId,
+			lightViewProjection);
+		return new CullingResults(context, payload.Index, payload.Generation);
+	}
+
+	public VisibleLight[] GetVisibleLights(CullingResults cullingResults)
+	{
+		RequireValid();
+		if (!SameContext(cullingResults.Context, context))
+			throw new InvalidOperationException("Culling results belong to another render context.");
+		var value = NativeRenderingBindings.GetVisibleLights(context, new RenderResultValue
+		{
+			Context = cullingResults.Context,
+			Index = cullingResults.Index,
+			Generation = cullingResults.Generation
+		});
+		var lights = new List<VisibleLight>(value.Directional.Length + value.Point.Length);
+		foreach (var light in value.Directional) lights.Add(new VisibleLight(light));
+		foreach (var light in value.Point) lights.Add(new VisibleLight(light));
+		return lights.ToArray();
+	}
+
+	public DirectionalShadowCascade[] ComputeDirectionalShadowCascades(Camera receiverCamera, Vector3 lightDirection,
+		DirectionalShadowCascadeSettings settings)
+	{
+		ArgumentNullException.ThrowIfNull(receiverCamera);
+		ArgumentNullException.ThrowIfNull(settings);
+		RequireValid();
+		settings.Validate();
+		var values = NativeRenderingBindings.DirectionalShadowCascades(context, receiverCamera.PersistentId,
+			lightDirection, settings.CascadeCount, settings.ShadowDistance, settings.SplitFractions,
+			settings.AtlasWidth, settings.AtlasHeight);
+		var cascades = new DirectionalShadowCascade[values.Length];
+		for (int index = 0; index < values.Length; ++index) cascades[index] = new DirectionalShadowCascade(values[index]);
+		return cascades;
 	}
 
 	public void SetupCameraProperties(Camera camera)
@@ -115,7 +224,7 @@ public sealed class ScriptableRenderContext : IDisposable
 		if (disposed)
 			return;
 		try { NativeRenderingBindings.End(context); }
-		finally { retainedResources.Clear(); disposed = true; }
+		finally { retainedResources.Clear(); hasCameraColorTarget = false; disposed = true; }
 	}
 
 	public void Submit()
@@ -158,8 +267,17 @@ public sealed class ScriptableRenderContext : IDisposable
 	{
 		if (disposed) return;
 		try { NativeRenderingBindings.Abort(context); }
-		finally { retainedResources.Clear(); disposed = true; }
+		finally { retainedResources.Clear(); hasCameraColorTarget = false; disposed = true; }
 	}
+
+	internal void SetCameraColorTarget(RenderTargetIdentifier target)
+	{
+		RequireValid();
+		cameraColorTarget = target;
+		hasCameraColorTarget = true;
+	}
+
+	internal void ClearCameraColorTarget() => hasCameraColorTarget = false;
 
 	internal void Submit(ReadOnlySpan<byte> batch, IReadOnlyCollection<RenderResource> resources, string name)
 	{
