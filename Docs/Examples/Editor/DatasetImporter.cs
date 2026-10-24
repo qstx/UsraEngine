@@ -47,10 +47,10 @@ public sealed class DatasetImporter : ScriptedImporter
 		node.Transform.LocalPosition = new Vector3(1, 2, 3);
 		node.AddComponent<MeshFilterComponent>().SharedMesh = mesh;
 		node.AddComponent<MeshRendererComponent>().SharedMaterial = material;
-		context.AddObjectToAsset("mesh", mesh);
-		context.AddObjectToAsset("material", material);
-		context.AddObjectToAsset("texture", texture);
-		context.AddObjectToAsset("data", data);
+		context.AddObjectToAsset("mesh", mesh, "Triangle");
+		context.AddObjectToAsset("material", material, "Surface");
+		context.AddObjectToAsset("texture", texture, "Pattern");
+		context.AddObjectToAsset("data", data, "Settings");
 		context.AddObjectToAsset("prefab", root);
 		context.SetMainObject(input.RootElement.TryGetProperty("main", out var main) && main.GetString() == "data" ? data : root);
 		if (input.RootElement.TryGetProperty("warning", out var warning)) context.LogImportWarning(warning.GetString()!);

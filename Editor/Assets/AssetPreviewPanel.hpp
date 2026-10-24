@@ -15,9 +15,8 @@ public:
 	AssetPreviewPanel(Rhi::DevicePtr selectedDevice, ImGuiBridge& bridge);
 	~AssetPreviewPanel();
 	Result<void> BeginFrame();
-	Result<void> Prepare(ProjectWorkspace& workspace, const ProjectBrowserModel& browser,
-	                     const EditorSelectionContext& selection, const EditorDocument* document,
-	                     const String& projectKey);
+	Result<void> Prepare(ProjectWorkspace& workspace, ProjectBrowserModel& browser, EditorSelectionContext& selection,
+	                     const EditorDocument* document, const String& projectKey);
 
 	bool Supported() const
 	{
@@ -132,6 +131,7 @@ private:
 	Vector<ImTextureID> retired;
 	Vector<std::unique_ptr<AssetPreviewContent>> retiredContents;
 	const ProjectWorkspace* preparedWorkspace = nullptr;
+	EditorSelectionContext* selectionContext = nullptr;
 	ResourceId projectSession = ResourceId::Generate();
 	UInt64 pipelineVersion = 0;
 	VirtualFileSystem* settingsFiles = nullptr;

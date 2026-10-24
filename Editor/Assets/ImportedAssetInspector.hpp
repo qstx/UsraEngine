@@ -23,6 +23,8 @@ private:
 	MaterialTexturePtr texture;
 	std::shared_ptr<MaterialInstance> material;
 	GameObject::Ptr root;
+	std::shared_ptr<const ModelSkeleton> skeleton;
+	std::shared_ptr<const AnimationClip> clip;
 	nlohmann::json payload;
 };
 } // namespace Ursa::Editor

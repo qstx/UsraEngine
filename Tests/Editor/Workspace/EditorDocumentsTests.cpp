@@ -5,6 +5,7 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
+#include <Vfs/AssetRoots.hpp>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -58,6 +59,16 @@ int main()
 		config.filePath = logPath;
 		config.level = LogLevel::Debug;
 		done(Log::Initialize(root / "EditorDocumentsTests.exe", config));
+		ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(Take(OpenEngineFileSystem())));
+
+		struct EngineFilesCleanup
+		{
+			~EngineFilesCleanup()
+			{
+				ConfigureEngineFileSystem({});
+			}
+		} engineFilesCleanup;
+
 		const auto firstPath = root / "Assets" / "first.ursamat";
 		const auto firstId = ResourceId::Generate();
 		MaterialInstance original(MaterialType::Unlit);

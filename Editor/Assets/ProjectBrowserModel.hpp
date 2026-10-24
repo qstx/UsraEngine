@@ -2,10 +2,13 @@
 
 #include <Assets/AssetDatabase.hpp>
 #include <Workspace/ProjectWorkspace.hpp>
+#include <Workspace/EditorSelectionContext.hpp>
 #include <optional>
 
 namespace Ursa::Editor
 {
+Vector<ImportedArtifactRecord> AssetObjectChoices(const ProjectWorkspace& workspace);
+
 struct ProjectBrowserEntry
 {
 	VirtualPath path;
@@ -15,6 +18,7 @@ struct ProjectBrowserEntry
 	std::optional<ResourceKind> kind;
 	String importer;
 	Vector<ImportedArtifactRecord> importedObjects;
+	Vector<ImportedArtifactRecord> VisibleChildren() const;
 };
 
 class ProjectBrowserModel final
@@ -43,6 +47,8 @@ public:
 	Vector<ProjectBrowserEntry> ChildAssets(const String& folder, const String& search = {}) const;
 
 	const ProjectBrowserEntry* Find(const VirtualPath& path) const;
+	const ProjectBrowserEntry* Find(ResourceId guid) const;
+	void ReconcileSelection(EditorSelectionContext& selection);
 
 	bool NeedsRefresh(const ProjectWorkspace& workspace) const;
 
@@ -53,6 +59,7 @@ private:
 	Map<String, Vector<String>> childrenByFolder;
 	String currentFolder;
 	VirtualPath selectedAsset;
+	ResourceId selectedGuid;
 	Ursa::UInt64 assetDatabaseRevision = 0;
 };
 } // namespace Ursa::Editor

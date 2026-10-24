@@ -25,6 +25,7 @@ if(URSA_BUILD_EDITOR)
   target_link_libraries(UrsaEditorDocumentsTests PRIVATE Ursa::Editor)
 
   add_test(NAME UrsaEditorDocumentsTests COMMAND UrsaEditorDocumentsTests)
+  ursa_require_test_content(UrsaEditorDocumentsTests UrsaEditorDocumentsTests)
 
   ursa_add_test_executable(UrsaProjectBrowserModelTests ProjectBrowserModelTests.cpp)
   target_link_libraries(UrsaProjectBrowserModelTests PRIVATE Ursa::Editor)

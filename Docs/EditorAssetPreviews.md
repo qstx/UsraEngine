@@ -42,7 +42,7 @@ Mip 使用产物中实际保存的像素层；源图或没有额外 Mip 的纹�
 
 支持现有导入器生成的骨骼动画片。新模型先显示绑定姿态；选片后从零时刻暂停。**Play / Pause** 控制独立预览时钟，**Loop** 只控制播放越界，**Speed** 接受有限正倍率。拖动时间轴会暂停；拖到精确片尾保留结束姿态，不因循环回到零。
 
-选择 Bind pose 清除动画采样并恢复初始姿态。零时长或非法时长片不可播放。静态模型没有动画控件。成功重导入时，仍存在的片保留身份，暂停并把时间限制在新时长内；已删除的片回到静态状态。
+选择 Bind pose 清除动画采样并恢复初始姿态。零时长或非法时长片不可播放。静态模型没有动画控件。成功重导入时，仍存在的片保留身份，暂停并把时间限制在新时长内；已删除的所选片保留为缺失引用，并清除旧画面；同一 ID 恢复后重新加载该片。
 
 Animator Controller、混合树、重定向、Root Motion、动画事件和 morph-target 不在此功能范围内。预览只调用显式姿态采样，不调用 Scene Update，不创建项目托管 Behaviour，也不执行 Awake、Start 或游戏 Update。
 
@@ -57,3 +57,12 @@ Animator Controller、混合树、重定向、Root Motion、动画事件和 morp
 替换或注销 GPU 目标前等待提交完成。双缓冲保留正在构建的 UI 引用的画面；旧 UI 纹理和内容在下一帧不再构建旧 draw data、且设备空闲等待成功后统一释放。等待失败返回应用的错误处理路径；退出时记录设备故障。预览在作者文档、脚本服务、UI 和设备销毁前释放，不建立跨项目全局缓存。
 
 验证入口：`UrsaAssetPreviewStateTests` 覆盖身份、版本和时钟；`UrsaAssetPreviewPanelTests` 使用真实 ImGui 控件/鼠标事件、GPU 图像、动画 FBX 与生命周期探针；`UrsaAssetPreviewWorkspaceTests` 启动多个完整 Editor 实例，检查设置、旧入口和停靠布局恢复；`UrsaEditorSrpAcceptanceTests` 检查活动管线的 Scene/Game/Inspector Preview 路由与重载。集成证据见 [验收记录](InspectorAssetPreviewAcceptance.md)。
+
+
+## 导入对象选择
+
+Project 和预览对象选择控件共用当前资产选择。选择源行查看主资产，选择具名子行则显示该具体资源的属性与预览；从预览对象控件切换时 Project 高亮也随之更新。AnimationClip 使用所属模型作呈现上下文，Inspector 目标仍是选中片段。Skeleton 提供只读关节信息；无适用画面的对象显示明确无预览状态。
+
+源文件移动后，仍存在的对象按 GUID/local file ID 保持选择。成功导入删除对象时停止旧目标预览并显示缺失；重新导入失败则保留有失败标记的最后完整结果。未应用 importer 设置的 Cancel 必须同时保留源选择、高亮和草稿。
+
+界面、字段引用和跨流程验证见 [Unity 风格导入资产验收](UnityImportedAssetsAcceptance.md)。

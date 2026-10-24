@@ -37,7 +37,7 @@ internal static partial class NativeImportBindings
 	[NativeMethod("Ursa::Editor::Bindings::ImportServices::SetModelSettings")]
 	internal static partial void SetModelSettings(ModelImporterSettingsValue settings);
 	[NativeMethod("Ursa::Editor::Bindings::ImportServices::AddObject")]
-	internal static partial void AddObject(string key, ImportReferenceInfo reference);
+	internal static partial void AddObject(string key, ImportReferenceInfo reference, string displayName);
 	[NativeMethod("Ursa::Editor::Bindings::ImportServices::SetMainObject")]
 	internal static partial void SetMainObject(ulong token);
 	[NativeMethod("Ursa::Editor::Bindings::ImportServices::RequireInvocation")]

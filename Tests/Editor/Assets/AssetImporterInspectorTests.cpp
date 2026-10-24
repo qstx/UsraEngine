@@ -192,7 +192,8 @@ int main()
 		std::optional<EditorSelectionContext> pending;
 		selection.beforeChange = [&](const EditorSelectionContext& next)
 		{
-			if (inspector->HasModified() && (next.kind != EditorSelectionKind::Asset || next.assetPath != source))
+			if (inspector->HasModified() &&
+			    (next.kind != EditorSelectionKind::Asset || next.assetPath != source || next.assetLocalFileId))
 			{
 				pending = next;
 				return false;
@@ -201,6 +202,10 @@ int main()
 		};
 		Expect(!selection.SelectAsset(Path("prj:Other.png")) && selection.assetPath == source && pending,
 		       "An unapplied importer switched target before resolving its selection prompt");
+		pending.reset();
+		Expect(!selection.SelectAsset(source, 42, "Mesh") && !selection.assetLocalFileId && pending &&
+		           pending->assetRole == EditorAssetSelectionRole::ImportedObject,
+		       "A child selection bypassed the dirty importer guard or changed the accepted target");
 		pending.reset();
 		Expect(selection.assetPath == source && inspector->HasModified(),
 		       "Cancelling target selection lost the old importer draft");

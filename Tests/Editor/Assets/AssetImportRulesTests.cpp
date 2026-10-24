@@ -188,6 +188,78 @@ void MainObjectDirectory()
 	Expect(!rebuilt->Resolve(guid, childId) && rebuilt->Resolve(guid), "Deleted sub-asset still resolved");
 }
 
+void PresentationDirectory()
+{
+	VirtualFileSystem files;
+	const auto sources = std::make_shared<MemoryFileProvider>();
+	Done(files.MountProvider("prj", sources, MountAccess::ReadWrite));
+	Done(files.MountProvider("lib", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	const auto source = Take(VirtualPath::Parse("prj:Presentation.shape"));
+	Done(files.WriteAtomic(source, {1}));
+	auto database = Take(AssetDatabase::Open(files));
+	Done(database->Refresh());
+	const auto guid = Take(database->Metadata(source)).guid;
+	const auto main = Take(StableImportObjectId("test", "root"));
+	const auto mesh = Take(StableImportObjectId("test", "mesh"));
+	const auto node = Take(StableImportObjectId("test", "node"));
+	Vector<ImportedArtifact> outputs{{main, "Prefab", {1}, "root", "Character"},
+	                                 {mesh, "Mesh", {2}, "mesh", "Body"},
+	                                 {node, "ModelNode", {3}, "node", "Hips", false}};
+	Done(database->PublishImport(source, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, main));
+	Expect(database->ImportedArtifacts().size() == 3 && database->VisibleImportedObjects().size() == 2,
+	       "Hidden model node leaked into visible choices or lost its identity");
+	Expect(Take(database->ImportedObject(guid)).localFileId == main &&
+	           Take(database->ImportedObject(guid, main)).isMainObject &&
+	           Take(database->ImportedObject(guid, mesh)).displayName == "Body" && database->Resolve(guid, node),
+	       "Object descriptions did not preserve canonical main or precise references");
+	const auto bytesPath = Take(database->Resolve(guid, mesh));
+	const auto revision = database->Revision();
+	outputs[1].displayName = "Torso";
+	Done(database->PublishImport(source, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, main));
+	Expect(database->Revision() > revision && Take(database->Resolve(guid, mesh)) == bytesPath &&
+	           Take(database->ImportedObject(guid, mesh)).displayName == "Torso",
+	       "Changing only presentation did not publish a new description over the same bytes");
+	auto otherTarget = outputs;
+	otherTarget[1].displayName = "Other profile";
+	Done(database->PublishImport(source, "test", 1, "other", nlohmann::json::object(), {}, otherTarget, main));
+	(void)database->ImportedArtifacts();
+	const auto beforeProfileSwitch = database->Revision();
+	Expect(Take(database->CheckImport(source, "test", 1, "cpu", nlohmann::json::object(), {})).upToDate &&
+	           database->Revision() > beforeProfileSwitch,
+	       "Selecting a complete cached target did not invalidate the presentation generation");
+	for (const auto& object : database->ImportedArtifacts())
+	{
+		Expect(object.localFileId != mesh || object.displayName == "Torso",
+		       "Cached directory retained the previous target's name");
+	}
+	Done(database->PublishImport(source, "test", 1, "other", nlohmann::json::object(), {}, otherTarget, main));
+	Done(database->PublishImport(source, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, main));
+	auto reopened = Take(AssetDatabase::Open(files));
+	Done(reopened->Refresh());
+	Expect(Take(reopened->ImportedObject(guid, mesh)).displayName == "Torso" &&
+	           !Take(reopened->ImportedObject(guid, node)).visibleInProject,
+	       "Presentation was lost when reopening the Library");
+	outputs.push_back(outputs[1]);
+	outputs[1].displayName = "Unpublished";
+	Expect(!reopened->PublishImport(source, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, main) &&
+	           Take(reopened->ImportedObject(guid, mesh)).displayName == "Torso",
+	       "Failed output validation replaced the last complete presentation");
+	outputs.pop_back();
+	outputs[1].displayName = "Torso";
+	auto document = nlohmann::json::parse(ToStdString(Take(files.ReadText({"lib", "AssetDatabase/prj.json"}))));
+	Expect(document["version"] == 4, "Presentation directory was not versioned");
+	document["version"] = 3;
+	const auto old = document.dump();
+	Done(files.WriteAtomic({"lib", "AssetDatabase/prj.json"}, Vector<UInt8>(old.data(), old.data() + old.size())));
+	auto oldDatabase = Take(AssetDatabase::Open(files));
+	Done(oldDatabase->Refresh());
+	Expect(oldDatabase->ImportedArtifacts().empty() && Take(oldDatabase->Metadata(source)).guid == guid,
+	       "Old directory was treated as complete or changed the source GUID");
+	Done(oldDatabase->PublishImport(source, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, main));
+	Expect(Take(oldDatabase->ImportedObject(guid, mesh)).displayName == "Torso",
+	       "Rebuilding changed the display description");
+}
+
 void NativeCapability()
 {
 	VirtualFileSystem files;
@@ -307,6 +379,7 @@ int main()
 		Processing();
 		NativeCapability();
 		MainObjectDirectory();
+		PresentationDirectory();
 		RuntimeMainAlias();
 		return 0;
 	}

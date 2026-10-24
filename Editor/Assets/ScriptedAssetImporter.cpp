@@ -306,6 +306,7 @@ Vector<ImportedArtifact> EncodeOutputs(Bindings::ImportInvocation& scope, const 
 		const auto& output = entry.second;
 		ImportedArtifact artifact;
 		artifact.outputKey = output.key;
+		artifact.displayName = output.displayName.empty() ? output.key : output.displayName;
 		artifact.localFileId = identities.at(output.token);
 		if (output.kind == 1)
 		{

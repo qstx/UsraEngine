@@ -133,7 +133,7 @@ ImporterSelectionResult AssetInspectorPanel::DrawSourceSelectionPrompt(const Req
 
 Result<bool> AssetInspectorPanel::SaveSelectedSource(const EditorSelectionContext& selection)
 {
-	if (selection.kind != EditorSelectionKind::Asset || selection.assetLocalFileId)
+	if (selection.kind != EditorSelectionKind::Asset || selection.assetMissing || selection.assetLocalFileId)
 	{
 		return Result<bool>::Success(false);
 	}
@@ -153,8 +153,9 @@ Result<bool> AssetInspectorPanel::SaveSelectedSource(const EditorSelectionContex
 
 EditorDocument* AssetInspectorPanel::SelectedDocument(const EditorSelectionContext& selection) const
 {
-	return selection.kind == EditorSelectionKind::Asset && !selection.assetLocalFileId && nativeInspector &&
-	               nativeInspector->Active() && nativeInspector->Document().Path() == selection.assetPath
+	return selection.kind == EditorSelectionKind::Asset && !selection.assetMissing && !selection.assetLocalFileId &&
+	               nativeInspector && nativeInspector->Active() &&
+	               nativeInspector->Document().Path() == selection.assetPath
 	           ? &nativeInspector->Document()
 	           : nullptr;
 }
@@ -188,10 +189,15 @@ void AssetInspectorPanel::Draw(
 		                  ImVec2(0, std::max(40.f, availableHeight - effectiveFooterHeight - spacing)),
 		                  ImGuiChildFlags_None);
 	}
-	const ProjectBrowserEntry* asset = model.Find(selection.assetPath);
+	const ProjectBrowserEntry* asset = selection.assetMissing ? nullptr : model.Find(selection.assetPath);
+	if (asset && selection.assetGuid && asset->guid != selection.assetGuid)
+	{
+		asset = nullptr;
+	}
 	if (!asset)
 	{
 		ImGui::TextDisabled("The selected asset is no longer available.");
+		ImGui::Text("GUID: %s | Local ID: %llu", selection.assetGuid.ToString().c_str(), selection.assetLocalFileId);
 	}
 	else
 	{
@@ -230,7 +236,7 @@ void AssetInspectorPanel::Draw(
 						importedDiagnostic = opened.error;
 					}
 				}
-				ImGui::Text("Object: %s %llu", artifact->kind.c_str(), artifact->localFileId);
+				ImGui::Text("Object: %s", artifact->Label().c_str());
 				if (importedInspector)
 				{
 					const auto drawn = importedInspector->Draw(custom);

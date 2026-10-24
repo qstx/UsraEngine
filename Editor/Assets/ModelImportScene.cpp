@@ -40,6 +40,7 @@ UInt64 ModelImportScene::OutputId(const String& key)
 		throw std::runtime_error("Model postprocess output identity collision");
 	}
 	candidate.outputKeys[id] = key;
+	candidate.displayNames[id] = key;
 	return id;
 }
 
@@ -127,7 +128,8 @@ Result<GameObject::Ptr> ModelImportScene::Build()
 	}
 }
 
-UInt64 ModelImportScene::MaterialId(const std::shared_ptr<MaterialInstance>& material, const String& key)
+UInt64 ModelImportScene::MaterialId(const std::shared_ptr<MaterialInstance>& material, const String& key,
+                                    const String& displayName)
 {
 	if (!material)
 	{
@@ -152,6 +154,7 @@ UInt64 ModelImportScene::MaterialId(const std::shared_ptr<MaterialInstance>& mat
 		throw std::runtime_error("Model postprocess material key is ambiguous");
 	}
 	Done(material->BindAssetIdentity({candidate.guid, id}));
+	candidate.displayNames[id] = displayName;
 	candidate.materials.emplace(id, ModelCandidateMaterial{id, key, material, {}});
 	materialIds.emplace(material.get(), id);
 	return id;
@@ -205,6 +208,7 @@ Result<void> ModelImportScene::Apply()
 				throw std::runtime_error("Model postprocessor produced ambiguous node keys");
 			}
 			ModelCandidateNode node{id, parent, Take(object->Name()), Take(object->GetLocalTransform()), {}, {}};
+			candidate.displayNames[id] = node.name.empty() ? "Node" : node.name;
 			MeshPtr mesh;
 			if (const auto* filter = object->FindComponent<MeshFilterComponent>())
 			{
@@ -217,6 +221,10 @@ Result<void> ModelImportScene::Apply()
 			if (mesh)
 			{
 				auto meshId = MeshId(mesh, "postprocess:mesh:" + path);
+				if (candidate.displayNames[meshId] == candidate.outputKeys[meshId])
+				{
+					candidate.displayNames[meshId] = candidate.displayNames[id] + " Mesh";
+				}
 				const auto* renderer = object->FindComponent<RendererComponent>();
 				Vector<UInt64> materialSlots;
 				if (renderer)
@@ -224,14 +232,16 @@ Result<void> ModelImportScene::Apply()
 					const auto materials = renderer->SharedMaterials();
 					for (Size slot = 0; slot < materials.size(); ++slot)
 					{
-						materialSlots.push_back(MaterialId(materials[slot], "postprocess:material:" + path + ":" +
-						                                                        ToUrsaString(std::to_string(slot))));
+						materialSlots.push_back(MaterialId(
+						    materials[slot], "postprocess:material:" + path + ":" + ToUrsaString(std::to_string(slot)),
+						    candidate.displayNames[id] + " Material " + ToUrsaString(std::to_string(slot))));
 					}
 				}
 				const auto previous = bindings.find(meshId);
 				if (previous != bindings.end() && previous->second != materialSlots)
 				{
 					meshId = MeshId(Take(mesh->Clone()), "postprocess:mesh-binding:" + path);
+					candidate.displayNames[meshId] = candidate.displayNames[id] + " Mesh";
 				}
 				bindings[meshId] = std::move(materialSlots);
 				node.meshes.push_back(meshId);
@@ -253,6 +263,7 @@ Result<void> ModelImportScene::Apply()
 			if (!usedNodes.count(old.localFileId))
 			{
 				candidate.outputKeys.erase(old.localFileId);
+				candidate.displayNames.erase(old.localFileId);
 			}
 		}
 		candidate.nodes = std::move(nodes);

@@ -1,3 +1,4 @@
+#include <Assets/ProjectBrowserModel.hpp>
 #include <Ui/EditorIcons.hpp>
 #include <Inspector/SceneInspectorPanel.hpp>
 #include <Inspector/MeshInspector.hpp>
@@ -193,44 +194,83 @@ bool DrawDirectionalShadowControls(DirectionalLightComponent& light, String& dia
 	return changed;
 }
 
+bool AcceptAssetDrop(const Vector<ImportedArtifactRecord>& choices, AssetReference& reference,
+                     const std::function<bool(const ImportedArtifactRecord&)>& compatible = {})
+{
+	bool accepted = false;
+	if (ImGui::BeginDragDropTarget())
+	{
+		if (const auto* payload = ImGui::AcceptDragDropPayload("URSA_ASSET_REFERENCE");
+		    payload && payload->DataSize == sizeof(AssetReference))
+		{
+			const auto dropped = *static_cast<const AssetReference*>(payload->Data);
+			const auto object =
+			    std::find_if(choices.begin(), choices.end(),
+			                 [&](const auto& item)
+			                 {
+				                 return item.guid == dropped.guid && (item.localFileId == dropped.localFileId ||
+				                                                      (!dropped.localFileId && item.isMainObject));
+			                 });
+			if (object != choices.end() && (!compatible || compatible(*object)))
+			{
+				reference = dropped;
+				accepted = true;
+			}
+		}
+		ImGui::EndDragDropTarget();
+	}
+	return accepted;
+}
+
 bool DrawSerializedAssetReference(nlohmann::json& value, const ProjectWorkspace& workspace)
 {
-	ResourceId currentId;
-	if (value.is_object() && value.contains("guid") && value["guid"].is_string())
+	AssetReference current;
+	if (value.is_object())
 	{
-		auto parsed = ResourceId::Parse(ToUrsaString(value["guid"].get<std::string>()));
+		const auto parsed = AssetReferenceFromJson(value, "Inspector asset");
 		if (parsed)
 		{
-			currentId = parsed.value;
+			current = parsed.value;
 		}
 	}
-	String preview = currentId ? currentId.ToString() : String("None");
-	for (const ResourceEntry& entry : workspace.Resources())
+	const auto choices = AssetObjectChoices(workspace);
+	String preview = current.guid ? String("Missing asset") : String("None");
+	for (const auto& object : choices)
 	{
-		if (entry.id == currentId)
+		if (object.guid == current.guid &&
+		    (object.localFileId == current.localFileId || (!current.localFileId && object.isMainObject)))
 		{
-			preview = entry.location.path.FileName();
+			preview = object.Label();
 			break;
 		}
 	}
 	bool changed = false;
 	if (ImGui::BeginCombo("##Asset", preview.c_str()))
 	{
-		if (Icons::Selectable(Icons::Icon::Close, "None", !currentId))
+		if (Icons::Selectable(Icons::Icon::Close, "None", !current.guid))
 		{
 			value = nullptr;
 			changed = true;
 		}
-		for (const ResourceEntry& entry : workspace.Resources())
+		for (const auto& object : choices)
 		{
-			const String label = entry.location.path.FileName() + "##" + entry.id.ToString();
-			if (Icons::Selectable(Icons::Icon::Link, label.c_str(), entry.id == currentId))
+			const String key = object.guid.ToString() + ":" + ToUrsaString(std::to_string(object.localFileId));
+			ImGui::PushID(key.c_str());
+			if (Icons::Selectable(Icons::Icon::Link, (object.Label() + " - " + object.sourcePath.ToString()).c_str(),
+			                      object.guid == current.guid && object.localFileId == current.localFileId))
 			{
-				value = {{"guid", ToStdString(entry.id.ToString())}, {"localFileId", 0u}};
+				value = AssetReferenceToJson({object.guid, object.localFileId});
 				changed = true;
 			}
+			ImGui::PopID();
 		}
 		ImGui::EndCombo();
+	}
+	AssetReference dropped;
+	if (AcceptAssetDrop(choices, dropped))
+	{
+		value = AssetReferenceToJson(dropped);
+		changed = true;
 	}
 	return changed;
 }
@@ -239,114 +279,120 @@ bool DrawSerializedScriptableObjectReference(nlohmann::json& value, const String
                                              const ProjectWorkspace& workspace,
                                              const Vector<ScriptTypeDescriptor>* scriptTypes)
 {
-	ResourceId currentGuid;
-	UInt64 currentLocalFileId = 0;
-	if (value.is_object() && value.contains("$ursaReference") && value["$ursaReference"].is_object())
+	AssetReference current;
+	if (value.is_object() && value.contains("$ursaReference"))
 	{
-		const auto& reference = value["$ursaReference"];
-		const auto binding = reference.find("Resource");
-		if (binding != reference.end() && binding->is_object() && binding->value("kind", std::string{}) == "asset" &&
-		    binding->contains("asset") && (*binding)["asset"].is_object())
+		const auto& ref = value["$ursaReference"];
+		if (ref.contains("Resource") && ref["Resource"].contains("asset"))
 		{
-			auto parsed = ResourceId::Parse(ToUrsaString((*binding)["asset"].value("guid", std::string{})));
+			const auto parsed = AssetReferenceFromJson(ref["Resource"]["asset"], "Inspector ScriptableObject");
 			if (parsed)
 			{
-				currentGuid = parsed.value;
-				currentLocalFileId = (*binding)["asset"].value("localFileId", UInt64{0});
+				current = parsed.value;
 			}
 		}
 	}
-	String preview = currentGuid ? currentGuid.ToString() : String("None");
-	const auto labelFor = [&](const AssetRecord& asset)
-	{ return asset.path.FileName() + "##" + asset.metadata.guid.ToString(); };
-	for (const AssetDatabase* database : {workspace.Database(), workspace.BuiltinDatabase()})
+	const auto choices = AssetObjectChoices(workspace);
+	String preview = current.guid ? String("Missing asset") : String("None");
+	for (const auto& object : choices)
 	{
-		if (!database || !currentGuid)
+		if (object.guid == current.guid &&
+		    (object.localFileId == current.localFileId || (!current.localFileId && object.isMainObject)))
 		{
-			continue;
+			preview = object.Label();
+			break;
 		}
-		for (const AssetRecord& asset : database->Assets())
+	}
+	auto resources = ResourceSession::Open(workspace.ContentFiles(), workspace.AssetResolver());
+	const auto compatible = [&](const ImportedArtifactRecord& object)
+	{
+		if (!resources)
 		{
-			if (asset.metadata.guid == currentGuid)
+			return false;
+		}
+		if (object.kind != "ScriptableObject" && object.kind != "ScriptableAsset")
+		{
+			return false;
+		}
+		auto graph = LoadScriptableAssetGraph(*resources.value, {object.guid, object.localFileId});
+		if (!graph)
+		{
+			return false;
+		}
+		const auto asset = std::find_if(graph.value.assets.begin(), graph.value.assets.end(),
+		                                [&](const auto& item)
+		                                {
+			                                return item.SourceGuid() == graph.value.root.guid &&
+			                                       item.LocalFileId() == graph.value.root.localFileId;
+		                                });
+		if (asset == graph.value.assets.end())
+		{
+			return false;
+		}
+		if (!expectedType.empty())
+		{
+			if (!scriptTypes)
 			{
-				preview = asset.path.FileName();
-				break;
+				return false;
+			}
+			const auto candidate = std::find_if(
+			    scriptTypes->begin(), scriptTypes->end(), [&](const auto& type)
+			    { return type.kind == ScriptTypeKind::ScriptableObject && type.scriptType == asset->TypeId(); });
+			if (candidate == scriptTypes->end())
+			{
+				return false;
+			}
+			const Size separator = candidate->clrTypeName.find(',');
+			const String concreteType = candidate->clrTypeName.substr(0, separator);
+			if (concreteType != expectedType &&
+			    std::find(candidate->baseTypeNames.begin(), candidate->baseTypeNames.end(), expectedType) ==
+			        candidate->baseTypeNames.end())
+			{
+				return false;
 			}
 		}
-	}
-	if (!ImGui::BeginCombo("##ScriptableAsset", preview.c_str()))
+		return true;
+	};
+	const auto assign = [&](AssetReference reference)
 	{
-		return false;
-	}
+		value = {{"$ursaReference",
+		          {{"Kind", "ScriptableObject"},
+		           {"Id", ""},
+		           {"Resource", {{"kind", "asset"}, {"asset", AssetReferenceToJson(reference)}}}}}};
+	};
 	bool changed = false;
-	if (Icons::Selectable(Icons::Icon::Close, "None", !currentGuid))
+	if (ImGui::BeginCombo("##ScriptableAsset", preview.c_str()))
 	{
-		value = nullptr;
-		changed = true;
-	}
-	const auto chooseDatabaseAssets = [&](const AssetDatabase* database)
-	{
-		if (!database)
+		if (Icons::Selectable(Icons::Icon::Close, "None", !current.guid))
 		{
-			return;
+			value = nullptr;
+			changed = true;
 		}
-		for (const AssetRecord& record : database->Assets())
+		for (const auto& object : choices)
 		{
-			if (record.metadata.folder || PathFromUrsaString(record.path.relative).extension() != ".ursaasset")
+			if (!compatible(object))
 			{
 				continue;
 			}
-			auto asset = LoadScriptableAssetSource(workspace.Index().Filesystem(), record.path, record.metadata.guid);
-			if (!asset)
+			const auto key = object.guid.ToString() + ":" + ToUrsaString(std::to_string(object.localFileId));
+			ImGui::PushID(key.c_str());
+			if (Icons::Selectable(Icons::Icon::Link, (object.Label() + " - " + object.sourcePath.ToString()).c_str(),
+			                      object.guid == current.guid && (object.localFileId == current.localFileId ||
+			                                                      (!current.localFileId && object.isMainObject))))
 			{
-				continue;
-			}
-			if (!expectedType.empty())
-			{
-				if (!scriptTypes)
-				{
-					continue;
-				}
-				const auto candidate = std::find_if(scriptTypes->begin(), scriptTypes->end(),
-				                                    [&](const auto& type)
-				                                    {
-					                                    return type.kind == ScriptTypeKind::ScriptableObject &&
-					                                           type.scriptType == asset.value.TypeId();
-				                                    });
-				if (candidate == scriptTypes->end())
-				{
-					continue;
-				}
-				const Size separator = candidate->clrTypeName.find(',');
-				const String concreteType = candidate->clrTypeName.substr(0, separator);
-				if (concreteType != expectedType &&
-				    std::find(candidate->baseTypeNames.begin(), candidate->baseTypeNames.end(), expectedType) ==
-				        candidate->baseTypeNames.end())
-				{
-					continue;
-				}
-			}
-			const String label = labelFor(record);
-			if (Icons::Selectable(Icons::Icon::Link, label.c_str(),
-			                      record.metadata.guid == currentGuid &&
-			                          asset.value.LocalFileId() == currentLocalFileId))
-			{
-				value = {{"$ursaReference",
-				          {{"Kind", "ScriptableObject"},
-				           {"Id", ""},
-				           {"Resource",
-				            {{"kind", "asset"},
-				             {"asset", AssetReferenceToJson({record.metadata.guid, asset.value.LocalFileId()})}}}}}};
+				assign({object.guid, object.localFileId});
 				changed = true;
 			}
+			ImGui::PopID();
 		}
-	};
-	chooseDatabaseAssets(workspace.Database());
-	if (workspace.BuiltinDatabase() != workspace.Database())
-	{
-		chooseDatabaseAssets(workspace.BuiltinDatabase());
+		ImGui::EndCombo();
 	}
-	ImGui::EndCombo();
+	AssetReference dropped;
+	if (AcceptAssetDrop(choices, dropped, compatible))
+	{
+		assign(dropped);
+		changed = true;
+	}
 	return changed;
 }
 
@@ -477,9 +523,42 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 			const auto& binding = value["$ursaReference"]["Resource"];
 			if (binding.is_object() && binding.value("kind", std::string{}) == "asset")
 			{
-				preview = ToUrsaString(binding["asset"]["guid"].get<std::string>());
+				preview = "Missing asset";
+				const auto reference = AssetReferenceFromJson(binding["asset"], "Inspector resource");
+				if (reference)
+				{
+					for (const auto& object : AssetObjectChoices(workspace))
+					{
+						if (object.guid == reference.value.guid &&
+						    (object.localFileId == reference.value.localFileId ||
+						     (!reference.value.localFileId && object.isMainObject)))
+						{
+							preview = object.Label();
+							break;
+						}
+					}
+				}
 			}
 		}
+		const auto choices = AssetObjectChoices(workspace);
+		auto resources = ResourceSession::Open(workspace.ContentFiles(), workspace.AssetResolver());
+		const auto compatible = [&](const ImportedArtifactRecord& object)
+		{
+			if (!resources || object.kind != (expected == ResourceKind::Mesh ? "Mesh" : "Material"))
+			{
+				return false;
+			}
+			return expected == ResourceKind::Mesh
+			           ? bool(resources.value->LoadMesh(object.guid, object.localFileId))
+			           : bool(resources.value->LoadMaterial(object.guid, object.localFileId));
+		};
+		const auto assign = [&](AssetReference reference)
+		{
+			value = {{"$ursaReference",
+			          {{"Kind", expected == ResourceKind::Mesh ? "Mesh" : "Material"},
+			           {"Id", ""},
+			           {"Resource", {{"kind", "asset"}, {"asset", AssetReferenceToJson(reference)}}}}}};
+		};
 		bool changed = false;
 		if (ImGui::BeginCombo("##Resource", preview.c_str()))
 		{
@@ -488,40 +567,24 @@ bool DrawSerializedScriptValue(nlohmann::json& value, const String& kind, const 
 				value = nullptr;
 				changed = true;
 			}
-			const auto choose = [&](AssetReference reference, const String& label)
+			for (const auto& object : choices)
 			{
-				if (Icons::Selectable(Icons::Icon::Link, label.c_str()))
+				if (object.kind == (expected == ResourceKind::Mesh ? "Mesh" : "Material") &&
+				    Icons::Selectable(Icons::Icon::Link,
+				                      (object.Label() + " - " + object.sourcePath.ToString()).c_str()) &&
+				    compatible(object))
 				{
-					value = {{"$ursaReference",
-					          {{"Kind", expected == ResourceKind::Mesh ? "Mesh" : "Material"},
-					           {"Id", ""},
-					           {"Resource", {{"kind", "asset"}, {"asset", AssetReferenceToJson(reference)}}}}}};
+					assign({object.guid, object.localFileId});
 					changed = true;
-				}
-			};
-			for (const auto& entry : workspace.Resources())
-			{
-				if (entry.location.kind == expected)
-				{
-					choose({entry.id, 0}, entry.location.path.ToString());
-				}
-			}
-			for (const auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
-			{
-				if (!database)
-				{
-					continue;
-				}
-				for (const auto& artifact : database->ImportedArtifacts())
-				{
-					if (artifact.localFileId && artifact.kind == (expected == ResourceKind::Mesh ? "Mesh" : "Material"))
-					{
-						choose({artifact.guid, artifact.localFileId},
-						       artifact.guid.ToString() + ":" + ToUrsaString(std::to_string(artifact.localFileId)));
-					}
 				}
 			}
 			ImGui::EndCombo();
+		}
+		AssetReference dropped;
+		if (AcceptAssetDrop(choices, dropped, compatible))
+		{
+			assign(dropped);
+			changed = true;
 		}
 		return changed;
 	}

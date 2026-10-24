@@ -28,6 +28,88 @@ String FoldCase(String value)
 
 } // namespace
 
+Vector<ImportedArtifactRecord> AssetObjectChoices(const ProjectWorkspace& workspace)
+{
+	Vector<ImportedArtifactRecord> result;
+	Set<String> mainGuids;
+	for (const auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
+	{
+		if (!database)
+		{
+			continue;
+		}
+		for (auto object : database->VisibleImportedObjects())
+		{
+			if (object.isMainObject)
+			{
+				mainGuids.insert(object.guid.ToString());
+			}
+			result.push_back(std::move(object));
+		}
+	}
+	for (const auto& entry : workspace.Resources())
+	{
+		if (!mainGuids.insert(entry.id.ToString()).second)
+		{
+			continue;
+		}
+		String kind;
+		switch (entry.location.kind)
+		{
+			case ResourceKind::Mesh:
+				kind = "Mesh";
+				break;
+			case ResourceKind::Material:
+				kind = "Material";
+				break;
+			case ResourceKind::Texture:
+				kind = "Texture";
+				break;
+			case ResourceKind::Prefab:
+				kind = "Prefab";
+				break;
+			case ResourceKind::Scene:
+				kind = "Scene";
+				break;
+			case ResourceKind::Shader:
+				kind = "Shader";
+				break;
+		}
+		result.push_back({entry.id,
+		                  0,
+		                  kind,
+		                  entry.location.path,
+		                  true,
+		                  entry.location.path.FileName(),
+		                  true,
+		                  entry.location.path,
+		                  {}});
+	}
+	return result;
+}
+
+Vector<ImportedArtifactRecord> ProjectBrowserEntry::VisibleChildren() const
+{
+	Vector<ImportedArtifactRecord> children;
+	for (const auto& object : importedObjects)
+	{
+		if (!object.isMainObject && object.visibleInProject)
+		{
+			children.push_back(object);
+		}
+	}
+	std::sort(children.begin(), children.end(),
+	          [](const auto& left, const auto& right)
+	          {
+		          if (left.displayName != right.displayName)
+		          {
+			          return left.displayName < right.displayName;
+		          }
+		          return left.localFileId < right.localFileId;
+	          });
+	return children;
+}
+
 Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 {
 	const String previousFolder = currentFolder;
@@ -117,7 +199,11 @@ Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 		folderCandidate = ParentPath(folderCandidate);
 		navigated = NavigateTo(folderCandidate);
 	}
-	if (!previousSelection.scheme.empty() && Find(previousSelection))
+	if (selectedGuid && Find(selectedGuid))
+	{
+		selectedAsset = Find(selectedGuid)->path;
+	}
+	else if (!previousSelection.scheme.empty() && Find(previousSelection))
 	{
 		selectedAsset = previousSelection;
 	}
@@ -148,11 +234,14 @@ Result<void> ProjectBrowserModel::NavigateTo(const String& relativePath)
 void ProjectBrowserModel::SelectAsset(const VirtualPath& path)
 {
 	selectedAsset = path;
+	const auto* entry = Find(path);
+	selectedGuid = entry ? entry->guid : ResourceId{};
 }
 
 void ProjectBrowserModel::ClearAssetSelection()
 {
 	selectedAsset = {};
+	selectedGuid = {};
 }
 
 Vector<ProjectBrowserEntry> ProjectBrowserModel::ChildFolders(const String& folder) const
@@ -187,7 +276,14 @@ Vector<ProjectBrowserEntry> ProjectBrowserModel::ChildAssets(const String& folde
 				continue;
 			}
 			const String foldedPath = FoldCase(item.first);
-			if (foldedPath.find(foldedSearch) != String::npos)
+			const bool childMatches =
+			    std::any_of(item.second.importedObjects.begin(), item.second.importedObjects.end(),
+			                [&](const auto& object)
+			                {
+				                return object.visibleInProject && !object.isMainObject &&
+				                       FoldCase(object.Label()).find(foldedSearch) != String::npos;
+			                });
+			if (foldedPath.find(foldedSearch) != String::npos || childMatches)
 			{
 				result.push_back(item.second);
 			}
@@ -225,6 +321,46 @@ const ProjectBrowserEntry* ProjectBrowserModel::Find(const VirtualPath& path) co
 bool ProjectBrowserModel::NeedsRefresh(const ProjectWorkspace& workspace) const
 {
 	return workspace.Database() && assetDatabaseRevision != workspace.Database()->Revision();
+}
+
+const ProjectBrowserEntry* ProjectBrowserModel::Find(ResourceId guid) const
+{
+	for (const auto& entry : entries)
+	{
+		if (entry.second.guid == guid)
+		{
+			return &entry.second;
+		}
+	}
+	return nullptr;
+}
+
+void ProjectBrowserModel::ReconcileSelection(EditorSelectionContext& selection)
+{
+	if (selection.kind != EditorSelectionKind::Asset)
+	{
+		return;
+	}
+	const auto* entry = selection.assetGuid ? Find(selection.assetGuid) : Find(selection.assetPath);
+	selection.assetMissing = !entry;
+	if (entry)
+	{
+		selection.assetGuid = entry->guid;
+		selection.assetPath = entry->path;
+		if (selection.assetLocalFileId)
+		{
+			const auto object =
+			    std::find_if(entry->importedObjects.begin(), entry->importedObjects.end(),
+			                 [&](const auto& item) { return item.localFileId == selection.assetLocalFileId; });
+			selection.assetMissing = object == entry->importedObjects.end();
+			if (!selection.assetMissing)
+			{
+				selection.assetKind = object->kind;
+			}
+		}
+	}
+	selectedAsset = selection.assetPath;
+	selectedGuid = selection.assetGuid;
 }
 
 void ProjectBrowserModel::AddChild(const String& parent, const ProjectBrowserEntry& entry)

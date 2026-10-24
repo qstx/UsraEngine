@@ -15,7 +15,7 @@ public:
 
 private:
 	UInt64 OutputId(const String& key);
-	UInt64 MaterialId(const std::shared_ptr<MaterialInstance>& material, const String& key);
+	UInt64 MaterialId(const std::shared_ptr<MaterialInstance>& material, const String& key, const String& displayName);
 	UInt64 MeshId(const MeshPtr& mesh, const String& key);
 	ModelImportCandidate& candidate;
 	Scene& scene;

@@ -1168,6 +1168,8 @@ Result<ResourceId> MaterialTextureId(const aiScene& scene, aiMaterial& material,
 			return Result<ResourceId>::Failure("Embedded texture output identity collision");
 		}
 		candidate.outputKeys[localFileId] = localKey;
+		candidate.displayNames[localFileId] =
+		    embedded->mFilename.length ? ToUrsaString(embedded->mFilename.C_Str()) : "Embedded Texture " + path;
 		embeddedIds.emplace(path, localFileId);
 		return Result<ResourceId>::Success(modelGuid);
 	}
@@ -1574,6 +1576,7 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 	candidate.guid = guid;
 	candidate.mainObjectLocalFileId = StableLocalFileId("main");
 	candidate.outputKeys[candidate.mainObjectLocalFileId] = "main";
+	candidate.displayNames[candidate.mainObjectLocalFileId] = source.FileName();
 
 	Assimp::Importer importer;
 	const auto& gltfDisplayNames = normalizedGltf.value.displayNames;
@@ -1835,6 +1838,7 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 		const Ursa::UInt64 localFileId =
 		    StableLocalFileId("material:" + ToUrsaString(std::to_string(index)) + ":" + name);
 		candidate.outputKeys[localFileId] = "material:" + ToUrsaString(std::to_string(index)) + ":" + name;
+		candidate.displayNames[localFileId] = name;
 		if (std::find(allMaterialIds.begin(), allMaterialIds.end(), localFileId) != allMaterialIds.end())
 		{
 			return Result<ModelImportCandidate>::Failure("Model material local-file-ID collision at " +
@@ -1869,6 +1873,7 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 		                                                   : "Mesh" + ToUrsaString(std::to_string(index));
 		const Ursa::UInt64 localFileId = StableLocalFileId("mesh:" + ToUrsaString(std::to_string(index)) + ":" + name);
 		candidate.outputKeys[localFileId] = "mesh:" + ToUrsaString(std::to_string(index)) + ":" + name;
+		candidate.displayNames[localFileId] = name;
 		meshIds[index] = localFileId;
 		meshIdMap.emplace(index, localFileId);
 		if (!mesh)
@@ -2002,6 +2007,7 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 		const Ursa::UInt64 localFileId =
 		    StableLocalFileId("animation:" + ToUrsaString(std::to_string(animationIndex)) + ":" + name);
 		candidate.outputKeys[localFileId] = "animation:" + ToUrsaString(std::to_string(animationIndex)) + ":" + name;
+		candidate.displayNames[localFileId] = name;
 		const Ursa::Float64 ticksPerSecond = animation->mTicksPerSecond > 0.0 ? animation->mTicksPerSecond : 25.0;
 		Ursa::Float64 durationTicks = animation->mDuration;
 		Json channels = Json::array();
@@ -2123,6 +2129,30 @@ Result<ModelImportCandidate> ModelImporter::BuildCandidate(AssetDatabase& databa
 	candidate.meshMaterialBindings = std::move(meshMaterialBindings);
 	candidate.dependencies = std::move(importedDependencies);
 	candidate.diagnostics = std::move(diagnostics);
+	Map<UInt64, String> names;
+	names[candidate.mainObjectLocalFileId] = source.FileName();
+	for (const auto& node : candidate.nodes)
+	{
+		names[node.localFileId] = node.name.empty() ? "Node" : node.name;
+	}
+	for (const auto& mesh : candidate.meshes)
+	{
+		names[mesh.first] = candidate.displayNames.at(mesh.first);
+	}
+	for (const auto& material : candidate.materials)
+	{
+		names[material.first] = material.second.name;
+	}
+	for (const auto& texture : candidate.textures)
+	{
+		names[texture.first] = candidate.displayNames.at(texture.first);
+	}
+	for (const auto& archive : candidate.archives)
+	{
+		const auto name = ToUrsaString(archive.second.document.value("name", std::string{}));
+		names[archive.first] = name.empty() ? archive.second.kind : name;
+	}
+	candidate.displayNames = std::move(names);
 	auto valid = candidate.Validate();
 	return valid ? Result<ModelImportCandidate>::Success(std::move(candidate))
 	             : Result<ModelImportCandidate>::Failure(valid.error);

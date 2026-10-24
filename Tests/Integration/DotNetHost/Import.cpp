@@ -16,6 +16,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 #include <Vfs/MemoryFileProvider.hpp>
+#include <Vfs/AssetRoots.hpp>
 #include <Scripting/Bindings/BindingRequirements.hpp>
 #include <iomanip>
 #include <sstream>
@@ -179,6 +180,31 @@ void TestManagedImporterRegistration(DotNetHost& host, VirtualFileSystem& filesy
 	VirtualFileSystem inputs;
 	Done(inputs.MountProvider(projectScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
 	Done(inputs.MountProvider(editorLibraryScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	const auto builtins = Take(OpenEngineFileSystem());
+	Done(inputs.MountProvider(engineScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	for (const auto& entry : Take(builtins.List(engineScheme)))
+	{
+		const auto kind = ResourceKindForPath(entry.path);
+		if (kind && kind.value == ResourceKind::Shader)
+		{
+			Done(inputs.WriteAtomic(entry.path, Take(builtins.Read(entry.path))));
+			const auto header = Take(ReadResourceHeader(builtins, entry.path));
+			Done(inputs.WriteAtomic(
+			    Take(VirtualPath::Parse(entry.path.ToString() + ".meta")),
+			    ImportJson({{"version", 1}, {"guid", ToStdString(header.id.ToString())}, {"folder", false}})));
+		}
+	}
+	auto builtinDatabase = Take(Ursa::Editor::AssetDatabase::Open(inputs, engineScheme));
+	Done(builtinDatabase->Refresh());
+	Ursa::Editor::ProjectAssetImporter builtinImporter;
+	for (const auto& asset : builtinDatabase->Assets())
+	{
+		const auto kind = ResourceKindForPath(asset.path);
+		if (!asset.metadata.folder && kind && kind.value == ResourceKind::Shader)
+		{
+			Take(builtinImporter.Import(*builtinDatabase, asset.path));
+		}
+	}
 	const VirtualPath source{projectScheme, "Generated.ursadataset"};
 	const VirtualPath definition{projectScheme, "Editor/DatasetImporter.cs"};
 	const auto sourceBytes = ImportJson({{"size", 2}, {"label", "Generated dataset"}});

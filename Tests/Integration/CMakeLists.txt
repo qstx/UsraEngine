@@ -79,6 +79,8 @@ if(URSA_ENABLE_DOTNET)
       "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ScriptedAssetImporter" --importer-registration-only)
     add_test(NAME UrsaAssetPostprocessorTests COMMAND UrsaDotNetHostTests
       "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/AssetPostprocessor" --importer-registration-only)
+    ursa_require_test_content(UrsaScriptedAssetImporterTests UrsaDotNetHostTests)
+    ursa_require_test_content(UrsaAssetPostprocessorTests UrsaDotNetHostTests)
   endif()
   ursa_attach_dotnet_host_runtime(UrsaDotNetHostTests)
   ursa_require_test_content(UrsaDotNetHostSmoke UrsaDotNetHostTests)

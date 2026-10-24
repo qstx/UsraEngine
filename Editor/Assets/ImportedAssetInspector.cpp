@@ -89,6 +89,21 @@ ImportedAssetInspector::Open(ProjectWorkspace& workspace, AssetReference referen
 			result->payload["Fields"]["name"] = ToStdString(Take(result->root->Name()));
 			result->payload["FieldTypes"]["name"] = {{"Kind", "String"}, {"TypeName", "System.String"}};
 		}
+		else if (kind == "Skeleton")
+		{
+			result->identity = "asset:ursa.Skeleton";
+			result->skeleton = Take(result->resources->LoadSkeleton(reference.guid, reference.localFileId));
+			number("jointCount", result->skeleton->joints.size());
+		}
+		else if (kind == "AnimationClip")
+		{
+			result->identity = "asset:ursa.AnimationClip";
+			result->clip = Take(result->resources->LoadAnimationClip(reference.guid, reference.localFileId));
+			number("channelCount", result->clip->channels.size());
+			result->payload["Fields"]["durationSeconds"] = result->clip->durationSeconds;
+			result->payload["FieldTypes"]["durationSeconds"] = {{"Kind", "FloatingPoint"},
+			                                                    {"TypeName", "System.Double"}};
+		}
 		else
 		{
 			throw std::runtime_error("This imported object has no resource Inspector adapter");
@@ -146,6 +161,48 @@ Result<void> ImportedAssetInspector::Draw(const std::function<Result<bool>(Manag
 		{
 			return {};
 		}
+	}
+	if (skeleton)
+	{
+		ImGui::Text("Joints: %zu", skeleton->joints.size());
+		for (Size index = 0; index < skeleton->joints.size(); ++index)
+		{
+			const auto& joint = skeleton->joints[index];
+			ImGui::PushID(static_cast<int>(index));
+			if (ImGui::TreeNode(joint.name.c_str()))
+			{
+				const auto parent = joint.parentJointIndex;
+				ImGui::Text("Parent: %s", parent >= 0 && Size(parent) < skeleton->joints.size()
+				                              ? skeleton->joints[parent].name.c_str()
+				                              : "Root");
+				const auto& bind = joint.bindLocalTransform;
+				ImGui::Text("Bind position: %.3f, %.3f, %.3f", bind.position.x, bind.position.y, bind.position.z);
+				ImGui::Text("Bind rotation: %.3f, %.3f, %.3f, %.3f", bind.rotation.x, bind.rotation.y, bind.rotation.z,
+				            bind.rotation.w);
+				ImGui::Text("Bind scale: %.3f, %.3f, %.3f", bind.scale.x, bind.scale.y, bind.scale.z);
+				ImGui::TextUnformatted("Inverse bind matrix:");
+				for (Int32 row = 0; row < 4; ++row)
+				{
+					ImGui::Text("%.3f  %.3f  %.3f  %.3f", joint.inverseBindMatrix.At(row, 0),
+					            joint.inverseBindMatrix.At(row, 1), joint.inverseBindMatrix.At(row, 2),
+					            joint.inverseBindMatrix.At(row, 3));
+				}
+				ImGui::TreePop();
+			}
+			ImGui::PopID();
+		}
+		return {};
+	}
+	if (clip)
+	{
+		ImGui::Text("Clip: %s", clip->name.c_str());
+		ImGui::Text("Duration: %.3f seconds | Channels: %zu", clip->durationSeconds, clip->channels.size());
+		for (const auto& channel : clip->channels)
+		{
+			ImGui::BulletText("Node %llu: position %zu, rotation %zu, scale %zu keys", channel.nodeLocalFileId,
+			                  channel.positions.size(), channel.rotations.size(), channel.scales.size());
+		}
+		return {};
 	}
 	try
 	{

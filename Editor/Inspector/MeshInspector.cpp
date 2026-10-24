@@ -1,6 +1,7 @@
 #include <Ui/EditorIcons.hpp>
 #include <Inspector/MeshInspector.hpp>
 #include <Assets/MeshAssetEditor.hpp>
+#include <Assets/ProjectBrowserModel.hpp>
 #include <Scene/MeshFilterComponent.hpp>
 #include <Scene/GameObject.hpp>
 #include <Scene/MeshRendererComponent.hpp>
@@ -17,34 +18,21 @@ struct Candidate
 {
 	AssetReference reference;
 	String label;
+	UInt64 mainLocalFileId = 0;
 };
 
 Vector<Candidate> Candidates(ProjectWorkspace& workspace, ResourceKind kind)
 {
 	Vector<Candidate> result;
-	for (const auto& entry : workspace.Resources())
+	for (const auto& artifact : AssetObjectChoices(workspace))
 	{
-		if (entry.location.kind == kind)
+		if (artifact.kind == (kind == ResourceKind::Mesh      ? "Mesh"
+		                      : kind == ResourceKind::Texture ? "Texture"
+		                                                      : "Material"))
 		{
-			result.push_back({{entry.id, 0}, entry.location.path.ToString()});
-		}
-	}
-	for (auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
-	{
-		if (!database)
-		{
-			continue;
-		}
-		const auto artifacts = database->ImportedArtifacts();
-		for (const auto& artifact : artifacts)
-		{
-			if (artifact.localFileId && artifact.kind == (kind == ResourceKind::Mesh      ? "Mesh"
-			                                              : kind == ResourceKind::Texture ? "Texture"
-			                                                                              : "Material"))
-			{
-				result.push_back({{artifact.guid, artifact.localFileId},
-				                  artifact.guid.ToString() + ":" + ToUrsaString(std::to_string(artifact.localFileId))});
-			}
+			result.push_back({{artifact.guid, artifact.isMainObject ? 0 : artifact.localFileId},
+			                  artifact.Label() + " - " + artifact.sourcePath.ToString(),
+			                  artifact.isMainObject ? artifact.localFileId : 0});
 		}
 	}
 	return result;
@@ -55,7 +43,9 @@ bool Picker(const char* label, AssetReference current, const Vector<Candidate>& 
 	String preview = current.guid ? current.guid.ToString() : String("None / Local");
 	for (const auto& option : options)
 	{
-		if (option.reference.guid == current.guid && option.reference.localFileId == current.localFileId)
+		if (option.reference.guid == current.guid &&
+		    (option.reference.localFileId == current.localFileId ||
+		     (!option.reference.localFileId && option.mainLocalFileId == current.localFileId)))
 		{
 			preview = option.label;
 			break;
@@ -87,8 +77,20 @@ bool Picker(const char* label, AssetReference current, const Vector<Candidate>& 
 		{
 			if (payload->DataSize == sizeof(AssetReference))
 			{
-				selected = *static_cast<const AssetReference*>(payload->Data);
-				changed = true;
+				const auto reference = *static_cast<const AssetReference*>(payload->Data);
+				const auto compatible = std::find_if(
+				    options.begin(), options.end(),
+				    [&](const auto& option)
+				    {
+					    return option.reference.guid == reference.guid &&
+					           (option.reference.localFileId == reference.localFileId ||
+					            (!option.reference.localFileId && option.mainLocalFileId == reference.localFileId));
+				    });
+				if (compatible != options.end())
+				{
+					selected = reference;
+					changed = true;
+				}
 			}
 		}
 		ImGui::EndDragDropTarget();

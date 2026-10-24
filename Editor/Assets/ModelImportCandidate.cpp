@@ -253,6 +253,17 @@ Result<void> ModelImportCandidate::Validate() const
 	{
 		return Result<void>::Failure("Invalid model auxiliary data: " + ToUrsaString(error.what()));
 	}
+	if (displayNames.size() != ids.size())
+	{
+		return Result<void>::Failure("Model candidate presentation directory does not match its outputs");
+	}
+	for (const auto& name : displayNames)
+	{
+		if (!ids.count(name.first) || name.second.empty())
+		{
+			return Result<void>::Failure("Model candidate has an invalid output display name");
+		}
+	}
 	return {};
 }
 
@@ -280,7 +291,10 @@ Result<Vector<ImportedArtifact>> ModelImportCandidate::Encode() const
 		           {"dependencies", Json::array()},
 		           {"diagnostics", Json::array()}};
 		const auto append = [&](UInt64 id, const String& kind, Vector<UInt8> bytes)
-		{ outputs.push_back({id, kind, std::move(bytes), outputKeys.at(id)}); };
+		{
+			outputs.push_back(
+			    {id, kind, std::move(bytes), outputKeys.at(id), displayNames.at(id), kind != "ModelNode"});
+		};
 		for (const auto& node : nodes)
 		{
 			auto document = NodeDocument(node);
@@ -392,7 +406,8 @@ Result<Vector<ImportedArtifact>> ModelImportCandidate::Encode() const
 			model["diagnostics"].push_back(ToStdString(diagnostic));
 		}
 		outputs.insert(outputs.begin(),
-		               {mainObjectLocalFileId, "Model", Cbor(model), outputKeys.at(mainObjectLocalFileId)});
+		               {mainObjectLocalFileId, "Model", Cbor(model), outputKeys.at(mainObjectLocalFileId),
+		                displayNames.count(mainObjectLocalFileId) ? displayNames.at(mainObjectLocalFileId) : "Model"});
 		return Result<Vector<ImportedArtifact>>::Success(std::move(outputs));
 	}
 	catch (const std::exception& error)

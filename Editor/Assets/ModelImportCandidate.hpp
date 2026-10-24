@@ -47,6 +47,7 @@ struct ModelImportCandidate
 	Map<UInt64, ModelCandidateArchive> archives;
 	Map<UInt64, std::shared_ptr<const ModelSkeleton>> skeletons;
 	Map<UInt64, String> outputKeys;
+	Map<UInt64, String> displayNames;
 	Vector<VirtualPath> dependencies;
 	Vector<String> diagnostics;
 

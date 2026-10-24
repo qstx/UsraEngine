@@ -87,8 +87,10 @@ void CompareOutputs(const ImportCacheStatus& actual, const ImportCacheStatus& ex
 	for (Size index = 0; index < actual.artifacts.size(); ++index)
 	{
 		Expect(actual.artifacts[index].localFileId == expected.artifacts[index].localFileId &&
-		           actual.artifacts[index].contentFingerprint == expected.artifacts[index].contentFingerprint,
-		       "Editor and CLI differ in generated output identity or contents");
+		           actual.artifacts[index].contentFingerprint == expected.artifacts[index].contentFingerprint &&
+		           actual.artifacts[index].displayName == expected.artifacts[index].displayName &&
+		           actual.artifacts[index].visibleInProject == expected.artifacts[index].visibleInProject,
+		       "Editor and CLI differ in generated output identity, contents or presentation directory");
 	}
 }
 
@@ -106,8 +108,9 @@ void ExpectPublished(AssetDatabase& database, ResourceId guid, const ImportCache
 	for (const auto& output : expected.artifacts)
 	{
 		const auto actual = Take(database.ResolveImportedArtifact(guid, output.localFileId));
-		Expect(actual.contentFingerprint == output.contentFingerprint && actual.size == output.size,
-		       "Failed import replaced the last published output bytes");
+		Expect(actual.contentFingerprint == output.contentFingerprint && actual.size == output.size &&
+		           actual.displayName == output.displayName && actual.visibleInProject == output.visibleInProject,
+		       "Failed import replaced the last published output bytes or presentation directory");
 	}
 }
 
@@ -287,15 +290,22 @@ public sealed class WorkflowReader : Behaviour
 		reader = Replace(reader, "ASSET_GUID", ToStdString(expectedGuid.ToString()));
 		reader = Replace(reader, "PLAYER_REPORT", (root / "PlayerReport").generic_string());
 		Write(root / "Assets/WorkflowReader.cs", reader);
+		const auto readerGuid = ResourceId::Generate();
+		const String readerType = "auto:" + readerGuid.ToString() + ":WorkflowReader";
+		Write(root / "Assets/WorkflowReader.cs.meta",
+		      nlohmann::json{{"version", 1}, {"guid", ToStdString(readerGuid.ToString())}, {"folder", false}}.dump());
 		{
 			VirtualFileSystem authorFiles;
 			Done(authorFiles.Mount(projectScheme, root / "Assets", MountAccess::ReadWrite));
 			Scene scene;
 			Take(Take(scene.CreateGameObject("Player camera"))->AddComponent<CameraComponent>());
 			const auto object = Take(scene.CreateGameObject("Runtime validation"));
-			Take(object->AddComponent<Scripting::ScriptBehaviourComponent>("WorkflowReader"))
-			    ->SetSerializedPayload(
-			        R"({"FormatVersion":1,"ScriptType":"test.workflow-reader","Version":1,"Fields":{}})");
+			Take(object->AddComponent<Scripting::ScriptBehaviourComponent>(readerType))
+			    ->SetSerializedPayload(ToUrsaString(nlohmann::json{{"FormatVersion", 1},
+			                                                       {"ScriptType", ToStdString(readerType)},
+			                                                       {"Version", 1},
+			                                                       {"Fields", nlohmann::json::object()}}
+			                                            .dump()));
 			ComponentRegistry registry;
 			Done(RegisterBuiltinComponents(registry));
 			auto document =
@@ -322,6 +332,16 @@ public sealed class WorkflowReader : Behaviour
 		const auto guid = Take(workspace->Database()->Metadata(source)).guid;
 		Expect(cli.upToDate && cli.artifacts.size() == 5 && cli.mainObjectLocalFileId,
 		       "CLI did not publish its complete typed outputs");
+		for (const auto& output : cli.artifacts)
+		{
+			const auto expected = output.kind == "Mesh"       ? "Triangle"
+			                      : output.kind == "Material" ? "Surface"
+			                      : output.kind == "Texture"  ? "Pattern"
+			                      : output.kind == "Prefab"   ? "prefab"
+			                                                  : "Settings";
+			Expect(output.displayName == expected && output.visibleInProject,
+			       "Scripted importer lost its explicit display name or legacy identifier fallback");
+		}
 		const auto playerManifest = Take(workspace->Index().Filesystem().ReadText(
 		    Take(RuntimeContentManifestPath(URSA_WORKFLOW_CONFIGURATION, "Player", "WindowsVulkan"))));
 		Expect(playerManifest.find("Ursa.Editor.dll") == String::npos &&
@@ -492,6 +512,48 @@ public sealed class WorkflowReader : Behaviour
 			       "The documented example did not open and capture its compiled importer in the actual Editor");
 			return 0;
 		}
+		const auto datasetImporterPath = root / "Assets/Editor/DatasetImporter.cs";
+		const auto datasetImporter = Read(datasetImporterPath);
+		const auto beforeRename = Take(workspace->Database()->CurrentImport(source));
+		const auto revisionBeforeRename = workspace->Database()->Revision();
+		auto renamedImporter =
+		    Replace(datasetImporter, "\"mesh\", mesh, \"Triangle\"", "\"mesh\", mesh, \"Renamed Triangle\"");
+		renamedImporter =
+		    Replace(renamedImporter, "context.AddObjectToAsset(\"mesh\", mesh, \"Renamed Triangle\");", "");
+		renamedImporter = Replace(renamedImporter, "context.AddObjectToAsset(\"prefab\", root);",
+		                          "context.AddObjectToAsset(\"prefab\", root); context.AddObjectToAsset(\"mesh\", "
+		                          "mesh, \"Renamed Triangle\");");
+		Write(datasetImporterPath, renamedImporter);
+		Take(workspace->PrepareManagedImports(URSA_WORKFLOW_CONFIGURATION, true));
+		Take(workspace->Importer().Import(*workspace->Database(), source));
+		const auto afterRename = Take(workspace->Database()->CurrentImport(source));
+		Expect(afterRename.mainObjectLocalFileId == beforeRename.mainObjectLocalFileId &&
+		           workspace->Database()->Revision() > revisionBeforeRename,
+		       "Display name edit changed the main identity or did not refresh the directory");
+		for (const auto& original : beforeRename.artifacts)
+		{
+			const auto found =
+			    std::find_if(afterRename.artifacts.begin(), afterRename.artifacts.end(),
+			                 [&](const auto& output) { return output.localFileId == original.localFileId; });
+			Expect(found != afterRename.artifacts.end() && found->contentFingerprint == original.contentFingerprint &&
+			           found->displayName == (original.kind == "Mesh" ? "Renamed Triangle" : original.displayName),
+			       "Renaming or reordering output registration changed resource identity or bytes");
+		}
+		const auto datasetPath = root / "Assets/Example.ursadataset";
+		const auto dataset = Read(datasetPath);
+		Write(datasetPath, Replace(dataset, "\"main\":\"data\"", "\"main\":\"prefab\""));
+		Take(workspace->Importer().Import(*workspace->Database(), source));
+		const auto changedMain = Take(workspace->Database()->CurrentImport(source));
+		Expect(changedMain.mainObjectLocalFileId != afterRename.mainObjectLocalFileId &&
+		           Take(workspace->Database()->ImportedObject(guid)).kind == "Prefab" &&
+		           Take(workspace->Database()->ImportedObject(guid, afterRename.mainObjectLocalFileId)).kind ==
+		               "ScriptableAsset",
+		       "Changing the main object lost a concrete output or left the zero alias on the previous type");
+		Write(datasetPath, dataset);
+		Write(datasetImporterPath, datasetImporter);
+		Take(workspace->PrepareManagedImports(URSA_WORKFLOW_CONFIGURATION, true));
+		Take(workspace->Importer().Import(*workspace->Database(), source));
+		CompareOutputs(Take(workspace->Database()->CurrentImport(source)), beforeRename);
 		const auto nativeSource = Take(VirtualPath::Parse("prj:Unrelated.bin"));
 		Write(root / "Assets/Unrelated.bin", "native cache");
 		Done(workspace->Database()->Refresh());

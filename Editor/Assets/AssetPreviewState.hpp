@@ -13,7 +13,8 @@ enum class AssetPreviewKind
 	Texture,
 	Model,
 	Mesh,
-	Prefab
+	Prefab,
+	Animation
 };
 
 struct AssetPreviewTarget

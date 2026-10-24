@@ -334,9 +334,52 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 			throw std::runtime_error("AssetField reference kind does not match its control");
 		}
 	}
-	const String preview = !value.present     ? String("None")
-	                       : current.hasAsset ? current.asset.guid.ToString()
-	                                          : current.id;
+	String preview = !value.present ? String("None") : current.hasAsset ? current.asset.guid.ToString() : current.id;
+	const auto choices = AssetChoices(scope);
+	for (const auto& asset : choices)
+	{
+		if (value.present && current.asset.guid == asset.reference.asset.guid &&
+		    (current.asset.localFileId == asset.reference.asset.localFileId ||
+		     (!current.asset.localFileId && !asset.isSubAsset)))
+		{
+			preview = asset.name;
+			break;
+		}
+	}
+	const auto compatible = [&](const EditorAssetData& asset)
+	{
+		if (kind != K::V_Asset && asset.reference.kind != kind)
+		{
+			return false;
+		}
+		if (kind == K::V_ScriptableObject)
+		{
+			const String& expectedType = scope.expectedAssetType;
+			if (!expectedType.empty())
+			{
+				if (!scope.source.scriptTypes)
+				{
+					return false;
+				}
+				const auto candidate =
+				    std::find_if(scope.source.scriptTypes->begin(), scope.source.scriptTypes->end(),
+				                 [&](const auto& type) { return type.scriptType == asset.reference.typeId; });
+				if (candidate == scope.source.scriptTypes->end() || candidate->kind != ScriptTypeKind::ScriptableObject)
+				{
+					return false;
+				}
+				const Size separator = candidate->clrTypeName.find(',');
+				const String concreteType = candidate->clrTypeName.substr(0, separator);
+				if (concreteType != expectedType &&
+				    std::find(candidate->baseTypeNames.begin(), candidate->baseTypeNames.end(), expectedType) ==
+				        candidate->baseTypeNames.end())
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	};
 	if (ImGui::BeginCombo(GuiString(label).c_str(), preview.c_str()))
 	{
 		ComboScope comboScope;
@@ -344,38 +387,11 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 		{
 			result = {};
 		}
-		for (const auto& asset : AssetChoices(scope))
+		for (const auto& asset : choices)
 		{
-			if (kind != K::V_Asset && asset.reference.kind != kind)
+			if (!compatible(asset))
 			{
 				continue;
-			}
-			if (kind == K::V_ScriptableObject)
-			{
-				const String& expectedType = scope.expectedAssetType;
-				if (!expectedType.empty())
-				{
-					if (!scope.source.scriptTypes)
-					{
-						continue;
-					}
-					const auto candidate =
-					    std::find_if(scope.source.scriptTypes->begin(), scope.source.scriptTypes->end(),
-					                 [&](const auto& type) { return type.scriptType == asset.reference.typeId; });
-					if (candidate == scope.source.scriptTypes->end() ||
-					    candidate->kind != ScriptTypeKind::ScriptableObject)
-					{
-						continue;
-					}
-					const Size separator = candidate->clrTypeName.find(',');
-					const String concreteType = candidate->clrTypeName.substr(0, separator);
-					if (concreteType != expectedType &&
-					    std::find(candidate->baseTypeNames.begin(), candidate->baseTypeNames.end(), expectedType) ==
-					        candidate->baseTypeNames.end())
-					{
-						continue;
-					}
-				}
 			}
 			const String key = asset.reference.asset.guid.ToString() + ":" +
 			                   ToUrsaString(std::to_string(asset.reference.asset.localFileId));
@@ -383,12 +399,35 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 			IdScope idScope;
 			if (ImGui::Selectable(asset.name.c_str(),
 			                      value.present && current.asset.guid == asset.reference.asset.guid &&
-			                          current.asset.localFileId == asset.reference.asset.localFileId))
+			                          (current.asset.localFileId == asset.reference.asset.localFileId ||
+			                           (!current.asset.localFileId && !asset.isSubAsset))))
 			{
 				result = {1, WriteReference(call, Resolve(scope, kind, {}, asset.reference.asset))};
 			}
 		}
 	}
+	if (ImGui::BeginDragDropTarget())
+	{
+		if (const auto* payload = ImGui::AcceptDragDropPayload("URSA_ASSET_REFERENCE"))
+		{
+			if (payload->DataSize == sizeof(AssetReference))
+			{
+				const auto reference = *static_cast<const AssetReference*>(payload->Data);
+				for (const auto& asset : choices)
+				{
+					if (asset.reference.asset.guid == reference.guid && compatible(asset) &&
+					    (asset.reference.asset.localFileId == reference.localFileId ||
+					     (!reference.localFileId && !asset.isSubAsset)))
+					{
+						result = {1, WriteReference(call, Resolve(scope, kind, {}, reference))};
+						break;
+					}
+				}
+			}
+		}
+		ImGui::EndDragDropTarget();
+	}
+
 	if (result.present)
 	{
 		result.F_value = WriteReference(call, ReadReference(scope, result.F_value));

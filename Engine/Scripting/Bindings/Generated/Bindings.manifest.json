@@ -1000,7 +1000,7 @@
     {
       "Id": 56953326496644908,
       "Name": "Import",
-      "Hash": "72fbdd3a70010cce03747c87f11724ce97b7dbd7310a7cb8f839bd84bad2e3fe",
+      "Hash": "2e814cf85b9b3aa4d4e0d655031c2d97378d3a9eb6137fc1367e66db5f854d37",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -1023,6 +1023,12 @@
             {
               "Name": "reference",
               "Type": "global::Ursa.ImportReferenceInfo",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "displayName",
+              "Type": "string",
               "HandleKind": 0,
               "Session": false
             }

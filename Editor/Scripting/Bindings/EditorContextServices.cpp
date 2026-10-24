@@ -1,6 +1,7 @@
 #include <Scripting/Bindings/EditorServices.hpp>
 #include <Assets/AssetImporterInspector.hpp>
 #include <Assets/MaterialDraft.hpp>
+#include <Assets/ProjectBrowserModel.hpp>
 #include <Assets/AssetPreviewExtension.hpp>
 #include <Runtime.generated.hpp>
 #include <Scripting/Bindings/BindingHandles.hpp>
@@ -656,82 +657,34 @@ EditorReferenceData EditorServices::Resolve(EditorInvocation& scope, UInt32 kind
 Vector<EditorAssetData> EditorServices::AssetChoices(EditorInvocation& scope)
 {
 	Vector<EditorAssetData> result;
-	Set<String> identities;
-	const auto append =
-	    [&](AssetReference asset, UInt32 kind, const String& path, const String& type, bool isSubAsset = false)
-	{
-		const String key = asset.guid.ToString() + ":" + ToUrsaString(std::to_string(asset.localFileId));
-		if (!identities.insert(key).second)
-		{
-			return;
-		}
-		EditorReferenceData reference{kind, {}, asset, true, type};
-		if (kind == K::V_ScriptableObject)
-		{
-			try
-			{
-				reference = Resolve(scope, kind, {}, asset);
-			}
-			catch (const std::exception&)
-			{
-				return;
-			}
-		}
-		result.push_back(
-		    {std::move(reference), path,
-		     path + (isSubAsset ? " / " + type + " #" + ToUrsaString(std::to_string(asset.localFileId)) : ""),
-		     isSubAsset});
-	};
 	if (scope.source.workspace)
 	{
-		Vector<AssetRecord> assets;
-		Vector<ImportedArtifactRecord> artifacts;
-		for (const auto* database : {scope.source.workspace->Database(), scope.source.workspace->BuiltinDatabase()})
+		for (const auto& object : AssetObjectChoices(*scope.source.workspace))
 		{
-			if (!database)
+			const auto path = object.sourcePath.ToString();
+			const auto kind = AssetKind(path, object.kind);
+			const AssetReference asset{object.guid, object.localFileId};
+			EditorReferenceData reference{kind, {}, asset, true, object.kind};
+			if (kind == K::V_ScriptableObject)
 			{
-				continue;
+				try
+				{
+					reference = Resolve(scope, kind, {}, asset);
+				}
+				catch (const std::exception&)
+				{
+					// Keep the last complete directory entry even when its runtime content cannot be loaded.
+				}
 			}
-			for (const auto& asset : database->Assets())
-			{
-				assets.push_back(asset);
-			}
-			for (const auto& artifact : database->ImportedArtifacts())
-			{
-				artifacts.push_back(artifact);
-			}
-		}
-		for (const auto& source : assets)
-		{
-			if (source.metadata.folder)
-			{
-				continue;
-			}
-			const auto root = std::find_if(artifacts.begin(), artifacts.end(), [&](const auto& value)
-			                               { return value.guid == source.metadata.guid && value.isMainObject; });
-			const String path = source.path.ToString();
-			append({source.metadata.guid, root == artifacts.end() ? 0 : root->localFileId},
-			       AssetKind(path, root == artifacts.end() ? String{} : root->kind), path,
-			       root == artifacts.end() ? String{} : root->kind);
-		}
-		for (const auto& artifact : artifacts)
-		{
-			const auto source = std::find_if(assets.begin(), assets.end(),
-			                                 [&](const auto& value) { return value.metadata.guid == artifact.guid; });
-			const String path = source == assets.end() ? artifact.path.ToString() : source->path.ToString();
-			append({artifact.guid, artifact.localFileId}, AssetKind(path, artifact.kind), path, artifact.kind,
-			       !artifact.isMainObject);
-		}
-		for (const auto& entry : scope.source.workspace->Resources())
-		{
-			append({entry.id, 0}, AssetKind(entry.location.path.ToString()), entry.location.path.ToString(), {});
+			result.push_back({std::move(reference), path, object.Label() + " - " + path, !object.isMainObject});
 		}
 	}
 	else if (scope.source.selection.loadContext || scope.source.documents)
 	{
 		for (const auto& entry : scope.Resources().Index().Entries())
 		{
-			append({entry.id, 0}, AssetKind(entry.location.path.ToString()), entry.location.path.ToString(), {});
+			const auto path = entry.location.path.ToString();
+			result.push_back({{AssetKind(path), {}, {entry.id, 0}, true, {}}, path, path, false});
 		}
 	}
 	return result;

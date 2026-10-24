@@ -134,7 +134,7 @@ Result<std::unique_ptr<AssetPreviewContent>> AssetPreviewContent::Load(const Ass
 				throw std::runtime_error("Texture has no readable source or imported result");
 			}
 		}
-		else if (selected.kind == AssetPreviewKind::Model)
+		else if (selected.kind == AssetPreviewKind::Model || selected.kind == AssetPreviewKind::Animation)
 		{
 			const auto artifact = Take(result->resources->ResolveAsset(guid));
 			const auto bytes = Take(result->resources->Index().Filesystem().Read(artifact));

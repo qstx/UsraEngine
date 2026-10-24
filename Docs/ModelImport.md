@@ -105,3 +105,16 @@ and is licensed CC BY 4.0; attribution is to Cesium.
 模型目录格式 2 按 Mesh 保存有序材质槽数组，保留空槽及不同 SubMesh 的材质绑定。当前读取器只接受此版本；升级后重新导入，不加载旧目录格式。
 
 模型 importer 版本为 9（内容目标 `model-v9`）。模型材质子资产与脚本生成材质统一使用当前 `.ursamat` 编码和加载器，保留 Shader、属性及纹理 GUID/local file ID；Mesh 数据版本 3 保存每网格 skin-local joint 到共享节点姿态的映射及逆绑定矩阵，兼容读取旧 Mesh 数据版本；AnimationClip 编码版本 2 保存轨道插值和三次切线。升级后重建 Library，源 GUID 和稳定输出 key 不变，Mesh、材质、骨骼和动画身份不随编码改变。
+
+
+## Project 子资产与模型节点
+
+展开模型源文件可以选择具名 Mesh、材质、内嵌 Texture、Skeleton 和 AnimationClip。主模型由源文件行代表，ModelNode 不作为平级资源展示；外部图片仍是它自己源文件的资产。Project 搜索支持可见子资产名称和类型，并显示所属模型源路径。
+
+模型 Inspector 的 Hierarchy 按源父子关系显示空节点、网格节点和骨骼节点，选中节点可检查只读局部位置、旋转、缩放及具名网格关联。该检查不创建 Scene 对象，也不修改导入草稿。实例化模型后，实际 GameObject 节点可在场景 Hierarchy 中展开、选中并按既有文档流程保存。
+
+选中 Skeleton 显示关节和绑定信息；选中 AnimationClip 显示时长、通道及其所属模型中的片段预览，复用现有播放、暂停和定位功能。无可呈现模型时保留片段信息并报告预览不可用，不把动画或骨骼数据当作模型加载。
+
+Library 导入目录使用格式 4，旧目录需重新导入以获得名称和可见性。该升级不改变源 GUID、既有输出 key 或引用格式；原本含源名称/索引的 key 仍受既有源结构稳定性约束。
+
+界面、字段引用和跨流程验证见 [Unity 风格导入资产验收](UnityImportedAssetsAcceptance.md)。

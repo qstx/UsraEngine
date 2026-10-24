@@ -134,12 +134,26 @@ void EditableGraph()
 	child.parentLocalFileId = originalNodeId;
 	child.name = "Created by postprocessor";
 	candidate.outputKeys[addedId] = "node:postprocessor-created";
+	candidate.displayNames[addedId] = child.name;
 	candidate.nodes.push_back(std::move(child));
 	auto positions = candidate.meshes.at(meshId)->Snapshot()->data.positions;
 	positions[0].z = 2;
 	Done(candidate.meshes.at(meshId)->SetVertices(std::move(positions)));
 	Done(candidate.materials.at(materialId).material->SetBaseColor({.1f, .7f, .2f, 1}));
 	const auto outputs = Take(candidate.Encode());
+	Expect(candidate.displayNames.at(meshId) == "Triangle" && candidate.displayNames.at(materialId) == "Red",
+	       "OBJ source names were replaced with stable keys");
+	for (const auto& output : outputs)
+	{
+		Expect(!output.displayName.empty() && output.visibleInProject == (output.kind != "ModelNode"),
+		       "Encoded model output lost its name or exposed an internal hierarchy node");
+	}
+	auto invalidNames = candidate;
+	invalidNames.displayNames.erase(meshId);
+	Expect(!invalidNames.Encode(), "An incomplete presentation directory was encoded");
+	invalidNames = candidate;
+	invalidNames.displayNames[1234] = "Dangling output";
+	Expect(!invalidNames.Encode(), "A dangling presentation descriptor was encoded");
 	Expect(!Take(files.Exists(Path("lib:AssetDatabase/prj.json"))), "Candidate encoding published to the real Library");
 	const auto model = nlohmann::json::from_cbor(outputs.front().bytes.begin(), outputs.front().bytes.end());
 	const auto edited =
@@ -231,6 +245,8 @@ void FbxCandidates(const char* fixture, const char* source, bool animated)
 	Done(editable.Apply());
 	Expect(candidate.rootNodeLocalFileId == originalRoot && candidate.animationOrder == originalClips,
 	       "Private model view changed original node or animation identities");
+	Expect(candidate.displayNames.at(originalRoot) == "Processed FBX",
+	       "Postprocessed node names did not follow their stable identity");
 	Expect(std::none_of(candidate.nodes.begin(), candidate.nodes.end(),
 	                    [](const auto& node) { return node.name == "Removed before publication"; }),
 	       "Deleted temporary model node survived publication");

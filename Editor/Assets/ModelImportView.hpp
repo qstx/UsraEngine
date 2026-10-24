@@ -28,6 +28,18 @@ public:
 		settingsInspector = std::move(value);
 	}
 
+	void SetObjectSelection(std::function<void(AssetReference)> callback)
+	{
+		selectObject = std::move(callback);
+	}
+
+	UInt64 SelectedNode() const
+	{
+		return selectedNode;
+	}
+
+	Result<void> SelectNode(UInt64 localFileId);
+
 	Result<void> Instantiate(SceneDraft& draft) const;
 	Result<std::shared_ptr<AssetImporterInspector>> SettingsInspector(AssetDatabase& database);
 	bool HasModifiedSettings() const;
@@ -56,6 +68,8 @@ private:
 	nlohmann::json document;
 	String diagnostic;
 	bool hasImported = false;
+	UInt64 selectedNode = 0;
+	std::function<void(AssetReference)> selectObject;
 	std::shared_ptr<AssetImporterInspector> settingsInspector;
 };
 } // namespace Ursa::Editor

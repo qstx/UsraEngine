@@ -245,10 +245,11 @@ int main()
 		auto scriptBuild = Take(AssetImportPipeline::Prepare(*scriptableWorkspace, options));
 		const auto typeCatalog = nlohmann::json::parse(
 		    ToStdString(Take(scriptableFiles.ReadText(Path("lib:ScriptBuild/Catalog/ScriptTypeCatalog.json")))));
-		const auto type =
-		    std::find_if(typeCatalog.at("Scripts").begin(), typeCatalog.at("Scripts").end(),
-		                 [](const auto& record) { return record.at("ScriptType") == "demo.render-settings"; });
+		const auto type = std::find_if(
+		    typeCatalog.at("Scripts").begin(), typeCatalog.at("Scripts").end(), [](const auto& record)
+		    { return record.at("ClrTypeName").template get<std::string>().find("Demo.RenderSettings,") == 0; });
 		Expect(type != typeCatalog.at("Scripts").end(), "Script build omitted the ScriptableObject type");
+		const auto renderTypeId = ToUrsaString(type->at("ScriptType").get<std::string>());
 		Expect(type->at("IsRenderPipeline").get<bool>(), "Catalog did not identify the derived pipeline asset");
 		const auto settingsPath = Path("prj:Settings.ursaasset");
 		Text(scriptableFiles, settingsPath, "{}");
@@ -290,13 +291,13 @@ int main()
 		                                    {"ElementKind", "SignedInteger"},
 		                                    {"TypeName", "System.Int32[]"},
 		                                    {"ElementTypeName", "System.Int32"}};
-		Done(settings.SetDescription(settingsMetadata.guid, 1, "demo.render-settings", 1, std::move(payload)));
+		Done(settings.SetDescription(settingsMetadata.guid, 1, renderTypeId, 1, std::move(payload)));
 		Done(SaveScriptableAssetSource(scriptableFiles, settingsPath, settings));
 		Done(scriptableWorkspace->Refresh());
 		ScriptTypeDescriptor pipelineType;
 		pipelineType.sourceGuid = typeMetadata.guid;
 		pipelineType.localFileId = type->at("LocalFileId").get<UInt64>();
-		pipelineType.scriptType = "demo.render-settings";
+		pipelineType.scriptType = renderTypeId;
 		pipelineType.kind = ScriptTypeKind::ScriptableObject;
 		pipelineType.isRenderPipeline = true;
 		const auto validatePipeline = [&](AssetReference reference)
@@ -314,9 +315,9 @@ int main()
 		Expect(!Rendering::EncodeGraphicsSettings({{settingsMetadata.guid, 0}}) &&
 		           !Rendering::EncodeGraphicsSettings({{{}, 1}}),
 		       "Graphics settings accepted an incomplete stable asset identity");
-		const auto otherType =
-		    std::find_if(typeCatalog.at("Scripts").begin(), typeCatalog.at("Scripts").end(),
-		                 [](const auto& record) { return record.at("ScriptType") == "demo.other-settings"; });
+		const auto otherType = std::find_if(
+		    typeCatalog.at("Scripts").begin(), typeCatalog.at("Scripts").end(), [](const auto& record)
+		    { return record.at("ClrTypeName").template get<std::string>().find("Demo.OtherSettings,") == 0; });
 		Expect(otherType != typeCatalog.at("Scripts").end() && !otherType->at("IsRenderPipeline").get<bool>(),
 		       "Catalog accepted an ordinary ScriptableObject as a pipeline");
 		const auto otherPath = Path("prj:OtherSettings.ursaasset");
@@ -324,7 +325,8 @@ int main()
 		Done(scriptableWorkspace->Refresh());
 		const auto otherMetadata = Take(scriptableWorkspace->Database()->Metadata(otherPath));
 		ScriptableAsset otherSettings;
-		Done(otherSettings.SetDescription(otherMetadata.guid, 1, "demo.other-settings", 1,
+		Done(otherSettings.SetDescription(otherMetadata.guid, 1,
+		                                  ToUrsaString(otherType->at("ScriptType").get<std::string>()), 1,
 		                                  {{"SourceGuid", typeMetadata.guid.ToString().c_str()},
 		                                   {"LocalFileId", otherType->at("LocalFileId").get<UInt64>()},
 		                                   {"Fields", nlohmann::json::object()},
@@ -371,7 +373,7 @@ int main()
 		           Take(scriptableResources->LoadShader(shaderMetadata.guid))->id == shaderMetadata.guid,
 		       "ScriptableAsset material or Shader dependency was not published for loose runtime loading");
 		auto settingsGraph = Take(LoadScriptableAssetGraph(*scriptableResources, {settingsMetadata.guid, 1}));
-		Expect(settingsGraph.assets.size() == 1 && settingsGraph.assets[0].TypeId() == "demo.render-settings",
+		Expect(settingsGraph.assets.size() == 1 && settingsGraph.assets[0].TypeId() == renderTypeId,
 		       "Loose runtime did not load the imported ScriptableAsset artifact");
 		VirtualFileSystem scriptablePackageOutput;
 		Done(scriptablePackageOutput.MountProvider("out", std::make_shared<MemoryFileProvider>(),

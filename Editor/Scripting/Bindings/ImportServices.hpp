@@ -40,6 +40,7 @@ struct ImportObjectRegistration
 	UInt32 kind = 0;
 	UInt64 instance = 0;
 	Scripting::ManagedHandle handle;
+	String displayName;
 };
 
 struct ImportMaterialTextureBinding
@@ -203,7 +204,8 @@ struct ImportServices
 	static Result<void> EndInvocation(B::BindingCall& call);
 	static Result<B::DataView> ReadSourceBytes(B::BindingCall& call);
 	static Result<void> AddObject(B::BindingCall& call, const B::Utf8View& key,
-	                              const B::Wire::Value_Ursa_ImportReferenceInfo& reference);
+	                              const B::Wire::Value_Ursa_ImportReferenceInfo& reference,
+	                              const B::Utf8View& displayName);
 	static Result<void> SetMainObject(B::BindingCall& call, UInt64 token);
 	static Result<B::DataView> ReadSourceAsset(B::BindingCall& call, const B::Utf8View& path);
 	static Result<void> DependsOnSourceAsset(B::BindingCall& call, const B::Utf8View& path);

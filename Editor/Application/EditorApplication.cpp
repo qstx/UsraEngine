@@ -383,7 +383,7 @@ void EditorApplication::DrawImporterSelectionPrompt()
 		assetImporterInspector.reset();
 		if (next.kind == EditorSelectionKind::Asset)
 		{
-			selectionContext.SelectAsset(next.assetPath, next.assetLocalFileId, next.assetKind);
+			selectionContext.SelectAsset(next.assetPath, next.assetLocalFileId, next.assetKind, next.assetGuid);
 			projectBrowser.SelectAsset(next.assetPath);
 		}
 		else if (next.kind == EditorSelectionKind::GameObject)
@@ -2934,10 +2934,9 @@ Result<void> EditorApplication::OnGui()
 			{
 				refreshed = projectBrowser.Refresh(*workspace);
 			}
-			if (refreshed && projectBrowser.SelectedAsset().scheme.empty() &&
-			    selectionContext.kind == EditorSelectionKind::Asset)
+			if (refreshed)
 			{
-				selectionContext.Clear();
+				projectBrowser.ReconcileSelection(selectionContext);
 			}
 			return refreshed;
 		};
@@ -3120,6 +3119,7 @@ Result<void> EditorApplication::OnGui()
 	{
 		auto* selectedDocument = assetInspectorPanel.SelectedDocument(selectionContext);
 		assetPreview->SetExtensionResolver([this](ManagedEditorContext& context) { ConfigureAssetPreview(context); });
+		projectBrowser.ReconcileSelection(selectionContext);
 		auto prepared = assetPreview->Prepare(*workspace, projectBrowser, selectionContext,
 		                                      selectedDocument ? selectedDocument
 		                                      : documents      ? documents->Current()
@@ -3259,6 +3259,18 @@ Result<void> EditorApplication::OnGui()
 								    };
 							    }
 						    }
+						    modelImportView->SetObjectSelection(
+						        [this](AssetReference reference)
+						        {
+							        const auto object =
+							            workspace->Database()->ImportedObject(reference.guid, reference.localFileId);
+							        if (object &&
+							            selectionContext.SelectAsset(object.value.sourcePath, object.value.localFileId,
+							                                         object.value.kind, reference.guid))
+							        {
+								        projectBrowser.ReconcileSelection(selectionContext);
+							        }
+						        });
 						    drawn = modelImportView->Draw(*workspace->Database(), workspace->Importer(), canApply,
 						                                  instantiate, request, workspace.get(), custom, true);
 					    }

@@ -1,6 +1,8 @@
 #include <Assets/ProjectBrowserModel.hpp>
+#include <Assets/AssetImportRules.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceId.hpp>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -82,8 +84,114 @@ int main()
 		Expect(renamedAssets.size() == 1 && renamedAssets.front().name == "Renamed.png" &&
 		           renamedAssets.front().guid == textureGuid,
 		       "Project rename did not preserve the asset GUID in the browser");
-		Expect(model.CurrentFolder() == "Textures" && model.SelectedAsset().scheme.empty(),
-		       "Browser selection was not cleared after its asset was renamed");
+		Expect(model.CurrentFolder() == "Textures" && model.SelectedAsset() == renamedAssets.front().path,
+		       "Browser did not preserve source identity after its asset was renamed");
+
+		const auto source = renamedAssets.front().path;
+		const auto mainId = StableImportObjectId("test", "main").value;
+		const auto meshA = StableImportObjectId("test", "mesh-a").value;
+		const auto meshB = StableImportObjectId("test", "mesh-b").value;
+		const auto nodeId = StableImportObjectId("test", "node").value;
+		Vector<ImportedArtifact> outputs{{mainId, "Prefab", {1}, "main", "Root"},
+		                                 {meshA, "Mesh", {2}, "mesh-a", "Body"},
+		                                 {meshB, "Mesh", {3}, "mesh-b", "Body"},
+		                                 {nodeId, "ModelNode", {4}, "node", "Private joint", false}};
+		auto* database = workspace.value->Database();
+		Expect(bool(database->PublishImport(source, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, mainId)),
+		       "Cannot publish browser presentation fixture");
+		Expect(bool(model.Refresh(*workspace.value)), "Cannot refresh presentation fixture");
+		const auto* entry = model.Find(textureGuid);
+		Expect(entry && entry->VisibleChildren().size() == 2 && entry->importedObjects.size() == 4,
+		       "Browser duplicated main object or displayed internal nodes");
+		const auto children = entry->VisibleChildren();
+		Expect(children[0].Label() != children[1].Label() && children[0].displayName == "Body",
+		       "Same-name outputs are not distinguishable without changing author names");
+		Expect(model.ChildAssets({}, "BODY").size() == 1 && model.ChildAssets({}, "Private joint").empty(),
+		       "Browser did not search child names or leaked hidden node names");
+		const auto other = VirtualPath::Parse("prj:Other.shape").value;
+		WriteFile(assets / "Other.shape", "other source");
+		Expect(
+		    bool(database->Refresh()) &&
+		        bool(database->PublishImport(other, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, mainId)) &&
+		        bool(model.Refresh(*workspace.value)),
+		    "Cannot prepare another source with same-named children");
+		const auto sameNameSources = model.ChildAssets({}, "Body");
+		Expect(sameNameSources.size() == 2 && sameNameSources[0].guid != sameNameSources[1].guid &&
+		           sameNameSources[0].path != sameNameSources[1].path,
+		       "Child search did not distinguish matching source paths");
+		Expect(bool(database->Remove(other)) && bool(model.Refresh(*workspace.value)), "Cannot remove search fixture");
+		EditorSelectionContext selection;
+		selection.SelectAsset(source, meshA, "Mesh", textureGuid);
+		model.ReconcileSelection(selection);
+		Expect(!selection.assetMissing && selection.assetRole == EditorAssetSelectionRole::ImportedObject,
+		       "Precise imported selection was not reconciled");
+		selection.beforeChange = [](const auto&) { return false; };
+		Expect(!selection.SelectAsset(source) && selection.assetLocalFileId == meshA,
+		       "Rejected selection switched from the selected object");
+		selection.beforeChange = {};
+		const auto moved = VirtualPath::Parse("prj:Moved.png").value;
+		Expect(bool(database->Move(source, moved)) && bool(model.Refresh(*workspace.value)),
+		       "Cannot move selected source");
+		model.ReconcileSelection(selection);
+		Expect(!selection.assetMissing && selection.assetPath == moved && selection.assetLocalFileId == meshA,
+		       "Moving the source lost the selected child identity");
+		outputs.erase(outputs.begin() + 1);
+		Expect(bool(database->PublishImport(moved, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, mainId)) &&
+		           bool(model.Refresh(*workspace.value)),
+		       "Cannot remove selected output");
+		model.ReconcileSelection(selection);
+		Expect(selection.assetMissing && selection.assetLocalFileId == meshA && selection.assetGuid == textureGuid,
+		       "Deleted object silently rebound to its same-name neighbour");
+		outputs.insert(outputs.begin() + 1, {meshA, "Mesh", {2}, "mesh-a", "Torso"});
+		Expect(bool(database->PublishImport(moved, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, mainId)) &&
+		           bool(model.Refresh(*workspace.value)),
+		       "Cannot restore selected output");
+		model.ReconcileSelection(selection);
+		Expect(!selection.assetMissing && selection.assetLocalFileId == meshA,
+		       "Restoring the same stable output failed to recover its selection");
+		outputs[1].visibleInProject = false;
+		Expect(bool(database->PublishImport(moved, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, mainId)) &&
+		           bool(model.Refresh(*workspace.value)),
+		       "Cannot hide selected output");
+		model.ReconcileSelection(selection);
+		Expect(!selection.assetMissing && model.Find(textureGuid)->VisibleChildren().size() == 1,
+		       "Hiding an object removed its identity or kept it in the visible list");
+		std::reverse(outputs.begin(), outputs.end());
+		Expect(bool(database->PublishImport(moved, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, meshB)) &&
+		           bool(model.Refresh(*workspace.value)),
+		       "Cannot reorder outputs or change the main object");
+		model.ReconcileSelection(selection);
+		Expect(!selection.assetMissing && selection.assetLocalFileId == meshA &&
+		           database->ImportedObject(textureGuid).value.localFileId == meshB,
+		       "Main-object change or directory order rebound a concrete selection");
+		const auto choices = AssetObjectChoices(*workspace.value);
+		Expect(std::count_if(choices.begin(), choices.end(), [&](const auto& object)
+		                     { return object.guid == textureGuid && object.isMainObject; }) == 1 &&
+		           std::none_of(choices.begin(), choices.end(),
+		                        [&](const auto& object)
+		                        {
+			                        return object.guid == textureGuid &&
+			                               (object.localFileId == meshA || object.localFileId == nodeId);
+		                        }),
+		       "Chooser duplicated the main alias or included hidden outputs");
+		const auto parent = VirtualPath::Parse("prj:Container").value;
+		const auto nested = VirtualPath::Parse("prj:Container/Moved.png").value;
+		Expect(bool(database->CreateFolder(parent)) && bool(database->Move(moved, nested)) &&
+		           bool(database->Move(parent, VirtualPath::Parse("prj:RenamedContainer").value)) &&
+		           bool(model.Refresh(*workspace.value)),
+		       "Cannot move a selected source's parent folder");
+		model.ReconcileSelection(selection);
+		Expect(selection.assetPath == VirtualPath::Parse("prj:RenamedContainer/Moved.png").value &&
+		           !selection.assetMissing,
+		       "Parent-folder move lost the selected source GUID");
+		Expect(bool(database->Remove(selection.assetPath)) && bool(model.Refresh(*workspace.value)),
+		       "Cannot delete selected source");
+		model.ReconcileSelection(selection);
+		Expect(selection.assetMissing && selection.assetGuid == textureGuid && selection.assetLocalFileId == meshA,
+		       "Deleting a source discarded its missing exact selection");
+		selection.SelectGameObject(ResourceId::Generate(), ResourceId::Generate());
+		Expect(!selection.assetGuid && !selection.assetMissing && selection.kind == EditorSelectionKind::GameObject,
+		       "GameObject selection retained a missing asset identity");
 
 		std::filesystem::remove_all(root);
 		return 0;

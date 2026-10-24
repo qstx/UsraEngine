@@ -43,50 +43,38 @@ String LocalFileIdText(Ursa::UInt64 localFileId)
 	return ToUrsaString(std::to_string(localFileId));
 }
 
-void DrawModelNode(const Json& nodes, Ursa::UInt64 localFileId, ResourceId modelGuid)
+void DrawModelNode(const Json& nodes, UInt64 localFileId, UInt64& selected)
 {
-	for (const Json& node : nodes)
+	for (const auto& node : nodes)
 	{
-		if (node.value("localFileId", Ursa::UInt64{0}) != localFileId)
+		if (node.value("localFileId", UInt64{0}) != localFileId)
 		{
 			continue;
 		}
 		const String name = ToUrsaString(node.value("name", std::string("Node")));
-		const String id = LocalFileIdText(localFileId);
-		if (ImGui::TreeNode((name + "##" + id).c_str()))
+		const auto key = name + "##" + LocalFileIdText(localFileId);
+		const auto flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
+		                   ImGuiTreeNodeFlags_SpanAvailWidth |
+		                   (selected == localFileId ? ImGuiTreeNodeFlags_Selected : 0) |
+		                   (!node.value("parentLocalFileId", UInt64{0}) ? ImGuiTreeNodeFlags_DefaultOpen : 0) |
+		                   (node.value("children", Json::array()).empty() ? ImGuiTreeNodeFlags_Leaf : 0);
+		const bool open = ImGui::TreeNodeEx(key.c_str(), flags);
+		if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
 		{
-			const Json transform = node.value("transform", Json::array());
-			if (transform.size() == 16)
+			selected = localFileId;
+		}
+		if (open)
+		{
+			for (const auto& child : node.value("children", Json::array()))
 			{
-				ImGui::Text("Position: %.3f, %.3f, %.3f", transform[3].get<float>(), transform[7].get<float>(),
-				            transform[11].get<float>());
-			}
-			if (node.contains("meshLocalFileIds"))
-			{
-				for (const Json& meshId : node["meshLocalFileIds"])
-				{
-					ImGui::BulletText("Mesh local ID: %s", LocalFileIdText(meshId.get<Ursa::UInt64>()).c_str());
-					if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
-					{
-						const AssetReference reference{modelGuid, meshId.get<UInt64>()};
-						ImGui::SetDragDropPayload("URSA_ASSET_REFERENCE", &reference, sizeof(reference));
-						ImGui::TextUnformatted("Mesh sub-asset");
-						ImGui::EndDragDropSource();
-					}
-				}
-			}
-			if (node.contains("children"))
-			{
-				for (const Json& child : node["children"])
-				{
-					DrawModelNode(nodes, child.get<Ursa::UInt64>(), modelGuid);
-				}
+				DrawModelNode(nodes, child.get<UInt64>(), selected);
 			}
 			ImGui::TreePop();
 		}
 		return;
 	}
 }
+
 } // namespace
 
 Result<std::unique_ptr<ModelImportView>> ModelImportView::Open(VirtualPath source, ModelImportSettings settings)
@@ -115,6 +103,11 @@ Result<void> ModelImportView::RefreshImportedDocument(const VirtualFileSystem& f
 		                             imported.artifactPath.ToString());
 	}
 	document = std::move(loaded.value);
+	if (std::none_of(document["nodes"].begin(), document["nodes"].end(),
+	                 [&](const auto& node) { return node.value("localFileId", UInt64{0}) == selectedNode; }))
+	{
+		selectedNode = document.value("rootNodeLocalFileId", UInt64{0});
+	}
 	hasImported = true;
 	return {};
 }
@@ -158,6 +151,17 @@ Result<void> ModelImportView::Reimport(AssetDatabase& database, ProjectAssetImpo
 		return refreshed;
 	}
 	diagnostic.clear();
+	return {};
+}
+
+Result<void> ModelImportView::SelectNode(UInt64 localFileId)
+{
+	if (!hasImported || std::none_of(document["nodes"].begin(), document["nodes"].end(), [&](const auto& node)
+	                                 { return node.value("localFileId", UInt64{0}) == localFileId; }))
+	{
+		return Result<void>::Failure("The selected model hierarchy node is missing");
+	}
+	selectedNode = localFileId;
 	return {};
 }
 
@@ -254,26 +258,46 @@ Result<void> ModelImportView::Draw(AssetDatabase& database, ProjectAssetImporter
 		ImGui::TextDisabled("GUID: %s", imported.guid.ToString().c_str());
 		if (ImGui::TreeNode("Hierarchy"))
 		{
-			DrawModelNode(document["nodes"], document.value("rootNodeLocalFileId", Ursa::UInt64{0}), imported.guid);
+			DrawModelNode(document["nodes"], document.value("rootNodeLocalFileId", UInt64{0}), selectedNode);
+			for (const auto& node : document["nodes"])
+			{
+				if (node.value("localFileId", UInt64{0}) != selectedNode)
+				{
+					continue;
+				}
+				ImGui::SeparatorText("Node (read-only)");
+				ImGui::TextUnformatted(node.value("name", std::string("Node")).c_str());
+				if (node.contains("localTransform"))
+				{
+					for (const char* field : {"position", "rotation", "scale"})
+					{
+						const auto text = node["localTransform"].value(field, Json::array()).dump();
+						ImGui::Text("%s: %s", field, text.c_str());
+					}
+				}
+				for (const auto& id : node.value("meshLocalFileIds", Json::array()))
+				{
+					const auto object = database.ImportedObject(imported.guid, id.get<UInt64>());
+					if (object && Icons::Selectable(Icons::Icon::Mesh, object.value.Label().c_str()) && selectObject)
+					{
+						selectObject({imported.guid, object.value.localFileId});
+					}
+				}
+			}
 			ImGui::TreePop();
 		}
 		if (ImGui::TreeNode("Sub-assets"))
 		{
-			for (const ImportedArtifactLocation& subAsset : imported.subAssets)
+			for (const auto& object : database.VisibleImportedObjects())
 			{
-				if (subAsset.localFileId == imported.mainObjectLocalFileId)
+				if (object.guid != imported.guid || object.isMainObject)
 				{
 					continue;
 				}
-				auto record = ReadCbor(database.Filesystem(), subAsset.path);
-				if (!record)
+				if (Icons::Selectable(Icons::Icon::File, object.Label().c_str()) && selectObject)
 				{
-					ImGui::BulletText("%s: %s", subAsset.kind.c_str(), record.error.c_str());
-					continue;
+					selectObject({object.guid, object.localFileId});
 				}
-				const String name = ToUrsaString(record.value.value("name", std::string(subAsset.kind.c_str())));
-				ImGui::BulletText("%s: %s (local ID %s)", subAsset.kind.c_str(), name.c_str(),
-				                  LocalFileIdText(subAsset.localFileId).c_str());
 			}
 			ImGui::TreePop();
 		}

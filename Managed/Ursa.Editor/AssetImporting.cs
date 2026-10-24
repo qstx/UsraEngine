@@ -78,9 +78,14 @@ public sealed class AssetImportContext
 	}
 	public void AddObjectToAsset(string identifier, object value)
 	{
+		AddObjectToAsset(identifier, value, identifier);
+	}
+	public void AddObjectToAsset(string identifier, object value, string displayName)
+	{
 		RequireValid();
 		ArgumentNullException.ThrowIfNull(value);
-		NativeImportBindings.AddObject(identifier, ImportExecution.ReferenceFor(value));
+		NativeImportBindings.AddObject(identifier, ImportExecution.ReferenceFor(value),
+			string.IsNullOrWhiteSpace(displayName) ? identifier : displayName);
 	}
 	public void SetMainObject(object value)
 	{

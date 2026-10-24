@@ -50,6 +50,8 @@ struct ImportedArtifact
 	String kind;
 	Vector<Ursa::UInt8> bytes;
 	String outputKey;
+	String displayName;
+	bool visibleInProject = true;
 };
 
 struct ImportedArtifactLocation
@@ -60,6 +62,8 @@ struct ImportedArtifactLocation
 	String contentFingerprint;
 	Ursa::UInt64 size = 0;
 	String outputKey;
+	String displayName;
+	bool visibleInProject = true;
 };
 
 struct ImportedArtifactRecord
@@ -69,6 +73,13 @@ struct ImportedArtifactRecord
 	String kind;
 	VirtualPath path;
 	bool isMainObject = false;
+	String displayName;
+	bool visibleInProject = true;
+	VirtualPath sourcePath;
+	String outputKey;
+
+	String Label() const;
+	bool ambiguousName = false;
 };
 
 struct ImportCacheStatus
@@ -120,6 +131,8 @@ public:
 	Result<Vector<ImportedArtifactRecord>> CurrentImportedArtifacts();
 
 	Vector<ImportedArtifactRecord> ImportedArtifacts() const;
+	Vector<ImportedArtifactRecord> VisibleImportedObjects() const;
+	Result<ImportedArtifactRecord> ImportedObject(ResourceId guid, UInt64 localFileId = 0) const;
 
 	Result<ImportCacheStatus> CurrentImport(const VirtualPath& source);
 
@@ -214,6 +227,8 @@ private:
 	Map<String, String> selectedImports;
 	bool cacheLoaded = false;
 	Ursa::UInt64 revision = 0;
+	mutable Ursa::UInt64 presentationRevision = UInt64(-1);
+	mutable Vector<ImportedArtifactRecord> presentationDirectory;
 	bool capturingCandidates = false;
 	Set<String> candidatePublications;
 };

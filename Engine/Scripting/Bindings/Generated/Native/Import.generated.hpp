@@ -8,7 +8,7 @@ namespace Ursa::Scripting::Bindings::Import
 inline constexpr UInt64 moduleId = 0x00ca56bfaa9bff2cull;
 struct Table
 {
-	Int32 (*NativeImportBindings_AddObject)(void*, const Utf8View*, const Wire::Value_Ursa_ImportReferenceInfo*, BindingOutcome*) = nullptr;
+	Int32 (*NativeImportBindings_AddObject)(void*, const Utf8View*, const Wire::Value_Ursa_ImportReferenceInfo*, const Utf8View*, BindingOutcome*) = nullptr;
 	Int32 (*NativeImportBindings_BeginInvocation)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeImportBindings_CreateTexture2D)(void*, UInt32, UInt32, UInt32, Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
 	Int32 (*NativeImportBindings_DependsOnArtifact)(void*, const Wire::Value_Ursa_NativeAssetReference*, BindingOutcome*) = nullptr;
@@ -35,7 +35,7 @@ struct Table
 };
 // Contract: Ursa.Runtime/NativeImport.bindings.cs:40
 #line 40 "Ursa.Runtime/NativeImport.bindings.cs"
-inline Int32 NativeImportBindings_AddObject(void* context, const Utf8View* p_key, const Wire::Value_Ursa_ImportReferenceInfo* p_reference, BindingOutcome* outcome) noexcept
+inline Int32 NativeImportBindings_AddObject(void* context, const Utf8View* p_key, const Wire::Value_Ursa_ImportReferenceInfo* p_reference, const Utf8View* p_displayName, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
 	{
@@ -43,9 +43,11 @@ inline Int32 NativeImportBindings_AddObject(void* context, const Utf8View* p_key
 		Check_Wire_473287f8298dba71(*p_key);
 		if (!p_reference) throw std::runtime_error("Null binding parameter: reference");
 		Check_Wire_0b4be8acef6d9acf(*p_reference);
-		using TargetSignature = Result<void> (*)(BindingCall&, const Utf8View&, const Wire::Value_Ursa_ImportReferenceInfo&);
+		if (!p_displayName) throw std::runtime_error("Null binding parameter: displayName");
+		Check_Wire_473287f8298dba71(*p_displayName);
+		using TargetSignature = Result<void> (*)(BindingCall&, const Utf8View&, const Wire::Value_Ursa_ImportReferenceInfo&, const Utf8View&);
 		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::ImportServices::AddObject), TargetSignature>, "Native binding target signature mismatch: Ursa.NativeImportBindings.AddObject");
-		CompleteBindingResult(::Ursa::Editor::Bindings::ImportServices::AddObject(call, *p_key, *p_reference));
+		CompleteBindingResult(::Ursa::Editor::Bindings::ImportServices::AddObject(call, *p_key, *p_reference, *p_displayName));
 	});
 }
 #line 1 "Import.generated.hpp"
@@ -423,7 +425,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeImportBindings_SetTexture2DPixels,
 		&NativeImportBindings_SetTextureSettings,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 24, &table, &ValidateBindingContext, {0x72, 0xfb, 0xdd, 0x3a, 0x70, 0x01, 0x0c, 0xce, 0x03, 0x74, 0x7c, 0x87, 0xf1, 0x17, 0x24, 0xce, 0x97, 0xb7, 0xdb, 0xd7, 0x31, 0x0a, 0x7c, 0xb8, 0xf8, 0x39, 0xbd, 0x84, 0xba, 0xd2, 0xe3, 0xfe}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 24, &table, &ValidateBindingContext, {0x2e, 0x81, 0x4c, 0xf8, 0x5b, 0x9b, 0x3a, 0xa4, 0xd4, 0xe0, 0xd6, 0x55, 0x03, 0x1c, 0x2d, 0x97, 0x37, 0x8d, 0x3a, 0x9e, 0xb6, 0x13, 0x7f, 0xc1, 0x36, 0x7e, 0x66, 0xdb, 0x5f, 0x85, 0x4d, 0x37}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Import

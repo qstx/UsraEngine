@@ -6,7 +6,7 @@
 
 `ProjectWorkspace::InitializeBuiltinAssets()` 在已挂载的内置源上建立只读数据库，与项目数据库共用项目缓存归属。`BuiltinDatabase()` 用于查询内置元数据及导入记录；`AssetResolver()` 统一按 GUID/local file ID 分派。缺失内置元数据返回诊断，不能通过 Editor 写回引擎来源创建或修复身份。
 
-导入索引位于 `lib:AssetDatabase/<scheme>.json`，当前缓存格式版本为 2。原版本缓存不会被宣布为当前结果，可从源和元数据重新导入。`CheckImport` 按源身份及目标查找记录，并比较源、元数据、依赖、设置、导入器版本及输出完整性；不同目标保留各自的记录。命中某目标后，在当前数据库中选择其产物供后续解析；成功发布将选择状态持久化。
+导入索引位于 `lib:AssetDatabase/<scheme>.json`，当前缓存格式版本为 4。原版本缓存不会被宣布为当前结果，可从源和元数据重新导入。`CheckImport` 按源身份及目标查找记录，并比较源、元数据、依赖、设置、导入器版本及输出完整性；不同目标保留各自的记录。命中某目标后，在当前数据库中选择其产物供后续解析；成功发布将选择状态持久化。
 
 `PublishImport` 将产物写入 `lib:Artifacts/<输入指纹>/`，记录内容指纹与字节数。删除或损坏输出将导致缓存失效，可以重新导入恢复；失败发布不替换持久索引。项目之间的数据库及产物互相独立。
 
@@ -79,3 +79,12 @@ CTest 显式 fixture 在构建目录的 `TestProjects/Runtime/<配置>/Library` 
 旧默认 `URSA_ASSET_CACHE_DIR`、`URSA_ASSET_MIRROR_DIR`、`URSA_ENGINE_RESOURCES_ROOT` 和 `URSA_SHADER_COMPILE_CACHE_DIR` 会在重新配置时清除。未知自定义旧路径会明确要求移除选项并执行项目导入；迁移不删除数据。Engine/cache 和 Build/Resources 不再作为默认资源来源。旧格式项目 Library 可以删除后重建；Assets 与 `.meta` 必须保留。
 
 `URSA_CONTENT_PROJECT` 是显式的只读工具/测试内容选择入口，指向已准备项目，使用当前程序配置的 Editor 运行目录；不进行导入。正常 Editor/Player 启动使用 `--project` 或 `--pak`。
+
+
+## 导入对象展示目录
+
+Library 导入索引格式 4 保存每个输出的 `displayName` 和 `visibleInProject`，与二进制产物、主对象 ID 一起原子发布。版本 3 及更早索引需要显式重新导入；保留源文件和 `.meta`，不修改 GUID、稳定输出 key 或 Scene/Prefab 引用。Editor 和 UrsaAssetImport 使用同一生成路径。
+
+Project 源文件行代表主资产，展开区只显示可见子资产。ModelNode 等内部对象仍保留身份并参与模型、骨骼和动画引用，但不会成为平级资源条目。显示名称不作为身份；修改名称后即使资源字节不变，目录也会更新。导入失败保留上一份完整目录及诊断，不能把失败候选当成成功删除对象。
+
+资源选择器使用与 Project 相同的名称、类型和源路径。主资产的零 ID 别名及实际 ID 只对应一个选项；拖拽子资产传递准确 GUID/local file ID，接收字段按类型校验。

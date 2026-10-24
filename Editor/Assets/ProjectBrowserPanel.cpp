@@ -30,11 +30,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		{
 			diagnostic = refreshed.error;
 		}
-		else if (model.SelectedAsset().scheme.empty() && selection.kind == EditorSelectionKind::Asset)
-		{
-			selection.Clear();
-		}
 	}
+	model.ReconcileSelection(selection);
 	Vector<const ScriptTypeDescriptor*> scriptableAssetTypes;
 	if (actions.scriptableAssetTypes)
 	{
@@ -70,8 +67,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	ImGui::EndDisabled();
 	Icons::SameLine();
-	ImGui::BeginDisabled(readOnly || selection.kind != EditorSelectionKind::Asset || selection.assetLocalFileId ||
-	                     !actions.renameAsset);
+	ImGui::BeginDisabled(readOnly || selection.kind != EditorSelectionKind::Asset || selection.assetMissing ||
+	                     selection.assetLocalFileId || !actions.renameAsset);
 	if (Icons::Button("Rename Selected"))
 	{
 		auto renamed = RenameSelected(model, selection, actions);
@@ -118,12 +115,15 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	const String currentFolder = model.CurrentFolder();
 	auto selectFolder = [&](const String& path)
 	{
+		if (!selection.Clear())
+		{
+			return;
+		}
 		auto navigated = model.NavigateTo(path);
 		diagnostic = navigated ? String{} : navigated.error;
 		if (navigated)
 		{
 			model.ClearAssetSelection();
-			selection.Clear();
 			hierarchy.ClearSelection();
 		}
 	};
@@ -217,9 +217,11 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 			{
-				model.SelectAsset(folder.path);
-				selection.SelectAsset(folder.path);
-				hierarchy.ClearSelection();
+				if (selection.SelectAsset(folder.path))
+				{
+					model.SelectAsset(folder.path);
+					hierarchy.ClearSelection();
+				}
 			}
 			if (ImGui::BeginPopupContextItem("FolderActions"))
 			{
@@ -289,7 +291,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		ImGui::PushID(asset.path.relative.c_str());
 		bool& expanded = expandedAssets[asset.guid.ToString()];
-		if (!asset.importedObjects.empty())
+		const auto visibleObjects = asset.VisibleChildren();
+		const bool hasChildren = !visibleObjects.empty();
+		if (hasChildren)
 		{
 			if (ImGui::ArrowButton("##ImportedObjects", expanded ? ImGuiDir_Down : ImGuiDir_Right))
 			{
@@ -297,15 +301,19 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			ImGui::SameLine();
 		}
-		const bool selected = model.SelectedAsset() == asset.path && !selection.assetLocalFileId;
+		const bool selected = selection.kind == EditorSelectionKind::Asset && !selection.assetMissing &&
+		                      selection.assetPath == asset.path && !selection.assetLocalFileId;
 		const String label = search.empty() ? asset.name : asset.path.relative;
 		if (Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative), label.c_str(),
 		                      selected, ImGuiSelectableFlags_AllowDoubleClick))
 		{
-			model.SelectAsset(asset.path);
-			selection.SelectAsset(asset.path);
-			hierarchy.ClearSelection();
-			if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && actions.openAsset)
+			const bool accepted = selection.SelectAsset(asset.path, 0, {}, asset.guid);
+			if (accepted)
+			{
+				model.SelectAsset(asset.path);
+				hierarchy.ClearSelection();
+			}
+			if (accepted && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && actions.openAsset)
 			{
 				auto opened = actions.openAsset(asset);
 				diagnostic = opened ? String{} : opened.error;
@@ -320,19 +328,24 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 		if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 		{
-			model.SelectAsset(asset.path);
-			selection.SelectAsset(asset.path);
-			hierarchy.ClearSelection();
+			if (selection.SelectAsset(asset.path, 0, {}, asset.guid))
+			{
+				model.SelectAsset(asset.path);
+				hierarchy.ClearSelection();
+			}
 		}
 		if (ImGui::BeginPopupContextItem("AssetActions"))
 		{
-			if (Icons::MenuItem("Open") && actions.openAsset)
+			if (Icons::MenuItem("Open") && actions.openAsset && selection.SelectAsset(asset.path, 0, {}, asset.guid))
 			{
+				model.SelectAsset(asset.path);
+				hierarchy.ClearSelection();
 				auto opened = actions.openAsset(asset);
 				diagnostic = opened ? String{} : opened.error;
 			}
 			ImGui::BeginDisabled(!actions.renameAsset || readOnly || selection.kind != EditorSelectionKind::Asset ||
-			                     selection.assetPath != asset.path || selection.assetLocalFileId);
+			                     selection.assetMissing || selection.assetPath != asset.path ||
+			                     selection.assetLocalFileId);
 			if (Icons::MenuItem("Rename Selected"))
 			{
 				renameRequested = true;
@@ -340,19 +353,28 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			ImGui::EndDisabled();
 			ImGui::EndPopup();
 		}
-		if (expanded)
+		if (expanded || !search.empty())
 		{
 			ImGui::Indent();
-			for (const auto& object : asset.importedObjects)
+			for (const auto& object : visibleObjects)
 			{
+				if (object.isMainObject || !object.visibleInProject)
+				{
+					continue;
+				}
 				const String localId = ToUrsaString(std::to_string(object.localFileId));
 				ImGui::PushID(localId.c_str());
-				const String objectLabel = object.kind + " " + localId + (object.isMainObject ? " (Main)" : "");
-				if (ImGui::Selectable(objectLabel.c_str(), selection.kind == EditorSelectionKind::Asset &&
-				                                               selection.assetPath == asset.path &&
-				                                               selection.assetLocalFileId == object.localFileId))
+				const String objectLabel = object.Label();
+				const auto resourceKind = ResourceKindForPath(object.path);
+				if (Icons::Selectable(
+				        Icons::ForAsset(false,
+				                        resourceKind ? std::optional<ResourceKind>(resourceKind.value) : std::nullopt,
+				                        {}, {}),
+				        objectLabel.c_str(),
+				        selection.kind == EditorSelectionKind::Asset && selection.assetPath == asset.path &&
+				            selection.assetLocalFileId == object.localFileId))
 				{
-					if (selection.SelectAsset(asset.path, object.localFileId, object.kind))
+					if (selection.SelectAsset(asset.path, object.localFileId, object.kind, asset.guid))
 					{
 						model.SelectAsset(asset.path);
 						hierarchy.ClearSelection();
@@ -364,6 +386,21 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					ImGui::SetDragDropPayload("URSA_ASSET_REFERENCE", &reference, sizeof(reference));
 					ImGui::TextUnformatted(objectLabel.c_str());
 					ImGui::EndDragDropSource();
+				}
+				if (ImGui::IsItemClicked(ImGuiMouseButton_Right) &&
+				    selection.SelectAsset(asset.path, object.localFileId, object.kind, asset.guid))
+				{
+					model.SelectAsset(asset.path);
+					hierarchy.ClearSelection();
+				}
+				if (ImGui::BeginPopupContextItem("ImportedObjectActions"))
+				{
+					if (Icons::MenuItem("Select Source") && selection.SelectAsset(asset.path, 0, {}, asset.guid))
+					{
+						model.SelectAsset(asset.path);
+						hierarchy.ClearSelection();
+					}
+					ImGui::EndPopup();
 				}
 				ImGui::PopID();
 			}
@@ -380,7 +417,7 @@ Result<void> ProjectBrowserPanel::RenameSelected(const ProjectBrowserModel& mode
                                                  const ProjectBrowserActions& actions)
 {
 	const VirtualPath& source = model.SelectedAsset();
-	if (source.scheme.empty() || selection.assetLocalFileId || !actions.renameAsset)
+	if (source.scheme.empty() || selection.assetMissing || selection.assetLocalFileId || !actions.renameAsset)
 	{
 		return Result<void>::Failure("Select a writable Project asset to rename");
 	}

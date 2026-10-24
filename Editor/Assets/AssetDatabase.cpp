@@ -11,8 +11,19 @@
 
 namespace Ursa::Editor
 {
+String ImportedArtifactRecord::Label() const
+{
+	return displayName + " (" + kind + ")" +
+	       (ambiguousName ? " [" + (outputKey.empty() ? ToUrsaString(std::to_string(localFileId)) : outputKey) + "]"
+	                      : String{});
+}
+
 Vector<ImportedArtifactRecord> AssetDatabase::ImportedArtifacts() const
 {
+	if (presentationRevision == revision)
+	{
+		return presentationDirectory;
+	}
 	Vector<ImportedArtifactRecord> records;
 	for (const auto& entry : assetsByPath)
 	{
@@ -21,17 +32,90 @@ Vector<ImportedArtifactRecord> AssetDatabase::ImportedArtifacts() const
 			for (const auto& artifact : cached->artifacts)
 			{
 				records.push_back({entry.second.metadata.guid, artifact.localFileId, artifact.kind, artifact.path,
-				                   artifact.localFileId == cached->mainObjectLocalFileId});
+				                   artifact.localFileId == cached->mainObjectLocalFileId, artifact.displayName,
+				                   artifact.visibleInProject, entry.second.path, artifact.outputKey});
 			}
 		}
 	}
+	Map<String, Size> names;
+	for (const auto& record : records)
+	{
+		if (record.visibleInProject && !record.isMainObject)
+		{
+			++names[record.guid.ToString() + ":" + record.kind + ":" + record.displayName];
+		}
+	}
+	for (auto& record : records)
+	{
+		record.ambiguousName = names[record.guid.ToString() + ":" + record.kind + ":" + record.displayName] > 1;
+	}
+	presentationDirectory = records;
+	presentationRevision = revision;
 	return records;
+}
+
+Vector<ImportedArtifactRecord> AssetDatabase::VisibleImportedObjects() const
+{
+	auto records = ImportedArtifacts();
+	records.erase(std::remove_if(records.begin(), records.end(),
+	                             [](const auto& record) { return !record.isMainObject && !record.visibleInProject; }),
+	              records.end());
+	std::sort(records.begin(), records.end(),
+	          [](const auto& left, const auto& right)
+	          {
+		          if (left.sourcePath != right.sourcePath)
+		          {
+			          return left.sourcePath.ToString() < right.sourcePath.ToString();
+		          }
+		          if (left.isMainObject != right.isMainObject)
+		          {
+			          return left.isMainObject;
+		          }
+		          if (left.displayName != right.displayName)
+		          {
+			          return left.displayName < right.displayName;
+		          }
+		          return left.localFileId < right.localFileId;
+	          });
+	return records;
+}
+
+Result<ImportedArtifactRecord> AssetDatabase::ImportedObject(ResourceId guid, UInt64 localFileId) const
+{
+	const auto* cached = FindImport(guid.ToString());
+	if (cached)
+	{
+		const auto selected = localFileId ? localFileId : cached->mainObjectLocalFileId;
+		for (const auto& artifact : cached->artifacts)
+		{
+			if (artifact.localFileId == selected)
+			{
+				auto source = SourcePath(guid);
+				if (source)
+				{
+					const auto duplicates = std::count_if(
+					    cached->artifacts.begin(), cached->artifacts.end(),
+					    [&](const auto& other)
+					    {
+						    return other.visibleInProject && other.localFileId != cached->mainObjectLocalFileId &&
+						           other.kind == artifact.kind && other.displayName == artifact.displayName;
+					    });
+					return Result<ImportedArtifactRecord>::Success({guid, selected, artifact.kind, artifact.path,
+					                                                selected == cached->mainObjectLocalFileId,
+					                                                artifact.displayName, artifact.visibleInProject,
+					                                                source.value, artifact.outputKey, duplicates > 1});
+				}
+			}
+		}
+	}
+	return Result<ImportedArtifactRecord>::Failure("Imported object is missing: " + guid.ToString() + ":" +
+	                                               ToUrsaString(std::to_string(localFileId)));
 }
 
 namespace
 {
 using Json = nlohmann::json;
-constexpr Ursa::UInt32 importCacheVersion = 3;
+constexpr Ursa::UInt32 importCacheVersion = 4;
 
 Vector<Ursa::UInt8> BytesOf(const std::string& text)
 {
@@ -384,7 +468,10 @@ Result<void> AssetDatabase::LoadCache()
 					valid = false;
 					break;
 				}
-				if (!artifact.contains("outputKey") || !artifact["outputKey"].is_string())
+				if (!artifact.contains("outputKey") || !artifact["outputKey"].is_string() ||
+				    !artifact.contains("displayName") || !artifact["displayName"].is_string() ||
+				    artifact["displayName"].get<std::string>().empty() || !artifact.contains("visibleInProject") ||
+				    !artifact["visibleInProject"].is_boolean())
 				{
 					valid = false;
 					break;
@@ -392,7 +479,9 @@ Result<void> AssetDatabase::LoadCache()
 				cached.artifacts.push_back(
 				    {artifact["localFileId"].get<Ursa::UInt64>(), ToUrsaString(artifact["kind"].get<std::string>()),
 				     std::move(path.value), ToUrsaString(artifact.value("contentFingerprint", std::string{})),
-				     artifact.value("size", Ursa::UInt64{0}), ToUrsaString(artifact["outputKey"].get<std::string>())});
+				     artifact.value("size", Ursa::UInt64{0}), ToUrsaString(artifact["outputKey"].get<std::string>()),
+				     ToUrsaString(artifact["displayName"].get<std::string>()),
+				     artifact["visibleInProject"].get<bool>()});
 			}
 			if (valid && !cached.artifacts.empty())
 			{
@@ -457,6 +546,8 @@ Result<void> AssetDatabase::SaveCache(const Map<String, CachedImport>& imports) 
 				                              {"contentFingerprint", ToStdString(artifact.contentFingerprint)},
 				                              {"size", artifact.size}});
 				entry["artifacts"].back()["outputKey"] = ToStdString(artifact.outputKey);
+				entry["artifacts"].back()["displayName"] = ToStdString(artifact.displayName);
+				entry["artifacts"].back()["visibleInProject"] = artifact.visibleInProject;
 			}
 			document["imports"].push_back(std::move(entry));
 		}
@@ -1025,6 +1116,11 @@ Result<ImportCacheStatus> AssetDatabase::CheckImport(const VirtualPath& source, 
 	}
 	status.upToDate = true;
 	status.artifacts = cached->second.artifacts;
+	const auto selected = selectedImports.find(guid);
+	if (selected == selectedImports.end() || selected->second != key)
+	{
+		++revision;
+	}
 	selectedImports[guid] = key;
 	return Result<ImportCacheStatus>::Success(std::move(status));
 }
@@ -1097,7 +1193,8 @@ Result<Vector<ImportedArtifactRecord>> AssetDatabase::CurrentImportedArtifacts()
 		for (const ImportedArtifactLocation& artifact : current.value.artifacts)
 		{
 			result.push_back({asset.metadata.guid, artifact.localFileId, artifact.kind, artifact.path,
-			                  artifact.localFileId == current.value.mainObjectLocalFileId});
+			                  artifact.localFileId == current.value.mainObjectLocalFileId, artifact.displayName,
+			                  artifact.visibleInProject, asset.path, artifact.outputKey});
 		}
 	}
 	std::sort(result.begin(), result.end(),
@@ -1115,8 +1212,22 @@ Result<Vector<ImportedArtifactRecord>> AssetDatabase::CurrentImportedArtifacts()
 Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const String& importer,
                                           Ursa::UInt32 importerVersion, const String& target,
                                           const nlohmann::json& settings, const Vector<VirtualPath>& dependencies,
-                                          const Vector<ImportedArtifact>& artifacts, UInt64 mainObjectLocalFileId)
+                                          const Vector<ImportedArtifact>& inputArtifacts, UInt64 mainObjectLocalFileId)
 {
+	auto artifacts = inputArtifacts;
+	for (auto& artifact : artifacts)
+	{
+		if (artifact.displayName.empty())
+		{
+			artifact.displayName = artifact.localFileId == mainObjectLocalFileId ? source.FileName()
+			                       : !artifact.outputKey.empty()                 ? artifact.outputKey
+			                                                                     : artifact.kind;
+		}
+		if (artifact.kind == "ModelNode")
+		{
+			artifact.visibleInProject = false;
+		}
+	}
 	if (!filesystem.IsMounted(editorLibraryScheme))
 	{
 		return Result<void>::Failure("Editor import cache scheme is not mounted: " + String(editorLibraryScheme));
@@ -1158,7 +1269,9 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 	{
 		return Result<void>::Failure("Imported main object is not present at " + source.ToString());
 	}
+	const auto oldSelections = selectedImports;
 	auto status = CheckImport(source, importer, importerVersion, target, settings, dependencies);
+	selectedImports = oldSelections;
 	if (!status)
 	{
 		return Result<void>::Failure(status.error);
@@ -1178,7 +1291,8 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 			FingerprintBuilder content;
 			content.Add(output.bytes);
 			if (previous == status.value.artifacts.end() || previous->kind != output.kind ||
-			    previous->outputKey != output.outputKey || previous->size != output.bytes.size() ||
+			    previous->outputKey != output.outputKey || previous->displayName != output.displayName ||
+			    previous->visibleInProject != output.visibleInProject || previous->size != output.bytes.size() ||
 			    previous->contentFingerprint != content.ToString())
 			{
 				return false;
@@ -1186,7 +1300,9 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 		}
 		return true;
 	};
-	if (sameOutputs())
+	const auto selected = selectedImports.find(asset->second.metadata.guid.ToString());
+	if (sameOutputs() && selected != selectedImports.end() &&
+	    selected->second == asset->second.metadata.guid.ToString() + ":" + target)
 	{
 		return {};
 	}
@@ -1274,14 +1390,13 @@ Result<void> AssetDatabase::PublishImport(const VirtualPath& source, const Strin
 		}
 		candidate.artifacts.push_back({artifact.localFileId, artifact.kind, std::move(artifactPath.value),
 		                               content.ToString(), static_cast<Ursa::UInt64>(artifact.bytes.size()),
-		                               artifact.outputKey});
+		                               artifact.outputKey, artifact.displayName, artifact.visibleInProject});
 	}
 
 	const String guid = asset->second.metadata.guid.ToString();
 	const String key = guid + ":" + target;
 	Map<String, CachedImport> nextImports = importsByKey;
 	nextImports[key] = std::move(candidate);
-	const auto oldSelections = selectedImports;
 	selectedImports[guid] = key;
 	auto saved = SaveCache(nextImports);
 	if (!saved)

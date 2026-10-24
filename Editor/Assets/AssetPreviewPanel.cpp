@@ -88,10 +88,20 @@ Result<void> AssetPreviewPanel::BeginFrame()
 	return {};
 }
 
-Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, const ProjectBrowserModel& browser,
-                                        const EditorSelectionContext& selection, const EditorDocument* document,
+Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, ProjectBrowserModel& browser,
+                                        EditorSelectionContext& selection, const EditorDocument* document,
                                         const String& projectKey)
 {
+	if (browser.NeedsRefresh(workspace))
+	{
+		auto refreshed = browser.Refresh(workspace);
+		if (!refreshed)
+		{
+			return refreshed;
+		}
+	}
+	browser.ReconcileSelection(selection);
+	selectionContext = &selection;
 	settingsFiles = &workspace.Index().Filesystem();
 	if (preparedWorkspace != &workspace || settingsKey != projectKey)
 	{
@@ -135,7 +145,9 @@ Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, const Proje
 			}
 		}
 	}
-	const auto* entry = selection.kind == EditorSelectionKind::Asset ? browser.Find(selection.assetPath) : nullptr;
+	const auto* entry = selection.kind == EditorSelectionKind::Asset && !selection.assetMissing
+	                        ? browser.Find(selection.assetPath)
+	                        : nullptr;
 	if (entry)
 	{
 		auto exists = workspace.Index().Filesystem().Exists(entry->path);
@@ -176,7 +188,7 @@ Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, const Proje
 				{
 					continue;
 				}
-				if (!artifact.isMainObject)
+				if (!artifact.isMainObject && artifact.visibleInProject)
 				{
 					hasSubAssets = true;
 				}
@@ -209,7 +221,19 @@ Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, const Proje
 		selectedKind = ResourceKind::Prefab;
 	}
 	auto selected = ResolveAssetPreviewTarget(selection, entry, document, version, subAssetId, selectedKind);
-	if (subAssetId && (kind == "ScriptableObject" || kind == "ScriptableAsset"))
+	if (kind == "Model")
+	{
+		selected.kind = AssetPreviewKind::Model;
+	}
+	else if (kind == "AnimationClip")
+	{
+		selected.kind = AssetPreviewKind::Animation;
+	}
+	else if (subAssetId && !selectedKind)
+	{
+		selected.kind = AssetPreviewKind::None;
+	}
+	if (entry && subAssetId && artifactKind.empty())
 	{
 		selected.kind = AssetPreviewKind::None;
 	}
@@ -228,7 +252,7 @@ Result<void> AssetPreviewPanel::Prepare(ProjectWorkspace& workspace, const Proje
 	const bool contentChanged = state.Target().contentVersion != selected.contentVersion;
 	if (state.Select(std::move(selected)))
 	{
-		loadPending = Supported();
+		loadPending = state.Target().Supported();
 	}
 	if (identityChanged)
 	{
@@ -503,7 +527,7 @@ void AssetPreviewPanel::Reload(bool pipelineChanged)
 		state.Select(std::move(selected));
 	}
 	state.Invalidate();
-	loadPending = Supported();
+	loadPending = state.Target().Supported();
 }
 
 Result<void> AssetPreviewPanel::LoadContent(ProjectWorkspace& workspace, ComponentRegistry& registry,
@@ -516,7 +540,9 @@ Result<void> AssetPreviewPanel::LoadContent(ProjectWorkspace& workspace, Compone
 		return Result<void>::Failure(loaded.error);
 	}
 	candidate = std::move(loaded.value);
-	const auto oldClip = content ? content->SelectedClip() : 0;
+	const auto oldClip = state.Target().kind == AssetPreviewKind::Animation ? state.Target().identity.localFileId
+	                     : content                                          ? content->SelectedClip()
+	                                                                        : 0;
 	const auto oldTime = clock.Time();
 	clock = {};
 	if (oldClip)
@@ -585,16 +611,30 @@ void AssetPreviewPanel::DrawSubAssets(ProjectWorkspace& workspace)
 {
 	if (hasSubAssets || subAssetId)
 	{
-		const String label = subAssetId ? subAssetKind + " " + ToUrsaString(std::to_string(subAssetId))
-		                     : state.Target().kind == AssetPreviewKind::Model ? String("Whole model")
-		                                                                      : String("Main object");
+		String label = subAssetId                                       ? subAssetKind
+		               : state.Target().kind == AssetPreviewKind::Model ? String("Whole model")
+		                                                                : String("Main object");
+		for (const auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
+		{
+			if (database && subAssetId)
+			{
+				const auto object = database->ImportedObject(sourceGuid, subAssetId);
+				if (object)
+				{
+					label = object.value.Label();
+				}
+			}
+		}
 		ImGui::SetNextItemWidth(-1);
 		if (ImGui::BeginCombo("##Subasset", label.c_str()))
 		{
 			if (ImGui::Selectable(state.Target().kind == AssetPreviewKind::Model ? "Whole model" : "Main object",
 			                      !subAssetId))
 			{
-				subAssetId = 0;
+				if (selectionContext)
+				{
+					selectionContext->SelectAsset(state.Target().path, 0, {}, sourceGuid);
+				}
 			}
 			for (const auto* database : {workspace.Database(), workspace.BuiltinDatabase()})
 			{
@@ -602,17 +642,20 @@ void AssetPreviewPanel::DrawSubAssets(ProjectWorkspace& workspace)
 				{
 					continue;
 				}
-				for (const auto& artifact : database->ImportedArtifacts())
+				for (const auto& artifact : database->VisibleImportedObjects())
 				{
-					if (artifact.guid != sourceGuid || !artifact.localFileId)
+					if (artifact.guid != sourceGuid || artifact.isMainObject)
 					{
 						continue;
 					}
-					const auto name = artifact.kind + " " + ToUrsaString(std::to_string(artifact.localFileId));
+					const auto name = artifact.Label();
 					if (ImGui::Selectable(name.c_str(), subAssetId == artifact.localFileId))
 					{
-						subAssetId = artifact.localFileId;
-						subAssetKind = artifact.kind;
+						if (selectionContext)
+						{
+							selectionContext->SelectAsset(artifact.sourcePath, artifact.localFileId, artifact.kind,
+							                              artifact.guid);
+						}
 					}
 				}
 			}
@@ -720,7 +763,8 @@ void AssetPreviewPanel::DrawControls(ProjectWorkspace&)
 			ImGui::SetNextItemWidth(-1);
 			if (ImGui::BeginCombo("##AnimationClip", label.c_str()))
 			{
-				if (ImGui::Selectable("Bind pose", !active->SelectedClip()))
+				if (ImGui::Selectable("Bind pose", !active->SelectedClip()) && selectionContext &&
+				    selectionContext->SelectAsset(state.Target().path, 0, {}, sourceGuid))
 				{
 					auto cleared = active->SelectClip(0);
 					if (!cleared)
@@ -735,7 +779,10 @@ void AssetPreviewPanel::DrawControls(ProjectWorkspace&)
 					const bool valid = std::isfinite(clip.duration) && clip.duration > 0;
 					ImGui::BeginDisabled(!valid);
 					ImGui::PushID(static_cast<int>(clip.localFileId));
-					if (ImGui::Selectable(clip.name.c_str(), active->SelectedClip() == clip.localFileId))
+					if (ImGui::Selectable(clip.name.c_str(), active->SelectedClip() == clip.localFileId) &&
+					    selectionContext &&
+					    selectionContext->SelectAsset(state.Target().path, clip.localFileId, "AnimationClip",
+					                                  sourceGuid))
 					{
 						auto assigned = active->SelectClip(clip.localFileId);
 						if (assigned)
@@ -855,6 +902,13 @@ void AssetPreviewPanel::Draw(ProjectWorkspace& workspace, ComponentRegistry& reg
 		return;
 	}
 	DrawSubAssets(workspace);
+	if (!state.Target().Supported())
+	{
+		ImGui::TextDisabled("No preview is available for this object.");
+		ImGui::EndChild();
+		ImGui::PopID();
+		return;
+	}
 	if (extensionPreview && extension)
 	{
 		if (extensionDiagnostic.empty())

@@ -698,10 +698,11 @@ Result<B::DataView> ImportServices::ReadSourceBytes(B::BindingCall& call)
 }
 
 Result<void> ImportServices::AddObject(B::BindingCall& call, const B::Utf8View& key,
-                                       const B::Wire::Value_Ursa_ImportReferenceInfo& reference)
+                                       const B::Wire::Value_Ursa_ImportReferenceInfo& reference,
+                                       const B::Utf8View& displayName)
 {
 	Scope(call).AddOutput({B::ReadString(key), reference.F_Token, reference.F_Kind, reference.F_Instance,
-	                       B::ReadManagedHandle(reference.F_Handle)});
+	                       B::ReadManagedHandle(reference.F_Handle), B::ReadString(displayName)});
 	return {};
 }
 

@@ -51,7 +51,7 @@ public sealed class CounterImporter : ScriptedImporter
 
 ## 主资源目录
 
-导入缓存格式 3 显式保存 `mainObjectLocalFileId`，`ImportCacheStatus` 和 `ImportedArtifactRecord.isMainObject` 提供该信息。主资源必须存在于产物集合；非零主资源发布必须传入该 ID。无效输出即使命中缓存也会被拒绝。
+导入缓存格式 4 显式保存 `mainObjectLocalFileId`，`ImportCacheStatus` 和 `ImportedArtifactRecord.isMainObject` 提供该信息。主资源必须存在于产物集合；非零主资源发布必须传入该 ID。无效输出即使命中缓存也会被拒绝。
 
 `StableImportObjectId(importerIdentity, outputKey)` 从稳定 importer 身份和非空 key 计算非零 ID。key 区分大小写，不能依赖展示名称或输出枚举顺序。声明 key 的产物必须匹配此算法，key 保存在目录中；重复 ID、重复 key 和 ID/key 不匹配在发布前被拒绝，不通过改变枚举顺序重新分配。
 
@@ -67,7 +67,7 @@ public sealed class CounterImporter : ScriptedImporter
 
 验证失败、只读/写入失败、外部修改或源类型变化都保留未应用草稿，不覆盖源文件。内部设置归档使用 JSON；面向项目的 Inspector 仍通过类型化属性适配器访问，不需要解析此存储格式。
 
-元数据当前版本仍为 1，其 importer 字符串可保存 `script:<源GUID>:<类型local ID>`，配合非零 importerVersion 和设置对象形成稳定声明。脚本声明必须为规范身份，CLR 名称不进入持久值；不为无变化的 envelope 人为升级版本。未支持的版本、损坏身份和错误字段类型会报告诊断，不自动生成替代 GUID 或实现旧格式加载器。Library 目录版本 3 与运行目录版本 2 需要由显式导入重建。
+元数据当前版本仍为 1，其 importer 字符串可保存 `script:<源GUID>:<类型local ID>`，配合非零 importerVersion 和设置对象形成稳定声明。脚本声明必须为规范身份，CLR 名称不进入持久值；不为无变化的 envelope 人为升级版本。未支持的版本、损坏身份和错误字段类型会报告诊断，不自动生成替代 GUID 或实现旧格式加载器。Library 目录版本 4 与运行目录版本 2 需要由显式导入重建。
 
 ## 候选构建与正式发布
 
@@ -231,3 +231,14 @@ Import 回调可通过 Mesh.Load、Material.Load、Texture2D.Load 和 Scriptable
 
 
 生成的纹理可直接用于生成材质：`material.SetTexture(MaterialTextureSlot.BaseColor, texture)` 或内置 Unlit 的 `material.SetTexture("_BaseMap", texture)` 接受本次 `Texture2D` 候选。材质与纹理都需要 `AddObjectToAsset` 注册；最终发布统一解析稳定身份，因此可在注册前绑定，也可在绑定后继续修改像素。外来/过期候选和未注册纹理使整次导入失败；已发布纹理仍使用持久资源引用。可编译 DatasetImporter 示例版本为 5。
+
+
+## 输出名称与 Project 浏览
+
+`context.AddObjectToAsset("mesh", mesh, "Triangle")` 可为输出提供显示名称。原两参数重载继续有效，未指定或空白名称回退为稳定 identifier。identifier 决定身份，displayName 仅决定展示；修改显示名时不要同时更改 identifier。
+
+Project 的源行承载 `SetMainObject` 指定的主资产，不在展开列表重复显示它。其他显式注册的受支持输出显示名称和类型图标，可选中以检查只读属性、使用对应预览，或拖入兼容的组件/C# 资源字段。资源字段选择器使用相同名称和源路径，同名输出仍以稳定引用区分。生成对象不能直接另存覆盖源、重命名或移动；从子资产菜单选择 Select Source 返回导入设置。
+
+单击展开箭头只改变列表展开状态。离开有未应用设置的源时，Apply/Discard/Cancel 控制是否切换；Cancel 保持原高亮及草稿。成功重导入保留仍存在的选中对象；对象消失显示缺失状态，不按同名或相邻对象替换。
+
+界面、字段引用和跨流程验证见 [Unity 风格导入资产验收](UnityImportedAssetsAcceptance.md)。

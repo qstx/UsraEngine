@@ -7,10 +7,15 @@
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/TextureDraft.hpp>
 #include <Assets/ModelImporter.hpp>
+#include <Assets/ModelImportView.hpp>
+#include <Inspector/MeshInspector.hpp>
+#include <Scripting/Bindings/EditorServices.hpp>
+#include <Editor.generated.hpp>
 #include <Assets/TextureImportView.hpp>
 #include <Inspector/AssetInspectorPanel.hpp>
 #include <Scene/SceneViewPanel.hpp>
 #include <Serialization/PrefabAsset.hpp>
+#include <Serialization/PrefabResource.hpp>
 #include <Serialization/MeshResource.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
@@ -254,6 +259,7 @@ struct Harness
 	bool show = true;
 	bool failRender = false;
 	std::function<void()> duringRender;
+	std::function<void()> extraUi;
 	bool focused = false;
 	String diagnostic;
 	String projectKey = "preview-test";
@@ -541,6 +547,10 @@ struct Harness
 			               preview->ReservedHeight(),
 			               [&](Float32 maximumHeight) { preview->Draw(*workspace, registry, nullptr, maximumHeight); });
 		}
+		if (extraUi)
+		{
+			extraUi();
+		}
 		const EditorRenderViewport render =
 		    [&](Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& output,
 		        std::optional<Rendering::CameraType> type, std::optional<Rendering::CameraData> camera)
@@ -712,7 +722,8 @@ struct Harness
 				const auto encoded = nlohmann::json::to_cbor(data);
 				bytes.assign(encoded.data(), encoded.data() + encoded.size());
 			}
-			artifacts.push_back({record.localFileId, record.kind, std::move(bytes)});
+			artifacts.push_back({record.localFileId, record.kind, std::move(bytes), record.outputKey,
+			                     record.displayName, record.visibleInProject});
 		}
 		Done(database->PublishImport(modelPath, metadata.importer, metadata.importerVersion,
 		                             "preview-test-" + ToUrsaString(std::to_string(++publishedPreviewVersion)),
@@ -947,7 +958,7 @@ void ManagedPreviewContracts(Harness& h)
 	h.Select(generatedPath);
 	Expect(h.preview->State().Target().custom && !h.preview->State().Target().identity.localFileId,
 	       "Imported main-object alias did not dispatch its ScriptableObject Preview");
-	h.Choose("##Subasset", "Mesh " + ToUrsaString(std::to_string(importedMeshId)));
+	h.Choose("##Subasset", "mesh (Mesh)");
 	Expect(h.preview->State().Target().custom && h.preview->State().Target().identity.localFileId == importedMeshId &&
 	           h.vertexCount == mesh->Snapshot()->data.positions.size(),
 	       "Imported Mesh sub-asset did not receive its typed custom Preview");
@@ -975,8 +986,7 @@ void ManagedPreviewContracts(Harness& h)
 	h.Frame();
 	const String projectObjectId = ToUrsaString(std::to_string(importedMeshId));
 	ImGui::FocusWindow(projectContent);
-	ImGui::ActivateItemByID(
-	    ImHashStr(("Mesh " + projectObjectId).c_str(), 0, ImHashStr(projectObjectId.c_str(), 0, assetSeed)));
+	ImGui::ActivateItemByID(ImHashStr("mesh (Mesh)", 0, ImHashStr(projectObjectId.c_str(), 0, assetSeed)));
 	h.Frame();
 	h.Frame();
 	Expect(h.selection.assetLocalFileId == importedMeshId &&
@@ -1184,6 +1194,388 @@ void ContentContracts(Harness& h)
 	       "100% texture pan did not change clipped pixels");
 }
 
+void ImportedUiContracts(Harness& h)
+{
+	const auto guid = Take(h.workspace->Database()->Metadata(h.modelPath)).guid;
+	const auto directory = h.browser.Find(h.modelPath)->VisibleChildren();
+	Expect(!directory.empty() && std::none_of(directory.begin(), directory.end(), [](const auto& object)
+	                                          { return object.kind == "ModelNode" || object.isMainObject; }),
+	       "Project displayed an internal node or duplicate main object");
+	const auto mesh = Take(h.workspace->Database()->ImportedObject(guid, h.meshId));
+	h.Select(h.modelPath);
+	h.drawProject = true;
+	h.Frame();
+	h.Frame();
+	ImGuiWindow* list = nullptr;
+	for (auto* window : GImGui->Windows)
+	{
+		if (window->Active && std::string(window->Name).find("Project/") == 0 &&
+		    std::string(window->Name).find("ProjectFolderContents") != std::string::npos &&
+		    std::string(window->Name).find("ProjectBreadcrumbs") == std::string::npos)
+		{
+			list = window;
+		}
+	}
+	Expect(list, "Actual Project contents window is missing");
+	const auto seed = ImHashStr(h.modelPath.relative.c_str(), 0, list->ID);
+	ImGui::FocusWindow(list);
+	ImGui::ActivateItemByID(ImHashStr("##ImportedObjects", 0, seed));
+	h.Frame();
+	h.Frame();
+	Expect(!h.selection.assetLocalFileId, "Expanding Project changed the selected object");
+	const auto childId =
+	    ImHashStr(mesh.Label().c_str(), 0, ImHashStr(ToUrsaString(std::to_string(h.meshId)).c_str(), 0, seed));
+	const auto roots = h.author->GetScene().RootGameObjects();
+	Done(h.hierarchy.Select(h.author->GetScene(), roots.back()));
+	const auto oldHierarchy = h.hierarchy.SelectedId();
+	h.selection.beforeChange = [](const auto&) { return false; };
+	ImGui::FocusWindow(list);
+	ImGui::ActivateItemByID(childId);
+	h.Frame();
+	h.Frame();
+	Expect(!h.selection.assetLocalFileId && h.hierarchy.SelectedId() == oldHierarchy &&
+	           h.preview->State().Target().identity.localFileId == 0,
+	       "Cancelled Project child selection changed hierarchy, highlight or preview");
+	h.selection.beforeChange = {};
+	ImGui::FocusWindow(list);
+	ImGui::ActivateItemByID(childId);
+	h.Frame();
+	h.Frame();
+	Expect(h.selection.assetLocalFileId == h.meshId && h.preview->State().Target().identity.localFileId == h.meshId,
+	       "Project object click did not select the exact preview target");
+	h.Capture("15-Named-Project-Mesh.png");
+	ImGui::FocusWindow(list);
+	ImGui::ActivateItemByID(ImHashStr(h.modelPath.FileName().c_str(), 0, seed));
+	h.Frame();
+	h.Frame();
+	Expect(!h.selection.assetLocalFileId && h.selection.assetRole == EditorAssetSelectionRole::Source &&
+	           !h.preview->State().Target().identity.localFileId,
+	       "Project source row did not restore the source selection role");
+	ImGui::FocusWindow(list);
+	ImGui::ActivateItemByID(childId);
+	h.Frame();
+	h.Frame();
+	h.drawProject = false;
+	const auto choices = AssetObjectChoices(*h.workspace);
+	Expect(
+	    std::count_if(choices.begin(), choices.end(),
+	                  [&](const auto& object) { return object.guid == guid && object.isMainObject; }) == 1 &&
+	        std::none_of(choices.begin(), choices.end(), [](const auto& object) { return object.kind == "ModelNode"; }),
+	    "Resource chooser duplicated the main alias or exposed hierarchy nodes");
+	ManagedEditorContext context;
+	context.workspace = h.workspace.get();
+	Bindings::EditorInvocation invocation(context, 1);
+	const auto managedChoices = Bindings::EditorServices::AssetChoices(invocation);
+	const auto managedMesh =
+	    std::find_if(managedChoices.begin(), managedChoices.end(), [&](const auto& choice)
+	                 { return choice.reference.asset.guid == guid && choice.reference.asset.localFileId == h.meshId; });
+	Expect(managedMesh != managedChoices.end() && managedMesh->isSubAsset &&
+	           managedMesh->name == mesh.Label() + " - " + h.modelPath.ToString(),
+	       "C# AssetChoices disagreed with the Project descriptor or exact child identity");
+	Scene dropScene;
+	const auto receiver = Take(dropScene.CreateGameObject("Drop receiver"));
+	auto* filter = Take(receiver->AddComponent<MeshFilterComponent>());
+	auto resources = Take(ResourceSession::Open(h.workspace->ContentFiles(), h.workspace->AssetResolver()));
+	using OptionalField = Bindings::EditorServices::OptionalReference;
+	using FieldResult = Ursa::Scripting::Bindings::CallbackResult<OptionalField>;
+	std::unique_ptr<FieldResult> managedField;
+	ImVec2 meshDrop, managedDrop, materialDrop;
+	auto* materialReceiver = Take(receiver->AddComponent<MeshRendererComponent>());
+	Done(materialReceiver->SetSharedMaterials({nullptr}));
+	h.drawProject = true;
+	h.extraUi = [&]
+	{
+		ImGui::SetNextWindowPos({650, 0}, ImGuiCond_Always);
+		ImGui::SetNextWindowSize({440, 260}, ImGuiCond_Always);
+		ImGui::Begin("Native Mesh Drop");
+		meshDrop = ImGui::GetCursorScreenPos();
+		meshDrop.x += 80;
+		meshDrop.y += ImGui::GetFrameHeight() * .5f;
+		Take(DrawMeshInspector(*filter, *h.workspace, *resources));
+		managedDrop = ImGui::GetCursorScreenPos();
+		managedDrop.x += 80;
+		managedDrop.y += ImGui::GetFrameHeight() * .5f;
+		const String fieldLabel = "Script Mesh";
+		const Ursa::Scripting::Bindings::Utf8View label{reinterpret_cast<const UInt8*>(fieldLabel.data()),
+		                                                fieldLabel.size(), 1, 0};
+		OptionalField empty{};
+		FieldResult next;
+		next.status = Ursa::Scripting::Bindings::Editor::NativeEditorBindings_AssetField(
+		    invocation.Token(), &label, managedField ? &managedField->value : &empty,
+		    Ursa::Scripting::Bindings::Wire::Enum_Ursa_Editor_EditorReferenceKind::V_Mesh, &next.value, &next.outcome);
+		Expect(bool(next), next.Error().c_str());
+		managedField = std::make_unique<FieldResult>(std::move(next));
+
+		ImGui::End();
+		ImGui::SetNextWindowPos({650, 280}, ImGuiCond_Always);
+		ImGui::SetNextWindowSize({440, 280}, ImGuiCond_Always);
+		ImGui::Begin("Native Material Drop");
+		materialDrop = ImGui::GetCursorScreenPos();
+		materialDrop.x += 80;
+		materialDrop.y += ImGui::GetFrameHeightWithSpacing() * 3 + ImGui::GetFrameHeight() * .5f;
+		Take(DrawMeshInspector(*materialReceiver, *h.workspace, *resources));
+		ImGui::End();
+	};
+	h.Frame();
+	h.Frame();
+	const auto itemCenter = [&](ImGuiWindow* window, ImGuiID id)
+	{
+		ImGui::FocusWindow(window);
+		GImGui->NavWindow = window;
+		GImGui->NavId = id;
+		GImGui->NavLayer = ImGuiNavLayer_Main;
+		GImGui->NavInitRequest = false;
+		GImGui->NavInitResult.Clear();
+		h.Frame();
+		const auto rect = window->NavRectRel[ImGuiNavLayer_Main];
+		const ImRect absolute{{rect.Min.x + window->Pos.x, rect.Min.y + window->Pos.y},
+		                      {rect.Max.x + window->Pos.x, rect.Max.y + window->Pos.y}};
+		ImGui::ScrollToRect(window, absolute, ImGuiScrollFlags_KeepVisibleEdgeY);
+		h.Frame();
+		const auto center = window->NavRectRel[ImGuiNavLayer_Main].GetCenter();
+		return ImVec2{window->Pos.x + center.x, window->Pos.y + center.y};
+	};
+	const auto drag = [&](ImGuiID sourceId, const char* targetWindow = "Native Mesh Drop",
+	                      const char* targetField = "Mesh", bool material = false)
+	{
+		const auto source = itemCenter(list, sourceId);
+		auto* target = ImGui::FindWindowByName(targetWindow);
+		ImGui::FocusWindow(target);
+		h.Frame();
+		const auto destination = material                               ? materialDrop
+		                         : String(targetField) == "Script Mesh" ? managedDrop
+		                                                                : meshDrop;
+		ImGui::FocusWindow(list);
+		h.Mouse(source, false);
+		h.Mouse(source, true);
+		h.Mouse({source.x + 12, source.y}, true);
+		const auto* payload = ImGui::GetDragDropPayload();
+		Expect(payload && payload->IsDataType("URSA_ASSET_REFERENCE"),
+		       "Actual Project drag did not create an asset payload");
+		const auto sent = *static_cast<const AssetReference*>(payload->Data);
+		std::cout << "Project drag " << sent.guid.ToString().c_str() << ':' << sent.localFileId << " from " << source.x
+		          << ',' << source.y << " to " << destination.x << ',' << destination.y << " field " << targetField
+		          << '\n'
+		          << std::flush;
+		h.Mouse(destination, true);
+		h.Mouse(destination, true);
+		h.Capture("15b-Project-Drag.png");
+		h.Mouse(destination, false);
+		h.Frame();
+	};
+	drag(childId);
+	Expect(filter->SharedMesh() && filter->SharedMesh()->AssetIdentity().guid == guid &&
+	           filter->SharedMesh()->AssetIdentity().localFileId == h.meshId,
+	       "Project Mesh drag did not assign the exact generated object");
+	const auto assignedMesh = filter->SharedMesh();
+	const auto textureSeed = ImHashStr(h.texturePath.relative.c_str(), 0, list->ID);
+	drag(ImHashStr(h.texturePath.FileName().c_str(), 0, textureSeed));
+	Expect(filter->SharedMesh() == assignedMesh, "Dropping a Texture replaced a Mesh field");
+	drag(childId, "Native Mesh Drop", "Script Mesh");
+	Expect(managedField->value.present && managedField->value.F_value.F_Asset.F_value.F_LocalFileId == h.meshId,
+	       "Project Mesh drag did not assign the precise C# AssetField reference");
+	drag(ImHashStr(h.texturePath.FileName().c_str(), 0, textureSeed), "Native Mesh Drop", "Script Mesh");
+	Expect(managedField->value.F_value.F_Asset.F_value.F_LocalFileId == h.meshId,
+	       "C# AssetField accepted a Texture for a Mesh field");
+	const auto materialObject =
+	    std::find_if(directory.begin(), directory.end(), [](const auto& object) { return object.kind == "Material"; });
+	Expect(materialObject != directory.end(), "Model fixture has no material output");
+	const auto materialRowId =
+	    ImHashStr(materialObject->Label().c_str(), 0,
+	              ImHashStr(ToUrsaString(std::to_string(materialObject->localFileId)).c_str(), 0, seed));
+	drag(materialRowId, "Native Material Drop", "Element", true);
+	const auto assignedMaterial = materialReceiver->SharedMaterials().front();
+	Expect(assignedMaterial && assignedMaterial->AssetIdentity().guid == guid &&
+	           assignedMaterial->AssetIdentity().localFileId == materialObject->localFileId,
+	       "Project Material drag did not assign its precise output reference");
+	drag(childId, "Native Material Drop", "Element", true);
+	Expect(materialReceiver->SharedMaterials().front() == assignedMaterial, "A Mesh drop replaced a Material field");
+	const auto exactField = Bindings::EditorServices::ReadReference(invocation, managedField->value.F_value);
+	const nlohmann::json scriptPayload{
+	    {"FormatVersion", 1},
+	    {"ScriptType", "test.precise-fields"},
+	    {"Version", 1},
+	    {"Fields",
+	     {{"mesh",
+	       {{"$ursaReference",
+	         {{"Kind", "Mesh"},
+	          {"Id", ""},
+	          {"Resource", {{"kind", "asset"}, {"asset", AssetReferenceToJson(exactField.asset)}}}}}}}}}};
+	Take(receiver->AddComponent<Scripting::ScriptBehaviourComponent>("test.precise-fields"))
+	    ->SetSerializedPayload(ToUrsaString(scriptPayload.dump()));
+	const auto checkRoundTrip = [&](const Scene& scene)
+	{
+		const auto root = scene.RootGameObjects().front();
+		const auto meshIdentity = root->FindComponent<MeshFilterComponent>()->SharedMesh()->AssetIdentity();
+		const auto materialIdentity =
+		    root->FindComponent<MeshRendererComponent>()->SharedMaterials().front()->AssetIdentity();
+		const auto savedFields = nlohmann::json::parse(
+		    ToStdString(root->FindComponent<Scripting::ScriptBehaviourComponent>()->SerializedPayload()));
+		Expect(meshIdentity.guid == guid && meshIdentity.localFileId == h.meshId &&
+		           materialIdentity.localFileId == materialObject->localFileId &&
+		           savedFields.at("Fields") == scriptPayload.at("Fields"),
+		       "Scene/Prefab save and reopen changed a native or C# field's exact imported reference");
+	};
+	Done(SaveSceneResource(h.files, Path("prj:FieldRoundTrip.ursascene"), ResourceId::Generate(), dropScene,
+	                       h.registry));
+	ComponentLoadContext sceneContext(*resources);
+	const auto reopenedScene =
+	    Take(LoadSceneResource(h.files, Path("prj:FieldRoundTrip.ursascene"), h.registry, sceneContext));
+	checkRoundTrip(*reopenedScene.scene);
+	Done(SavePrefabResource(h.files, Path("prj:FieldRoundTrip.ursaprefab"), ResourceId::Generate(), dropScene, receiver,
+	                        h.registry));
+	ComponentLoadContext prefabContext(*resources);
+	const auto reopenedPrefab =
+	    Take(LoadPrefabResource(h.files, Path("prj:FieldRoundTrip.ursaprefab"), h.registry, prefabContext));
+	checkRoundTrip(*reopenedPrefab.scene);
+	h.extraUi = {};
+	h.drawProject = false;
+	for (const auto& object : directory)
+	{
+		if (object.kind != "Skeleton" && object.kind != "AnimationClip")
+		{
+			continue;
+		}
+		const auto inspector =
+		    Take(ImportedAssetInspector::Open(*h.workspace, {guid, object.localFileId}, object.kind));
+		auto readonly = inspector->Context();
+		Expect(!readonly.canEditTarget && readonly.assetSelection->localFileId == object.localFileId &&
+		           !readonly.document,
+		       "Skeleton or clip Inspector lost its exact read-only target");
+		Bindings::EditorInvocation metadata(readonly, 1);
+		const auto fields = metadata.properties->Snapshot().at("Fields");
+		if (object.kind == "Skeleton")
+		{
+			const auto skeleton = Take(h.documents->Session().LoadSkeleton(guid, object.localFileId));
+			Expect(fields.at("jointCount") == skeleton->joints.size(),
+			       "Skeleton Inspector joint count differs from its loaded resource");
+		}
+		else
+		{
+			const auto clip = Take(h.documents->Session().LoadAnimationClip(guid, object.localFileId));
+			Expect(fields.at("channelCount") == clip->channels.size() &&
+			           fields.at("durationSeconds") == clip->durationSeconds,
+			       "Animation Inspector metadata differs from its loaded clip");
+		}
+		h.selection.SelectAsset(h.modelPath, object.localFileId, object.kind, guid);
+		h.Frame();
+		h.Frame();
+		if (object.kind == "Skeleton")
+		{
+			Expect(!h.preview->State().HasImage() && !h.preview->Content(),
+			       "Selecting a Skeleton fell back to a model preview");
+			const auto skeleton = Take(h.documents->Session().LoadSkeleton(guid, object.localFileId));
+			for (auto* window : GImGui->Windows)
+			{
+				if (!window->Active || std::string(window->Name).find("Inspector/AssetProperties") != 0)
+				{
+					continue;
+				}
+				const int joint = 0;
+				ImGui::FocusWindow(window);
+				ImGui::ActivateItemByID(
+				    ImHashStr(skeleton->joints.front().name.c_str(), 0, ImHashData(&joint, sizeof(joint), window->ID)));
+				break;
+			}
+			h.Frame();
+			h.Frame();
+		}
+		else
+		{
+			Expect(h.preview->State().Target().kind == AssetPreviewKind::Animation &&
+			           h.preview->Content()->SelectedClip() == object.localFileId &&
+			           h.selection.assetLocalFileId == object.localFileId,
+			       "Clip selection did not use its exact identity with the main model rendering context");
+		}
+		h.Capture(object.kind == "Skeleton" ? "16-Skeleton-Inspector.png" : "17-Clip-Inspector-Preview.png");
+	}
+	h.Select(h.modelPath);
+	auto model = Take(ModelImportView::Open(h.modelPath, {}));
+	Done(model->Reimport(*h.workspace->Database(), h.workspace->Importer(), true));
+	const auto settings = Take(model->SettingsInspector(*h.workspace->Database()));
+	auto properties = Take(SerializedObject::Create(settings->Properties()));
+	auto normals = Take(properties->FindProperty("/Fields/generateNormals"));
+	Done(normals.SetValue(!Take(normals.Value()).get<bool>()));
+	Done(properties->Apply());
+	const auto modelBytes = Take(h.files.Read(Take(h.workspace->Database()->ImportedObject(guid)).path));
+	const auto document = nlohmann::json::from_cbor(modelBytes.begin(), modelBytes.end());
+	for (const auto& node : document.at("nodes"))
+	{
+		const auto nodeId = node.at("localFileId").get<UInt64>();
+		Done(model->SelectNode(nodeId));
+		Expect(model->SelectedNode() == nodeId && model->HasModifiedSettings(),
+		       "Node inspection changed identity or discarded importer draft");
+	}
+	Expect(!model->SelectNode(123) && model->HasModifiedSettings(),
+	       "Missing hierarchy node replaced the selected node");
+	h.extraUi = [&]
+	{
+		ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+		ImGui::SetNextWindowSize({640, 850}, ImGuiCond_Always);
+		ImGui::Begin("Imported Model Hierarchy");
+		ImGui::GetStateStorage()->SetInt(ImGui::GetID("Hierarchy"), 1);
+		Done(model->Draw(*h.workspace->Database(), h.workspace->Importer(), true, {}, {}, h.workspace.get(), {}, true));
+		ImGui::End();
+	};
+	h.Frame();
+	h.Frame();
+	h.Capture("18-Model-Hierarchy-Node.png");
+	h.extraUi = {};
+	Expect(h.author->GetScene().RootGameObjects() == roots && h.documents->Current()->Dirty() &&
+	           model->HasModifiedSettings(),
+	       "Browsing hierarchy nodes mutated the author Scene or discarded its importer draft");
+	Done(settings->Discard());
+	const auto noGeometryPath = Path("prj:NoGeometry.fbx");
+	Done(h.files.WriteAtomic(noGeometryPath, h.sourceBytes));
+	Done(h.workspace->Refresh());
+	auto candidate = Take(ModelImporter::BuildCandidate(*h.workspace->Database(), noGeometryPath, {}));
+	for (const auto& entry : candidate.meshes)
+	{
+		candidate.displayNames.erase(entry.first);
+	}
+	candidate.meshes.clear();
+	candidate.meshOrder.clear();
+	candidate.meshMaterialBindings.clear();
+	for (auto& node : candidate.nodes)
+	{
+		node.meshes.clear();
+	}
+	auto outputs = Take(candidate.Encode());
+	const auto selectedClip = candidate.animationOrder.front();
+	const auto publish = [&]
+	{
+		Done(h.workspace->Database()->PublishImport(noGeometryPath, "ursa.Model", ModelImporter::Version,
+		                                            ModelImporter::ContentTarget, ModelImportSettings{}.ToJson(),
+		                                            candidate.dependencies, outputs, candidate.mainObjectLocalFileId));
+		h.preview->Reload();
+		h.Frame();
+		h.Frame();
+	};
+	publish();
+	h.selection.SelectAsset(noGeometryPath, selectedClip, "AnimationClip", candidate.guid);
+	h.Frame();
+	h.Frame();
+	Expect(!h.preview->State().HasImage() && h.selection.assetLocalFileId == selectedClip &&
+	           h.preview->State().Diagnostic().find("geometry") != String::npos,
+	       "An animation without geometry displayed an old model image or lacked a diagnostic");
+	const auto clipInspector =
+	    Take(ImportedAssetInspector::Open(*h.workspace, {candidate.guid, selectedClip}, "AnimationClip"));
+	Expect(!clipInspector->Context().canEditTarget, "Animation metadata became unavailable without model geometry");
+	for (auto& output : outputs)
+	{
+		if (output.localFileId == candidate.mainObjectLocalFileId)
+		{
+			output.bytes = {0};
+		}
+	}
+	publish();
+	Expect(!h.preview->State().HasImage() && h.selection.assetLocalFileId == selectedClip &&
+	           !h.preview->State().Diagnostic().empty(),
+	       "A failed animation model context displayed another target");
+	Take(ImportedAssetInspector::Open(*h.workspace, {candidate.guid, selectedClip}, "AnimationClip"));
+	Done(h.workspace->Database()->Remove(noGeometryPath));
+}
+
 void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 {
 	Harness h(evidence, managedOnly);
@@ -1196,6 +1588,7 @@ void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 #else
 	(void)managedOnly;
 #endif
+	ImportedUiContracts(h);
 	h.Select(h.materialPath);
 	const auto sphere = h.lastPixels;
 	h.Capture("01-Material-Sphere.png");
@@ -1245,11 +1638,13 @@ void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 		}
 	}
 	Expect(ids.size() >= 2, "Multi-mesh fixture lost sub-assets");
-	h.Choose("##Subasset", "Mesh " + ToUrsaString(std::to_string(ids[0])));
+	h.Choose("##Subasset",
+	         Take(h.workspace->Database()->ImportedObject(h.preview->State().Target().identity.guid, ids[0])).Label());
 	h.Frame();
 	Expect(h.preview->State().Target().identity.localFileId == ids[0], "Mesh picker did not resolve local identity");
 	const auto indicesA = h.preview->Content()->MeshAsset()->Snapshot()->data.indices.size();
-	h.Choose("##Subasset", "Mesh " + ToUrsaString(std::to_string(ids[1])));
+	h.Choose("##Subasset",
+	         Take(h.workspace->Database()->ImportedObject(h.preview->State().Target().identity.guid, ids[1])).Label());
 	h.Frame();
 	Expect(h.preview->State().Target().identity.localFileId == ids[1] &&
 	           h.preview->Content()->MeshAsset()->Snapshot()->data.indices.size() != indicesA,
@@ -1433,9 +1828,9 @@ void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 	           !h.preview->Content()->SelectedClip(),
 	       "Zero-duration reimport remained playable");
 	h.PublishAnimation(h.clipDuration, true);
-	Expect(h.preview->Content()->Clips().empty() && !h.preview->Content()->SelectedClip() &&
-	           !h.preview->Clock().Playing(),
-	       "Removed clip survived reimport");
+	Expect(h.selection.assetMissing && h.selection.assetLocalFileId == clips[0].localFileId && !h.preview->Content() &&
+	           !h.preview->State().HasImage() && !h.preview->Clock().Playing(),
+	       "Removed clip did not retain a missing exact selection or left an old preview visible");
 	Take(ModelImporter::Import(*h.workspace->Database(), h.modelPath, ModelImportSettings{}, true));
 	h.preview->Reload();
 	h.Frame();
@@ -1501,7 +1896,9 @@ void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 			h.Capture(
 			    ("09-" + ToStdString(path.FileName()) + "-DPI-" + std::to_string(int(dpi * 100)) + ".png").c_str());
 		}
-		h.Choose("##Subasset", "Mesh " + ToUrsaString(std::to_string(h.meshId)));
+		h.Choose(
+		    "##Subasset",
+		    Take(h.workspace->Database()->ImportedObject(h.preview->State().Target().identity.guid, h.meshId)).Label());
 		h.Frame();
 		Expect(h.preview->State().Target().identity.localFileId == h.meshId && h.preview->ImageRect().width > 0 &&
 		           h.preview->ImageRect().height > 0,
