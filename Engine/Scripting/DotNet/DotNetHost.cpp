@@ -933,8 +933,9 @@ Result<Vector<ManagedEditorExtension>> DotNetHost::PrepareEditorExtensions(UInt6
 					        throw std::runtime_error("Unknown managed Editor extension kind");
 			        }
 			        return ManagedEditorExtension{
-			            Bindings::ReadString(value.F_Id), kind, Bindings::ReadString(value.F_Path),
-			            Bindings::ReadString(value.F_Target), Bindings::ReadString(value.F_Title)};
+			            Bindings::ReadString(value.F_Id),    kind,
+			            Bindings::ReadString(value.F_Path),  Bindings::ReadString(value.F_Target),
+			            Bindings::ReadString(value.F_Title), value.F_CanEditMultipleObjects != 0};
 		        }));
 	}
 	catch (const std::exception& error)

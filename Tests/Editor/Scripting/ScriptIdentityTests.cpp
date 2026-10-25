@@ -59,16 +59,28 @@ ScriptTypeDescriptor Find(const ScriptBuildService& service, const char* name)
 }
 
 void SetIdentity(AssetDatabase& database, const VirtualPath& path, const String& typeName, const String& id,
-				 Ursa::UInt32 version, Ursa::UInt64 localFileId)
+                 Ursa::UInt32 version, Ursa::UInt64 localFileId)
 {
 	for (const ScriptSourceAsset& source : database.ScriptSources())
 	{
-		if (source.path != path) continue;
+		if (source.path != path)
+		{
+			continue;
+		}
 		auto identities = source.identities;
-		if (!identities.contains("Version")) identities["Version"] = 1;
-		if (!identities.contains("Types")) identities["Types"] = Json::array();
-		identities["Types"].push_back({{"TypeName", ToStdString(typeName)}, {"Id", ToStdString(id)},
-										   {"Version", version}, {"LocalFileId", localFileId}, {"Primary", true}});
+		if (!identities.contains("Version"))
+		{
+			identities["Version"] = 1;
+		}
+		if (!identities.contains("Types"))
+		{
+			identities["Types"] = Json::array();
+		}
+		identities["Types"].push_back({{"TypeName", ToStdString(typeName)},
+		                               {"Id", ToStdString(id)},
+		                               {"Version", version},
+		                               {"LocalFileId", localFileId},
+		                               {"Primary", true}});
 		Done(database.UpdateScriptIdentities(source, identities));
 		return;
 	}

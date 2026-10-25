@@ -12,6 +12,7 @@ namespace Ursa::Editor
 {
 class AssetImporterInspector;
 class AssetPreviewExtension;
+struct AssetPreviewTarget;
 using ManagedExtensionDescriptor = Scripting::ManagedEditorExtension;
 using ManagedExtensionKind = Scripting::ManagedEditorExtensionKind;
 
@@ -23,10 +24,14 @@ struct ManagedEditorContext
 	const Vector<ScriptTypeDescriptor>* scriptTypes = nullptr;
 	ComponentRegistry* registry = nullptr;
 	Component* target = nullptr;
+	Vector<Component*> componentTargets;
+	Size componentPrimaryIndex = 0;
+	bool supportsMultipleObjects = false;
 	std::shared_ptr<MaterialInstance> targetMaterial;
 	MeshPtr targetMesh;
 	MaterialTexturePtr targetTexture;
 	AssetPreviewExtension* preview = nullptr;
+	std::function<Result<std::shared_ptr<AssetPreviewExtension>>(const AssetPreviewTarget&)> createReferencePreview;
 	bool previewProperties = false;
 	bool canEditTarget = true;
 	ComponentInspectorContext selection;

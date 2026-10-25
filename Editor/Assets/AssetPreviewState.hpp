@@ -27,6 +27,7 @@ struct AssetPreviewTarget
 	ResourceId projectSession;
 	const EditorDocument* draft = nullptr;
 	bool custom = false;
+	String customTypeId;
 
 	bool Supported() const;
 	bool SameIdentity(const AssetPreviewTarget& other) const;

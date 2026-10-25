@@ -103,6 +103,33 @@ int main()
 		auto locked = Take(SerializedObject::Create(draft->Properties(*session, false)));
 		Done(Take(locked->FindProperty("/Fields/_Strength")).SetValue(0.9));
 		Expect(!locked->Apply(), "A read-only material accepted a property write");
+
+		auto multiShader = std::make_shared<Shader::ShaderAsset>(*shader);
+		auto multiFirst = std::make_shared<MaterialDraft>(MaterialType::Unlit);
+		auto multiSecond = std::make_shared<MaterialDraft>(MaterialType::Unlit);
+		Done(multiFirst->Material().SetShaderAsset(multiShader));
+		Done(multiSecond->Material().SetShaderAsset(multiShader));
+		auto firstProperties = Take(SerializedObject::Create(multiFirst->Properties(*session)));
+		auto secondProperties = Take(SerializedObject::Create(multiSecond->Properties(*session)));
+		auto sameShaderGroup = Take(SerializedObjectGroup::Create({firstProperties.get(), secondProperties.get()}));
+		const auto sameShaderPaths = sameShaderGroup.CommonPropertyPaths();
+		Expect(std::find(sameShaderPaths.begin(), sameShaderPaths.end(), "/Fields/_Strength") != sameShaderPaths.end(),
+		       "Materials with the same Shader did not expose their shared declared property");
+		Done(sameShaderGroup.SetValue("/Fields/_Strength", 0.8));
+		Done(sameShaderGroup.Apply());
+		Expect(Take(multiFirst->Material().PropertyValue("_Strength", *multiShader)).floatValue == 0.8f &&
+		           Take(multiSecond->Material().PropertyValue("_Strength", *multiShader)).floatValue == 0.8f,
+		       "A common Shader property did not commit to every material target");
+		auto unrelatedShader = std::make_shared<Shader::ShaderAsset>(*multiShader);
+		unrelatedShader->id = ResourceId::Generate();
+		auto otherMaterial = std::make_shared<MaterialDraft>(MaterialType::Unlit);
+		Done(otherMaterial->Material().SetShaderAsset(unrelatedShader));
+		auto otherProperties = Take(SerializedObject::Create(otherMaterial->Properties(*session)));
+		auto mixedShaderGroup = Take(SerializedObjectGroup::Create({firstProperties.get(), otherProperties.get()}));
+		const auto mixedShaderPaths = mixedShaderGroup.CommonPropertyPaths();
+		Expect(std::find(mixedShaderPaths.begin(), mixedShaderPaths.end(), "/Fields/_Strength") ==
+		           mixedShaderPaths.end(),
+		       "Same-name properties from different Shaders were incorrectly treated as semantically common");
 		live = false;
 		Expect(!properties->Update(), "A closed document's material adapter stayed active");
 		draft.reset();

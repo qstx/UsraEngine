@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "552adeae31f9fe90604d004ef447ec04c5243d365bdb4ace65fc23c11bf61ad6",
+      "Hash": "bffd5fb4f3729ff822a61c1e7d88647ddbe6c194e07a4a3771749b6f9d06f06a",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -440,9 +440,25 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetTargetHandles",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeHandle[]",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.GetTargetPayload",
           "Direction": "NativeMethod",
           "Return": "string",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetTargetPrimaryIndex",
+          "Direction": "NativeMethod",
+          "Return": "uint",
           "Parameters": [],
           "Thread": 0,
           "NativeOnly": false
@@ -1390,7 +1406,7 @@
     {
       "Id": 14281836054586644981,
       "Name": "ManagedHost",
-      "Hash": "1bfa8aaaa223e3b52f97e936f3b1ef7f02848d0edc113a4b99925167716c91df",
+      "Hash": "7f3e79617db2f014a516faf1879a2d5dd7766cdbbd7a1a139656f03dab0f279d",
       "CommandHash": "",
       "Required": true,
       "CallScoped": false,

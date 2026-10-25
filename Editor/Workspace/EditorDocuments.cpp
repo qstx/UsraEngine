@@ -413,6 +413,26 @@ Result<void> EditorDocuments::RenameCurrent(const VirtualPath& path)
 	return {};
 }
 
+Result<void> EditorDocuments::FollowMovedSource()
+{
+	if (!current)
+	{
+		return {};
+	}
+	auto indexed = workspace.Index().Resolve(current->Id());
+	if (!indexed)
+	{
+		return Result<void>::Failure("The open document source no longer resolves by GUID after Move");
+	}
+	auto kind = ResourceKindForPath(indexed.value.path);
+	if (indexed.value.path.scheme != projectResourceScheme || !kind || kind.value != current->Kind())
+	{
+		return Result<void>::Failure("The moved source no longer matches the open document identity");
+	}
+	current->path = indexed.value.path;
+	return {};
+}
+
 Result<void> EditorDocuments::RefreshResources()
 {
 	const MaterialInstance* protectedMaterial = nullptr;

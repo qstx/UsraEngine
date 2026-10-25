@@ -38,7 +38,9 @@ struct Table
 	Int32 (*NativeEditorBindings_GetSelection)(void*, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetTarget)(void*, Wire::Value_Ursa_Editor_EditorReferenceValue_*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetTargetHandle)(void*, Wire::Value_Ursa_NativeHandle*, BindingOutcome*) = nullptr;
+	Int32 (*NativeEditorBindings_GetTargetHandles)(void*, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetTargetPayload)(void*, Utf8View*, BindingOutcome*) = nullptr;
+	Int32 (*NativeEditorBindings_GetTargetPrimaryIndex)(void*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_HasModifiedImporterSettings)(void*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_HasModifiedProperties)(void*, UInt64, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_IntField)(void*, const Utf8View*, Int64, Int64*, BindingOutcome*) = nullptr;
@@ -67,8 +69,8 @@ struct Table
 	Int32 (*NativeEditorBindings_Vector3Field)(void*, const Utf8View*, const Wire::Value_Ursa_Vector3*, Wire::Value_Ursa_Vector3*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_Vector4Field)(void*, const Utf8View*, const Wire::Value_Ursa_Vector4*, Wire::Value_Ursa_Vector4*, BindingOutcome*) = nullptr;
 };
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:38
-#line 38 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:42
+#line 42 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_ApplyComponentFields(void* context, const Wire::Value_Ursa_NativeHandle* p_component, const Utf8View* p_fields, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -86,8 +88,8 @@ inline Int32 NativeEditorBindings_ApplyComponentFields(void* context, const Wire
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:48
-#line 48 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:52
+#line 52 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_ApplyImporterSettings(void* context, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -100,8 +102,8 @@ inline Int32 NativeEditorBindings_ApplyImporterSettings(void* context, UInt32* r
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:116
-#line 116 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:120
+#line 120 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_ApplyProperties(void* context, UInt64 p_revision, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -115,8 +117,8 @@ inline Int32 NativeEditorBindings_ApplyProperties(void* context, UInt64 p_revisi
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:42
-#line 42 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:46
+#line 46 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_ApplyTargetFields(void* context, const Utf8View* p_fields, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -131,8 +133,8 @@ inline Int32 NativeEditorBindings_ApplyTargetFields(void* context, const Utf8Vie
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:106
-#line 106 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:110
+#line 110 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_AssetField(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Editor_EditorReferenceValue_* p_value, UInt32 p_kind, Wire::Value_Ursa_Editor_EditorReferenceValue_* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -151,8 +153,8 @@ inline Int32 NativeEditorBindings_AssetField(void* context, const Utf8View* p_la
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:80
-#line 80 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:84
+#line 84 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_BeginGroup(void* context, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -178,8 +180,8 @@ inline Int32 NativeEditorBindings_BeginPreview(void* context, UInt64 p_utility, 
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:74
-#line 74 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:78
+#line 78 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Button(void* context, const Utf8View* p_label, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -194,8 +196,8 @@ inline Int32 NativeEditorBindings_Button(void* context, const Utf8View* p_label,
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:102
-#line 102 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:106
+#line 106 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_ColorField(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Color* p_value, Wire::Value_Ursa_Color* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -239,8 +241,8 @@ inline Int32 NativeEditorBindings_DestroyPreviewUtility(void* context, UInt64 p_
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:124
-#line 124 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:128
+#line 128 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_DrawDefaultInspector(void* context, UInt64 p_revision, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -254,8 +256,8 @@ inline Int32 NativeEditorBindings_DrawDefaultInspector(void* context, UInt64 p_r
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:52
-#line 52 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:56
+#line 56 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_DrawImporterApplyRevert(void* context, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -302,8 +304,8 @@ inline Int32 NativeEditorBindings_DrawPreviewTexture(void* context, const Wire::
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:82
-#line 82 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:86
+#line 86 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_EndGroup(void* context, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -327,8 +329,8 @@ inline Int32 NativeEditorBindings_EndPreview(void* context, UInt64 p_utility, Bi
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:88
-#line 88 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:92
+#line 92 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_FloatField(void* context, const Utf8View* p_label, Float64 p_value, Float64* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -344,8 +346,8 @@ inline Int32 NativeEditorBindings_FloatField(void* context, const Utf8View* p_la
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:62
-#line 62 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:66
+#line 66 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetAssets(void* context, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -359,8 +361,8 @@ inline Int32 NativeEditorBindings_GetAssets(void* context, DataView* result, Bin
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:36
-#line 36 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:40
+#line 40 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetComponentPayload(void* context, const Wire::Value_Ursa_NativeHandle* p_component, Utf8View* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -377,8 +379,8 @@ inline Int32 NativeEditorBindings_GetComponentPayload(void* context, const Wire:
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:60
-#line 60 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:64
+#line 64 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetDocument(void* context, Wire::Value_Ursa_Editor_EditorDocumentValue_* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -392,8 +394,8 @@ inline Int32 NativeEditorBindings_GetDocument(void* context, Wire::Value_Ursa_Ed
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:44
-#line 44 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:48
+#line 48 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetImporterInfo(void* context, Wire::Value_Ursa_Editor_EditorImporterInfo_* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -421,8 +423,8 @@ inline Int32 NativeEditorBindings_GetPreviewInput(void* context, Wire::Value_Urs
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:108
-#line 108 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:112
+#line 112 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetProperty(void* context, UInt64 p_revision, const Utf8View* p_path, Wire::Value_Ursa_Editor_SerializedPropertyState* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -439,8 +441,8 @@ inline Int32 NativeEditorBindings_GetProperty(void* context, UInt64 p_revision, 
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:120
-#line 120 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:124
+#line 124 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetPropertyPaths(void* context, UInt64 p_revision, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -469,8 +471,8 @@ inline Int32 NativeEditorBindings_GetRuntimeCapability(void* context, Wire::Valu
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:54
-#line 54 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:58
+#line 58 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetScope(void* context, Wire::Value_Ursa_Editor_EditorScopeValue* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -483,8 +485,8 @@ inline Int32 NativeEditorBindings_GetScope(void* context, Wire::Value_Ursa_Edito
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:56
-#line 56 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:60
+#line 60 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetSelection(void* context, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -498,8 +500,8 @@ inline Int32 NativeEditorBindings_GetSelection(void* context, DataView* result, 
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:58
-#line 58 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:62
+#line 62 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetTarget(void* context, Wire::Value_Ursa_Editor_EditorReferenceValue_* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -527,8 +529,23 @@ inline Int32 NativeEditorBindings_GetTargetHandle(void* context, Wire::Value_Urs
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:40
-#line 40 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:36
+#line 36 "Ursa.Editor/NativeEditor.bindings.cs"
+inline Int32 NativeEditorBindings_GetTargetHandles(void* context, DataView* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<DataView> (*)(BindingCall&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::GetTargetHandles), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.GetTargetHandles");
+		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::GetTargetHandles(call));
+		CheckOwned_Wire_16c806ee9cbf244f(*result, call.arena);
+		Check_Wire_16c806ee9cbf244f(*result);
+	});
+}
+#line 1 "Editor.generated.hpp"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:44
+#line 44 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetTargetPayload(void* context, Utf8View* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -542,8 +559,22 @@ inline Int32 NativeEditorBindings_GetTargetPayload(void* context, Utf8View* resu
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:46
-#line 46 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:38
+#line 38 "Ursa.Editor/NativeEditor.bindings.cs"
+inline Int32 NativeEditorBindings_GetTargetPrimaryIndex(void* context, UInt32* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<UInt32> (*)(BindingCall&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::GetTargetPrimaryIndex), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.GetTargetPrimaryIndex");
+		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::GetTargetPrimaryIndex(call));
+		Check_Wire_c3f2029bb0eab1c0(*result);
+	});
+}
+#line 1 "Editor.generated.hpp"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:50
+#line 50 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_HasModifiedImporterSettings(void* context, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -556,8 +587,8 @@ inline Int32 NativeEditorBindings_HasModifiedImporterSettings(void* context, UIn
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:118
-#line 118 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:122
+#line 122 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_HasModifiedProperties(void* context, UInt64 p_revision, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -571,8 +602,8 @@ inline Int32 NativeEditorBindings_HasModifiedProperties(void* context, UInt64 p_
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:86
-#line 86 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:90
+#line 90 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_IntField(void* context, const Utf8View* p_label, Int64 p_value, Int64* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -588,8 +619,8 @@ inline Int32 NativeEditorBindings_IntField(void* context, const Utf8View* p_labe
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:66
-#line 66 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:70
+#line 70 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_MarkDirty(void* context, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -600,8 +631,8 @@ inline Int32 NativeEditorBindings_MarkDirty(void* context, BindingOutcome* outco
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:104
-#line 104 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:108
+#line 108 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_ObjectField(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Editor_EditorReferenceValue_* p_value, UInt32 p_kind, Wire::Value_Ursa_Editor_EditorReferenceValue_* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -620,8 +651,8 @@ inline Int32 NativeEditorBindings_ObjectField(void* context, const Utf8View* p_l
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:70
-#line 70 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:74
+#line 74 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_OpenAsset(void* context, const Utf8View* p_path, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -634,8 +665,8 @@ inline Int32 NativeEditorBindings_OpenAsset(void* context, const Utf8View* p_pat
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:92
-#line 92 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:96
+#line 96 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Popup(void* context, const Utf8View* p_label, Int32 p_selected, const DataView* p_options, Int32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -694,8 +725,8 @@ inline Int32 NativeEditorBindings_PreviewInstantiatePrefab(void* context, UInt64
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:122
-#line 122 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:126
+#line 126 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_PropertyField(void* context, UInt64 p_revision, const Utf8View* p_path, const Utf8View* p_label, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -711,8 +742,8 @@ inline Int32 NativeEditorBindings_PropertyField(void* context, UInt64 p_revision
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:100
-#line 100 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:104
+#line 104 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_QuaternionField(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Quaternion* p_value, Wire::Value_Ursa_Quaternion* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -729,8 +760,8 @@ inline Int32 NativeEditorBindings_QuaternionField(void* context, const Utf8View*
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:112
-#line 112 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:116
+#line 116 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_ResizeArray(void* context, UInt64 p_revision, const Utf8View* p_path, Int32 p_size, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -745,8 +776,8 @@ inline Int32 NativeEditorBindings_ResizeArray(void* context, UInt64 p_revision, 
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:64
-#line 64 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:68
+#line 68 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_ResolveReference(void* context, UInt32 p_kind, const Utf8View* p_id, const Wire::Value_Ursa_NativeAssetReference_* p_asset, Wire::Value_Ursa_Editor_EditorReferenceValue* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -765,8 +796,8 @@ inline Int32 NativeEditorBindings_ResolveReference(void* context, UInt32 p_kind,
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:50
-#line 50 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:54
+#line 54 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_RevertImporterSettings(void* context, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -777,8 +808,8 @@ inline Int32 NativeEditorBindings_RevertImporterSettings(void* context, BindingO
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:76
-#line 76 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:80
+#line 80 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_SameLine(void* context, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -789,8 +820,8 @@ inline Int32 NativeEditorBindings_SameLine(void* context, BindingOutcome* outcom
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:68
-#line 68 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:72
+#line 72 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Save(void* context, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -801,8 +832,8 @@ inline Int32 NativeEditorBindings_Save(void* context, BindingOutcome* outcome) n
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:78
-#line 78 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:82
+#line 82 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Separator(void* context, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -849,8 +880,8 @@ inline Int32 NativeEditorBindings_SetPreviewLighting(void* context, UInt64 p_uti
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:110
-#line 110 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:114
+#line 114 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_SetProperty(void* context, UInt64 p_revision, const Utf8View* p_path, const Wire::Value_Ursa_Editor_SerializedValue* p_value, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -866,8 +897,8 @@ inline Int32 NativeEditorBindings_SetProperty(void* context, UInt64 p_revision, 
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:72
-#line 72 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:76
+#line 76 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Text(void* context, const Utf8View* p_text, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -880,8 +911,8 @@ inline Int32 NativeEditorBindings_Text(void* context, const Utf8View* p_text, Bi
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:90
-#line 90 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:94
+#line 94 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_TextField(void* context, const Utf8View* p_label, const Utf8View* p_value, Utf8View* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -899,8 +930,8 @@ inline Int32 NativeEditorBindings_TextField(void* context, const Utf8View* p_lab
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:84
-#line 84 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:88
+#line 88 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Toggle(void* context, const Utf8View* p_label, UInt32 p_value, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -916,8 +947,8 @@ inline Int32 NativeEditorBindings_Toggle(void* context, const Utf8View* p_label,
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:114
-#line 114 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:118
+#line 118 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_UpdateProperties(void* context, UInt64* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -930,8 +961,8 @@ inline Int32 NativeEditorBindings_UpdateProperties(void* context, UInt64* result
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:94
-#line 94 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:98
+#line 98 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Vector2Field(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Vector2* p_value, Wire::Value_Ursa_Vector2* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -948,8 +979,8 @@ inline Int32 NativeEditorBindings_Vector2Field(void* context, const Utf8View* p_
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:96
-#line 96 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:100
+#line 100 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Vector3Field(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Vector3* p_value, Wire::Value_Ursa_Vector3* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -966,8 +997,8 @@ inline Int32 NativeEditorBindings_Vector3Field(void* context, const Utf8View* p_
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:98
-#line 98 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:102
+#line 102 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_Vector4Field(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Vector4* p_value, Wire::Value_Ursa_Vector4* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1018,7 +1049,9 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_GetSelection,
 		&NativeEditorBindings_GetTarget,
 		&NativeEditorBindings_GetTargetHandle,
+		&NativeEditorBindings_GetTargetHandles,
 		&NativeEditorBindings_GetTargetPayload,
+		&NativeEditorBindings_GetTargetPrimaryIndex,
 		&NativeEditorBindings_HasModifiedImporterSettings,
 		&NativeEditorBindings_HasModifiedProperties,
 		&NativeEditorBindings_IntField,
@@ -1047,7 +1080,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_Vector3Field,
 		&NativeEditorBindings_Vector4Field,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 58, &table, &ValidateBindingContext, {0x55, 0x2a, 0xde, 0xae, 0x31, 0xf9, 0xfe, 0x90, 0x60, 0x4d, 0x00, 0x4e, 0xf4, 0x47, 0xec, 0x04, 0xc5, 0x24, 0x3d, 0x36, 0x5b, 0xdb, 0x4a, 0xce, 0x65, 0xfc, 0x23, 0xc1, 0x1b, 0xf6, 0x1a, 0xd6}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 60, &table, &ValidateBindingContext, {0xbf, 0xfd, 0x5f, 0xb4, 0xf3, 0x72, 0x9f, 0xf8, 0x22, 0xa6, 0x1c, 0x1e, 0x7d, 0x88, 0x64, 0x7d, 0xdb, 0xe6, 0xc1, 0x94, 0xe0, 0x7a, 0x4a, 0x37, 0x71, 0x74, 0x9b, 0x6f, 0x9d, 0x06, 0xf0, 0x6a}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Editor

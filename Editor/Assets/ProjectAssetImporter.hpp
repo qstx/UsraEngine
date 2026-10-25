@@ -57,6 +57,8 @@ public:
 	static Result<AssetImportResult> LoadCurrent(AssetDatabase& database, const VirtualPath& source);
 
 	Result<AssetImportResult> Import(AssetDatabase& database, const VirtualPath& source, bool force = false) const;
+	Result<Vector<AssetImportResult>> ImportBatch(AssetDatabase& database, const Vector<VirtualPath>& sources,
+	                                              bool force = false) const;
 
 private:
 	struct Registry

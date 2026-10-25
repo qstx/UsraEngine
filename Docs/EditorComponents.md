@@ -17,6 +17,23 @@ Hierarchy displays ordered GameObjects and selection. The Inspector follows the
 selection in either a Scene or a PrefabAsset. It contains the object's name,
 enabled state and transform, then a section for each attached component.
 
+For a multi-object selection, the Inspector shows the selection count and edits
+the common name, active state, transform fields, and supported common native
+component properties as one atomic property group. A mixed field is not written
+until the user edits it; editing one vector component preserves every target's
+other components. Common component identity uses serialized type or exact
+script type plus its same-type occurrence order. The Scene Gizmo continues to
+operate on the primary object only. Undo/Redo is not part of this editing flow.
+
+Project multi-selection also exposes a shared Inspector for writable source
+Materials using the same Shader property identities and for ScriptableObjects
+of the same exact script type. Only fields supported by every target are shown;
+unsupported ScriptableObject collection and reference fields are reported
+without being edited. Each field edit is applied to the selected source drafts
+as one group, and **Save Selected** writes all dirty members. Imported subassets
+are read-only here, mixed asset kinds and importer sources show a restriction,
+and the Inspector footer preview continues to follow the primary asset.
+
 Native component creation is registered through `Editor::ComponentEditors`.
 Each `ComponentTypeDescriptor` has a stable serialized type ID, display name,
 category, factory, optional eligibility check and duplicate policy. Built-in

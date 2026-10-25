@@ -1,11 +1,16 @@
 #include <Scripting/Bindings/EditorServices.hpp>
 #include <Assets/AssetPreviewExtension.hpp>
+#include <Assets/AssetPreviewContent.hpp>
+#include <Inspector/ReferencePicker.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
+#include <Scene/Scene.hpp>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 namespace Ursa::Editor::Bindings
 {
@@ -28,6 +33,107 @@ struct IdScope
 		ImGui::PopID();
 	}
 };
+
+struct PickerCandidate
+{
+	EditorReferenceData reference;
+	String key;
+	String name;
+	String type;
+	String source;
+	std::function<Result<MaterialTexturePtr>()> loadTexturePreview;
+	std::function<Result<std::shared_ptr<MaterialInstance>>()> loadMaterialPreview;
+	std::function<Result<std::unique_ptr<AssetPreviewContent>>()> loadAssetPreviewContent;
+	std::function<Result<std::shared_ptr<AssetPreviewExtension>>()> createCustomPreview;
+};
+
+Map<String, ResourceId> pendingComponentDropChoices;
+
+String PickerTargetKey(const EditorInvocation& scope)
+{
+	String key = scope.source.targetIdentity;
+	if (scope.source.assetSelection)
+	{
+		key += ":asset:" + scope.source.assetSelection->guid.ToString() + ":" +
+		       ToUrsaString(std::to_string(scope.source.assetSelection->localFileId));
+	}
+	if (scope.source.target)
+	{
+		key += ":target:" + scope.source.target->PersistentId().ToString();
+	}
+	for (const Component* component : scope.source.componentTargets)
+	{
+		key += ":component:" + component->PersistentId().ToString();
+	}
+	if (scope.source.selection.object)
+	{
+		key += ":object:" + scope.source.selection.object->Id().ToString();
+	}
+	return key.empty() ? String("editor-context") : key;
+}
+
+String PickerReferenceType(UInt32 kind)
+{
+	switch (kind)
+	{
+		case K::V_GameObject:
+			return "GameObject";
+		case K::V_Component:
+			return "Component";
+		case K::V_Mesh:
+			return "Mesh";
+		case K::V_Material:
+			return "Material";
+		case K::V_Texture:
+			return "Texture";
+		case K::V_ScriptableObject:
+			return "ScriptableObject";
+		case K::V_Shader:
+			return "Shader";
+		case K::V_ComputeShader:
+			return "ComputeShader";
+		default:
+			return "Asset";
+	}
+}
+
+std::optional<Size> DrawReferencePicker(const String& controlScope, const String& label, const String& currentName,
+                                        const String& expectedType, const Vector<PickerCandidate>& candidates,
+                                        const String& currentKey)
+{
+	ImGui::BeginGroup();
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(label.c_str());
+	ImGui::SameLine();
+	Vector<ReferencePickerOption> options;
+	options.reserve(candidates.size());
+	for (const auto& candidate : candidates)
+	{
+		String source = candidate.source;
+		if (candidate.reference.hasAsset)
+		{
+			source += " GUID=" + candidate.reference.asset.guid.ToString();
+			if (candidate.reference.asset.localFileId)
+			{
+				source += " localID=" + ToUrsaString(std::to_string(candidate.reference.asset.localFileId));
+			}
+		}
+		else if (!candidate.reference.id.empty())
+		{
+			source += " ID=" + candidate.reference.id;
+		}
+		ReferencePickerOption option{candidate.key,     candidate.name, candidate.type,
+		                             std::move(source), true,           candidate.loadTexturePreview};
+		option.loadMaterialPreview = candidate.loadMaterialPreview;
+		option.loadAssetPreviewContent = candidate.loadAssetPreviewContent;
+		option.createCustomPreview = candidate.createCustomPreview;
+		options.push_back(std::move(option));
+	}
+	const auto selected = DrawReferencePickerButton(controlScope + ":" + label, currentName, expectedType, options,
+	                                                currentKey, controlScope);
+	ImGui::EndGroup();
+	return selected;
+}
 
 String GuiString(const B::Utf8View& value)
 {
@@ -246,6 +352,7 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 		throw std::runtime_error("ObjectField requires a GameObject or Component kind");
 	}
 	OptionalReference result = value;
+	const String controlKey = PickerTargetKey(scope) + ":" + GuiString(label);
 	EditorReferenceData current;
 	if (value.present)
 	{
@@ -255,58 +362,211 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 			throw std::runtime_error("ObjectField reference kind does not match its control");
 		}
 	}
-	if (ImGui::BeginCombo(GuiString(label).c_str(), value.present ? current.id.c_str() : "None"))
+	Vector<PickerCandidate> candidates;
+	candidates.push_back({{kind, {}, {}, false, {}}, "none", "None", "None", {}});
+	Vector<GameObject::Ptr> objects =
+	    scope.source.selection.scene ? scope.source.selection.scene->RootGameObjects() : scope.source.selection.roots;
+	if (objects.empty() && scope.source.selection.object)
 	{
-		ComboScope comboScope;
-		if (ImGui::Selectable("None", !result.present))
+		auto root = scope.source.selection.object;
+		while (root->Parent())
 		{
-			result = {};
+			root = root->Parent();
 		}
-		Vector<GameObject::Ptr> objects = scope.source.selection.scene ? scope.source.selection.scene->RootGameObjects()
-		                                                               : scope.source.selection.roots;
-		if (objects.empty() && scope.source.selection.object)
+		objects.push_back(root);
+	}
+	while (!objects.empty())
+	{
+		auto object = std::move(objects.back());
+		objects.pop_back();
+		if (!object->IsValid())
 		{
-			auto root = scope.source.selection.object;
-			while (root->Parent())
-			{
-				root = root->Parent();
-			}
-			objects.push_back(root);
+			continue;
 		}
-		while (!objects.empty())
+		for (const auto& child : object->Children())
 		{
-			auto object = std::move(objects.back());
-			objects.pop_back();
-			if (!object->IsValid())
+			objects.push_back(child);
+		}
+		const String name = B::TakeBindingResult(object->Name());
+		ResourceId objectId = object->Id();
+		if (scope.source.selection.scene)
+		{
+			auto persistent = scope.source.selection.scene->PersistentId(object);
+			if (persistent)
 			{
-				continue;
+				objectId = persistent.value;
 			}
-			for (const auto& child : object->Children())
+		}
+		if (kind == K::V_GameObject)
+		{
+			const String id = objectId.ToString();
+			candidates.push_back({Resolve(scope, kind, id), "object:" + id, name, "GameObject", id});
+		}
+		else
+		{
+			for (Component* component :
+			     CompatibleComponentsForReference(*object, scope.expectedObjectType, scope.source.scriptTypes))
 			{
-				objects.push_back(child);
-			}
-			const String name = B::TakeBindingResult(object->Name());
-			const auto draw = [&](const String& id, const String& title)
-			{
-				ImGui::PushID(id.c_str());
-				IdScope idScope;
-				if (ImGui::Selectable(title.c_str(), value.present && current.id == id))
+				ResourceId componentId = component->PersistentId();
+				if (scope.source.selection.scene)
 				{
-					result = {1, WriteReference(call, Resolve(scope, kind, id))};
+					auto persistent = scope.source.selection.scene->ComponentPersistentId(component->Id());
+					if (persistent)
+					{
+						componentId = persistent.value;
+					}
 				}
-			};
-			if (kind == K::V_GameObject)
-			{
-				draw(object->Id().ToString(), name);
-			}
-			else
-			{
-				for (const auto* component : object->Components())
-				{
-					draw(component->PersistentId().ToString(), name + " / " + component->SerializationType());
-				}
+				const String id = componentId.ToString();
+				const String type = component->SerializationType();
+				candidates.push_back({Resolve(scope, kind, id), "component:" + id, name + " / " + type, type, name});
 			}
 		}
+	}
+	String currentName = value.present ? "Missing " + current.id : "None";
+	for (Size index = 1; index < candidates.size(); ++index)
+	{
+		if (candidates[index].reference.id == current.id)
+		{
+			currentName = candidates[index].name;
+			break;
+		}
+	}
+	const auto chosen = DrawReferencePicker(
+	    PickerTargetKey(scope), GuiString(label), currentName, kind == K::V_GameObject ? "GameObject" : "Component",
+	    candidates, value.present ? String(kind == K::V_GameObject ? "object:" : "component:") + current.id : String{});
+	if (chosen)
+	{
+		result = *chosen == 0 ? OptionalReference{}
+		                      : OptionalReference{1, WriteReference(call, candidates[*chosen].reference)};
+	}
+	if (kind == K::V_Component)
+	{
+		ImGui::PushID(controlKey.c_str());
+		if (ImGui::BeginPopup("ChooseDroppedComponent"))
+		{
+			auto pending = pendingComponentDropChoices.find(controlKey);
+			if (pending != pendingComponentDropChoices.end() && scope.source.selection.scene)
+			{
+				auto object = scope.source.selection.scene->GameObjectById(pending->second);
+				if (object)
+				{
+					ImGui::TextUnformatted("Choose a compatible component");
+					for (Component* component : CompatibleComponentsForReference(
+					         *object.value, scope.expectedObjectType, scope.source.scriptTypes))
+					{
+						ResourceId componentId = component->PersistentId();
+						auto persistent = scope.source.selection.scene->ComponentPersistentId(component->Id());
+						if (persistent)
+						{
+							componentId = persistent.value;
+						}
+						const String item = component->SerializationType() + "##" + componentId.ToString();
+						if (ImGui::Selectable(item.c_str()))
+						{
+							result = {1, WriteReference(call, Resolve(scope, kind, componentId.ToString()))};
+							pendingComponentDropChoices.erase(pending);
+							ImGui::CloseCurrentPopup();
+							break;
+						}
+					}
+				}
+				else
+				{
+					ImGui::TextDisabled("The dragged GameObject is no longer available.");
+				}
+			}
+			if (ImGui::Button("Cancel"))
+			{
+				pendingComponentDropChoices.erase(controlKey);
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+		if (ImGui::BeginDragDropTarget())
+		{
+			if (const auto* payload = AcceptEditorDragDropPayload();
+			    payload && scope.source.document && scope.source.selection.scene)
+			{
+				auto decoded = DecodeEditorDragPayload(payload->DataType, payload->Data, payload->DataSize);
+				auto componentSource = decoded ? SingleComponentDragReference(decoded.value)
+				                               : Result<ComponentDragReference>::Failure(decoded.error);
+				if (componentSource)
+				{
+					const auto dragged = componentSource.value;
+					if (dragged.owner.documentId != scope.source.document->Id())
+					{
+						ImGui::SetTooltip("A component reference must belong to the current editing document.");
+					}
+					else
+					{
+						auto componentId = scope.source.selection.scene->ComponentByPersistentId(dragged.componentId);
+						Component* component =
+						    componentId ? scope.source.selection.scene->GetComponent(componentId.value) : nullptr;
+						auto owner = scope.source.selection.scene->GameObjectById(dragged.owner.objectId);
+						Vector<Component*> compatible;
+						if (owner)
+						{
+							compatible = CompatibleComponentsForReference(*owner.value, scope.expectedObjectType,
+							                                              scope.source.scriptTypes);
+						}
+						if (component && owner && component->GetGameObject() == owner.value &&
+						    std::find(compatible.begin(), compatible.end(), component) != compatible.end())
+						{
+							result = {1, WriteReference(call, Resolve(scope, kind, dragged.componentId.ToString()))};
+						}
+						else
+						{
+							ImGui::SetTooltip("The dragged component is no longer available or is incompatible.");
+						}
+					}
+				}
+				else
+				{
+					auto draggedResult = decoded ? SingleGameObjectDragReference(decoded.value)
+					                             : Result<GameObjectDragPayload>::Failure(decoded.error);
+					if (draggedResult)
+					{
+						const auto dragged = draggedResult.value;
+						if (dragged.documentId != scope.source.document->Id())
+						{
+							ImGui::SetTooltip("A GameObject reference must belong to the current editing document.");
+						}
+						auto object =
+						    dragged.documentId == scope.source.document->Id()
+						        ? scope.source.selection.scene->GameObjectById(dragged.objectId)
+						        : Result<GameObject::Ptr>::Failure("The dragged object belongs to another document");
+						Vector<Component*> compatible;
+						if (object)
+						{
+							compatible = CompatibleComponentsForReference(*object.value, scope.expectedObjectType,
+							                                              scope.source.scriptTypes);
+						}
+						if (compatible.size() == 1)
+						{
+							ResourceId componentId = compatible.front()->PersistentId();
+							auto persistent =
+							    scope.source.selection.scene->ComponentPersistentId(compatible.front()->Id());
+							if (persistent)
+							{
+								componentId = persistent.value;
+							}
+							result = {1, WriteReference(call, Resolve(scope, kind, componentId.ToString()))};
+						}
+						else if (compatible.size() > 1)
+						{
+							pendingComponentDropChoices[controlKey] = dragged.objectId;
+							ImGui::OpenPopup("ChooseDroppedComponent");
+						}
+						else if (object)
+						{
+							ImGui::SetTooltip("The dragged GameObject has no compatible component.");
+						}
+					}
+				}
+			}
+			ImGui::EndDragDropTarget();
+		}
+		ImGui::PopID();
 	}
 	if (result.present)
 	{
@@ -355,64 +615,125 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 		if (kind == K::V_ScriptableObject)
 		{
 			const String& expectedType = scope.expectedAssetType;
-			if (!expectedType.empty())
+			if (!expectedType.empty() &&
+			    (!scope.source.scriptTypes ||
+			     !IsScriptReferenceTypeCompatible(*scope.source.scriptTypes, asset.reference.typeId, expectedType,
+			                                      ScriptTypeKind::ScriptableObject)))
 			{
-				if (!scope.source.scriptTypes)
-				{
-					return false;
-				}
-				const auto candidate =
-				    std::find_if(scope.source.scriptTypes->begin(), scope.source.scriptTypes->end(),
-				                 [&](const auto& type) { return type.scriptType == asset.reference.typeId; });
-				if (candidate == scope.source.scriptTypes->end() || candidate->kind != ScriptTypeKind::ScriptableObject)
-				{
-					return false;
-				}
-				const Size separator = candidate->clrTypeName.find(',');
-				const String concreteType = candidate->clrTypeName.substr(0, separator);
-				if (concreteType != expectedType &&
-				    std::find(candidate->baseTypeNames.begin(), candidate->baseTypeNames.end(), expectedType) ==
-				        candidate->baseTypeNames.end())
-				{
-					return false;
-				}
+				return false;
 			}
 		}
 		return true;
 	};
-	if (ImGui::BeginCombo(GuiString(label).c_str(), preview.c_str()))
+	Vector<PickerCandidate> candidates;
+	candidates.push_back({{kind, {}, {}, false, {}}, "none", "None", "None", {}});
+	for (const auto& asset : choices)
 	{
-		ComboScope comboScope;
-		if (ImGui::Selectable("None", !result.present))
+		if (!compatible(asset))
 		{
-			result = {};
+			continue;
 		}
-		for (const auto& asset : choices)
+		const String key = "asset:" + asset.reference.asset.guid.ToString() + ":" +
+		                   ToUrsaString(std::to_string(asset.reference.asset.localFileId));
+		String type = asset.reference.typeId;
+		if (type.empty())
 		{
-			if (!compatible(asset))
+			type = PickerReferenceType(asset.reference.kind);
+		}
+		PickerCandidate candidate{asset.reference, key, asset.name, std::move(type), asset.path};
+		if (asset.reference.kind == K::V_Texture)
+		{
+			const auto reference = asset.reference.asset;
+			candidate.loadTexturePreview = [&scope, reference]
+			{ return scope.Resources().LoadTexture(reference.guid, reference.localFileId); };
+		}
+		else if (asset.reference.kind == K::V_Material)
+		{
+			const auto reference = asset.reference.asset;
+			candidate.loadMaterialPreview = [&scope, reference]
+			{ return scope.Resources().LoadMaterial(reference.guid, reference.localFileId); };
+		}
+		if (scope.source.workspace && asset.reference.hasAsset)
+		{
+			AssetPreviewKind previewKind = AssetPreviewKind::None;
+			switch (asset.reference.kind)
 			{
-				continue;
+				case K::V_Material:
+					previewKind = AssetPreviewKind::Material;
+					break;
+				case K::V_Texture:
+					previewKind = AssetPreviewKind::Texture;
+					break;
+				case K::V_Mesh:
+					previewKind = AssetPreviewKind::Mesh;
+					break;
+				default:
+					break;
 			}
-			const String key = asset.reference.asset.guid.ToString() + ":" +
-			                   ToUrsaString(std::to_string(asset.reference.asset.localFileId));
-			ImGui::PushID(key.c_str());
-			IdScope idScope;
-			if (ImGui::Selectable(asset.name.c_str(),
-			                      value.present && current.asset.guid == asset.reference.asset.guid &&
-			                          (current.asset.localFileId == asset.reference.asset.localFileId ||
-			                           (!current.asset.localFileId && !asset.isSubAsset))))
+			auto parsedPath = VirtualPath::Parse(asset.path);
+			const bool customScriptable =
+			    asset.reference.kind == K::V_ScriptableObject && !asset.reference.typeId.empty();
+			if ((previewKind != AssetPreviewKind::None || customScriptable) && parsedPath)
 			{
-				result = {1, WriteReference(call, Resolve(scope, kind, {}, asset.reference.asset))};
+				AssetPreviewTarget target;
+				target.kind = previewKind;
+				target.identity = asset.reference.asset;
+				target.path = std::move(parsedPath.value);
+				target.projectSession = ResourceId::Generate();
+				target.custom = customScriptable;
+				target.customTypeId = customScriptable ? asset.reference.typeId : String{};
+				if (previewKind != AssetPreviewKind::None)
+				{
+					auto* workspace = scope.source.workspace;
+					candidate.loadAssetPreviewContent = [workspace, target]
+					{ return LoadAssetPreviewContent(target, *workspace); };
+				}
+				if (scope.source.createReferencePreview)
+				{
+					auto factory = scope.source.createReferencePreview;
+					candidate.createCustomPreview = [factory = std::move(factory), target] { return factory(target); };
+				}
 			}
 		}
+		candidates.push_back(std::move(candidate));
+	}
+	const auto currentCandidate =
+	    std::find_if(candidates.begin() + 1, candidates.end(),
+	                 [&](const PickerCandidate& candidate)
+	                 {
+		                 return candidate.reference.asset.guid == current.asset.guid &&
+		                        (candidate.reference.asset.localFileId == current.asset.localFileId ||
+		                         (!current.asset.localFileId && !candidate.reference.asset.localFileId));
+	                 });
+	if (currentCandidate != candidates.end())
+	{
+		preview = currentCandidate->name;
+	}
+	else if (value.present)
+	{
+		preview = "Missing " + preview;
+	}
+	const String expectedType = scope.expectedAssetType.empty() ? PickerReferenceType(kind) : scope.expectedAssetType;
+	const String currentKey = currentCandidate == candidates.end() ? String{} : currentCandidate->key;
+	const auto chosen =
+	    DrawReferencePicker(PickerTargetKey(scope), GuiString(label), preview, expectedType, candidates, currentKey);
+	if (chosen)
+	{
+		result = *chosen == 0
+		             ? OptionalReference{}
+		             : OptionalReference{
+		                   1, WriteReference(call, Resolve(scope, kind, {}, candidates[*chosen].reference.asset))};
 	}
 	if (ImGui::BeginDragDropTarget())
 	{
-		if (const auto* payload = ImGui::AcceptDragDropPayload("URSA_ASSET_REFERENCE"))
+		if (const auto* payload = AcceptEditorDragDropPayload())
 		{
-			if (payload->DataSize == sizeof(AssetReference))
+			auto decoded = DecodeEditorDragPayload(payload->DataType, payload->Data, payload->DataSize);
+			auto dropped =
+			    decoded ? SingleAssetDragReference(decoded.value) : Result<AssetReference>::Failure(decoded.error);
+			if (dropped)
 			{
-				const auto reference = *static_cast<const AssetReference*>(payload->Data);
+				const auto reference = dropped.value;
 				for (const auto& asset : choices)
 				{
 					if (asset.reference.asset.guid == reference.guid && compatible(asset) &&

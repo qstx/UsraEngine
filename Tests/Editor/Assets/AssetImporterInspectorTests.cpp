@@ -209,10 +209,33 @@ int main()
 		pending.reset();
 		Expect(selection.assetPath == source && inspector->HasModified(),
 		       "Cancelling target selection lost the old importer draft");
+		const auto originalSelection = *selection.PrimaryEntry();
+		EditorSelectionEntry secondAsset;
+		secondAsset.kind = EditorSelectionKind::Asset;
+		secondAsset.assetPath = Path("prj:Other.png");
+		secondAsset.assetGuid = ResourceId::Generate();
+		const auto originalRevision = selection.revision;
+		selection.beforeChange = [&](const EditorSelectionContext& next)
+		{
+			const auto* proposedPrimary = next.PrimaryEntry();
+			if (inspector->HasModified() && (!proposedPrimary || !proposedPrimary->SameIdentity(originalSelection)))
+			{
+				pending = next;
+				return false;
+			}
+			return true;
+		};
+		Expect(!selection.SelectEntries({originalSelection, secondAsset}, 1) && pending &&
+		           pending->entries.size() == 2 && pending->PrimaryEntry()->SameIdentity(secondAsset) &&
+		           selection.entries.size() == 1 && selection.PrimaryEntry()->SameIdentity(originalSelection) &&
+		           selection.revision == originalRevision,
+		       "Dirty importer gate did not preserve the complete original selection and defer the full proposal");
 		Done(inspector->Discard());
-		Expect(selection.SelectAsset(Path("prj:Other.png")) && !inspector->HasModified() &&
+		Expect(selection.SelectEntries(pending->entries, pending->primaryIndex, pending->rangeAnchor) &&
+		           selection.entries.size() == 2 && selection.PrimaryEntry()->SameIdentity(secondAsset) &&
+		           selection.SelectAsset(Path("prj:Other.png")) && !inspector->HasModified() &&
 		           Take(files.Read(sidecar)) == saved,
-		       "Discarding an importer draft saved metadata or prevented target selection");
+		       "Resolving an importer draft did not apply the full pending selection safely");
 		Done(properties->Update());
 		Done(Take(properties->FindProperty("/Fields/alpha")).SetValue(true));
 		Done(properties->Apply());
@@ -320,7 +343,8 @@ int main()
 		Done(readOnlyDatabase->Refresh());
 		auto readOnlyInspector = Take(AssetImporterInspector::Open(*readOnlyDatabase, source));
 		auto locked = Take(SerializedObject::Create(readOnlyInspector->Properties()));
-		Done(Take(locked->FindProperty("/Fields/alpha")).SetValue(true));
+		auto lockedAlpha = Take(locked->FindProperty("/Fields/alpha"));
+		Done(lockedAlpha.SetValue(!Take(lockedAlpha.Value()).get<bool>()));
 		Expect(!locked->Apply() && !readOnlyInspector->HasModified(),
 		       "Read-only importer source accepted a property transaction");
 		readOnlyInspector.reset();

@@ -122,6 +122,63 @@ SerializedTargetAdapter ScriptableAssetInspector::Properties()
 			target->payload = value;
 			return Result<nlohmann::json>::Success(value);
 		};
+		adapter.prepare = [owner](const nlohmann::json& original,
+		                          const nlohmann::json& candidate) -> Result<SerializedTargetCheckpoint>
+		{
+			const auto target = owner.lock();
+			if (!target)
+			{
+				return Result<SerializedTargetCheckpoint>::Failure("ScriptableObject Inspector target is closed");
+			}
+			auto valid = target->ValidateSource();
+			if (!valid)
+			{
+				return Result<SerializedTargetCheckpoint>::Failure(valid.error);
+			}
+			const auto writable = target->workspace->CheckWritable(target->source);
+			if (!writable)
+			{
+				return Result<SerializedTargetCheckpoint>::Failure(writable.error);
+			}
+			SerializedTargetCheckpoint checkpoint;
+			checkpoint.serializedPayload = original;
+			checkpoint.backendToken = {{"Candidate", candidate}};
+			return Result<SerializedTargetCheckpoint>::Success(std::move(checkpoint));
+		};
+		adapter.validate = [owner](const SerializedTargetCheckpoint&)
+		{
+			const auto target = owner.lock();
+			if (!target)
+			{
+				return Result<void>::Failure("ScriptableObject Inspector target is closed");
+			}
+			auto valid = target->ValidateSource();
+			if (!valid)
+			{
+				return valid;
+			}
+			return target->workspace->CheckWritable(target->source);
+		};
+		adapter.publish = [owner](const SerializedTargetCheckpoint& checkpoint) -> Result<nlohmann::json>
+		{
+			const auto target = owner.lock();
+			if (!target)
+			{
+				return Result<nlohmann::json>::Failure("ScriptableObject Inspector target is closed");
+			}
+			target->payload = checkpoint.backendToken.at("Candidate");
+			return Result<nlohmann::json>::Success(target->payload);
+		};
+		adapter.restore = [owner](const SerializedTargetCheckpoint& checkpoint)
+		{
+			const auto target = owner.lock();
+			if (!target)
+			{
+				return Result<void>::Failure("ScriptableObject Inspector target is closed");
+			}
+			target->payload = checkpoint.serializedPayload;
+			return Result<void>{};
+		};
 	}
 	return adapter;
 }

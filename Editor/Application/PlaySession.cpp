@@ -5,9 +5,14 @@
 
 namespace Ursa::Editor
 {
-FrameInput SelectPlayInput(FrameInput polled, bool viewportFocused, bool editorTextActive)
+FrameInput SelectPlayInput(FrameInput polled, bool viewportFocused, bool editorInputCaptured)
 {
-	return viewportFocused && !editorTextActive ? polled : FrameInput{};
+	return viewportFocused && !editorInputCaptured ? polled : FrameInput{};
+}
+
+bool EditorInputBlocksPlay(bool wantCaptureKeyboard, bool wantTextInput, bool dragDropActive, bool popupOpen)
+{
+	return wantCaptureKeyboard || wantTextInput || dragDropActive || popupOpen;
 }
 
 Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, const ComponentRegistry& registry,

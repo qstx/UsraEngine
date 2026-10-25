@@ -26,8 +26,14 @@ public:
 	void* hostToken = nullptr;
 	ManagedEditorContext& source;
 	std::unique_ptr<SerializedObject> properties;
+	Vector<std::unique_ptr<SerializedObject>> additionalProperties;
+	std::unique_ptr<SerializedObjectGroup> propertyGroup;
 	UInt64 revision = 1;
+	UInt64 generation = 0;
 	String expectedAssetType;
+	String expectedObjectType;
+	Vector<String> pendingPropertyPaths;
+	Vector<String> appliedPropertyPaths;
 	Int32 groups = 0;
 	bool changed = false;
 
@@ -112,6 +118,8 @@ struct EditorServices
 	static Result<B::Wire::Value_Ursa_Editor_EditorScopeValue> GetScope(B::BindingCall& call);
 	static Result<B::Wire::Value_Ursa_EditorBindingCapability> GetRuntimeCapability(B::BindingCall& call);
 	static Result<B::Wire::Value_Ursa_NativeHandle> GetTargetHandle(B::BindingCall& call);
+	static Result<B::DataView> GetTargetHandles(B::BindingCall& call);
+	static Result<UInt32> GetTargetPrimaryIndex(B::BindingCall& call);
 	static Result<B::Utf8View> GetComponentPayload(B::BindingCall& call,
 	                                               const B::Wire::Value_Ursa_NativeHandle& component);
 	static Result<bool> ApplyComponentFields(B::BindingCall& call, const B::Wire::Value_Ursa_NativeHandle& component,

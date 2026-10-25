@@ -6,10 +6,13 @@ namespace Ursa.Editor;
 public sealed class SerializedObject
 {
 	private readonly ulong generation = EditorApi.Generation;
+	private readonly object[] targetObjects;
 	internal ulong Revision { get; private set; } = EditorApi.Revision;
-	internal SerializedObject() { }
+	internal SerializedObject(object[] targets) { targetObjects = (object[])targets.Clone(); }
 	internal void RequireValid() => EditorApi.RequireGeneration(generation);
 	public EditorReference? TargetObject { get { RequireValid(); return EditorContext.Target; } }
+	public object[] TargetObjects { get { RequireValid(); return (object[])targetObjects.Clone(); } }
+	public bool IsEditingMultipleObjects { get { RequireValid(); return targetObjects.Length > 1; } }
 	public bool HasModifiedProperties { get { RequireValid(); return NativeEditorBindings.HasModifiedProperties(Revision); } }
 	public void Update() { RequireValid(); Revision = NativeEditorBindings.UpdateProperties(); }
 	public SerializedProperty FindProperty(string propertyPath)
@@ -101,6 +104,7 @@ public sealed class SerializedProperty
 	}
 	private void Write(SerializedValue value) { RequireValid(); NativeEditorBindings.SetProperty(Revision, StoragePath, value); }
 	public SerializedPropertyType PropertyType => State.Type;
+	public bool HasMultipleDifferentValues => State.HasMultipleDifferentValues;
 	public string TypeName => State.TypeName;
 	public EditorReferenceKind ReferenceKind => State.ReferenceKind;
 	public bool IsNull

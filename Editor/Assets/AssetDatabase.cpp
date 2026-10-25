@@ -1710,9 +1710,27 @@ AssetDatabase::StageTransfer(const VirtualPath& source, const VirtualPath& desti
 	return Result<Vector<FileTransfer>>::Success(std::move(result));
 }
 
-Result<void> AssetDatabase::CommitTransfer(Vector<FileTransfer> files, bool moveSource, bool regenerateGuids)
+Result<void> AssetDatabase::CommitTransfer(Vector<FileTransfer> files, bool regenerateGuids)
 {
 	Vector<VirtualPath> written;
+	const auto rollback = [&]()
+	{
+		String failures;
+		for (auto path = written.rbegin(); path != written.rend(); ++path)
+		{
+			auto removed = filesystem.Remove(*path);
+			if (!removed)
+			{
+				failures += "\nremove staged copy " + path->ToString() + ": " + removed.error;
+			}
+		}
+		auto refreshed = Refresh();
+		if (!refreshed)
+		{
+			failures += "\nrefresh restored asset index: " + refreshed.error;
+		}
+		return failures;
+	};
 	for (FileTransfer& file : files)
 	{
 		Vector<Ursa::UInt8> bytes = file.bytes;
@@ -1722,90 +1740,296 @@ Result<void> AssetDatabase::CommitTransfer(Vector<FileTransfer> files, bool move
 			    DecodeMetadata(ToUrsaString(std::string(file.bytes.begin(), file.bytes.end())), file.source);
 			if (!metadata)
 			{
-				for (const VirtualPath& path : written)
-				{
-					filesystem.Remove(path);
-				}
-				return Result<void>::Failure(metadata.error);
+				const String compensation = rollback();
+				return Result<void>::Failure(metadata.error + compensation);
 			}
 			metadata.value.guid = ResourceId::Generate();
 			metadata.value.scriptTypes = Json::object();
 			auto encoded = EncodeMetadata(metadata.value);
 			if (!encoded)
 			{
-				for (const VirtualPath& path : written)
-				{
-					filesystem.Remove(path);
-				}
-				return Result<void>::Failure(encoded.error);
+				const String compensation = rollback();
+				return Result<void>::Failure(encoded.error + compensation);
 			}
 			bytes = BytesOf(ToStdString(encoded.value));
 		}
 		auto saved = filesystem.WriteAtomic(file.destination, bytes);
 		if (!saved)
 		{
-			for (const VirtualPath& path : written)
-			{
-				filesystem.Remove(path);
-			}
-			return Result<void>::Failure(saved.error);
+			const String compensation = rollback();
+			return Result<void>::Failure("Cannot stage copy destination " + file.destination.ToString() + ": " +
+			                             saved.error + compensation);
 		}
 		written.push_back(file.destination);
 	}
 
-	if (moveSource)
+	auto refreshed = Refresh();
+	if (!refreshed)
 	{
-		Vector<Ursa::Size> removed;
-		for (Ursa::Size index = 0; index < files.size(); ++index)
-		{
-			auto removal = filesystem.Remove(files[index].source);
-			if (!removal)
-			{
-				for (Ursa::Size restoreIndex : removed)
-				{
-					filesystem.WriteAtomic(files[restoreIndex].source, files[restoreIndex].bytes);
-				}
-				for (const VirtualPath& path : written)
-				{
-					filesystem.Remove(path);
-				}
-				return Result<void>::Failure(removal.error);
-			}
-			removed.push_back(index);
-		}
+		const String compensation = rollback();
+		return Result<void>::Failure("Asset copy rolled back after index refresh failed: " + refreshed.error +
+		                             compensation);
 	}
-	return Refresh();
+	return {};
+}
+
+Result<std::shared_ptr<VirtualFileLease>> AssetDatabase::AcquireAssetOperationLease() const
+{
+	if (!filesystem.IsMounted(editorLibraryScheme))
+	{
+		return Result<std::shared_ptr<VirtualFileLease>>::Success({});
+	}
+	auto leasePath = VirtualPath::Parse(String(editorLibraryScheme) + ":Import.lock");
+	if (!leasePath)
+	{
+		return Result<std::shared_ptr<VirtualFileLease>>::Failure(leasePath.error);
+	}
+	return filesystem.AcquireExclusiveLease(leasePath.value);
 }
 
 Result<void> AssetDatabase::Move(const VirtualPath& source, const VirtualPath& destination)
 {
-	const auto record = assetsByPath.find(source.relative);
-	if (record == assetsByPath.end())
+	return MoveBatch({AssetMoveRequest{source, destination}});
+}
+
+Result<void> AssetDatabase::MoveBatch(const Vector<AssetMoveRequest>& moves)
+{
+	if (moves.empty())
 	{
-		return Result<void>::Failure("Asset is not indexed: " + source.ToString());
+		return {};
 	}
-	const bool isFolder = record->second.metadata.folder;
-	auto files = StageTransfer(source, destination, isFolder);
-	if (!files)
+	auto lease = AcquireAssetOperationLease();
+	if (!lease)
 	{
-		return Result<void>::Failure(files.error);
+		return Result<void>::Failure(lease.error);
 	}
-	auto moved = CommitTransfer(std::move(files.value), true, false);
-	if (!moved || !isFolder)
+
+	struct RootMove
 	{
-		return moved;
+		VirtualPath source;
+		VirtualPath destination;
+		bool folder = false;
+	};
+
+	Vector<RootMove> roots;
+	Vector<FileTransfer> files;
+	Set<String> sourcePaths;
+	Set<String> destinationPaths;
+	Set<String> sourceFolders;
+	Set<String> destinationFolders;
+	Set<String> destinationParentFolders;
+	for (const AssetMoveRequest& request : moves)
+	{
+		const auto record = assetsByPath.find(request.source.relative);
+		if (record == assetsByPath.end() || request.source.scheme != sourceScheme)
+		{
+			return Result<void>::Failure("Asset is not indexed: " + request.source.ToString());
+		}
+		if (request.destination.scheme != sourceScheme)
+		{
+			return Result<void>::Failure("Asset move destination must use scheme " + sourceScheme);
+		}
+		if (!sourcePaths.insert(request.source.relative).second)
+		{
+			return Result<void>::Failure("An asset move batch contains a duplicate source: " +
+			                             request.source.ToString());
+		}
+		for (String parentPath = ParentRelativePath(request.destination.relative); !parentPath.empty();
+		     parentPath = ParentRelativePath(parentPath))
+		{
+			const auto parent = assetsByPath.find(parentPath);
+			if (parent != assetsByPath.end() && parent->second.metadata.folder)
+			{
+				break;
+			}
+			destinationParentFolders.insert(parentPath);
+		}
+		RootMove root{request.source, request.destination, record->second.metadata.folder};
+		roots.push_back(root);
+		if (root.folder)
+		{
+			sourceFolders.insert(root.source.relative);
+			for (const auto& asset : assetsByPath)
+			{
+				if (asset.second.metadata.folder &&
+				    (asset.first == root.source.relative || IsPathWithin(asset.first, root.source.relative)))
+				{
+					destinationFolders.insert(root.destination.relative +
+					                          asset.first.substr(root.source.relative.size()));
+					sourceFolders.insert(asset.first);
+				}
+			}
+		}
+		auto staged = StageTransfer(root.source, root.destination, root.folder);
+		if (!staged)
+		{
+			return Result<void>::Failure(staged.error);
+		}
+		for (auto& file : staged.value)
+		{
+			if (!sourcePaths.insert(file.source.relative).second && file.source.relative != root.source.relative)
+			{
+				return Result<void>::Failure("Move batch sources overlap at " + file.source.ToString());
+			}
+			if (!destinationPaths.insert(file.destination.relative).second)
+			{
+				return Result<void>::Failure("Move batch destinations overlap at " + file.destination.ToString());
+			}
+			files.push_back(std::move(file));
+		}
 	}
-	auto createdDirectory = filesystem.CreateDirectory(destination);
-	if (!createdDirectory)
+	for (Ursa::Size left = 0; left < roots.size(); ++left)
 	{
-		return Result<void>::Failure("Folder assets moved but the destination directory could not be created: " +
-		                             createdDirectory.error);
+		for (Ursa::Size right = left + 1; right < roots.size(); ++right)
+		{
+			if ((roots[left].folder && IsPathWithin(roots[right].source.relative, roots[left].source.relative)) ||
+			    (roots[right].folder && IsPathWithin(roots[left].source.relative, roots[right].source.relative)))
+			{
+				return Result<void>::Failure("Move batch contains both a folder and one of its descendants");
+			}
+		}
 	}
-	auto removedDirectory = filesystem.RemoveDirectory(source, true);
-	if (!removedDirectory)
+	for (const String& folder : destinationFolders)
 	{
-		return Result<void>::Failure("Folder assets moved but the empty source directory could not be removed: " +
-		                             removedDirectory.error);
+		destinationParentFolders.erase(folder);
+	}
+
+	Vector<VirtualPath> createdDestinationFolders;
+	Vector<VirtualPath> writtenDestinations;
+	Vector<Ursa::Size> removedSources;
+	const auto rollback = [&]()
+	{
+		String failures;
+		for (const RootMove& root : roots)
+		{
+			if (root.folder)
+			{
+				for (const String& folder : sourceFolders)
+				{
+					if (folder == root.source.relative || IsPathWithin(folder, root.source.relative))
+					{
+						auto restored = filesystem.CreateDirectory(VirtualPath{sourceScheme, folder});
+						if (!restored)
+						{
+							failures += "\nrestore directory " + folder + ": " + restored.error;
+						}
+					}
+				}
+			}
+		}
+		for (Ursa::Size index : removedSources)
+		{
+			auto restored = filesystem.WriteAtomic(files[index].source, files[index].bytes);
+			if (!restored)
+			{
+				failures += "\nrestore source " + files[index].source.ToString() + ": " + restored.error;
+			}
+		}
+		for (auto destination = writtenDestinations.rbegin(); destination != writtenDestinations.rend(); ++destination)
+		{
+			auto removed = filesystem.Remove(*destination);
+			if (!removed)
+			{
+				failures += "\nremove staged destination " + destination->ToString() + ": " + removed.error;
+			}
+		}
+		for (auto directory = createdDestinationFolders.rbegin(); directory != createdDestinationFolders.rend();
+		     ++directory)
+		{
+			auto removed = filesystem.RemoveDirectory(*directory, true);
+			if (!removed)
+			{
+				failures += "\nremove staged destination directory " + directory->ToString() + ": " + removed.error;
+			}
+		}
+		auto refreshed = Refresh();
+		if (!refreshed)
+		{
+			failures += "\nrefresh restored asset index: " + refreshed.error;
+		}
+		return failures;
+	};
+
+	Vector<String> orderedDestinationParents(destinationParentFolders.begin(), destinationParentFolders.end());
+	std::sort(orderedDestinationParents.begin(), orderedDestinationParents.end(),
+	          [](const String& left, const String& right)
+	          {
+		          const Ursa::Size leftDepth = static_cast<Ursa::Size>(std::count(left.begin(), left.end(), '/'));
+		          const Ursa::Size rightDepth = static_cast<Ursa::Size>(std::count(right.begin(), right.end(), '/'));
+		          return leftDepth == rightDepth ? left < right : leftDepth < rightDepth;
+	          });
+	for (const String& folder : orderedDestinationParents)
+	{
+		auto destination = VirtualPath::Parse(sourceScheme + ":" + folder);
+		if (!destination)
+		{
+			return Result<void>::Failure(destination.error);
+		}
+		auto created = filesystem.CreateDirectory(destination.value);
+		if (!created)
+		{
+			const String compensation = rollback();
+			return Result<void>::Failure("Cannot stage destination parent folder: " + created.error + compensation);
+		}
+		createdDestinationFolders.push_back(destination.value);
+	}
+	for (const String& folder : destinationFolders)
+	{
+		auto destination = VirtualPath::Parse(sourceScheme + ":" + folder);
+		if (!destination)
+		{
+			return Result<void>::Failure(destination.error);
+		}
+		auto created = filesystem.CreateDirectory(destination.value);
+		if (!created)
+		{
+			const String compensation = rollback();
+			return Result<void>::Failure("Cannot stage destination folder: " + created.error + compensation);
+		}
+		createdDestinationFolders.push_back(destination.value);
+	}
+	for (FileTransfer& file : files)
+	{
+		auto written = filesystem.WriteAtomic(file.destination, file.bytes);
+		if (!written)
+		{
+			const String compensation = rollback();
+			return Result<void>::Failure("Cannot stage move destination " + file.destination.ToString() + ": " +
+			                             written.error + compensation);
+		}
+		writtenDestinations.push_back(file.destination);
+	}
+	for (Ursa::Size index = 0; index < files.size(); ++index)
+	{
+		auto removed = filesystem.Remove(files[index].source);
+		removedSources.push_back(index);
+		if (!removed)
+		{
+			const String compensation = rollback();
+			return Result<void>::Failure("Cannot remove move source " + files[index].source.ToString() + ": " +
+			                             removed.error + compensation);
+		}
+	}
+	for (const RootMove& root : roots)
+	{
+		if (!root.folder)
+		{
+			continue;
+		}
+		auto removed = filesystem.RemoveDirectory(root.source, true);
+		if (!removed)
+		{
+			const String compensation = rollback();
+			return Result<void>::Failure("Cannot remove moved source directory " + root.source.ToString() + ": " +
+			                             removed.error + compensation);
+		}
+	}
+	auto refreshed = Refresh();
+	if (!refreshed)
+	{
+		const String compensation = rollback();
+		return Result<void>::Failure("Asset move batch rolled back after index refresh failed: " + refreshed.error +
+		                             compensation);
 	}
 	return {};
 }
@@ -1817,52 +2041,147 @@ Result<void> AssetDatabase::Copy(const VirtualPath& source, const VirtualPath& d
 	{
 		return Result<void>::Failure("Asset is not indexed: " + source.ToString());
 	}
+	auto lease = AcquireAssetOperationLease();
+	if (!lease)
+	{
+		return Result<void>::Failure(lease.error);
+	}
 	auto files = StageTransfer(source, destination, record->second.metadata.folder);
-	return files ? CommitTransfer(std::move(files.value), false, true) : Result<void>::Failure(files.error);
+	return files ? CommitTransfer(std::move(files.value), true) : Result<void>::Failure(files.error);
 }
 
 Result<void> AssetDatabase::Remove(const VirtualPath& path)
 {
-	const auto record = assetsByPath.find(path.relative);
-	if (record == assetsByPath.end())
+	return RemoveBatch({path});
+}
+
+Result<void> AssetDatabase::RemoveBatch(const Vector<VirtualPath>& paths)
+{
+	if (paths.empty())
 	{
-		return Result<void>::Failure("Asset is not indexed: " + path.ToString());
+		return {};
 	}
-	auto files = FilesFor(path, record->second.metadata.folder);
-	if (!files)
+	auto lease = AcquireAssetOperationLease();
+	if (!lease)
 	{
-		return Result<void>::Failure(files.error);
+		return Result<void>::Failure(lease.error);
 	}
+	Vector<VirtualPath> roots;
 	Vector<FileTransfer> backups;
-	backups.reserve(files.value.size());
-	for (const VirtualPath& file : files.value)
+	Set<String> sourceFiles;
+	Set<String> folders;
+	for (const VirtualPath& path : paths)
 	{
-		auto writable = filesystem.CheckWritable(file);
-		if (!writable)
+		const auto record = assetsByPath.find(path.relative);
+		if (path.scheme != sourceScheme || record == assetsByPath.end())
 		{
-			return writable;
+			return Result<void>::Failure("Asset is not indexed: " + path.ToString());
 		}
-		auto bytes = filesystem.Read(file);
-		if (!bytes)
+		if (std::any_of(roots.begin(), roots.end(), [&](const VirtualPath& root) { return root == path; }))
 		{
-			return Result<void>::Failure(bytes.error);
+			return Result<void>::Failure("Remove batch contains a duplicate source: " + path.ToString());
 		}
-		backups.push_back({file, file, std::move(bytes.value)});
+		for (const VirtualPath& root : roots)
+		{
+			const auto rootRecord = assetsByPath.find(root.relative);
+			if ((rootRecord != assetsByPath.end() && rootRecord->second.metadata.folder &&
+			     IsPathWithin(path.relative, root.relative)) ||
+			    (record->second.metadata.folder && IsPathWithin(root.relative, path.relative)))
+			{
+				return Result<void>::Failure("Remove batch contains both a folder and one of its descendants");
+			}
+		}
+		roots.push_back(path);
+		auto files = FilesFor(path, record->second.metadata.folder);
+		if (!files)
+		{
+			return Result<void>::Failure(files.error);
+		}
+		if (record->second.metadata.folder)
+		{
+			for (const auto& asset : assetsByPath)
+			{
+				if (asset.second.metadata.folder &&
+				    (asset.first == path.relative || IsPathWithin(asset.first, path.relative)))
+				{
+					folders.insert(asset.first);
+				}
+			}
+		}
+		for (const VirtualPath& file : files.value)
+		{
+			if (!sourceFiles.insert(file.relative).second)
+			{
+				return Result<void>::Failure("Remove batch sources overlap at " + file.ToString());
+			}
+			auto writable = filesystem.CheckWritable(file);
+			auto bytes = filesystem.Read(file);
+			if (!writable || !bytes)
+			{
+				return Result<void>::Failure(!writable ? writable.error : bytes.error);
+			}
+			backups.push_back({file, file, std::move(bytes.value)});
+		}
 	}
 	Vector<Ursa::Size> removed;
+	const auto rollback = [&]()
+	{
+		String failures;
+		for (const String& folder : folders)
+		{
+			auto restored = filesystem.CreateDirectory(VirtualPath{sourceScheme, folder});
+			if (!restored)
+			{
+				failures += "\nrestore directory " + folder + ": " + restored.error;
+			}
+		}
+		for (Ursa::Size index : removed)
+		{
+			auto restored = filesystem.WriteAtomic(backups[index].source, backups[index].bytes);
+			if (!restored)
+			{
+				failures += "\nrestore source " + backups[index].source.ToString() + ": " + restored.error;
+			}
+		}
+		auto refreshed = Refresh();
+		if (!refreshed)
+		{
+			failures += "\nrefresh restored asset index: " + refreshed.error;
+		}
+		return failures;
+	};
 	for (Ursa::Size index = 0; index < backups.size(); ++index)
 	{
 		auto result = filesystem.Remove(backups[index].source);
+		removed.push_back(index);
 		if (!result)
 		{
-			for (Ursa::Size restoreIndex : removed)
-			{
-				filesystem.WriteAtomic(backups[restoreIndex].source, backups[restoreIndex].bytes);
-			}
-			return result;
+			const String compensation = rollback();
+			return Result<void>::Failure("Cannot remove asset source " + backups[index].source.ToString() + ": " +
+			                             result.error + compensation);
 		}
-		removed.push_back(index);
 	}
-	return Refresh();
+	for (const VirtualPath& root : roots)
+	{
+		if (!folders.count(root.relative))
+		{
+			continue;
+		}
+		auto result = filesystem.RemoveDirectory(root, true);
+		if (!result)
+		{
+			const String compensation = rollback();
+			return Result<void>::Failure("Cannot remove asset directory " + root.ToString() + ": " + result.error +
+			                             compensation);
+		}
+	}
+	auto refreshed = Refresh();
+	if (!refreshed)
+	{
+		const String compensation = rollback();
+		return Result<void>::Failure("Asset remove batch rolled back after index refresh failed: " + refreshed.error +
+		                             compensation);
+	}
+	return {};
 }
 } // namespace Ursa::Editor

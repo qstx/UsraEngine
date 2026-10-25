@@ -2,6 +2,7 @@
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/TextureDraft.hpp>
 #include <Assets/TextureImporter.hpp>
+#include <Serialization/ComponentRegistry.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/SceneResource.hpp>
 #include <Serialization/PrefabAsset.hpp>
@@ -221,6 +222,19 @@ Result<std::unique_ptr<AssetPreviewContent>> AssetPreviewContent::Load(const Ass
 	{
 		return Result<std::unique_ptr<AssetPreviewContent>>::Failure(ToUrsaString(error.what()));
 	}
+}
+
+Result<std::unique_ptr<AssetPreviewContent>> LoadAssetPreviewContent(const AssetPreviewTarget& target,
+                                                                     ProjectWorkspace& workspace,
+                                                                     const AssetPreviewTextureInput* textureInput)
+{
+	ComponentRegistry registry;
+	auto registered = RegisterBuiltinComponents(registry);
+	if (!registered)
+	{
+		return Result<std::unique_ptr<AssetPreviewContent>>::Failure(registered.error);
+	}
+	return AssetPreviewContent::Load(target, workspace, registry, textureInput);
 }
 
 Scene* AssetPreviewContent::RenderScene() const

@@ -34,12 +34,136 @@ void WriteFile(const std::filesystem::path& path, const char* contents)
 
 } // namespace
 
+namespace
+{
+EditorSelectionEntry SourceEntry(const ProjectBrowserEntry& asset)
+{
+	EditorSelectionEntry entry;
+	entry.kind = EditorSelectionKind::Asset;
+	entry.assetPath = asset.path;
+	entry.assetGuid = asset.guid;
+	entry.assetRole = EditorAssetSelectionRole::Source;
+	return entry;
+}
+
+void TestMoveDropPlanning(const std::filesystem::path& root)
+{
+	std::filesystem::remove_all(root);
+	const auto assets = root / "Assets";
+	WriteFile(assets / "A" / "Same.txt", "A");
+	WriteFile(assets / "A" / "Already.txt", "A target conflict");
+	WriteFile(assets / "B" / "Same.txt", "B");
+	WriteFile(assets / "B" / "Already.txt", "B source conflict");
+	WriteFile(assets / "Container" / "Child.txt", "child");
+	auto workspace = ProjectWorkspace::Open(root);
+	Expect(bool(workspace), "Cannot open Move drop planning workspace");
+	Expect(bool(workspace.value->Database()->CreateFolder(VirtualPath::Parse("prj:Destination").value)) &&
+	           bool(workspace.value->Database()->CreateFolder(VirtualPath::Parse("prj:Container/Nested").value)) &&
+	           bool(workspace.value->Database()->CreateFolder(VirtualPath::Parse("prj:Destination/Nested").value)) &&
+	           bool(workspace.value->Database()->Move(VirtualPath::Parse("prj:A/Already.txt").value,
+	                                                  VirtualPath::Parse("prj:Destination/Already.txt").value)) &&
+	           bool(workspace.value->Refresh()),
+	       "Cannot prepare Project Move drop destinations");
+	ProjectBrowserModel model;
+	Expect(bool(model.Refresh(*workspace.value)), "Cannot refresh Move drop planning model");
+	const auto* folderA = model.Find(VirtualPath::Parse("prj:A").value);
+	const auto* fileA = model.Find(VirtualPath::Parse("prj:A/Same.txt").value);
+	const auto* fileB = model.Find(VirtualPath::Parse("prj:B/Same.txt").value);
+	const auto* container = model.Find(VirtualPath::Parse("prj:Container").value);
+	const auto* child = model.Find(VirtualPath::Parse("prj:Container/Child.txt").value);
+	Expect(folderA && fileA && fileB && container && child, "Move drop fixture entries are missing");
+	const ResourceId childGuid = child->guid;
+	Expect(!PlanProjectSourceDelete(*workspace.value->Database(), {}, false),
+	       "Project Delete accepted an empty selection");
+	Expect(!PlanProjectSourceDelete(*workspace.value->Database(), {SourceEntry(*fileA)}, true),
+	       "Read-only Project accepted source deletion");
+	EditorSelectionEntry importedDelete = SourceEntry(*fileA);
+	importedDelete.assetRole = EditorAssetSelectionRole::ImportedObject;
+	importedDelete.assetLocalFileId = 7;
+	Expect(!PlanProjectSourceDelete(*workspace.value->Database(), {importedDelete}, false),
+	       "Project Delete accepted an imported sub-asset");
+	EditorSelectionEntry staleDelete = SourceEntry(*fileA);
+	staleDelete.assetPath = VirtualPath::Parse("prj:B/Same.txt").value;
+	Expect(!PlanProjectSourceDelete(*workspace.value->Database(), {staleDelete}, false),
+	       "Project Delete accepted a stale GUID/path pair");
+	auto deleteParentAndChild =
+	    PlanProjectSourceDelete(*workspace.value->Database(), {SourceEntry(*fileA), SourceEntry(*folderA)}, false);
+	Expect(deleteParentAndChild && deleteParentAndChild.value.size() == 1 &&
+	           deleteParentAndChild.value.front() == folderA->path,
+	       "Project Delete did not normalize selected descendants beneath a folder");
+	auto independentDelete =
+	    PlanProjectSourceDelete(*workspace.value->Database(), {SourceEntry(*fileA), SourceEntry(*fileB)}, false);
+	Expect(independentDelete && independentDelete.value.size() == 2,
+	       "Project Delete rejected independent writable sources");
+	Expect(!PlanProjectSourceReimport(*workspace.value->Database(), {}, false) &&
+	           !PlanProjectSourceReimport(*workspace.value->Database(), {SourceEntry(*fileA)}, true),
+	       "Project Reimport accepted an empty or read-only source selection");
+	EditorSelectionEntry importedReimport = SourceEntry(*fileA);
+	importedReimport.assetRole = EditorAssetSelectionRole::ImportedObject;
+	importedReimport.assetLocalFileId = 7;
+	Expect(!PlanProjectSourceReimport(*workspace.value->Database(), {importedReimport}, false),
+	       "Project Reimport accepted an imported sub-asset");
+	auto folderReimport =
+	    PlanProjectSourceReimport(*workspace.value->Database(), {SourceEntry(*folderA), SourceEntry(*fileA)}, false);
+	Expect(folderReimport && folderReimport.value.size() == 1 && folderReimport.value.front() == fileA->path,
+	       "Project Reimport did not expand folders and deduplicate selected descendants");
+	EditorDragSession parentAndChild;
+	parentAndChild.sources = {{SourceEntry(*fileA), {}, {}}, {SourceEntry(*folderA), {}, {}}};
+	auto normalized = PlanProjectFolderDrop(*workspace.value->Database(), parentAndChild, "Destination", false);
+	if (!normalized)
+	{
+		throw std::runtime_error("Project Move plan rejected a selected parent/child group: " +
+		                         ToStdString(normalized.error));
+	}
+	Expect(normalized && normalized.value.size() == 1 &&
+	           normalized.value.front().source == VirtualPath::Parse("prj:A").value &&
+	           normalized.value.front().destination == VirtualPath::Parse("prj:Destination/A").value,
+	       "Project Move did not discard selected descendants while preserving the selected folder");
+	Expect(!PlanProjectFolderDrop(*workspace.value->Database(),
+	                              EditorDragSession{1, 0, {{SourceEntry(*container), {}, {}}}}, "Container/Nested",
+	                              false),
+	       "Project Move accepted a folder drop into its own descendant");
+	Expect(!PlanProjectFolderDrop(*workspace.value->Database(),
+	                              EditorDragSession{1, 0, {{SourceEntry(*fileA), {}, {}}}}, "Destination", true),
+	       "Read-only Project accepted a Move drop");
+	EditorSelectionEntry imported = SourceEntry(*fileA);
+	imported.assetRole = EditorAssetSelectionRole::ImportedObject;
+	imported.assetLocalFileId = 42;
+	Expect(!PlanProjectFolderDrop(*workspace.value->Database(), EditorDragSession{1, 0, {{imported, {}, {}}}},
+	                              "Destination", false),
+	       "Project Move accepted an imported child instead of its source asset");
+	EditorDragSession duplicateNames;
+	duplicateNames.sources = {{SourceEntry(*fileA), {}, {}}, {SourceEntry(*fileB), {}, {}}};
+	Expect(!PlanProjectFolderDrop(*workspace.value->Database(), duplicateNames, "", false),
+	       "Project Move accepted colliding destination names from separate roots");
+	EditorDragSession existingTarget;
+	existingTarget.sources = {{SourceEntry(*model.Find(VirtualPath::Parse("prj:B/Already.txt").value)), {}, {}}};
+	Expect(!PlanProjectFolderDrop(*workspace.value->Database(), existingTarget, "Destination", false),
+	       "Project Move accepted a file whose destination already exists");
+
+	EditorSelectionContext selection;
+	Expect(selection.SelectAsset(child->path, 0, {}, child->guid), "Cannot seed moved child selection");
+	EditorDragSession moveContainer;
+	moveContainer.sources = {{SourceEntry(*container), {}, {}}};
+	auto plan = PlanProjectFolderDrop(*workspace.value->Database(), moveContainer, "Destination", false);
+	Expect(plan && plan.value.size() == 1 && bool(workspace.value->Database()->MoveBatch(plan.value)) &&
+	           bool(workspace.value->Refresh()) && bool(model.Refresh(*workspace.value)),
+	       "Project Move batch could not move a folder from the browser plan");
+	model.ReconcileSelection(selection);
+	Expect(selection.assetGuid == childGuid && !selection.assetMissing &&
+	           selection.assetPath == VirtualPath::Parse("prj:Destination/Container/Child.txt").value,
+	       "Project Move did not restore the selected asset by GUID after moving its parent folder");
+	std::filesystem::remove_all(root);
+}
+} // namespace
+
 int main()
 {
 	const auto root = std::filesystem::temp_directory_path() /
 	                  ("UrsaProjectBrowserModelTests-" + ToStdString(ResourceId::Generate().ToString()));
 	try
 	{
+		TestMoveDropPlanning(root / "MoveDrop");
 		const auto assets = root / "Assets";
 		WriteFile(assets / "Textures" / "Albedo.png", "test texture");
 		auto workspace = ProjectWorkspace::Open(root);
@@ -125,6 +249,11 @@ int main()
 		model.ReconcileSelection(selection);
 		Expect(!selection.assetMissing && selection.assetRole == EditorAssetSelectionRole::ImportedObject,
 		       "Precise imported selection was not reconciled");
+		const auto selectedMeshA = *selection.PrimaryEntry();
+		auto selectedMeshB = selectedMeshA;
+		selectedMeshB.assetLocalFileId = meshB;
+		Expect(selection.SelectEntries({selectedMeshA, selectedMeshB}, 0),
+		       "Cannot select multiple imported children from one source");
 		selection.beforeChange = [](const auto&) { return false; };
 		Expect(!selection.SelectAsset(source) && selection.assetLocalFileId == meshA,
 		       "Rejected selection switched from the selected object");
@@ -140,15 +269,18 @@ int main()
 		           bool(model.Refresh(*workspace.value)),
 		       "Cannot remove selected output");
 		model.ReconcileSelection(selection);
-		Expect(selection.assetMissing && selection.assetLocalFileId == meshA && selection.assetGuid == textureGuid,
-		       "Deleted object silently rebound to its same-name neighbour");
+		Expect(selection.entries.size() == 2 && selection.entries[0].assetMissing &&
+		           selection.entries[0].assetLocalFileId == meshA && !selection.entries[1].assetMissing &&
+		           selection.PrimaryEntry()->assetLocalFileId == meshB && !selection.assetMissing,
+		       "Deleted child rebound by name or displaced another valid selected child");
 		outputs.insert(outputs.begin() + 1, {meshA, "Mesh", {2}, "mesh-a", "Torso"});
 		Expect(bool(database->PublishImport(moved, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, mainId)) &&
 		           bool(model.Refresh(*workspace.value)),
 		       "Cannot restore selected output");
 		model.ReconcileSelection(selection);
-		Expect(!selection.assetMissing && selection.assetLocalFileId == meshA,
-		       "Restoring the same stable output failed to recover its selection");
+		Expect(!selection.entries[0].assetMissing && selection.entries[0].assetLocalFileId == meshA &&
+		           selection.PrimaryEntry()->assetLocalFileId == meshB,
+		       "Restoring the same stable output failed to recover its original selection entry");
 		outputs[1].visibleInProject = false;
 		Expect(bool(database->PublishImport(moved, "test", 1, "cpu", nlohmann::json::object(), {}, outputs, mainId)) &&
 		           bool(model.Refresh(*workspace.value)),
@@ -161,10 +293,12 @@ int main()
 		           bool(model.Refresh(*workspace.value)),
 		       "Cannot reorder outputs or change the main object");
 		model.ReconcileSelection(selection);
-		Expect(!selection.assetMissing && selection.assetLocalFileId == meshA &&
+		Expect(!selection.assetMissing && selection.assetLocalFileId == meshB &&
 		           database->ImportedObject(textureGuid).value.localFileId == meshB,
 		       "Main-object change or directory order rebound a concrete selection");
 		const auto choices = AssetObjectChoices(*workspace.value);
+		const auto textureChoices = QueryAssetObjectChoices(*workspace.value, [&](const ImportedArtifactRecord& object)
+		                                                    { return object.guid == textureGuid; });
 		Expect(std::count_if(choices.begin(), choices.end(), [&](const auto& object)
 		                     { return object.guid == textureGuid && object.isMainObject; }) == 1 &&
 		           std::none_of(choices.begin(), choices.end(),
@@ -174,6 +308,11 @@ int main()
 			                               (object.localFileId == meshA || object.localFileId == nodeId);
 		                        }),
 		       "Chooser duplicated the main alias or included hidden outputs");
+		Expect(std::count_if(textureChoices.begin(), textureChoices.end(), [&](const auto& object)
+		                     { return object.guid == textureGuid && object.isMainObject; }) == 1 &&
+		           std::none_of(textureChoices.begin(), textureChoices.end(), [&](const auto& object)
+		                        { return object.guid == textureGuid && object.localFileId == meshA; }),
+		       "Filtered reference query did not preserve primary alias de-duplication");
 		const auto parent = VirtualPath::Parse("prj:Container").value;
 		const auto nested = VirtualPath::Parse("prj:Container/Moved.png").value;
 		Expect(bool(database->CreateFolder(parent)) && bool(database->Move(moved, nested)) &&
@@ -187,7 +326,9 @@ int main()
 		Expect(bool(database->Remove(selection.assetPath)) && bool(model.Refresh(*workspace.value)),
 		       "Cannot delete selected source");
 		model.ReconcileSelection(selection);
-		Expect(selection.assetMissing && selection.assetGuid == textureGuid && selection.assetLocalFileId == meshA,
+		Expect(selection.assetMissing && selection.assetGuid == textureGuid && selection.assetLocalFileId == meshB &&
+		           selection.entries.size() == 2 && selection.entries[0].assetMissing &&
+		           selection.entries[1].assetMissing,
 		       "Deleting a source discarded its missing exact selection");
 		selection.SelectGameObject(ResourceId::Generate(), ResourceId::Generate());
 		Expect(!selection.assetGuid && !selection.assetMissing && selection.kind == EditorSelectionKind::GameObject,

@@ -136,8 +136,21 @@ int main()
 		           documents->Session().Index().Resolve(secondId).value.path == renamedPath &&
 		           !std::filesystem::exists(root / "Assets" / "second.ursamat"),
 		       "Rename lost the stable resource ID or old path");
+		const auto movedPath = Take(VirtualPath::Parse("prj:Moved/renamed.ursamat"));
+		done(workspace->Database()->CreateFolder(Take(VirtualPath::Parse("prj:Moved"))));
+		documents->Current()->MarkDirty();
+		done(workspace->Database()->Move(renamedPath, movedPath));
+		done(workspace->Refresh());
+		done(documents->FollowMovedSource());
+		Expect(documents->Current()->Path() == movedPath && documents->Current()->Dirty() &&
+		           documents->Current()->Id() == secondId,
+		       "Open dirty document did not follow its source GUID through a Project Move");
+		done(documents->SaveCurrent());
+		Expect(workspace->Index().Resolve(secondId).value.path == movedPath &&
+		           !std::filesystem::exists(root / "Assets" / "renamed.ursamat"),
+		       "Saving a moved dirty draft did not write to the GUID's new path");
 		auto provider = std::make_shared<MemoryFileProvider>();
-		done(provider->WriteAtomic("renamed.ursamat", Take(workspace->Index().Filesystem().Read(renamedPath)), true));
+		done(provider->WriteAtomic("renamed.ursamat", Take(workspace->Index().Filesystem().Read(movedPath)), true));
 		VirtualFileSystem readOnly;
 		done(readOnly.MountProvider(projectScheme, provider, MountAccess::ReadOnly));
 		auto readOnlyWorkspace = Take(Editor::ProjectWorkspace::FromFilesystem(root, readOnly));

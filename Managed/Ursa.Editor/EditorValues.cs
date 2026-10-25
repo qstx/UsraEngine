@@ -131,6 +131,7 @@ internal struct SerializedPropertyState
 {
 	public SerializedPropertyType Type;
 	public SerializedPropertyType ElementType;
+	public bool HasMultipleDifferentValues;
 	public EditorReferenceKind ReferenceKind;
 	public string TypeName;
 	public string[] EnumNames;

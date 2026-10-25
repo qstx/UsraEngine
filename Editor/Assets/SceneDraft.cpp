@@ -651,6 +651,26 @@ Result<void> SceneDraft::SetInstanceProperty(ResourceId instanceId, ResourceId s
 	return SetPrefabPropertyOverride(*linked, instanceId, sourceObjectId, pointer, value);
 }
 
+Result<void> SceneDraft::SetInstanceProperties(const Vector<SceneInstancePropertyOverride>& overrides)
+{
+	if (!linked)
+	{
+		return Result<void>::Failure("Scene has no linked Prefab instances");
+	}
+	const auto previousDocument = linked->document;
+	for (const auto& property : overrides)
+	{
+		auto updated = SetPrefabPropertyOverride(*linked, property.instanceId, property.sourceObjectId, property.path,
+		                                         property.value);
+		if (!updated)
+		{
+			linked->document = previousDocument;
+			return updated;
+		}
+	}
+	return {};
+}
+
 Result<void> SceneDraft::SetInstanceStructure(ResourceId instanceId, const String& operation,
                                               const nlohmann::json& value)
 {
@@ -664,9 +684,20 @@ Result<void> SceneDraft::SetInstanceStructure(ResourceId instanceId, const Strin
 Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId parentId, const VirtualPath& scenePath,
                                            ResourceId sceneId)
 {
+	auto placed = PlacePrefabBatch({{prefabId, parentId}}, scenePath, sceneId);
+	return placed ? Result<ResourceId>::Success(placed.value.front()) : Result<ResourceId>::Failure(placed.error);
+}
+
+Result<Vector<ResourceId>> SceneDraft::PlacePrefabBatch(const Vector<std::pair<ResourceId, ResourceId>>& placements,
+                                                        const VirtualPath& scenePath, ResourceId sceneId)
+{
 	if (kind != ResourceKind::Scene)
 	{
-		return Result<ResourceId>::Failure("Prefab instances can only be placed in scenes");
+		return Result<Vector<ResourceId>>::Failure("Prefab instances can only be placed in scenes");
+	}
+	if (placements.empty())
+	{
+		return Result<Vector<ResourceId>>::Failure("Prefab placement requires at least one instance");
 	}
 	const MaterialIdResolver resolver = [this](const std::shared_ptr<MaterialInstance>& material)
 	{ return MaterialId(material); };
@@ -679,7 +710,7 @@ Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId paren
 		auto captured = CaptureLinkedSceneChanges(scenePath.ToString(), *linked, registry, resolver);
 		if (!captured)
 		{
-			return Result<ResourceId>::Failure(captured.error);
+			return Result<Vector<ResourceId>>::Failure(captured.error);
 		}
 		document = linked->document;
 		linked->document = previousDocument;
@@ -691,15 +722,21 @@ Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId paren
 		auto encoded = EncodeSceneDocument(scenePath.ToString(), sceneId, *scene, registry, resolver);
 		if (!encoded)
 		{
-			return Result<ResourceId>::Failure(encoded.error);
+			return Result<Vector<ResourceId>>::Failure(encoded.error);
 		}
 		document = std::move(encoded.value);
 	}
-	const ResourceId instanceId = ResourceId::Generate();
-	auto placed = AddPrefabInstance(document, prefabId, instanceId, parentId);
-	if (!placed)
+	Vector<ResourceId> instanceIds;
+	instanceIds.reserve(placements.size());
+	for (const auto& [prefabId, parentId] : placements)
 	{
-		return Result<ResourceId>::Failure(placed.error);
+		const ResourceId instanceId = ResourceId::Generate();
+		auto placed = AddPrefabInstance(document, prefabId, instanceId, parentId);
+		if (!placed)
+		{
+			return Result<Vector<ResourceId>>::Failure(placed.error);
+		}
+		instanceIds.push_back(instanceId);
 	}
 	ComponentLoadContext context(resources);
 	if (setup)
@@ -707,17 +744,197 @@ Result<ResourceId> SceneDraft::PlacePrefab(ResourceId prefabId, ResourceId paren
 		auto prepared = setup(context);
 		if (!prepared)
 		{
-			return Result<ResourceId>::Failure(prepared.error);
+			return Result<Vector<ResourceId>>::Failure(prepared.error);
 		}
 	}
 	auto loaded = DecodeLinkedSceneDocument(scenePath.ToString(), std::move(document), registry, context);
 	if (!loaded)
 	{
-		return Result<ResourceId>::Failure(loaded.error);
+		return Result<Vector<ResourceId>>::Failure(loaded.error);
 	}
 	linked = std::make_unique<LinkedSceneResource>(std::move(loaded.value));
 	scene.reset();
-	return Result<ResourceId>::Success(instanceId);
+	return Result<Vector<ResourceId>>::Success(std::move(instanceIds));
+}
+
+Result<Vector<ResourceId>> SceneDraft::PlaceImportedAssets(const Vector<SceneAssetPlacement>& placements,
+                                                           ResourceId parentId, std::optional<Size> insertIndex,
+                                                           const VirtualPath& scenePath, ResourceId sceneId)
+{
+	if (kind != ResourceKind::Scene || placements.empty())
+	{
+		return Result<Vector<ResourceId>>::Failure("Imported assets can only be placed into a Scene");
+	}
+	Set<String> seen;
+	Vector<std::pair<ResourceId, ResourceId>> prefabPlacements;
+	for (const auto& placement : placements)
+	{
+		if (!placement.guid || (placement.kind != "Prefab" && placement.kind != "Model") ||
+		    !seen.insert(placement.guid.ToString()).second)
+		{
+			return Result<Vector<ResourceId>>::Failure("Scene placement requires unique Prefab or Model main assets");
+		}
+		if (placement.kind == "Model" && (!placement.modelDocument.is_object() ||
+		                                  placement.modelDocument.value("format", std::string{}) != "UrsaModel"))
+		{
+			return Result<Vector<ResourceId>>::Failure("Scene placement contains an invalid imported Model document");
+		}
+		if (placement.kind == "Prefab")
+		{
+			prefabPlacements.push_back({placement.guid, parentId});
+		}
+	}
+	GameObject::Ptr parent;
+	if (parentId)
+	{
+		auto resolved = GetScene().GameObjectById(parentId);
+		if (!resolved)
+		{
+			return Result<Vector<ResourceId>>::Failure(resolved.error);
+		}
+		parent = resolved.value;
+	}
+	Size siblingCount = 0;
+	if (parent)
+	{
+		auto children = GetScene().ChildrenOf(parent);
+		if (!children)
+		{
+			return Result<Vector<ResourceId>>::Failure(children.error);
+		}
+		siblingCount = children.value.size();
+	}
+	else
+	{
+		siblingCount = GetScene().RootGameObjects().size();
+	}
+	if (insertIndex && *insertIndex > siblingCount)
+	{
+		return Result<Vector<ResourceId>>::Failure("Scene placement sibling index is out of range");
+	}
+	Vector<std::pair<ResourceId, GameObject::Ptr>> createdModels;
+	Vector<std::pair<ResourceId, ResourceId>> modelIds;
+	auto rollbackModels = [&]
+	{
+		for (const auto& item : createdModels)
+		{
+			if (GetScene().Contains(item.second))
+			{
+				GetScene().DestroyGameObject(item.second);
+			}
+		}
+	};
+	for (const auto& placement : placements)
+	{
+		if (placement.kind != "Model")
+		{
+			continue;
+		}
+		auto model = InstantiateModel(placement.guid, placement.modelDocument, false);
+		if (!model)
+		{
+			rollbackModels();
+			return Result<Vector<ResourceId>>::Failure(model.error);
+		}
+		auto attached = GetScene().SetParent(model.value, parent);
+		if (!attached)
+		{
+			GetScene().DestroyGameObject(model.value);
+			rollbackModels();
+			return Result<Vector<ResourceId>>::Failure(attached.error);
+		}
+		auto id = GetScene().PersistentId(model.value);
+		if (!id)
+		{
+			GetScene().DestroyGameObject(model.value);
+			rollbackModels();
+			return Result<Vector<ResourceId>>::Failure(id.error);
+		}
+		modelIds.push_back({placement.guid, id.value});
+		createdModels.push_back({placement.guid, std::move(model.value)});
+	}
+	Vector<ResourceId> prefabInstances;
+	if (!prefabPlacements.empty())
+	{
+		auto placed = PlacePrefabBatch(prefabPlacements, scenePath, sceneId);
+		if (!placed)
+		{
+			rollbackModels();
+			return Result<Vector<ResourceId>>::Failure(placed.error);
+		}
+		prefabInstances = std::move(placed.value);
+	}
+	Vector<ResourceId> placedIds;
+	placedIds.reserve(placements.size());
+	Size prefabIndex = 0;
+	for (const auto& placement : placements)
+	{
+		if (placement.kind == "Model")
+		{
+			const auto model = std::find_if(modelIds.begin(), modelIds.end(),
+			                                [&](const auto& item) { return item.first == placement.guid; });
+			placedIds.push_back(model->second);
+			continue;
+		}
+		const ResourceId instanceId = prefabInstances[prefabIndex++];
+		ResourceId rootId = instanceId;
+		if (!GetScene().GameObjectById(rootId) && linked)
+		{
+			const auto scope = linked->scopedIds.find(instanceId.ToString());
+			if (scope != linked->scopedIds.end())
+			{
+				for (const auto& [localId, scopedId] : scope->second)
+				{
+					(void)localId;
+					auto parsed = ResourceId::Parse(scopedId);
+					auto candidate = parsed ? GetScene().GameObjectById(parsed.value)
+					                        : Result<GameObject::Ptr>::Failure(parsed.error);
+					if (!candidate)
+					{
+						continue;
+					}
+					auto candidateParent = GetScene().ParentOf(candidate.value);
+					if (!candidateParent)
+					{
+						continue;
+					}
+					ResourceId resolvedParent;
+					if (candidateParent.value)
+					{
+						auto resolved = GetScene().PersistentId(candidateParent.value);
+						if (!resolved)
+						{
+							continue;
+						}
+						resolvedParent = resolved.value;
+					}
+					if (resolvedParent == parentId)
+					{
+						rootId = parsed.value;
+						break;
+					}
+				}
+			}
+		}
+		placedIds.push_back(rootId);
+	}
+	if (insertIndex)
+	{
+		for (Size index = 0; index < placedIds.size(); ++index)
+		{
+			auto object = GetScene().GameObjectById(placedIds[index]);
+			if (!object)
+			{
+				return Result<Vector<ResourceId>>::Failure(object.error);
+			}
+			auto reordered = GetScene().ReorderGameObject(object.value, *insertIndex + index);
+			if (!reordered)
+			{
+				return Result<Vector<ResourceId>>::Failure(reordered.error);
+			}
+		}
+	}
+	return Result<Vector<ResourceId>>::Success(std::move(placedIds));
 }
 
 Result<std::unique_ptr<EditorDocument>> NewSceneDocument(const VirtualPath& path, ResourceKind kind,

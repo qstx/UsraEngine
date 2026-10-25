@@ -34,6 +34,12 @@ struct AssetGuidAssignment
 	ResourceId guid;
 };
 
+struct AssetMoveRequest
+{
+	VirtualPath source;
+	VirtualPath destination;
+};
+
 using ScriptAssemblyGroup = Ursa::ScriptAssemblyGroup;
 
 struct ScriptSourceAsset
@@ -155,9 +161,13 @@ public:
 
 	Result<void> Move(const VirtualPath& source, const VirtualPath& destination);
 
+	Result<void> MoveBatch(const Vector<AssetMoveRequest>& moves);
+
 	Result<void> Copy(const VirtualPath& source, const VirtualPath& destination);
 
 	Result<void> Remove(const VirtualPath& path);
+
+	Result<void> RemoveBatch(const Vector<VirtualPath>& paths);
 
 	const String& SourceScheme() const
 	{
@@ -165,6 +175,11 @@ public:
 	}
 
 	VirtualFileSystem& Filesystem()
+	{
+		return filesystem;
+	}
+
+	const VirtualFileSystem& Filesystem() const
 	{
 		return filesystem;
 	}
@@ -207,7 +222,9 @@ private:
 	Result<Vector<FileTransfer>> StageTransfer(const VirtualPath& source, const VirtualPath& destination,
 	                                           bool sourceIsFolder) const;
 
-	Result<void> CommitTransfer(Vector<FileTransfer> files, bool moveSource, bool regenerateGuids);
+	Result<void> CommitTransfer(Vector<FileTransfer> files, bool regenerateGuids);
+
+	Result<std::shared_ptr<VirtualFileLease>> AcquireAssetOperationLease() const;
 
 	Result<Vector<VirtualPath>> FilesFor(const VirtualPath& path, bool isFolder) const;
 

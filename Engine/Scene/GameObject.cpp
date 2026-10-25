@@ -284,6 +284,35 @@ Result<void> GameObject::RemoveComponent(Component* component)
 	return RemoveComponentOwned(component);
 }
 
+Result<std::unique_ptr<Component>> GameObject::ReleaseDetachedComponent(Component* component)
+{
+	if (!alive || scene || !component || component->gameObject != this)
+	{
+		return Result<std::unique_ptr<Component>>::Failure(
+		    "Only a component owned by a detached staging object can be released");
+	}
+	const auto found =
+	    std::find_if(components.begin(), components.end(),
+	                 [component](const std::unique_ptr<Component>& item) { return item.get() == component; });
+	if (found == components.end())
+	{
+		return Result<std::unique_ptr<Component>>::Failure("Staged component does not belong to its owner");
+	}
+	auto released = std::move(*found);
+	components.erase(found);
+	released->gameObject = nullptr;
+	return Result<std::unique_ptr<Component>>::Success(std::move(released));
+}
+
+Result<Component*> GameObject::AdoptDetachedComponent(std::unique_ptr<Component> component)
+{
+	if (!component || component->scene || component->gameObject)
+	{
+		return Result<Component*>::Failure("Only a detached component can be adopted");
+	}
+	return AddComponentOwned(std::move(component));
+}
+
 Result<void> GameObject::RemoveComponentOwned(Component* component)
 {
 	const auto found =

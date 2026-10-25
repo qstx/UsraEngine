@@ -1,6 +1,8 @@
 #include <Ui/EditorIcons.hpp>
 #include <Inspector/MeshInspector.hpp>
+#include <Inspector/ReferencePicker.hpp>
 #include <Assets/MeshAssetEditor.hpp>
+#include <Assets/AssetPreviewContent.hpp>
 #include <Assets/ProjectBrowserModel.hpp>
 #include <Scene/MeshFilterComponent.hpp>
 #include <Scene/GameObject.hpp>
@@ -19,26 +21,30 @@ struct Candidate
 	AssetReference reference;
 	String label;
 	UInt64 mainLocalFileId = 0;
+	ResourceKind kind;
+	VirtualPath path;
 };
 
 Vector<Candidate> Candidates(ProjectWorkspace& workspace, ResourceKind kind)
 {
 	Vector<Candidate> result;
-	for (const auto& artifact : AssetObjectChoices(workspace))
+	const String expectedKind = kind == ResourceKind::Mesh      ? "Mesh"
+	                            : kind == ResourceKind::Texture ? "Texture"
+	                                                            : "Material";
+	for (const auto& artifact : QueryAssetObjectChoices(workspace, [&](const ImportedArtifactRecord& object)
+	                                                    { return object.kind == expectedKind; }))
 	{
-		if (artifact.kind == (kind == ResourceKind::Mesh      ? "Mesh"
-		                      : kind == ResourceKind::Texture ? "Texture"
-		                                                      : "Material"))
-		{
-			result.push_back({{artifact.guid, artifact.isMainObject ? 0 : artifact.localFileId},
-			                  artifact.Label() + " - " + artifact.sourcePath.ToString(),
-			                  artifact.isMainObject ? artifact.localFileId : 0});
-		}
+		result.push_back({{artifact.guid, artifact.isMainObject ? 0 : artifact.localFileId},
+		                  artifact.Label() + " - " + artifact.sourcePath.ToString(),
+		                  artifact.isMainObject ? artifact.localFileId : 0,
+		                  kind,
+		                  artifact.sourcePath});
 	}
 	return result;
 }
 
-bool Picker(const char* label, AssetReference current, const Vector<Candidate>& options, AssetReference& selected)
+bool Picker(const char* label, AssetReference current, const Vector<Candidate>& options, ProjectWorkspace& workspace,
+            AssetReference& selected)
 {
 	String preview = current.guid ? current.guid.ToString() : String("None / Local");
 	for (const auto& option : options)
@@ -52,32 +58,49 @@ bool Picker(const char* label, AssetReference current, const Vector<Candidate>& 
 		}
 	}
 	bool changed = false;
-	if (ImGui::BeginCombo(label, preview.c_str()))
+	Vector<ReferencePickerOption> pickerOptions;
+	pickerOptions.push_back({"none", "None", "None", {}, true});
+	for (const auto& option : options)
 	{
-		if (Icons::Selectable(Icons::Icon::Close, "None"))
+		ReferencePickerOption candidate{"asset:" + option.reference.guid.ToString() + ":" +
+		                                    ToUrsaString(std::to_string(option.reference.localFileId)),
+		                                option.label, option.kind == ResourceKind::Texture ? "Texture" : "Asset",
+		                                option.label, true};
+		AssetPreviewTarget target;
+		target.kind = option.kind == ResourceKind::Texture    ? AssetPreviewKind::Texture
+		              : option.kind == ResourceKind::Material ? AssetPreviewKind::Material
+		              : option.kind == ResourceKind::Mesh     ? AssetPreviewKind::Mesh
+		                                                      : AssetPreviewKind::None;
+		target.identity = option.reference;
+		target.path = option.path;
+		target.projectSession = ResourceId::Generate();
+		if (target.Supported())
 		{
-			selected = {};
-			changed = true;
+			candidate.loadAssetPreviewContent = [&workspace, target]
+			{ return LoadAssetPreviewContent(target, workspace); };
 		}
-		for (const auto& option : options)
-		{
-			if (Icons::Selectable(Icons::Icon::Link, option.label.c_str(),
-			                      option.reference.guid == current.guid &&
-			                          option.reference.localFileId == current.localFileId))
-			{
-				selected = option.reference;
-				changed = true;
-			}
-		}
-		ImGui::EndCombo();
+		pickerOptions.push_back(std::move(candidate));
+	}
+	const auto accepted = DrawReferencePickerButton(
+	    "mesh-reference:" + ToUrsaString(std::to_string(ImGui::GetID(label))), preview, "Mesh, Texture or Material",
+	    pickerOptions,
+	    current.guid ? "asset:" + current.guid.ToString() + ":" + ToUrsaString(std::to_string(current.localFileId))
+	                 : String{});
+	if (accepted)
+	{
+		selected = *accepted == 0 ? AssetReference{} : options[*accepted - 1].reference;
+		changed = true;
 	}
 	if (ImGui::BeginDragDropTarget())
 	{
-		if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("URSA_ASSET_REFERENCE"))
+		if (const ImGuiPayload* payload = AcceptEditorDragDropPayload())
 		{
-			if (payload->DataSize == sizeof(AssetReference))
+			auto decoded = DecodeEditorDragPayload(payload->DataType, payload->Data, payload->DataSize);
+			auto dropped =
+			    decoded ? SingleAssetDragReference(decoded.value) : Result<AssetReference>::Failure(decoded.error);
+			if (dropped)
 			{
-				const auto reference = *static_cast<const AssetReference*>(payload->Data);
+				const auto reference = dropped.value;
 				const auto compatible = std::find_if(
 				    options.begin(), options.end(),
 				    [&](const auto& option)
@@ -156,7 +179,7 @@ Result<bool> EditMaterial(MaterialInstance& material, ProjectWorkspace& workspac
 			{
 				AssetReference selected;
 				if (Picker(label, {value.textureId, value.textureLocalFileId},
-				           Candidates(workspace, ResourceKind::Texture), selected))
+				           Candidates(workspace, ResourceKind::Texture), workspace, selected))
 				{
 					value.textureId = selected.guid;
 					value.textureLocalFileId = selected.localFileId;
@@ -223,7 +246,7 @@ Result<bool> DrawMeshInspector(Component& component, ProjectWorkspace& workspace
 	{
 		AssetReference selected;
 		if (Picker("Mesh", mesh ? mesh->AssetIdentity() : AssetReference{}, Candidates(workspace, ResourceKind::Mesh),
-		           selected))
+		           workspace, selected))
 		{
 			auto loaded = selected.guid ? resources.LoadMesh(selected.guid, selected.localFileId)
 			                            : Result<MeshPtr>::Success(nullptr);
@@ -336,7 +359,8 @@ Result<bool> DrawMeshInspector(Component& component, ProjectWorkspace& workspace
 		{
 			ImGui::PushID(int(i));
 			AssetReference selected;
-			if (Picker("Element", materials[i] ? materials[i]->AssetIdentity() : AssetReference{}, options, selected))
+			if (Picker("Element", materials[i] ? materials[i]->AssetIdentity() : AssetReference{}, options, workspace,
+			           selected))
 			{
 				auto loaded = selected.guid ? resources.LoadMaterial(selected.guid, selected.localFileId)
 				                            : Result<std::shared_ptr<MaterialInstance>>::Success(nullptr);

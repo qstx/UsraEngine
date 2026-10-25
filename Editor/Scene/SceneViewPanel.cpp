@@ -7,16 +7,27 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
 #include <Ui/ImGuiBridge.hpp>
+#include <Math/Vec4.hpp>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 
 namespace Ursa::Editor
 {
 namespace
 {
+ImVec2 CurrentViewportFramebufferScale()
+{
+	const ImVec2 viewportScale = ImGui::GetWindowViewport()->FramebufferScale;
+	const ImVec2 fallback = ImGui::GetIO().DisplayFramebufferScale;
+	return ImVec2(viewportScale.x > 0.f ? viewportScale.x : std::max(fallback.x, 1.f),
+	              viewportScale.y > 0.f ? viewportScale.y : std::max(fallback.y, 1.f));
+}
+
 Vector<UInt8> ToBytes(const String& text)
 {
 	Vector<UInt8> bytes;
@@ -38,7 +49,139 @@ bool HasEffectiveGameCamera(const Scene& scene)
 	auto active = scene.IsComponentActive(cameraId);
 	return active && active.value;
 }
+
+Vec4 Transform(const Mat4& matrix, Vec4 vector)
+{
+	const Float32 input[] = {vector.x, vector.y, vector.z, vector.w};
+	Float32 output[4]{};
+	for (Int32 row = 0; row < 4; ++row)
+	{
+		for (Int32 column = 0; column < 4; ++column)
+		{
+			output[row] += matrix.At(row, column) * input[column];
+		}
+	}
+	return {output[0], output[1], output[2], output[3]};
+}
+
+bool IntersectBounds(Vec3 origin, Vec3 direction, const Bounds& bounds, Float32& distance)
+{
+	if (bounds.empty)
+	{
+		return false;
+	}
+	Float32 minimum = 0.f;
+	Float32 maximum = std::numeric_limits<Float32>::max();
+	const Float32 origins[] = {origin.x, origin.y, origin.z};
+	const Float32 directions[] = {direction.x, direction.y, direction.z};
+	const Float32 lower[] = {bounds.minimum.x, bounds.minimum.y, bounds.minimum.z};
+	const Float32 upper[] = {bounds.maximum.x, bounds.maximum.y, bounds.maximum.z};
+	for (Size axis = 0; axis < 3; ++axis)
+	{
+		if (std::abs(directions[axis]) < 1.0e-7f)
+		{
+			if (origins[axis] < lower[axis] || origins[axis] > upper[axis])
+			{
+				return false;
+			}
+			continue;
+		}
+		Float32 first = (lower[axis] - origins[axis]) / directions[axis];
+		Float32 second = (upper[axis] - origins[axis]) / directions[axis];
+		if (first > second)
+		{
+			std::swap(first, second);
+		}
+		minimum = std::max(minimum, first);
+		maximum = std::min(maximum, second);
+		if (minimum > maximum)
+		{
+			return false;
+		}
+	}
+	distance = minimum;
+	return maximum >= 0.f && std::isfinite(distance);
+}
+
+Vec3 Add(Vec3 left, Vec3 right)
+{
+	return {left.x + right.x, left.y + right.y, left.z + right.z};
+}
+
+Vec3 Scale(Vec3 value, Float32 scalar)
+{
+	return {value.x * scalar, value.y * scalar, value.z * scalar};
+}
 } // namespace
+
+Result<SceneDropPoint> ResolveSceneDropPoint(const Camera& camera, Float32 aspect, const ViewportLayout& layout,
+                                             ViewportPoint screenPosition,
+                                             const Vector<Rendering::RenderObject>& renderObjects)
+{
+	const auto pixel = ScreenToViewportPixel(screenPosition, layout);
+	if (!pixel || !layout.targetPixels.width || !layout.targetPixels.height || !std::isfinite(aspect) || aspect <= 0.f)
+	{
+		return Result<SceneDropPoint>::Failure("The pointer is outside the Scene image viewport");
+	}
+	try
+	{
+		const Float32 x = 2.f * pixel->x / static_cast<Float32>(layout.targetPixels.width) - 1.f;
+		const Float32 y = 1.f - 2.f * pixel->y / static_cast<Float32>(layout.targetPixels.height);
+		const Mat4 inverse = camera.ViewProjection(aspect).Inverse();
+		const auto unproject = [&](Float32 depth) -> Result<Vec3>
+		{
+			const Vec4 homogeneous = Transform(inverse, {x, y, depth, 1.f});
+			if (!std::isfinite(homogeneous.w) || std::abs(homogeneous.w) < 1.0e-7f)
+			{
+				return Result<Vec3>::Failure("The Scene camera ray has an invalid homogeneous coordinate");
+			}
+			return Result<Vec3>::Success(
+			    {homogeneous.x / homogeneous.w, homogeneous.y / homogeneous.w, homogeneous.z / homogeneous.w});
+		};
+		auto nearPoint = unproject(0.f);
+		auto farPoint = unproject(1.f);
+		if (!nearPoint || !farPoint)
+		{
+			return Result<SceneDropPoint>::Failure(!nearPoint ? nearPoint.error : farPoint.error);
+		}
+		const Vec3 direction = Normalized(farPoint.value - nearPoint.value);
+		if (Dot(direction, direction) < 0.99f)
+		{
+			return Result<SceneDropPoint>::Failure("The Scene camera ray is degenerate");
+		}
+		Float32 nearest = std::numeric_limits<Float32>::max();
+		bool hitGeometry = false;
+		for (const auto& object : renderObjects)
+		{
+			Float32 distance = 0.f;
+			if (IntersectBounds(nearPoint.value, direction, object.worldBounds, distance) && distance < nearest)
+			{
+				nearest = distance;
+				hitGeometry = true;
+			}
+		}
+		if (hitGeometry)
+		{
+			return Result<SceneDropPoint>::Success({Add(nearPoint.value, Scale(direction, nearest)), true});
+		}
+		const Vec3 planeNormal = Normalized(camera.target - camera.position);
+		const Float32 denominator = Dot(direction, planeNormal);
+		if (std::abs(denominator) < 1.0e-6f)
+		{
+			return Result<SceneDropPoint>::Failure("The Scene camera ray is parallel to the camera target plane");
+		}
+		const Float32 planeDistance = Dot(camera.target - nearPoint.value, planeNormal) / denominator;
+		if (!std::isfinite(planeDistance) || planeDistance < 0.f)
+		{
+			return Result<SceneDropPoint>::Failure("The Scene camera target plane is behind the viewport ray");
+		}
+		return Result<SceneDropPoint>::Success({Add(nearPoint.value, Scale(direction, planeDistance)), false});
+	}
+	catch (const std::exception& error)
+	{
+		return Result<SceneDropPoint>::Failure(ToUrsaString(error.what()));
+	}
+}
 
 Result<std::unique_ptr<SceneViewPanel>> SceneViewPanel::Create(Rhi::DevicePtr selectedDevice, ImGuiBridge& gui)
 {
@@ -549,17 +692,31 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 
 Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, EditorHierarchy& hierarchy,
                                   PlaySession& play, VirtualFileSystem* userFiles, const String& projectKey,
-                                  bool& showScene, bool& showGame, bool& viewportFocused, String& diagnostic)
+                                  bool& showScene, bool& showGame, bool& viewportFocused, String& diagnostic,
+                                  const std::function<Result<void>(const EditorDragSession&, Vec3)>& placeAssets,
+                                  ImGuiViewport** focusedGameViewport)
 {
 	viewportFocused = false;
+	if (focusedGameViewport)
+	{
+		*focusedGameViewport = nullptr;
+	}
 	sceneTarget.visible = false;
 	gameTarget.visible = false;
 	Scene& scene = play.Active() ? *play.GetScene() : draft.GetScene();
-	const ImVec2 dpi = ImGui::GetIO().DisplayFramebufferScale;
 	if (showScene)
 	{
 		if (ImGui::Begin("Scene", &showScene))
 		{
+			const ImVec2 dpi = CurrentViewportFramebufferScale();
+			if (ImGui::BeginPopupContextWindow("ScenePanelActions", ImGuiPopupFlags_NoOpenOverItems))
+			{
+				if (ImGui::MenuItem("Close Panel"))
+				{
+					showScene = false;
+				}
+				ImGui::EndPopup();
+			}
 			if (Icons::Button("Translate", Icons::Icon::Move, "Translate", gizmoOperation == GizmoOperation::Translate))
 			{
 				gizmoOperation = GizmoOperation::Translate;
@@ -593,12 +750,98 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				sceneTarget.visible = true;
 				const ViewportRect content{position.x, position.y, available.x, available.y};
 				const auto layout = ComputeViewportLayout(content, dpi.x, sceneTarget.size, 1, {}, true);
+				sceneLayout = layout;
 				const Float32 clipX = std::max(content.x, layout.displayRect.x);
 				const Float32 clipY = std::max(content.y, layout.displayRect.y);
 				ImGui::PushClipRect({clipX, clipY}, {clipX + layout.clipRect.width, clipY + layout.clipRect.height},
 				                    true);
 				ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 				ImGui::Image(sceneTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
+				if (ImGui::BeginDragDropTarget())
+				{
+					if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
+					        editorDragSessionPayloadType,
+					        ImGuiDragDropFlags_AcceptNoDrawDefaultRect | ImGuiDragDropFlags_AcceptBeforeDelivery))
+					{
+						auto drag = DecodeEditorDragPayload(payload->DataType, payload->Data,
+						                                    static_cast<Size>(payload->DataSize));
+						if (!drag)
+						{
+							if (payload->IsDelivery())
+							{
+								diagnostic = drag.error;
+							}
+						}
+						else if (!play.Active() && draft.Kind() == ResourceKind::Scene && placeAssets)
+						{
+							const ImVec2 mouse = ImGui::GetIO().MousePos;
+							const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
+							                       static_cast<Float32>(sceneTarget.size.height);
+							auto renderData = scene.CollectPreviewRenderData(sceneTarget.preview->GetCamera(), aspect);
+							auto dropPoint =
+							    renderData ? ResolveSceneDropPoint(sceneTarget.preview->GetCamera(), aspect, layout,
+							                                       {mouse.x, mouse.y}, renderData.value.objects)
+							               : Result<SceneDropPoint>::Failure(renderData.error);
+							if (dropPoint)
+							{
+								const Vec4 clip = Transform(
+								    sceneTarget.preview->GetCamera().ViewProjection(aspect),
+								    {dropPoint.value.world.x, dropPoint.value.world.y, dropPoint.value.world.z, 1.f});
+								if (std::isfinite(clip.w) && std::abs(clip.w) > 1.0e-7f)
+								{
+									const ImVec2 previewPoint{
+									    layout.displayRect.x +
+									        (clip.x / clip.w + 1.f) * layout.displayRect.width * 0.5f,
+									    layout.displayRect.y +
+									        (1.f - clip.y / clip.w) * layout.displayRect.height * 0.5f};
+									auto* drawList = ImGui::GetWindowDrawList();
+									drawList->AddCircleFilled(previewPoint, 6.f,
+									                          ImGui::GetColorU32(ImGuiCol_DragDropTarget), 16);
+									drawList->AddCircle(previewPoint, 9.f, ImGui::GetColorU32(ImGuiCol_Text), 16, 1.5f);
+								}
+								if (ClaimEditorDragDropDelivery(payload))
+								{
+									auto placed = placeAssets(drag.value, dropPoint.value.world);
+									diagnostic = placed ? String{} : placed.error;
+								}
+							}
+							else if (payload->IsDelivery())
+							{
+								diagnostic = dropPoint.error;
+							}
+						}
+					}
+					ImGui::EndDragDropTarget();
+				}
+				if (ImGui::BeginPopupContextItem("SceneViewportActions"))
+				{
+					const bool canCreate = !play.Active() && draft.Kind() == ResourceKind::Scene;
+					if (ImGui::MenuItem("Create Empty", nullptr, false, canCreate))
+					{
+						GameObject::Ptr parent;
+						auto selected = hierarchy.SelectedGameObject(scene);
+						if (selected)
+						{
+							parent = selected.value;
+						}
+						else if (!scene.RootGameObjects().empty())
+						{
+							parent = scene.RootGameObjects().front();
+						}
+						auto created = scene.CreateGameObject("GameObject", parent);
+						if (created)
+						{
+							auto selectedCreated = hierarchy.Select(scene, created.value);
+							document.MarkDirty();
+							diagnostic = selectedCreated ? String{} : selectedCreated.error;
+						}
+						else
+						{
+							diagnostic = created.error;
+						}
+					}
+					ImGui::EndPopup();
+				}
 				ImGui::PopClipRect();
 				GameObject::Ptr gizmoTarget;
 				ResourceId prefabObjectId;
@@ -680,6 +923,15 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 	{
 		if (ImGui::Begin("Game", &showGame))
 		{
+			const ImVec2 dpi = CurrentViewportFramebufferScale();
+			if (ImGui::BeginPopupContextWindow("GamePanelActions", ImGuiPopupFlags_NoOpenOverItems))
+			{
+				if (ImGui::MenuItem("Close Panel"))
+				{
+					showGame = false;
+				}
+				ImGui::EndPopup();
+			}
 			DrawGameToolbar(userFiles, projectKey, diagnostic);
 			const ImVec2 available = ImGui::GetContentRegionAvail();
 			const ImVec2 position = ImGui::GetCursorScreenPos();
@@ -757,6 +1009,10 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					ImGui::PopClipRect();
 					viewportFocused = play.Active() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
 					                  imageHovered && !panning;
+					if (viewportFocused && focusedGameViewport)
+					{
+						*focusedGameViewport = ImGui::GetWindowViewport();
+					}
 				}
 			}
 		}

@@ -150,7 +150,17 @@ void Send(GLFWwindow* handle, const WindowEvent& event)
 Result<std::shared_ptr<Window>> Window::Create(Ursa::UInt32 width, Ursa::UInt32 height, const String& title,
                                                bool visible)
 {
-	if (width == 0 || height == 0)
+	WindowCreateDesc desc;
+	desc.width = width;
+	desc.height = height;
+	desc.title = title;
+	desc.visible = visible;
+	return Create(desc);
+}
+
+Result<std::shared_ptr<Window>> Window::Create(const WindowCreateDesc& desc)
+{
+	if (desc.width == 0 || desc.height == 0)
 	{
 		return Result<std::shared_ptr<Window>>::Failure("Window dimensions must be positive");
 	}
@@ -160,8 +170,11 @@ Result<std::shared_ptr<Window>> Window::Create(Ursa::UInt32 width, Ursa::UInt32 
 		return Result<std::shared_ptr<Window>>::Failure("GLFW initialization failed");
 	}
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
-	auto* handle = glfwCreateWindow(static_cast<int>(width), static_cast<int>(height), title.c_str(), nullptr, nullptr);
+	glfwWindowHint(GLFW_VISIBLE, desc.visible ? GLFW_TRUE : GLFW_FALSE);
+	glfwWindowHint(GLFW_DECORATED, desc.decorated ? GLFW_TRUE : GLFW_FALSE);
+	glfwWindowHint(GLFW_FLOATING, desc.floating ? GLFW_TRUE : GLFW_FALSE);
+	auto* handle = glfwCreateWindow(static_cast<int>(desc.width), static_cast<int>(desc.height), desc.title.c_str(),
+	                                nullptr, nullptr);
 	if (!handle)
 	{
 		const char* message = nullptr;
@@ -229,7 +242,135 @@ Result<std::shared_ptr<Window>> Window::Create(Ursa::UInt32 width, Ursa::UInt32 
 		                           event.focused = focused == GLFW_TRUE;
 		                           Send(native, event);
 	                           });
+	glfwSetWindowPosCallback(handle,
+	                         [](GLFWwindow* native, int x, int y)
+	                         {
+		                         WindowEvent event;
+		                         event.type = WindowEventType::PositionChanged;
+		                         event.x = static_cast<Ursa::Float64>(x);
+		                         event.y = static_cast<Ursa::Float64>(y);
+		                         Send(native, event);
+	                         });
+	glfwSetWindowSizeCallback(handle,
+	                          [](GLFWwindow* native, int width, int height)
+	                          {
+		                          WindowEvent event;
+		                          event.type = WindowEventType::SizeChanged;
+		                          event.x = static_cast<Ursa::Float64>(width);
+		                          event.y = static_cast<Ursa::Float64>(height);
+		                          Send(native, event);
+	                          });
+	glfwSetFramebufferSizeCallback(handle,
+	                               [](GLFWwindow* native, int width, int height)
+	                               {
+		                               WindowEvent event;
+		                               event.type = WindowEventType::FramebufferSizeChanged;
+		                               event.x = static_cast<Ursa::Float64>(width);
+		                               event.y = static_cast<Ursa::Float64>(height);
+		                               Send(native, event);
+	                               });
+	glfwSetWindowContentScaleCallback(handle,
+	                                  [](GLFWwindow* native, float x, float y)
+	                                  {
+		                                  WindowEvent event;
+		                                  event.type = WindowEventType::ContentScaleChanged;
+		                                  event.x = static_cast<Ursa::Float64>(x);
+		                                  event.y = static_cast<Ursa::Float64>(y);
+		                                  Send(native, event);
+	                                  });
 	return Result<std::shared_ptr<Window>>::Success(std::move(window));
+}
+
+Result<WindowWorkArea> Window::PrimaryMonitorWorkArea()
+{
+	std::lock_guard<std::mutex> lock(glfwMutex);
+	const bool temporaryInitialization = windowCount == 0;
+	if (temporaryInitialization && !glfwInit())
+	{
+		return Result<WindowWorkArea>::Failure("GLFW initialization failed while querying the monitor work area");
+	}
+	GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+	if (!monitor)
+	{
+		if (temporaryInitialization)
+		{
+			glfwTerminate();
+		}
+		return Result<WindowWorkArea>::Failure("No primary monitor is available");
+	}
+	int x = 0;
+	int y = 0;
+	int width = 0;
+	int height = 0;
+	glfwGetMonitorWorkarea(monitor, &x, &y, &width, &height);
+	if (width <= 0 || height <= 0)
+	{
+		if (temporaryInitialization)
+		{
+			glfwTerminate();
+		}
+		return Result<WindowWorkArea>::Failure("Primary monitor has an invalid work area");
+	}
+	if (temporaryInitialization)
+	{
+		glfwTerminate();
+	}
+	return Result<WindowWorkArea>::Success({static_cast<Ursa::Int32>(x), static_cast<Ursa::Int32>(y),
+	                                        static_cast<Ursa::UInt32>(width), static_cast<Ursa::UInt32>(height)});
+}
+
+Result<Vector<WindowMonitorInfo>> Window::Monitors()
+{
+	std::lock_guard<std::mutex> lock(glfwMutex);
+	const bool temporaryInitialization = windowCount == 0;
+	if (temporaryInitialization && !glfwInit())
+	{
+		return Result<Vector<WindowMonitorInfo>>::Failure("GLFW initialization failed while querying monitors");
+	}
+	int count = 0;
+	GLFWmonitor** monitors = glfwGetMonitors(&count);
+	if (!monitors || count <= 0)
+	{
+		if (temporaryInitialization)
+		{
+			glfwTerminate();
+		}
+		return Result<Vector<WindowMonitorInfo>>::Failure("No display monitors are available");
+	}
+	Vector<WindowMonitorInfo> result;
+	result.reserve(static_cast<Size>(count));
+	for (int index = 0; index < count; ++index)
+	{
+		int x = 0;
+		int y = 0;
+		int workX = 0;
+		int workY = 0;
+		int workWidth = 0;
+		int workHeight = 0;
+		float scaleX = 1.0f;
+		float scaleY = 1.0f;
+		const GLFWvidmode* mode = glfwGetVideoMode(monitors[index]);
+		glfwGetMonitorPos(monitors[index], &x, &y);
+		glfwGetMonitorWorkarea(monitors[index], &workX, &workY, &workWidth, &workHeight);
+		glfwGetMonitorContentScale(monitors[index], &scaleX, &scaleY);
+		if (!mode || mode->width <= 0 || mode->height <= 0 || workWidth <= 0 || workHeight <= 0 || scaleX <= 0.0f ||
+		    scaleY <= 0.0f)
+		{
+			continue;
+		}
+		result.push_back({{static_cast<Ursa::Int32>(x), static_cast<Ursa::Int32>(y),
+		                   static_cast<Ursa::UInt32>(mode->width), static_cast<Ursa::UInt32>(mode->height)},
+		                  {static_cast<Ursa::Int32>(workX), static_cast<Ursa::Int32>(workY),
+		                   static_cast<Ursa::UInt32>(workWidth), static_cast<Ursa::UInt32>(workHeight)},
+		                  static_cast<Ursa::Float32>(scaleX),
+		                  static_cast<Ursa::Float32>(scaleY)});
+	}
+	if (temporaryInitialization)
+	{
+		glfwTerminate();
+	}
+	return result.empty() ? Result<Vector<WindowMonitorInfo>>::Failure("No monitor has a valid work area")
+	                      : Result<Vector<WindowMonitorInfo>>::Success(std::move(result));
 }
 
 Window::~Window()
@@ -254,6 +395,11 @@ void Window::PollEvents() const
 void Window::WaitEvents() const
 {
 	glfwWaitEvents();
+}
+
+void Window::WaitEventsTimeout(Float64 timeoutSeconds) const
+{
+	glfwWaitEventsTimeout(std::max(0.0, timeoutSeconds));
 }
 
 bool Window::ShouldClose() const
@@ -329,6 +475,44 @@ std::pair<Ursa::Float64, Ursa::Float64> Window::CursorPosition() const
 	Ursa::Float64 y = 0.0;
 	glfwGetCursorPos(static_cast<GLFWwindow*>(handle), &x, &y);
 	return {x, y};
+}
+
+std::pair<Ursa::Float64, Ursa::Float64> Window::DesktopCursorPosition() const
+{
+	const auto cursor = CursorPosition();
+	const auto position = Position();
+	return {cursor.first + position.first, cursor.second + position.second};
+}
+
+std::pair<Ursa::Int32, Ursa::Int32> Window::Position() const
+{
+	int x = 0;
+	int y = 0;
+	glfwGetWindowPos(static_cast<GLFWwindow*>(handle), &x, &y);
+	return {static_cast<Ursa::Int32>(x), static_cast<Ursa::Int32>(y)};
+}
+
+void Window::SetPosition(Ursa::Int32 x, Ursa::Int32 y)
+{
+	glfwSetWindowPos(static_cast<GLFWwindow*>(handle), static_cast<int>(x), static_cast<int>(y));
+}
+
+std::pair<Ursa::Float32, Ursa::Float32> Window::ContentScale() const
+{
+	float x = 1.0f;
+	float y = 1.0f;
+	glfwGetWindowContentScale(static_cast<GLFWwindow*>(handle), &x, &y);
+	return {static_cast<Ursa::Float32>(x), static_cast<Ursa::Float32>(y)};
+}
+
+bool Window::Focused() const
+{
+	return glfwGetWindowAttrib(static_cast<GLFWwindow*>(handle), GLFW_FOCUSED) == GLFW_TRUE;
+}
+
+void Window::Focus()
+{
+	glfwFocusWindow(static_cast<GLFWwindow*>(handle));
 }
 
 Result<Ursa::UInt64> Window::Subscribe(WindowEventCallback callback)
@@ -416,4 +600,5 @@ Ursa::UInt32 Window::FramebufferHeight() const
 	glfwGetFramebufferSize(static_cast<GLFWwindow*>(handle), &w, &h);
 	return static_cast<Ursa::UInt32>(h);
 }
+
 } // namespace Ursa

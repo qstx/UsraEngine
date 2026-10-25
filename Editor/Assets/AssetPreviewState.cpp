@@ -50,7 +50,7 @@ bool AssetPreviewTarget::Supported() const
 bool AssetPreviewTarget::SameIdentity(const AssetPreviewTarget& other) const
 {
 	return projectSession == other.projectSession && kind == other.kind && identity.guid == other.identity.guid &&
-	       identity.localFileId == other.identity.localFileId;
+	       identity.localFileId == other.identity.localFileId && customTypeId == other.customTypeId;
 }
 
 AssetPreviewTarget ResolveAssetPreviewTarget(const EditorSelectionContext& selection, const ProjectBrowserEntry* entry,
@@ -79,7 +79,7 @@ bool AssetPreviewState::Select(AssetPreviewTarget selected)
 	const bool identityChanged = !target.SameIdentity(selected);
 	const bool changed = identityChanged || target.contentVersion != selected.contentVersion ||
 	                     target.pipelineVersion != selected.pipelineVersion || target.draft != selected.draft ||
-	                     target.custom != selected.custom;
+	                     target.custom != selected.custom || target.customTypeId != selected.customTypeId;
 	target = std::move(selected);
 	if (identityChanged)
 	{

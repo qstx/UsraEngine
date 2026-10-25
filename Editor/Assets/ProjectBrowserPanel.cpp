@@ -1,15 +1,243 @@
 #include <Ui/EditorIcons.hpp>
 #include <Serialization/AssetReference.hpp>
 #include <Assets/ProjectBrowserPanel.hpp>
+#include <Workspace/EditorDragSession.hpp>
 
 #include <Core/StringInterop.hpp>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <algorithm>
 #include <functional>
 #include <tuple>
 
 namespace Ursa::Editor
 {
+namespace
+{
+EditorSelectionEntry AssetSelection(const ProjectBrowserEntry& asset, UInt64 localFileId = 0,
+                                    const String& resourceKind = {})
+{
+	EditorSelectionEntry entry;
+	entry.kind = EditorSelectionKind::Asset;
+	entry.assetPath = asset.path;
+	entry.assetGuid = asset.guid;
+	entry.assetLocalFileId = localFileId;
+	entry.assetKind = resourceKind;
+	entry.assetRole = localFileId ? EditorAssetSelectionRole::ImportedObject : EditorAssetSelectionRole::Source;
+	return entry;
+}
+
+void DrawProjectAssetDragSource(const EditorSelectionContext& selection, const EditorSelectionEntry& entry,
+                                const String& label)
+{
+	if (ImGui::BeginDragDropSource())
+	{
+		const auto drag = BeginEditorDragSession(selection, entry);
+		if (drag)
+		{
+			ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value, sizeof(drag.value));
+		}
+		ImGui::TextUnformatted(label.c_str());
+		ImGui::EndDragDropSource();
+	}
+}
+
+void DrawProjectMoveDropTarget(const ImRect& rect, ProjectWorkspace& workspace, ProjectBrowserModel& model,
+                               EditorSelectionContext& selection, const String& destinationFolder, bool readOnly,
+                               String& diagnostic, const ProjectBrowserActions& actions)
+{
+	if (!workspace.Database() || rect.GetHeight() < 2.0f ||
+	    !ImGui::BeginDragDropTargetCustom(rect, ImGui::GetID("##projectMoveDropTarget")))
+	{
+		return;
+	}
+	if (const ImGuiPayload* payload =
+	        ImGui::AcceptDragDropPayload(editorDragSessionPayloadType, ImGuiDragDropFlags_AcceptNoDrawDefaultRect |
+	                                                                       ImGuiDragDropFlags_AcceptBeforeDelivery))
+	{
+		auto decoded = DecodeEditorDragPayload(payload->DataType, payload->Data, static_cast<Size>(payload->DataSize),
+		                                       selection.revision);
+		if (!decoded)
+		{
+			if (payload->IsDelivery())
+			{
+				diagnostic = decoded.error;
+			}
+		}
+		else
+		{
+			const bool sceneObjects = !decoded.value.sources.empty() &&
+			                          std::all_of(decoded.value.sources.begin(), decoded.value.sources.end(),
+			                                      [](const EditorDragSource& source)
+			                                      {
+				                                      return source.identity.kind == EditorSelectionKind::GameObject &&
+				                                             !source.identity.IsMissing();
+			                                      });
+			if (sceneObjects)
+			{
+				if (!readOnly && actions.exportScenePrefabs)
+				{
+					ImGui::GetWindowDrawList()->AddRectFilled(rect.Min, rect.Max,
+					                                          ImGui::GetColorU32(ImGuiCol_DragDropTarget, 0.22f));
+					if (ClaimEditorDragDropDelivery(payload))
+					{
+						auto exported = actions.exportScenePrefabs(decoded.value, destinationFolder);
+						diagnostic = exported ? String{} : exported.error;
+					}
+				}
+				else if (payload->IsDelivery())
+				{
+					diagnostic = "Drop Scene GameObjects on a writable Project folder to create Prefabs";
+				}
+			}
+			else
+			{
+				auto plan = PlanProjectFolderDrop(*workspace.Database(), decoded.value, destinationFolder, readOnly);
+				if (plan)
+				{
+					ImGui::GetWindowDrawList()->AddRectFilled(rect.Min, rect.Max,
+					                                          ImGui::GetColorU32(ImGuiCol_DragDropTarget, 0.3f));
+					if (ClaimEditorDragDropDelivery(payload))
+					{
+						auto moved = actions.moveAssets ? actions.moveAssets(plan.value)
+						                                : Result<void>::Failure("Project Move is unavailable");
+						if (moved)
+						{
+							auto rebuilt = model.Refresh(workspace);
+							if (!rebuilt)
+							{
+								diagnostic = rebuilt.error;
+							}
+							else
+							{
+								model.ReconcileSelection(selection);
+								diagnostic.clear();
+							}
+						}
+						else
+						{
+							diagnostic = moved.error;
+						}
+					}
+				}
+				else if (payload->IsDelivery())
+				{
+					diagnostic = plan.error;
+				}
+			}
+		}
+	}
+	ImGui::EndDragDropTarget();
+}
+
+void DrawScenePrefabDropTarget(const ImRect& rect, const String& destinationFolder, bool readOnly,
+                               UInt64 selectionRevision, String& diagnostic, const ProjectBrowserActions& actions)
+{
+	const ImGuiPayload* active = ImGui::GetDragDropPayload();
+	if (readOnly || !actions.exportScenePrefabs || !active || !active->IsDataType(editorDragSessionPayloadType) ||
+	    rect.GetHeight() < 2.0f)
+	{
+		return;
+	}
+	auto drag =
+	    DecodeEditorDragPayload(active->DataType, active->Data, static_cast<Size>(active->DataSize), selectionRevision);
+	if (!drag || drag.value.sources.empty() ||
+	    std::any_of(
+	        drag.value.sources.begin(), drag.value.sources.end(), [](const EditorDragSource& source)
+	        { return source.identity.kind != EditorSelectionKind::GameObject || source.identity.IsMissing(); }) ||
+	    !ImGui::BeginDragDropTargetCustom(rect, ImGui::GetID("##projectPrefabDropTarget")))
+	{
+		return;
+	}
+	if (const ImGuiPayload* payload =
+	        ImGui::AcceptDragDropPayload(editorDragSessionPayloadType, ImGuiDragDropFlags_AcceptNoDrawDefaultRect |
+	                                                                       ImGuiDragDropFlags_AcceptBeforeDelivery))
+	{
+		ImGui::GetWindowDrawList()->AddRectFilled(rect.Min, rect.Max,
+		                                          ImGui::GetColorU32(ImGuiCol_DragDropTarget, 0.22f));
+		if (ClaimEditorDragDropDelivery(payload))
+		{
+			auto exported = actions.exportScenePrefabs(drag.value, destinationFolder);
+			diagnostic = exported ? String{} : exported.error;
+		}
+	}
+	ImGui::EndDragDropTarget();
+}
+} // namespace
+
+void ProjectBrowserPanel::Reset()
+{
+	expandedAssets.clear();
+	searchText.fill(0);
+	destinationPath.fill(0);
+	folderName.fill(0);
+	createFolderRequested = false;
+	renameRequested = false;
+	deleteRequested = false;
+	deleteTargets.clear();
+	backgroundMenuFolder.clear();
+	contextMenuTargets.clear();
+}
+
+void ProjectBrowserPanel::RequestRenameSelected()
+{
+	renameRequested = true;
+}
+
+void ProjectBrowserPanel::RequestDeleteSelected(const EditorSelectionContext& selection)
+{
+	deleteTargets = selection.entries;
+	deleteRequested = true;
+	deleteDiagnostic.clear();
+}
+
+void ProjectBrowserPanel::CaptureMenuContext(const String& key, const EditorSelectionContext& selection)
+{
+	contextMenuTargets.clear();
+	contextMenuTargets.emplace(
+	    key, EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision));
+}
+
+Result<void> ProjectBrowserPanel::CanExecuteMenuCommand(const String& key, const String& commandId, const String& label,
+                                                        const EditorSelectionContext& selection,
+                                                        const EditorCommandAvailability& availability) const
+{
+	const auto captured = contextMenuTargets.find(key);
+	if (captured == contextMenuTargets.end())
+	{
+		return Result<void>::Failure("The Project context menu target is no longer available");
+	}
+	EditorCommands commands;
+	auto registered =
+	    commands.Register({commandId, label, {}, availability, [](const auto&) { return Result<void>{}; }});
+	if (!registered)
+	{
+		return registered;
+	}
+	const auto current = EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision);
+	return commands.CanExecute(commandId, captured->second, current);
+}
+
+Result<void> ProjectBrowserPanel::ExecuteMenuCommand(const String& key, const String& commandId, const String& label,
+                                                     const EditorSelectionContext& selection,
+                                                     const EditorCommandAvailability& availability,
+                                                     const EditorCommandAction& action) const
+{
+	const auto captured = contextMenuTargets.find(key);
+	if (captured == contextMenuTargets.end())
+	{
+		return Result<void>::Failure("The Project context menu target is no longer available");
+	}
+	EditorCommands commands;
+	auto registered = commands.Register({commandId, label, {}, availability, action});
+	if (!registered)
+	{
+		return registered;
+	}
+	const auto current = EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision);
+	return commands.Execute(commandId, captured->second, current);
+}
+
 Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrowserModel& model,
                                        EditorSelectionContext& selection, EditorHierarchy& hierarchy, bool& open,
                                        bool readOnly, String& diagnostic, const ProjectBrowserActions& actions)
@@ -18,7 +246,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		return {};
 	}
-	if (!ImGui::Begin("Project", &open))
+	const bool visible = ImGui::Begin("Project", &open);
+	Icons::DrawPanelContextMenu("ProjectPanelActions", &open);
+	if (!visible)
 	{
 		ImGui::End();
 		return {};
@@ -52,10 +282,15 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		          });
 	}
 	ImGui::TextWrapped("Assets: %s", PathToUrsaString(workspace.ProjectRoot()).c_str());
+	if (selection.MissingCount())
+	{
+		ImGui::TextDisabled("%zu selected asset(s) no longer exist", selection.MissingCount());
+	}
 	if (!diagnostic.empty())
 	{
 		ImGui::TextWrapped("%s", diagnostic.c_str());
 	}
+	auto queueDelete = [&] { RequestDeleteSelected(selection); };
 	ImGui::InputTextWithHint("##NewAssetPath", "Asset path for Create/Rename", destinationPath.data(),
 	                         destinationPath.size());
 	ImGui::InputTextWithHint("##NewFolderName", "New folder name", folderName.data(), folderName.size());
@@ -64,6 +299,17 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		auto created = actions.createFolder(String(folderName.data()));
 		diagnostic = created ? String{} : created.error;
+	}
+	ImGui::EndDisabled();
+	Icons::SameLine();
+	const auto reimportPlan = workspace.Database()
+	                              ? PlanProjectSourceReimport(*workspace.Database(), selection.entries, readOnly)
+	                              : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+	ImGui::BeginDisabled(!actions.reimportAssets || !reimportPlan);
+	if (Icons::Button("Reimport Selected"))
+	{
+		auto reimported = actions.reimportAssets(reimportPlan.value);
+		diagnostic = reimported ? String{} : reimported.error;
 	}
 	ImGui::EndDisabled();
 	Icons::SameLine();
@@ -79,6 +325,42 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 	}
 	ImGui::EndDisabled();
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	    ImGui::IsKeyPressed(ImGuiKey_F2))
+	{
+		const auto captured = EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision);
+		const auto current = EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision);
+		EditorCommands commands;
+		auto registered =
+		    commands.Register({"project.rename", "Rename", "F2",
+		                       [readOnly, &actions](const EditorCommandContext& context)
+		                       {
+			                       const auto* primary = context.selection.PrimaryEntry();
+			                       return !readOnly && actions.renameAsset && context.selection.entries.size() == 1 &&
+			                                      primary && primary->kind == EditorSelectionKind::Asset &&
+			                                      !primary->IsMissing() &&
+			                                      primary->assetRole == EditorAssetSelectionRole::Source
+			                                  ? Result<void>{}
+			                                  : Result<void>::Failure("Rename requires one writable source asset");
+		                       },
+		                       [this](const EditorCommandContext&)
+		                       {
+			                       renameRequested = true;
+			                       return Result<void>{};
+		                       }});
+		if (registered)
+		{
+			auto renamed = commands.Execute("project.rename", captured, current);
+			if (!renamed && !selection.entries.empty())
+			{
+				diagnostic = renamed.error;
+			}
+		}
+		else
+		{
+			diagnostic = registered.error;
+		}
+	}
 	if (renameRequested)
 	{
 		ImGui::OpenPopup("Rename Project Asset");
@@ -136,6 +418,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		{
 			selectFolder({});
 		}
+		const ImRect rootFolderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+		DrawProjectMoveDropTarget(rootFolderRect, workspace, model, selection, {}, readOnly, diagnostic, actions);
 		std::function<void(const ProjectBrowserEntry&)> drawFolder = [&](const ProjectBrowserEntry& folder)
 		{
 			ImGui::PushID(folder.path.relative.c_str());
@@ -150,6 +434,10 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			{
 				selectFolder(folder.path.relative);
 			}
+			const ImRect folderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+			DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name);
+			DrawProjectMoveDropTarget(folderRect, workspace, model, selection, folder.path.relative, readOnly,
+			                          diagnostic, actions);
 			if (folderOpen)
 			{
 				for (const ProjectBrowserEntry& child : model.ChildFolders(folder.path.relative))
@@ -206,24 +494,76 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	ImGui::SetNextItemWidth(-1.0f);
 	ImGui::InputTextWithHint("##ProjectSearch", "Search Assets", searchText.data(), searchText.size());
 	const String search(searchText.data());
+	Vector<EditorSelectionEntry> visibleRows;
+	if (search.empty())
+	{
+		for (const auto& folder : model.ChildFolders(currentFolder))
+		{
+			visibleRows.push_back(AssetSelection(folder));
+		}
+	}
+	const auto visibleAssets = model.ChildAssets(currentFolder, search);
+	for (const auto& asset : visibleAssets)
+	{
+		visibleRows.push_back(AssetSelection(asset));
+		if (expandedAssets[asset.guid.ToString()] || !search.empty())
+		{
+			for (const auto& object : asset.VisibleChildren())
+			{
+				if (!object.isMainObject && object.visibleInProject)
+				{
+					visibleRows.push_back(AssetSelection(asset, object.localFileId, object.kind));
+				}
+			}
+		}
+	}
+	auto selectAsset = [&](const EditorSelectionEntry& entry)
+	{
+		const bool accepted =
+		    selection.SelectClicked(entry, visibleRows, ImGui::GetIO().KeyCtrl, ImGui::GetIO().KeyShift);
+		if (accepted)
+		{
+			const auto* primary = selection.PrimaryEntry();
+			if (primary && primary->kind == EditorSelectionKind::Asset)
+			{
+				model.SelectAsset(primary->assetPath);
+			}
+			hierarchy.ClearSelection();
+		}
+		return accepted;
+	};
 	if (search.empty())
 	{
 		for (const ProjectBrowserEntry& folder : model.ChildFolders(currentFolder))
 		{
 			ImGui::PushID(folder.path.relative.c_str());
-			if (Icons::Selectable(Icons::Icon::Folder, folder.name.c_str()))
+			const bool folderSelected = Icons::Selectable(Icons::Icon::Folder, folder.name.c_str());
+			const ImRect folderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+			if (folderSelected)
 			{
 				selectFolder(folder.path.relative);
 			}
+			DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name);
+			DrawProjectMoveDropTarget(folderRect, workspace, model, selection, folder.path.relative, readOnly,
+			                          diagnostic, actions);
+			bool contextSelectionAccepted = true;
 			if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 			{
-				if (selection.SelectAsset(folder.path))
+				if (!selection.Contains(AssetSelection(folder)))
 				{
-					model.SelectAsset(folder.path);
-					hierarchy.ClearSelection();
+					contextSelectionAccepted = selection.SelectAsset(folder.path);
+					if (contextSelectionAccepted)
+					{
+						model.SelectAsset(folder.path);
+						hierarchy.ClearSelection();
+					}
+				}
+				if (contextSelectionAccepted)
+				{
+					CaptureMenuContext("folder:" + folder.path.relative, selection);
 				}
 			}
-			if (ImGui::BeginPopupContextItem("FolderActions"))
+			if (contextSelectionAccepted && ImGui::BeginPopupContextItem("FolderActions"))
 			{
 				if (Icons::MenuItem("Open"))
 				{
@@ -272,22 +612,109 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					ImGui::EndMenu();
 				}
 				ImGui::EndDisabled();
-				ImGui::BeginDisabled(!actions.renameAsset || readOnly);
-				if (Icons::MenuItem("Rename Selected"))
+				const String commandKey = "folder:" + folder.path.relative;
+				const auto canRename = CanExecuteMenuCommand(
+				    commandKey, "project.rename", "Rename", selection,
+				    [&](const EditorCommandContext& context)
+				    {
+					    const auto* primary = context.selection.PrimaryEntry();
+					    return actions.renameAsset && !readOnly && context.selection.entries.size() == 1 && primary &&
+					                   primary->kind == EditorSelectionKind::Asset &&
+					                   primary->assetPath == folder.path &&
+					                   primary->assetRole == EditorAssetSelectionRole::Source
+					               ? Result<void>{}
+					               : Result<void>::Failure("The folder selection changed or is read-only");
+				    });
+				if (Icons::MenuItem("Rename Selected", nullptr, false, static_cast<bool>(canRename)))
 				{
-					if (selection.SelectAsset(folder.path))
-					{
-						model.SelectAsset(folder.path);
-						renameRequested = true;
-					}
+					auto renamed = ExecuteMenuCommand(
+					    commandKey, "project.rename", "Rename", selection,
+					    [&](const EditorCommandContext& context)
+					    {
+						    const auto* primary = context.selection.PrimaryEntry();
+						    return actions.renameAsset && !readOnly && context.selection.entries.size() == 1 &&
+						                   primary && primary->kind == EditorSelectionKind::Asset &&
+						                   primary->assetPath == folder.path &&
+						                   primary->assetRole == EditorAssetSelectionRole::Source
+						               ? Result<void>{}
+						               : Result<void>::Failure("The folder selection changed or is read-only");
+					    },
+					    [&](const EditorCommandContext&)
+					    {
+						    model.SelectAsset(folder.path);
+						    renameRequested = true;
+						    return Result<void>{};
+					    });
+					diagnostic = renamed ? String{} : renamed.error;
 				}
-				ImGui::EndDisabled();
+				const auto canDelete = CanExecuteMenuCommand(
+				    commandKey, "project.delete", "Delete", selection,
+				    [&](const EditorCommandContext& context)
+				    {
+					    auto plan =
+					        workspace.Database()
+					            ? PlanProjectSourceDelete(*workspace.Database(), context.selection.entries, readOnly)
+					            : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+					    return actions.deleteAssets && plan
+					               ? Result<void>{}
+					               : Result<void>::Failure(plan ? "Project Delete is unavailable" : plan.error);
+				    });
+				if (Icons::MenuItem("Delete Selected", nullptr, false, static_cast<bool>(canDelete)))
+				{
+					auto queued = ExecuteMenuCommand(
+					    commandKey, "project.delete", "Delete", selection,
+					    [&](const EditorCommandContext& context)
+					    {
+						    auto plan =
+						        workspace.Database()
+						            ? PlanProjectSourceDelete(*workspace.Database(), context.selection.entries,
+						                                      readOnly)
+						            : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+						    return actions.deleteAssets && plan
+						               ? Result<void>{}
+						               : Result<void>::Failure(plan ? "Project Delete is unavailable" : plan.error);
+					    },
+					    [&](const EditorCommandContext&)
+					    {
+						    queueDelete();
+						    return Result<void>{};
+					    });
+					diagnostic = queued ? String{} : queued.error;
+				}
+				const auto contextReimportPlan =
+				    workspace.Database() ? PlanProjectSourceReimport(*workspace.Database(), selection.entries, readOnly)
+				                         : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+				if (Icons::MenuItem("Reimport Selected", nullptr, false,
+				                    static_cast<bool>(actions.reimportAssets) &&
+				                        static_cast<bool>(contextReimportPlan)))
+				{
+					auto queued = ExecuteMenuCommand(
+					    commandKey, "project.reimport", "Reimport", selection,
+					    [&](const EditorCommandContext& context)
+					    {
+						    auto plan =
+						        workspace.Database()
+						            ? PlanProjectSourceReimport(*workspace.Database(), context.selection.entries,
+						                                        readOnly)
+						            : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+						    return actions.reimportAssets && plan
+						               ? Result<void>{}
+						               : Result<void>::Failure(plan ? "Project Reimport is unavailable" : plan.error);
+					    },
+					    [&](const EditorCommandContext& context)
+					    {
+						    auto plan =
+						        PlanProjectSourceReimport(*workspace.Database(), context.selection.entries, readOnly);
+						    return plan ? actions.reimportAssets(plan.value) : Result<void>::Failure(plan.error);
+					    });
+					diagnostic = queued ? String{} : queued.error;
+				}
 				ImGui::EndPopup();
 			}
 			ImGui::PopID();
 		}
 	}
-	for (const ProjectBrowserEntry& asset : model.ChildAssets(currentFolder, search))
+	for (const ProjectBrowserEntry& asset : visibleAssets)
 	{
 		ImGui::PushID(asset.path.relative.c_str());
 		bool& expanded = expandedAssets[asset.guid.ToString()];
@@ -301,56 +728,187 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			ImGui::SameLine();
 		}
-		const bool selected = selection.kind == EditorSelectionKind::Asset && !selection.assetMissing &&
-		                      selection.assetPath == asset.path && !selection.assetLocalFileId;
+		const auto assetEntry = AssetSelection(asset);
+		const bool selected = selection.Contains(assetEntry);
 		const String label = search.empty() ? asset.name : asset.path.relative;
 		if (Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative), label.c_str(),
 		                      selected, ImGuiSelectableFlags_AllowDoubleClick))
 		{
-			const bool accepted = selection.SelectAsset(asset.path, 0, {}, asset.guid);
+			const bool accepted = selectAsset(assetEntry);
 			if (accepted)
 			{
 				model.SelectAsset(asset.path);
-				hierarchy.ClearSelection();
 			}
 			if (accepted && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && actions.openAsset)
 			{
-				auto opened = actions.openAsset(asset);
+				EditorCommands commands;
+				commands.Register(
+				    {"project.open",
+				     "Open",
+				     {},
+				     [assetEntry](const EditorCommandContext& context)
+				     {
+					     const auto* primary = context.selection.PrimaryEntry();
+					     return primary && primary->SameIdentity(assetEntry) && !primary->IsMissing()
+					                ? Result<void>{}
+					                : Result<void>::Failure("The Project selection changed before opening the asset");
+				     },
+				     [&actions, &asset](const EditorCommandContext&) { return actions.openAsset(asset); }});
+				const auto commandContext =
+				    EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision);
+				auto opened = commands.Execute("project.open", commandContext, commandContext);
 				diagnostic = opened ? String{} : opened.error;
 			}
 		}
-		if (!asset.folder && ImGui::BeginDragDropSource())
-		{
-			const AssetReference reference{asset.guid, 0};
-			ImGui::SetDragDropPayload("URSA_ASSET_REFERENCE", &reference, sizeof(reference));
-			ImGui::TextUnformatted(asset.name.c_str());
-			ImGui::EndDragDropSource();
-		}
+		DrawProjectAssetDragSource(selection, assetEntry, asset.name);
+		bool contextSelectionAccepted = true;
 		if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 		{
-			if (selection.SelectAsset(asset.path, 0, {}, asset.guid))
+			if (!selection.Contains(assetEntry) && selection.SelectEntries({assetEntry}, 0, assetEntry))
 			{
 				model.SelectAsset(asset.path);
 				hierarchy.ClearSelection();
+			}
+			else if (!selection.Contains(assetEntry))
+			{
+				contextSelectionAccepted = false;
+			}
+			if (contextSelectionAccepted)
+			{
+				CaptureMenuContext("asset:" + asset.guid.ToString(), selection);
 			}
 		}
-		if (ImGui::BeginPopupContextItem("AssetActions"))
+		if (contextSelectionAccepted && ImGui::BeginPopupContextItem("AssetActions"))
 		{
-			if (Icons::MenuItem("Open") && actions.openAsset && selection.SelectAsset(asset.path, 0, {}, asset.guid))
+			const String commandKey = "asset:" + asset.guid.ToString();
+			const auto canOpen = CanExecuteMenuCommand(
+			    commandKey, "project.open", "Open", selection,
+			    [&](const EditorCommandContext& context)
+			    {
+				    if (!actions.openAsset || context.selection.entries.empty())
+				    {
+					    return Result<void>::Failure("Select an asset that can be opened");
+				    }
+				    if (std::none_of(context.selection.entries.begin(), context.selection.entries.end(),
+				                     [&](const auto& entry) { return entry.SameIdentity(assetEntry); }))
+				    {
+					    return Result<void>::Failure("The asset selection changed");
+				    }
+				    return Result<void>{};
+			    });
+			if (Icons::MenuItem("Open", nullptr, false, static_cast<bool>(canOpen)))
 			{
-				model.SelectAsset(asset.path);
-				hierarchy.ClearSelection();
-				auto opened = actions.openAsset(asset);
+				auto opened = ExecuteMenuCommand(
+				    commandKey, "project.open", "Open", selection,
+				    [&](const EditorCommandContext& context)
+				    {
+					    return !actions.openAsset || context.selection.entries.empty()
+					               ? Result<void>::Failure("Select an asset that can be opened")
+					           : std::none_of(context.selection.entries.begin(), context.selection.entries.end(),
+					                          [&](const auto& entry) { return entry.SameIdentity(assetEntry); })
+					               ? Result<void>::Failure("The asset selection changed")
+					               : Result<void>{};
+				    },
+				    [&](const EditorCommandContext&)
+				    {
+					    model.SelectAsset(asset.path);
+					    hierarchy.ClearSelection();
+					    return actions.openAsset(asset);
+				    });
 				diagnostic = opened ? String{} : opened.error;
 			}
-			ImGui::BeginDisabled(!actions.renameAsset || readOnly || selection.kind != EditorSelectionKind::Asset ||
-			                     selection.assetMissing || selection.assetPath != asset.path ||
-			                     selection.assetLocalFileId);
-			if (Icons::MenuItem("Rename Selected"))
+			const auto canRename = CanExecuteMenuCommand(
+			    commandKey, "project.rename", "Rename", selection,
+			    [&](const EditorCommandContext& context)
+			    {
+				    const auto* primary = context.selection.PrimaryEntry();
+				    return actions.renameAsset && !readOnly && context.selection.entries.size() == 1 && primary &&
+				                   primary->kind == EditorSelectionKind::Asset && !primary->IsMissing() &&
+				                   primary->assetRole == EditorAssetSelectionRole::Source &&
+				                   primary->assetPath == asset.path
+				               ? Result<void>{}
+				               : Result<void>::Failure("Select a writable source asset to rename");
+			    });
+			if (Icons::MenuItem("Rename Selected", nullptr, false, static_cast<bool>(canRename)))
 			{
-				renameRequested = true;
+				auto renamed = ExecuteMenuCommand(
+				    commandKey, "project.rename", "Rename", selection,
+				    [&](const EditorCommandContext& context)
+				    {
+					    const auto* primary = context.selection.PrimaryEntry();
+					    return actions.renameAsset && !readOnly && context.selection.entries.size() == 1 && primary &&
+					                   primary->kind == EditorSelectionKind::Asset && !primary->IsMissing() &&
+					                   primary->assetRole == EditorAssetSelectionRole::Source &&
+					                   primary->assetPath == asset.path
+					               ? Result<void>{}
+					               : Result<void>::Failure("Select a writable source asset to rename");
+				    },
+				    [&](const EditorCommandContext&)
+				    {
+					    renameRequested = true;
+					    return Result<void>{};
+				    });
+				diagnostic = renamed ? String{} : renamed.error;
 			}
-			ImGui::EndDisabled();
+			const auto canDelete = CanExecuteMenuCommand(
+			    commandKey, "project.delete", "Delete", selection,
+			    [&](const EditorCommandContext& context)
+			    {
+				    auto plan =
+				        workspace.Database()
+				            ? PlanProjectSourceDelete(*workspace.Database(), context.selection.entries, readOnly)
+				            : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+				    return actions.deleteAssets && plan
+				               ? Result<void>{}
+				               : Result<void>::Failure(plan ? "Project Delete is unavailable" : plan.error);
+			    });
+			if (Icons::MenuItem("Delete Selected", nullptr, false, static_cast<bool>(canDelete)))
+			{
+				auto queued = ExecuteMenuCommand(
+				    commandKey, "project.delete", "Delete", selection,
+				    [&](const EditorCommandContext& context)
+				    {
+					    auto plan =
+					        workspace.Database()
+					            ? PlanProjectSourceDelete(*workspace.Database(), context.selection.entries, readOnly)
+					            : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+					    return actions.deleteAssets && plan
+					               ? Result<void>{}
+					               : Result<void>::Failure(plan ? "Project Delete is unavailable" : plan.error);
+				    },
+				    [&](const EditorCommandContext&)
+				    {
+					    queueDelete();
+					    return Result<void>{};
+				    });
+				diagnostic = queued ? String{} : queued.error;
+			}
+			const auto contextReimportPlan =
+			    workspace.Database() ? PlanProjectSourceReimport(*workspace.Database(), selection.entries, readOnly)
+			                         : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+			if (Icons::MenuItem("Reimport Selected", nullptr, false,
+			                    static_cast<bool>(actions.reimportAssets) && static_cast<bool>(contextReimportPlan)))
+			{
+				auto queued = ExecuteMenuCommand(
+				    commandKey, "project.reimport", "Reimport", selection,
+				    [&](const EditorCommandContext& context)
+				    {
+					    auto plan =
+					        workspace.Database()
+					            ? PlanProjectSourceReimport(*workspace.Database(), context.selection.entries, readOnly)
+					            : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+					    return actions.reimportAssets && plan
+					               ? Result<void>{}
+					               : Result<void>::Failure(plan ? "Project Reimport is unavailable" : plan.error);
+				    },
+				    [&](const EditorCommandContext& context)
+				    {
+					    auto plan =
+					        PlanProjectSourceReimport(*workspace.Database(), context.selection.entries, readOnly);
+					    return plan ? actions.reimportAssets(plan.value) : Result<void>::Failure(plan.error);
+				    });
+				diagnostic = queued ? String{} : queued.error;
+			}
 			ImGui::EndPopup();
 		}
 		if (expanded || !search.empty())
@@ -366,39 +924,79 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				ImGui::PushID(localId.c_str());
 				const String objectLabel = object.Label();
 				const auto resourceKind = ResourceKindForPath(object.path);
+				const auto objectEntry = AssetSelection(asset, object.localFileId, object.kind);
 				if (Icons::Selectable(
 				        Icons::ForAsset(false,
 				                        resourceKind ? std::optional<ResourceKind>(resourceKind.value) : std::nullopt,
 				                        {}, {}),
 				        objectLabel.c_str(),
-				        selection.kind == EditorSelectionKind::Asset && selection.assetPath == asset.path &&
-				            selection.assetLocalFileId == object.localFileId))
+				        selection.Contains(AssetSelection(asset, object.localFileId, object.kind))))
 				{
-					if (selection.SelectAsset(asset.path, object.localFileId, object.kind, asset.guid))
+					if (selectAsset(AssetSelection(asset, object.localFileId, object.kind)))
+					{
+					}
+				}
+				if (ImGui::BeginDragDropSource())
+				{
+					const auto drag = BeginEditorDragSession(selection, objectEntry);
+					if (drag)
+					{
+						ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value, sizeof(drag.value));
+					}
+					ImGui::TextUnformatted(objectLabel.c_str());
+					ImGui::EndDragDropSource();
+				}
+				bool contextObjectSelectionAccepted = true;
+				if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selection.Contains(objectEntry))
+				{
+					contextObjectSelectionAccepted = selection.SelectEntries({objectEntry}, 0, objectEntry);
+					if (contextObjectSelectionAccepted)
 					{
 						model.SelectAsset(asset.path);
 						hierarchy.ClearSelection();
 					}
 				}
-				if (ImGui::BeginDragDropSource())
+				if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 				{
-					const AssetReference reference{asset.guid, object.localFileId};
-					ImGui::SetDragDropPayload("URSA_ASSET_REFERENCE", &reference, sizeof(reference));
-					ImGui::TextUnformatted(objectLabel.c_str());
-					ImGui::EndDragDropSource();
-				}
-				if (ImGui::IsItemClicked(ImGuiMouseButton_Right) &&
-				    selection.SelectAsset(asset.path, object.localFileId, object.kind, asset.guid))
-				{
-					model.SelectAsset(asset.path);
-					hierarchy.ClearSelection();
-				}
-				if (ImGui::BeginPopupContextItem("ImportedObjectActions"))
-				{
-					if (Icons::MenuItem("Select Source") && selection.SelectAsset(asset.path, 0, {}, asset.guid))
+					if (contextObjectSelectionAccepted)
 					{
-						model.SelectAsset(asset.path);
-						hierarchy.ClearSelection();
+						CaptureMenuContext("object:" + asset.guid.ToString() + ":" + localId, selection);
+					}
+				}
+				if (contextObjectSelectionAccepted && ImGui::BeginPopupContextItem("ImportedObjectActions"))
+				{
+					const String commandKey = "object:" + asset.guid.ToString() + ":" + localId;
+					const auto canSelectSource = CanExecuteMenuCommand(
+					    commandKey, "project.select-source", "Select Source", selection,
+					    [&](const EditorCommandContext& context)
+					    {
+						    const auto* primary = context.selection.PrimaryEntry();
+						    return primary && primary->kind == EditorSelectionKind::Asset &&
+						                   primary->assetRole == EditorAssetSelectionRole::ImportedObject &&
+						                   primary->assetGuid == asset.guid
+						               ? Result<void>{}
+						               : Result<void>::Failure("The imported object selection changed");
+					    });
+					if (Icons::MenuItem("Select Source", nullptr, false, static_cast<bool>(canSelectSource)))
+					{
+						auto selectedSource = ExecuteMenuCommand(
+						    commandKey, "project.select-source", "Select Source", selection,
+						    [&](const EditorCommandContext& context)
+						    {
+							    const auto* primary = context.selection.PrimaryEntry();
+							    return primary && primary->kind == EditorSelectionKind::Asset &&
+							                   primary->assetRole == EditorAssetSelectionRole::ImportedObject &&
+							                   primary->assetGuid == asset.guid
+							               ? Result<void>{}
+							               : Result<void>::Failure("The imported object selection changed");
+						    },
+						    [&](const EditorCommandContext&)
+						    {
+							    return selection.SelectEntries({assetEntry}, 0, assetEntry)
+							               ? (model.SelectAsset(asset.path), hierarchy.ClearSelection(), Result<void>{})
+							               : Result<void>::Failure("The source asset could not be selected");
+						    });
+						diagnostic = selectedSource ? String{} : selectedSource.error;
 					}
 					ImGui::EndPopup();
 				}
@@ -408,7 +1006,192 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 		ImGui::PopID();
 	}
+	const ImVec2 blankDropMin = ImGui::GetCursorScreenPos();
+	const ImRect contentWork = ImGui::GetCurrentWindow()->WorkRect;
+	DrawProjectMoveDropTarget(ImRect(blankDropMin, contentWork.Max), workspace, model, selection, currentFolder,
+	                          readOnly, diagnostic, actions);
+	const ImVec2 folderContentsMin = ImGui::GetWindowPos();
+	const ImVec2 folderContentsSize = ImGui::GetWindowSize();
+	DrawScenePrefabDropTarget(
+	    {folderContentsMin, {folderContentsMin.x + folderContentsSize.x, folderContentsMin.y + folderContentsSize.y}},
+	    currentFolder, readOnly, selection.revision, diagnostic, actions);
+	if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+	{
+		backgroundMenuFolder = currentFolder;
+	}
+	if (ImGui::BeginPopupContextWindow("ProjectBackgroundActions",
+	                                   ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+	{
+		const String targetFolder = backgroundMenuFolder;
+		EditorSelectionContext emptySelection;
+		emptySelection.activeDocumentId = selection.activeDocumentId;
+		emptySelection.revision = selection.revision;
+		const EditorCommandContext captured =
+		    EditorCommandContext::Capture(emptySelection, selection.activeDocumentId, selection.revision);
+		const EditorCommandContext current =
+		    EditorCommandContext::Capture(emptySelection, selection.activeDocumentId, selection.revision);
+		EditorCommands commands;
+		commands.Register({"project.background.create-folder",
+		                   "Create Folder",
+		                   {},
+		                   [readOnly, &actions](const EditorCommandContext&)
+		                   {
+			                   return !readOnly && actions.createFolder
+			                              ? Result<void>{}
+			                              : Result<void>::Failure("Project folder creation is unavailable");
+		                   },
+		                   [&, targetFolder](const EditorCommandContext&)
+		                   {
+			                   auto navigated = model.NavigateTo(targetFolder);
+			                   if (!navigated)
+			                   {
+				                   return navigated;
+			                   }
+			                   auto created = actions.createFolder(String(folderName.data()));
+			                   if (created)
+			                   {
+				                   folderName.fill(0);
+			                   }
+			                   return created;
+		                   }});
+		const auto canCreateFolder = commands.CanExecute("project.background.create-folder", captured, current);
+		if (Icons::MenuItem("Create Folder", nullptr, false, static_cast<bool>(canCreateFolder)))
+		{
+			diagnostic = commands.Execute("project.background.create-folder", captured, current).error;
+		}
+		ImGui::BeginDisabled(readOnly || !actions.createAsset);
+		if (Icons::BeginMenu("Create Asset"))
+		{
+			for (const auto& item : {std::tuple<const char*, ResourceKind, MaterialType>{"Scene", ResourceKind::Scene,
+			                                                                             MaterialType::Unlit},
+			                         {"Prefab", ResourceKind::Prefab, MaterialType::Unlit},
+			                         {"Unlit Material", ResourceKind::Material, MaterialType::Unlit},
+			                         {"PBR Material", ResourceKind::Material, MaterialType::PbrMetallicRoughness},
+			                         {"Texture", ResourceKind::Texture, MaterialType::Unlit}})
+			{
+				if (Icons::MenuItem(std::get<0>(item)))
+				{
+					auto navigated = model.NavigateTo(targetFolder);
+					if (!navigated)
+					{
+						diagnostic = navigated.error;
+					}
+					else
+					{
+						destinationPath.fill(0);
+						auto created = actions.createAsset(std::get<1>(item), std::get<2>(item), String{});
+						diagnostic = created ? String{} : created.error;
+						if (created)
+						{
+							selection.Clear();
+							hierarchy.ClearSelection();
+						}
+					}
+				}
+			}
+			for (const ScriptTypeDescriptor* type : scriptableAssetTypes)
+			{
+				if (Icons::MenuItem(type->createAssetMenuName.c_str(), nullptr, false,
+				                    static_cast<bool>(actions.createScriptableAsset)))
+				{
+					auto navigated = model.NavigateTo(targetFolder);
+					if (!navigated)
+					{
+						diagnostic = navigated.error;
+					}
+					else
+					{
+						auto created = actions.createScriptableAsset
+						                   ? actions.createScriptableAsset(*type, type->createAssetFileName)
+						                   : Result<void>::Failure("ScriptableObject asset creation is unavailable");
+						diagnostic = created ? String{} : created.error;
+						if (created)
+						{
+							selection.Clear();
+							hierarchy.ClearSelection();
+						}
+					}
+				}
+			}
+			ImGui::EndMenu();
+		}
+		ImGui::EndDisabled();
+		ImGui::EndPopup();
+	}
 	ImGui::EndChild();
+	if (deleteRequested)
+	{
+		ImGui::OpenPopup("Delete Project Assets");
+	}
+	if (ImGui::BeginPopupModal("Delete Project Assets", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		auto plan = workspace.Database() ? PlanProjectSourceDelete(*workspace.Database(), deleteTargets, readOnly)
+		                                 : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+		if (!plan)
+		{
+			ImGui::TextWrapped("%s", plan.error.c_str());
+		}
+		else
+		{
+			ImGui::Text("Delete %zu source asset(s)? This removes their metadata and imported outputs too.",
+			            plan.value.size());
+			for (const VirtualPath& path : plan.value)
+			{
+				ImGui::BulletText("%s", path.relative.c_str());
+			}
+		}
+		if (!deleteDiagnostic.empty())
+		{
+			ImGui::TextWrapped("%s", deleteDiagnostic.c_str());
+		}
+		if (ImGui::Button("Delete", ImVec2(120.0f, 0.0f)))
+		{
+			plan = workspace.Database() ? PlanProjectSourceDelete(*workspace.Database(), deleteTargets, readOnly)
+			                            : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+			if (!plan)
+			{
+				deleteDiagnostic = plan.error;
+			}
+			else if (!actions.deleteAssets)
+			{
+				deleteDiagnostic = "Project Delete is unavailable";
+			}
+			else
+			{
+				auto deleted = actions.deleteAssets(plan.value);
+				if (!deleted)
+				{
+					deleteDiagnostic = deleted.error;
+				}
+				else
+				{
+					auto refreshed = model.Refresh(workspace);
+					if (!refreshed)
+					{
+						deleteDiagnostic = refreshed.error;
+					}
+					else
+					{
+						selection.Clear();
+						hierarchy.ClearSelection();
+						deleteTargets.clear();
+						deleteDiagnostic.clear();
+						deleteRequested = false;
+						ImGui::CloseCurrentPopup();
+					}
+				}
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+		{
+			deleteRequested = false;
+			deleteTargets.clear();
+			deleteDiagnostic.clear();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
+	}
 	ImGui::End();
 	return {};
 }

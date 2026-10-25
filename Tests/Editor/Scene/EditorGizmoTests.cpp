@@ -1,5 +1,6 @@
 #include <Core/Types.hpp>
 #include <Scene/EditorGizmo.hpp>
+#include <Workspace/EditorSelectionContext.hpp>
 #include <Core/StringInterop.hpp>
 #include <cmath>
 #include <iostream>
@@ -52,6 +53,7 @@ int main()
 	try
 	{
 		Scene scene;
+		using namespace Ursa::Editor;
 		const auto parent = Take(scene.CreateGameObject());
 		const auto child = Take(scene.CreateGameObject(parent));
 		LocalTransform parentLocal;
@@ -85,6 +87,27 @@ int main()
 		nonfinite.At(0, 3) = NAN;
 		Expect(!Editor::ApplyGizmoWorldTransform(scene, child, nonfinite), "Non-finite gizmo transform should fail");
 		Expect(near(Take(scene.WorldTransform(child)), previous), "Invalid gizmo transform changed the node");
+		const auto first = Take(scene.CreateGameObject("First"));
+		const auto second = Take(scene.CreateGameObject("Second"));
+		EditorSelectionContext selection;
+		const ResourceId documentId = ResourceId::Generate();
+		EditorSelectionEntry firstEntry;
+		firstEntry.kind = EditorSelectionKind::GameObject;
+		firstEntry.documentId = documentId;
+		firstEntry.objectId = Take(scene.PersistentId(first));
+		EditorSelectionEntry secondEntry = firstEntry;
+		secondEntry.objectId = Take(scene.PersistentId(second));
+		Expect(selection.SelectEntries({firstEntry, secondEntry}, 1), "Cannot select Gizmo group");
+		const auto* primary = selection.PrimaryEntry();
+		Expect(primary && primary->objectId == secondEntry.objectId, "Gizmo group lost its primary selection");
+		const Mat4 firstBefore = Take(scene.WorldTransform(first));
+		const Mat4 secondBefore = Take(scene.WorldTransform(second));
+		const auto primaryObject = Take(scene.GameObjectById(primary->objectId));
+		done(Editor::ApplyGizmoWorldTransform(scene, primaryObject, Mat4::Translation({7, 0, 0})));
+		Expect(near(Take(scene.WorldTransform(first)), firstBefore) &&
+		           near(Take(scene.WorldTransform(second)), Mat4::Translation({7, 0, 0})) &&
+		           !near(Take(scene.WorldTransform(second)), secondBefore),
+		       "Transform Gizmo modified more than the primary selection");
 		std::cout << "Editor gizmo transform test passed\n";
 		return 0;
 	}

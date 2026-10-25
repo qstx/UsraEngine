@@ -121,7 +121,11 @@ void Run()
 	ComponentEditors editors;
 	Done(RegisterBuiltinComponentEditors(editors));
 	ComponentLoadContext context(*resources);
-	ComponentInspectorContext inspector{a, scene.RootGameObjects(), &scene, nullptr, &context};
+	ComponentInspectorContext inspector;
+	inspector.object = a;
+	inspector.roots = scene.RootGameObjects();
+	inspector.scene = &scene;
+	inspector.loadContext = &context;
 	Expect(!editors.CanCreate("ursa.MeshFilter", inspector) && !editors.CanCreate("ursa.MeshRenderer", inspector) &&
 	           !editors.CanCreate("ursa.SkinnedMeshRenderer", inspector),
 	       "Add Component admitted a duplicate Filter/Renderer");

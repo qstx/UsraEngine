@@ -797,7 +797,7 @@ void TestShaderLabPipelineStates(const DevicePtr& device)
 	done(Take(device->Submit(command))->Wait());
 }
 
-void RenderSwapchainFrame(const DevicePtr& device, const SwapchainPtr& swapchain)
+TexturePtr RenderSwapchainFrame(const DevicePtr& device, const SwapchainPtr& swapchain)
 {
 	auto acquired = Take(swapchain->Acquire());
 	Expect(bool(acquired.texture), "Swapchain resize test did not acquire an image");
@@ -812,6 +812,7 @@ void RenderSwapchainFrame(const DevicePtr& device, const SwapchainPtr& swapchain
 	done(command->End());
 	done(Take(device->Submit(command, swapchain))->Wait());
 	done(swapchain->Present());
+	return acquired.texture;
 }
 
 void TestSwapchainResize()
@@ -833,6 +834,41 @@ void TestSwapchainResize()
 	}
 	done(device->WaitIdle());
 }
+
+void TestMultipleWindowSwapchains()
+{
+	auto primaryWindow = Take(Ursa::Window::Create(640, 480, "Ursa primary swapchain test", false));
+	auto detachedWindow = Take(Ursa::Window::Create(360, 240, "Ursa detached swapchain test", false));
+	DeviceDesc deviceDesc;
+	deviceDesc.window = primaryWindow;
+#ifndef NDEBUG
+	deviceDesc.validation = true;
+#endif
+	auto device = Take(CreateDevice(deviceDesc));
+	auto primarySwapchain = Take(device->CreateSwapchain({}));
+	SwapchainDesc detachedDesc;
+	detachedDesc.window = detachedWindow;
+	auto detachedSwapchain = Take(device->CreateSwapchain(detachedDesc));
+	RenderSwapchainFrame(device, primarySwapchain);
+	auto retainedDetachedImage = RenderSwapchainFrame(device, detachedSwapchain);
+	detachedWindow->Resize(480, 300);
+	detachedWindow->PollEvents();
+	RenderSwapchainFrame(device, primarySwapchain);
+	RenderSwapchainFrame(device, detachedSwapchain);
+	const auto primaryStats = primarySwapchain->Statistics();
+	const auto detachedStats = detachedSwapchain->Statistics();
+	Expect(primaryStats.presentations == 2 && primaryStats.rebuilds == 1,
+	       "Resizing the detached window changed the primary swapchain");
+	Expect(detachedStats.presentations == 2 && detachedStats.rebuilds == 2,
+	       "The detached swapchain did not rebuild independently after its window resized");
+	detachedSwapchain.reset();
+	detachedWindow->RequestClose();
+	detachedWindow.reset();
+	RenderSwapchainFrame(device, primarySwapchain);
+	retainedDetachedImage.reset();
+	RenderSwapchainFrame(device, primarySwapchain);
+	done(device->WaitIdle());
+}
 } // namespace
 
 int main()
@@ -844,6 +880,7 @@ int main()
 		desc.validation = true;
 #endif
 		auto device = Take(CreateDevice(desc));
+		Expect(!device->CreateSwapchain({}), "A windowless Device unexpectedly created a presentation swapchain");
 		const auto caps = device->Capabilities();
 		Expect(caps.graphics && caps.compute && caps.textureSampling && caps.storageImage && caps.offscreenRendering,
 		       "Required RHI capabilities unavailable");
@@ -863,6 +900,7 @@ int main()
 		TestStorageImage(device);
 		done(device->WaitIdle());
 		TestSwapchainResize();
+		TestMultipleWindowSwapchains();
 		std::cout << "RHI GPU tests passed on " << Ursa::ToStdString(device->AdapterInfo().name) << '\n';
 		return 0;
 	}

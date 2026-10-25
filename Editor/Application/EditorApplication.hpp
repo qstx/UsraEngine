@@ -11,6 +11,7 @@
 #include <Ui/ImGuiBridge.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <Workspace/EditorSelectionContext.hpp>
+#include <Workspace/EditorDragSession.hpp>
 #include <Assets/ProjectBrowserModel.hpp>
 #include <Assets/ProjectBrowserPanel.hpp>
 #include <Inspector/AssetInspectorPanel.hpp>
@@ -105,6 +106,7 @@ protected:
 	Result<void> EnsureManagedHost();
 	Result<bool> DrawAssetExtension(ManagedEditorContext& context);
 	void ConfigureAssetPreview(ManagedEditorContext& context);
+	void ConfigureReferencePreviewFactory(ManagedEditorContext& context);
 	bool BeforeImporterSelection(const EditorSelectionContext& next);
 	void DrawImporterSelectionPrompt();
 
@@ -248,12 +250,14 @@ private:
 	Result<void> PresentGuiFrame(bool capture = true);
 
 	void RequestAssetImport(const VirtualPath& scope = {}, bool force = false);
+	void RequestAssetReimport(const Vector<VirtualPath>& sources);
 
 	std::future<Result<AssetImportReport>> assetImportJob;
 	std::future<Result<String>> assetScanJob;
 	String observedAssetSources;
 	String assetImportStatus;
 	VirtualPath requestedImportScope;
+	Vector<VirtualPath> requestedImportSources;
 	bool assetImportRequested = false;
 	bool forceAssetImport = false;
 	bool autoRefreshAssets = true;
@@ -272,6 +276,7 @@ private:
 	std::chrono::steady_clock::time_point nextAssetScan{};
 
 	void DrawMainMenuBar();
+	void ResetEditorLayout();
 
 	void PumpScriptIde();
 
@@ -289,6 +294,7 @@ private:
 	                                const String& requestedPath = {});
 
 	Result<void> CreateProjectScriptableAsset(const ScriptTypeDescriptor& type, const String& requestedName);
+	Result<void> ExportScenePrefabs(const EditorDragSession& session, const String& destinationFolder);
 
 	Result<void> ApplyGraphicsSettings(AssetReference pipeline);
 
@@ -322,6 +328,7 @@ private:
 	std::unique_ptr<SceneViewPanel> sceneViewPanel;
 	PlaySession play;
 	bool viewportFocused = false;
+	ImGuiViewport* focusedGameViewport = nullptr;
 	std::unique_ptr<ProjectWorkspace> workspace;
 	std::unique_ptr<EditorDocuments> documents;
 	ProjectBrowserModel projectBrowser;
@@ -329,6 +336,8 @@ private:
 	AssetInspectorPanel assetInspectorPanel;
 	std::shared_ptr<AssetImporterInspector> assetImporterInspector;
 	std::optional<EditorSelectionContext> pendingImporterSelection;
+	std::optional<EditorSelectionContext> pendingPickerSelection;
+	bool closeDocumentAfterPickerCancellation = false;
 	bool importerSelectionPopup = false;
 	bool pendingSourceAsset = false;
 	VirtualPath pendingImporterOpen;

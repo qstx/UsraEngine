@@ -48,16 +48,28 @@ void WriteSource(const std::filesystem::path& path, const char* text)
 }
 
 void SetIdentity(AssetDatabase& database, const VirtualPath& path, const char* typeName, const char* id,
-				 Ursa::UInt32 version, Ursa::UInt64 localFileId, bool primary = false)
+                 Ursa::UInt32 version, Ursa::UInt64 localFileId, bool primary = false)
 {
 	for (const ScriptSourceAsset& source : database.ScriptSources())
 	{
-		if (source.path != path) continue;
+		if (source.path != path)
+		{
+			continue;
+		}
 		auto identities = source.identities;
-		if (!identities.contains("Version")) identities["Version"] = 1;
-		if (!identities.contains("Types")) identities["Types"] = nlohmann::json::array();
-		identities["Types"].push_back({{"TypeName", typeName}, {"Id", id}, {"Version", version},
-										   {"LocalFileId", localFileId}, {"Primary", primary}});
+		if (!identities.contains("Version"))
+		{
+			identities["Version"] = 1;
+		}
+		if (!identities.contains("Types"))
+		{
+			identities["Types"] = nlohmann::json::array();
+		}
+		identities["Types"].push_back({{"TypeName", typeName},
+		                               {"Id", id},
+		                               {"Version", version},
+		                               {"LocalFileId", localFileId},
+		                               {"Primary", primary}});
 		auto updated = database.UpdateScriptIdentities(source, identities);
 		Expect(static_cast<bool>(updated), "Could not write script identity fixture metadata");
 		return;
@@ -69,7 +81,10 @@ void RenameIdentity(AssetDatabase& database, const VirtualPath& path, const char
 {
 	for (const ScriptSourceAsset& source : database.ScriptSources())
 	{
-		if (source.path != path) continue;
+		if (source.path != path)
+		{
+			continue;
+		}
 		auto identities = source.identities;
 		for (auto& identity : identities["Types"])
 		{
@@ -152,14 +167,16 @@ int main(int argumentCount, char** arguments)
 		auto database = AssetDatabase::Open(filesystem);
 		Expect(static_cast<bool>(database), "Could not open ScriptBuild AssetDatabase");
 		Expect(static_cast<bool>(database.value->Refresh()), "Could not discover initial ScriptBuild sources");
-		SetIdentity(*database.value, Path("prj:Scripts/GameMover.cs"), "DemoScripts.GameMover", "demo.mover", 2, 51001, true);
-		SetIdentity(*database.value, Path("prj:Scripts/GameMover.cs"), "DemoScripts.Follower", "demo.follower", 1, 51002);
+		SetIdentity(*database.value, Path("prj:Scripts/GameMover.cs"), "DemoScripts.GameMover", "demo.mover", 2, 51001,
+		            true);
+		SetIdentity(*database.value, Path("prj:Scripts/GameMover.cs"), "DemoScripts.Follower", "demo.follower", 1,
+		            51002);
 		SetIdentity(*database.value, Path("prj:Scripts/Editor/SceneTool.cs"), "DemoScripts.Editor.SceneTool",
-					"editor.scene-tool", 1, 51003, true);
+		            "editor.scene-tool", 1, 51003, true);
 		SetIdentity(*database.value, Path("prj:Scripts/Settings.cs"), "DemoScripts.Settings", "demo.settings", 1, 51004,
-					true);
-		SetIdentity(*database.value, Path("prj:Scripts/Settings.cs"), "DemoScripts.OtherSettings", "demo.other-settings",
-					1, 51005);
+		            true);
+		SetIdentity(*database.value, Path("prj:Scripts/Settings.cs"), "DemoScripts.OtherSettings",
+		            "demo.other-settings", 1, 51005);
 		auto service =
 		    ScriptBuildService::Open(filesystem, *database.value, std::filesystem::u8path(arguments[1]),
 		                             framework / "Ursa.Runtime.dll", framework / "Ursa.Editor.dll",
@@ -183,7 +200,10 @@ int main(int argumentCount, char** arguments)
 			String available;
 			for (const ScriptTypeRecord& type : service.value->ScriptTypes())
 			{
-				if (!available.empty()) available += ", ";
+				if (!available.empty())
+				{
+					available += ", ";
+				}
 				available += type.scriptType + " (" + type.clrTypeName + ")";
 			}
 			throw std::runtime_error(ToStdString(String("ScriptType is missing from generated catalog: ") + id +
@@ -258,11 +278,9 @@ int main(int argumentCount, char** arguments)
 		           settingsField("material").kind == "MaterialReference" &&
 		           settingsField("material").typeName == "Ursa.Material",
 		       "ScriptableObject classification or stable subasset identity was lost");
-		WriteSource(
-		    assets / "Scripts" / "Settings.cs",
-		    "using Ursa; namespace DemoScripts; "
-		    "public sealed class Settings : ScriptableObject {} "
-		    "public sealed class OtherSettings : ScriptableObject {}\n");
+		WriteSource(assets / "Scripts" / "Settings.cs", "using Ursa; namespace DemoScripts; "
+		                                                "public sealed class Settings : ScriptableObject {} "
+		                                                "public sealed class OtherSettings : ScriptableObject {}\n");
 		Expect(static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()) &&
 		           findType("demo.settings").createAssetMenuName.empty(),
 		       "Removed CreateAssetMenu attribute remained registered in the refreshed script catalog");
@@ -363,10 +381,9 @@ int main(int argumentCount, char** arguments)
 		           rebuiltEditor.value.diagnostics.find("up to date") == String::npos,
 		       "ScriptBuild did not rebuild after its Library cache was removed");
 
-		WriteSource(assets / "Scripts" / "GameMover.cs",
-		            "using Ursa; namespace DemoScripts; "
-		            "public sealed class GameMover : Behaviour { } "
-		            "public sealed class Follower : Behaviour { }\n");
+		WriteSource(assets / "Scripts" / "GameMover.cs", "using Ursa; namespace DemoScripts; "
+		                                                 "public sealed class GameMover : Behaviour { } "
+		                                                 "public sealed class Follower : Behaviour { }\n");
 		const auto gameStagingRoot = library / "ScriptBuild" / "Staging" / "Game";
 		std::set<std::filesystem::path> existingStaging;
 		if (std::filesystem::exists(gameStagingRoot))
@@ -390,13 +407,12 @@ int main(int argumentCount, char** arguments)
 						    if (existingStaging.find(entry.path()) == existingStaging.end())
 						    {
 							    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-							    WriteSource(
-							        assets / "Scripts" / "GameMover.cs",
-							        "using Ursa; namespace DemoScripts; "
-							        "public sealed class GameMover : "
-							        "Behaviour { } "
-							        "public sealed class Follower : Behaviour { } "
-							        "// changed after build batch started\n");
+							    WriteSource(assets / "Scripts" / "GameMover.cs",
+							                "using Ursa; namespace DemoScripts; "
+							                "public sealed class GameMover : "
+							                "Behaviour { } "
+							                "public sealed class Follower : Behaviour { } "
+							                "// changed after build batch started\n");
 							    sourceChangedDuringCompile = true;
 							    return;
 						    }
@@ -414,12 +430,11 @@ int main(int argumentCount, char** arguments)
 		Expect(stableBatch && stableBatch.value.succeeded,
 		       "ScriptBuild did not recover after rejecting a stale build batch");
 
-		WriteSource(assets / "Scripts" / "GameMover.cs",
-		            "using Ursa; namespace DemoScripts; "
-		            "public sealed class Follower : Behaviour { } "
-		            "public sealed class RenamedMover : Behaviour { } "
-		            "public sealed class GenericProbe<T> : Behaviour { } "
-		            "public abstract class AbstractProbe : Behaviour { }\n");
+		WriteSource(assets / "Scripts" / "GameMover.cs", "using Ursa; namespace DemoScripts; "
+		                                                 "public sealed class Follower : Behaviour { } "
+		                                                 "public sealed class RenamedMover : Behaviour { } "
+		                                                 "public sealed class GenericProbe<T> : Behaviour { } "
+		                                                 "public abstract class AbstractProbe : Behaviour { }\n");
 		auto staleGameBuild = service.value->IsBuildCurrent(ScriptAssemblyGroup::Game);
 		Expect(staleGameBuild && !staleGameBuild.value,
 		       "ScriptBuild allowed Run with an assembly stale against changed source inputs");
@@ -454,7 +469,7 @@ int main(int argumentCount, char** arguments)
 		Expect(static_cast<bool>(database.value->Refresh()),
 		       "AssetDatabase could not discover duplicate ScriptType fixture");
 		SetIdentity(*database.value, Path("prj:Scripts/Duplicate.cs"), "DemoScripts.DuplicateMover", "demo.mover", 1,
-					51006, true);
+		            51006, true);
 		const auto lastGoodCatalog = filesystem.Read(projects.value.typeCatalog);
 		const auto duplicateCatalog = service.value->GenerateProjects();
 		Expect(!service.value->LastDiagnostics().empty() &&
@@ -504,13 +519,12 @@ int main(int argumentCount, char** arguments)
 		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/InvalidMenu.cs.meta"))) &&
 		           static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()),
 		       "Script catalog did not recover after invalid CreateAssetMenu removal");
-		WriteSource(assets / "Scripts" / "ForwardCollision.cs",
-		            "using Ursa; namespace DemoScripts; "
-		            "public sealed class ForwardCollision : "
-		            "ScriptableObject {}\n");
+		WriteSource(assets / "Scripts" / "ForwardCollision.cs", "using Ursa; namespace DemoScripts; "
+		                                                        "public sealed class ForwardCollision : "
+		                                                        "ScriptableObject {}\n");
 		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase missed the framework identity collision");
 		SetIdentity(*database.value, Path("prj:Scripts/ForwardCollision.cs"), "DemoScripts.ForwardCollision",
-					"ursa.rendering.forward", 1, 51007, true);
+		            "ursa.rendering.forward", 1, 51007, true);
 		auto reservedIdentity = service.value->GenerateProjects();
 		Expect(!reservedIdentity &&
 		           reservedIdentity.error.find("framework type Ursa.Rendering.ForwardRenderPipelineAsset") !=
@@ -521,14 +535,14 @@ int main(int argumentCount, char** arguments)
 		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/ForwardCollision.cs.meta"))) &&
 		           static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()),
 		       "Script catalog did not recover after removing the framework identity collision");
-		WriteSource(
-		    assets / "Scripts" / "Settings.cs",
-		    "using Ursa; namespace DemoScripts; "
-		    "public sealed class OtherSettings : ScriptableObject {} "
-		    "public sealed partial class RenamedSettings : ScriptableObject {} "
-		    "public sealed partial class RenamedSettings { public int value = 5; }\n");
+		WriteSource(assets / "Scripts" / "Settings.cs",
+		            "using Ursa; namespace DemoScripts; "
+		            "public sealed class OtherSettings : ScriptableObject {} "
+		            "public sealed partial class RenamedSettings : ScriptableObject {} "
+		            "public sealed partial class RenamedSettings { public int value = 5; }\n");
 		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase could not refresh renamed settings source");
-		RenameIdentity(*database.value, Path("prj:Scripts/Settings.cs"), "demo.settings", "DemoScripts.RenamedSettings");
+		RenameIdentity(*database.value, Path("prj:Scripts/Settings.cs"), "demo.settings",
+		               "DemoScripts.RenamedSettings");
 		Expect(static_cast<bool>(service.value->GenerateProjects()) &&
 		           findType("demo.settings").localFileId == settingsType.localFileId &&
 		           findType("demo.settings").sourceGuid == settingsType.sourceGuid,

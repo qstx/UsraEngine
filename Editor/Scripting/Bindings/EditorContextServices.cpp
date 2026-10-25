@@ -11,12 +11,14 @@
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <imgui.h>
 #include <algorithm>
+#include <atomic>
 
 namespace Ursa::Editor::Bindings
 {
 namespace
 {
 using K = B::Wire::Enum_Ursa_Editor_EditorReferenceKind;
+std::atomic<UInt64> nextEditorGeneration{1};
 
 class EditorRuntimeApi final : public Scripting::ManagedSceneApi
 {
@@ -147,7 +149,8 @@ UInt32 AssetKind(const String& path, const String& artifact = {})
 } // namespace
 
 EditorInvocation::EditorInvocation(ManagedEditorContext& editorContext, UInt64 scriptSession)
-    : source(editorContext), session(scriptSession)
+    : source(editorContext), generation(nextEditorGeneration.fetch_add(1, std::memory_order_relaxed)),
+      session(scriptSession)
 {
 	if (source.serializedTarget)
 	{
@@ -157,6 +160,59 @@ EditorInvocation::EditorInvocation(ManagedEditorContext& editorContext, UInt64 s
 			adapter.resources = &Resources();
 		}
 		properties = B::TakeBindingResult(SerializedObject::Create(std::move(adapter)));
+	}
+	else if (!source.componentTargets.empty())
+	{
+		if (source.componentTargets.size() > 1 && !source.supportsMultipleObjects)
+		{
+			throw std::runtime_error("This Inspector has not declared multi-object editing support");
+		}
+		if (source.componentPrimaryIndex >= source.componentTargets.size() ||
+		    source.componentTargets[source.componentPrimaryIndex] != source.target)
+		{
+			throw std::runtime_error("Managed Inspector primary target does not match its target group");
+		}
+		if (!source.registry || !source.selection.loadContext)
+		{
+			throw std::runtime_error("Inspector context has no serialization services");
+		}
+		targetId = source.target->PersistentId();
+		targetOwner = source.target->GetGameObject();
+		attachedTarget = !targetOwner.expired();
+		Vector<SerializedObject*> groupTargets(source.componentTargets.size(), nullptr);
+		for (Size index = 0; index < source.componentTargets.size(); ++index)
+		{
+			auto* component = source.componentTargets[index];
+			if (!component)
+			{
+				throw std::runtime_error("Managed Inspector target group contains a missing component");
+			}
+			auto serialized = SerializedObject::Create(*component, *source.registry, *source.selection.loadContext,
+			                                           source.saveContext);
+			if (!serialized)
+			{
+				throw std::runtime_error(ToStdString(serialized.error));
+			}
+			if (index == source.componentPrimaryIndex)
+			{
+				properties = std::move(serialized.value);
+				groupTargets[index] = properties.get();
+			}
+			else
+			{
+				groupTargets[index] = serialized.value.get();
+				additionalProperties.push_back(std::move(serialized.value));
+			}
+		}
+		if (groupTargets.size() > 1)
+		{
+			auto group = SerializedObjectGroup::Create(std::move(groupTargets), source.componentPrimaryIndex);
+			if (!group)
+			{
+				throw std::runtime_error(ToStdString(group.error));
+			}
+			propertyGroup = std::make_unique<SerializedObjectGroup>(std::move(group.value));
+		}
 	}
 	else if (source.target)
 	{
@@ -231,7 +287,7 @@ UInt64 EditorInvocation::TransferBudget() const
 
 UInt64 EditorInvocation::Generation() const
 {
-	return UInt64(reinterpret_cast<UIntPtr>(Token()));
+	return generation;
 }
 
 void EditorInvocation::RequireProperties(UInt64 expected) const
@@ -417,6 +473,43 @@ Result<B::Wire::Value_Ursa_NativeHandle> EditorServices::GetTargetHandle(B::Bind
 		        B::TakeBindingResult(api.Register(scope.source.selection.object))));
 	}
 	return Result<B::Wire::Value_Ursa_NativeHandle>::Failure("No typed native Editor target is active");
+}
+
+Result<B::DataView> EditorServices::GetTargetHandles(B::BindingCall& call)
+{
+	auto& scope = Scope(call);
+	Vector<B::Wire::Value_Ursa_NativeHandle> handles;
+	if (!scope.source.componentTargets.empty())
+	{
+		handles.reserve(scope.source.componentTargets.size());
+		for (Component* component : scope.source.componentTargets)
+		{
+			if (!component)
+			{
+				return Result<B::DataView>::Failure("Inspector target group contains a missing component");
+			}
+			handles.push_back(B::WriteManagedHandle<B::Wire::Value_Ursa_NativeHandle>(
+			    B::TakeBindingResult(scope.RuntimeApi().RegisterComponent(component))));
+		}
+	}
+	else
+	{
+		auto handle = GetTargetHandle(call);
+		if (!handle)
+		{
+			return Result<B::DataView>::Failure(handle.error);
+		}
+		handles.push_back(handle.value);
+	}
+	return Result<B::DataView>::Success(
+	    B::WriteArray<B::Wire::Value_Ursa_NativeHandle>(call.arena, handles, [](const auto& value) { return value; }));
+}
+
+Result<UInt32> EditorServices::GetTargetPrimaryIndex(B::BindingCall& call)
+{
+	const auto& scope = Scope(call);
+	return Result<UInt32>::Success(
+	    scope.source.componentTargets.empty() ? 0 : static_cast<UInt32>(scope.source.componentPrimaryIndex));
 }
 
 Result<B::Utf8View> EditorServices::GetComponentPayload(B::BindingCall& call,
@@ -728,7 +821,58 @@ Result<bool> EditorServices::ApplyTargetFields(B::BindingCall& call, const B::Ut
 	{
 		return Result<bool>::Failure("This Editor target is read-only");
 	}
-	auto applied = scope.properties->ApplyFields(nlohmann::json::parse(ToStdString(B::ReadString(fields))));
+	const auto payload = nlohmann::json::parse(ToStdString(B::ReadString(fields)));
+	Result<bool> applied = Result<bool>::Success(false);
+	if (scope.propertyGroup && payload.is_object() && payload.contains("Targets"))
+	{
+		auto targets = payload["Targets"];
+		if (!targets.is_array() || targets.size() != scope.source.componentTargets.size())
+		{
+			return Result<bool>::Failure("Managed Inspector target field patch does not match its target group");
+		}
+		bool changed = false;
+		for (const auto& propertyPath : scope.appliedPropertyPaths)
+		{
+			constexpr const char* fieldPrefix = "/Fields/";
+			if (propertyPath.rfind(fieldPrefix, 0) != 0)
+			{
+				continue;
+			}
+			const Size separator = propertyPath.find('/', std::char_traits<char>::length(fieldPrefix));
+			const String field = propertyPath.substr(
+			    std::char_traits<char>::length(fieldPrefix),
+			    separator == String::npos ? String::npos : separator - std::char_traits<char>::length(fieldPrefix));
+			for (auto& target : targets)
+			{
+				if (target.is_object())
+				{
+					target.erase(ToStdString(field));
+				}
+			}
+		}
+		for (Size index = 0; index < targets.size(); ++index)
+		{
+			auto targetPatch = scope.propertyGroup->SetTargetFields(index, targets[index]);
+			if (!targetPatch)
+			{
+				return Result<bool>::Failure(targetPatch.error);
+			}
+			changed |= targetPatch.value;
+		}
+		if (changed)
+		{
+			auto committed = scope.propertyGroup->Apply();
+			if (!committed)
+			{
+				return Result<bool>::Failure(committed.error);
+			}
+		}
+		applied = Result<bool>::Success(changed);
+	}
+	else
+	{
+		applied = scope.properties->ApplyFields(payload);
+	}
 	if (applied && applied.value)
 	{
 		scope.changed = true;

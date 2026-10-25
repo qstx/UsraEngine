@@ -1112,4 +1112,124 @@ Result<AssetImportResult> ProjectAssetImporter::Import(AssetDatabase& database, 
 	}
 	return result;
 }
+
+Result<Vector<AssetImportResult>>
+ProjectAssetImporter::ImportBatch(AssetDatabase& database, const Vector<VirtualPath>& sources, bool force) const
+{
+	if (sources.empty())
+	{
+		return Result<Vector<AssetImportResult>>::Failure("Batch reimport requires at least one source asset");
+	}
+	try
+	{
+		VirtualFileSystem stagingFiles;
+		std::shared_ptr<MemoryFileProvider> stagedSources;
+		std::shared_ptr<MemoryFileProvider> stagedLibrary;
+		for (const auto& scheme : database.Filesystem().Schemes())
+		{
+			if (scheme == database.SourceScheme() || scheme == editorLibraryScheme)
+			{
+				auto provider = std::make_shared<MemoryFileProvider>();
+				auto entries = database.Filesystem().List(scheme);
+				if (!entries)
+				{
+					return Result<Vector<AssetImportResult>>::Failure(entries.error);
+				}
+				for (const auto& entry : entries.value)
+				{
+					auto bytes = database.Filesystem().Read(entry.path);
+					if (!bytes)
+					{
+						return Result<Vector<AssetImportResult>>::Failure(bytes.error);
+					}
+					auto copied = provider->WriteAtomic(entry.path.relative, bytes.value, true);
+					if (!copied)
+					{
+						return Result<Vector<AssetImportResult>>::Failure(copied.error);
+					}
+				}
+				auto mounted = stagingFiles.MountProvider(scheme, provider, MountAccess::ReadWrite);
+				if (!mounted)
+				{
+					return Result<Vector<AssetImportResult>>::Failure(mounted.error);
+				}
+				if (scheme == database.SourceScheme())
+				{
+					stagedSources = std::move(provider);
+				}
+				else
+				{
+					stagedLibrary = std::move(provider);
+				}
+				continue;
+			}
+			for (const auto& provider : database.Filesystem().Providers())
+			{
+				if (provider.scheme == scheme)
+				{
+					auto mounted = stagingFiles.MountProvider(scheme, provider.provider, provider.access);
+					if (!mounted)
+					{
+						return Result<Vector<AssetImportResult>>::Failure(mounted.error);
+					}
+				}
+			}
+		}
+		if (!stagedSources || !stagedLibrary)
+		{
+			return Result<Vector<AssetImportResult>>::Failure("Batch reimport requires source and Library schemes");
+		}
+		auto stagingDatabase = AssetDatabase::Open(stagingFiles, database.SourceScheme());
+		if (!stagingDatabase)
+		{
+			return Result<Vector<AssetImportResult>>::Failure(stagingDatabase.error);
+		}
+		auto refreshed = stagingDatabase.value->Refresh();
+		if (!refreshed)
+		{
+			return Result<Vector<AssetImportResult>>::Failure(refreshed.error);
+		}
+		refreshed = stagingDatabase.value->ReloadImports();
+		if (!refreshed)
+		{
+			return Result<Vector<AssetImportResult>>::Failure(refreshed.error);
+		}
+		stagingDatabase.value->BeginCandidateCapture();
+		Set<String> seen;
+		Vector<AssetImportResult> results;
+		results.reserve(sources.size());
+		for (const auto& source : sources)
+		{
+			if (source.scheme != database.SourceScheme() || !seen.insert(source.ToString()).second)
+			{
+				if (source.scheme != database.SourceScheme())
+				{
+					return Result<Vector<AssetImportResult>>::Failure(
+					    "Batch reimport source belongs to another scheme: " + source.ToString());
+				}
+				continue;
+			}
+			auto imported = Import(*stagingDatabase.value, source, force);
+			if (!imported)
+			{
+				return Result<Vector<AssetImportResult>>::Failure(imported.error);
+			}
+			results.push_back(std::move(imported.value));
+		}
+		if (results.empty())
+		{
+			return Result<Vector<AssetImportResult>>::Failure("Batch reimport contains no unique source assets");
+		}
+		auto published = database.PublishCandidates(*stagingDatabase.value);
+		if (!published)
+		{
+			return Result<Vector<AssetImportResult>>::Failure(published.error);
+		}
+		return Result<Vector<AssetImportResult>>::Success(std::move(results));
+	}
+	catch (const std::exception& error)
+	{
+		return Result<Vector<AssetImportResult>>::Failure(ToUrsaString(error.what()));
+	}
+}
 } // namespace Ursa::Editor

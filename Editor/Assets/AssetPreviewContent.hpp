@@ -99,4 +99,10 @@ private:
 	UInt64 selectedClip = 0;
 	Vector<std::pair<GameObject::Ptr, LocalTransform>> bindTransforms;
 };
+
+// Picker previews use a private built-in component registry instead of borrowing the
+// Inspector footer's draft or registry lifetime.
+Result<std::unique_ptr<AssetPreviewContent>>
+LoadAssetPreviewContent(const AssetPreviewTarget& target, ProjectWorkspace& workspace,
+                        const AssetPreviewTextureInput* textureInput = nullptr);
 } // namespace Ursa::Editor

@@ -164,7 +164,8 @@ Array<Size, 5> EditorConsolePanel::Counts(const Vector<LogRecord>& records)
 	return counts;
 }
 
-void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandler& contextHandler)
+void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandler& contextHandler,
+                              ContextActionProbe* contextProbe)
 {
 	if (!open)
 	{
@@ -174,6 +175,14 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 	{
 		ImGui::End();
 		return;
+	}
+	if (ImGui::BeginPopupContextWindow("ConsolePanelActions", ImGuiPopupFlags_NoOpenOverItems))
+	{
+		if (ImGui::MenuItem("Close Panel"))
+		{
+			open = false;
+		}
+		ImGui::EndPopup();
 	}
 	if (Icons::Button("Clear", Icons::Icon::Delete, "Clear console"))
 	{
@@ -228,6 +237,46 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			ImGui::TextUnformatted(record.category.c_str());
 			ImGui::TableSetColumnIndex(3);
 			ImGui::TextWrapped("%s", record.message.c_str());
+			if (contextProbe && record.message == contextProbe->message)
+			{
+				const auto minimum = ImGui::GetItemRectMin();
+				const auto maximum = ImGui::GetItemRectMax();
+				contextProbe->messageCenter = {(minimum.x + maximum.x) * 0.5f, (minimum.y + maximum.y) * 0.5f};
+				contextProbe->messageHovered = ImGui::IsItemHovered();
+			}
+			if (ImGui::BeginPopupContextItem("ConsoleEntryActions"))
+			{
+				const bool copy = ImGui::MenuItem("Copy Message");
+				if (contextProbe && record.message == contextProbe->message)
+				{
+					contextProbe->copyItem = ImGui::GetItemID();
+					const auto minimum = ImGui::GetItemRectMin();
+					const auto maximum = ImGui::GetItemRectMax();
+					contextProbe->copyCenter = {(minimum.x + maximum.x) * 0.5f, (minimum.y + maximum.y) * 0.5f};
+					contextProbe->copyHovered = ImGui::IsItemHovered();
+				}
+				if (copy)
+				{
+					ImGui::SetClipboardText(record.message.c_str());
+				}
+				const bool canLocate =
+				    contextHandler && (!record.context.resourcePath.empty() || !record.context.objectId.empty());
+				const bool locate = canLocate && ImGui::MenuItem("Locate");
+				if (contextProbe && record.message == contextProbe->message && canLocate)
+				{
+					contextProbe->locateItem = ImGui::GetItemID();
+					const auto minimum = ImGui::GetItemRectMin();
+					const auto maximum = ImGui::GetItemRectMax();
+					contextProbe->locateCenter = {(minimum.x + maximum.x) * 0.5f, (minimum.y + maximum.y) * 0.5f};
+					contextProbe->locateHovered = ImGui::IsItemHovered();
+				}
+				if (locate)
+				{
+					auto located = contextHandler(record);
+					diagnostic = located ? String{} : located.error;
+				}
+				ImGui::EndPopup();
+			}
 			if (contextHandler && (!record.context.resourcePath.empty() || !record.context.objectId.empty()))
 			{
 				ImGui::SameLine();

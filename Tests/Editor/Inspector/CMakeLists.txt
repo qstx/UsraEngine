@@ -9,5 +9,10 @@ if(URSA_BUILD_EDITOR)
   target_link_libraries(UrsaComponentEditorsTests PRIVATE Ursa::Editor)
 
   add_test(NAME UrsaComponentEditorsTests COMMAND UrsaComponentEditorsTests)
+
+  ursa_add_test_executable(UrsaReferencePickerTests ReferencePickerTests.cpp)
+  target_link_libraries(UrsaReferencePickerTests PRIVATE Ursa::Editor)
+
+  add_test(NAME UrsaReferencePickerTests COMMAND UrsaReferencePickerTests)
 endif()
 ursa_finalize_test_directory()

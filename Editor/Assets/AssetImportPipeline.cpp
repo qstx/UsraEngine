@@ -386,6 +386,15 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 		auto& files = workspace.Index().Filesystem();
 		auto lease = Take(files.AcquireExclusiveLease(Path("lib:Import.lock")));
 		Done(workspace.Database()->ReloadImports());
+		if (!options.sources.empty())
+		{
+			auto imported = workspace.Importer().ImportBatch(*workspace.Database(), options.sources, options.force);
+			if (!imported)
+			{
+				return Result<AssetImportReport>::Failure(imported.error);
+			}
+			Done(workspace.Database()->ReloadImports());
+		}
 		if (!workspace.BuiltinDatabase())
 		{
 			Done(workspace.InitializeBuiltinAssets());
@@ -496,9 +505,12 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			}
 			auto* database = asset.path.scheme == engineScheme ? workspace.BuiltinDatabase() : workspace.Database();
 			const auto current = Take(database->CurrentImport(asset.path));
-			bool selected = options.scope.relative.empty() || asset.path == options.scope ||
-			                (asset.path.scheme == options.scope.scheme &&
-			                 asset.path.relative.rfind(options.scope.relative + "/", 0) == 0);
+			bool selected =
+			    options.sources.empty() && (options.scope.relative.empty() || asset.path == options.scope ||
+			                                (asset.path.scheme == options.scope.scheme &&
+			                                 asset.path.relative.rfind(options.scope.relative + "/", 0) == 0));
+			selected = selected ||
+			           std::find(options.sources.begin(), options.sources.end(), asset.path) != options.sources.end();
 			for (const auto& dependency : current.dependencies)
 			{
 				selected = selected || dependency == options.scope;
@@ -506,7 +518,8 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 			AssetImportResult imported;
 			if (selected)
 			{
-				imported = Take(importer.Import(*database, asset.path, options.force));
+				imported = options.sources.empty() ? Take(importer.Import(*database, asset.path, options.force))
+				                                   : Take(ProjectAssetImporter::LoadCurrent(*database, asset.path));
 			}
 			else
 			{

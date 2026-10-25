@@ -590,6 +590,25 @@ struct Context
 	}
 };
 
+struct SurfaceState
+{
+	std::shared_ptr<Context> ctx;
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
+	bool ownsSurface = false;
+
+	~SurfaceState()
+	{
+		if (ownsSurface && surface && ctx && ctx->instance)
+		{
+			if (ctx->device)
+			{
+				vkDeviceWaitIdle(ctx->device);
+			}
+			vkDestroySurfaceKHR(ctx->instance, surface, nullptr);
+		}
+	}
+};
+
 VKAPI_ATTR VkBool32 VKAPI_CALL ValidationCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                   VkDebugUtilsMessageTypeFlagsEXT,
                                                   const VkDebugUtilsMessengerCallbackDataEXT* data, void* user)
@@ -893,6 +912,7 @@ struct BufferImpl final : Buffer
 struct SwapchainState
 {
 	std::shared_ptr<Context> ctx;
+	std::shared_ptr<SurfaceState> surface;
 	VkSwapchainKHR swapchain = VK_NULL_HANDLE;
 	Vector<VkSemaphore> imageAvailable, renderComplete;
 	Vector<VkImage> images;
@@ -2258,6 +2278,8 @@ struct FenceImpl final : Fence
 struct SwapchainImpl final : Swapchain
 {
 	std::shared_ptr<Context> ctx;
+	std::shared_ptr<Window> window;
+	std::shared_ptr<SurfaceState> surface;
 	SwapchainDesc desc;
 	std::shared_ptr<SwapchainState> state;
 	Vector<TexturePtr> textures;
@@ -2278,8 +2300,8 @@ struct SwapchainImpl final : Swapchain
 
 	void Rebuild()
 	{
-		Require(ctx->window && ctx->surface, "Swapchain requires a window surface");
-		const Ursa::UInt32 width = ctx->window->FramebufferWidth(), height = ctx->window->FramebufferHeight();
+		Require(window && surface && surface->surface, "Swapchain requires a window surface");
+		const Ursa::UInt32 width = window->FramebufferWidth(), height = window->FramebufferHeight();
 		Require(width && height, "Cannot rebuild swapchain for zero-sized window");
 		Check(vkDeviceWaitIdle(ctx->device), "Waiting before swapchain rebuild");
 		auto previous = state;
@@ -2288,15 +2310,16 @@ struct SwapchainImpl final : Swapchain
 		state.reset();
 		auto next = std::make_shared<SwapchainState>();
 		next->ctx = ctx;
+		next->surface = surface;
 		VkSurfaceCapabilitiesKHR caps{};
-		Check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx->physical, ctx->surface, &caps),
+		Check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx->physical, surface->surface, &caps),
 		      "Querying surface capabilities");
 		Ursa::UInt32 formatCount = 0;
-		Check(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->physical, ctx->surface, &formatCount, nullptr),
+		Check(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->physical, surface->surface, &formatCount, nullptr),
 		      "Querying surface formats");
 		Require(formatCount, "Surface has no formats");
 		Vector<VkSurfaceFormatKHR> formats(formatCount);
-		Check(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->physical, ctx->surface, &formatCount, formats.data()),
+		Check(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->physical, surface->surface, &formatCount, formats.data()),
 		      "Querying surface formats");
 		VkSurfaceFormatKHR chosen = formats.front();
 		for (const auto& f : formats)
@@ -2312,12 +2335,12 @@ struct SwapchainImpl final : Swapchain
 		        "Surface lacks an RGBA8/BGRA8 UNORM format");
 		next->format = FromVkFormat(chosen.format);
 		Ursa::UInt32 modeCount = 0;
-		Check(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physical, ctx->surface, &modeCount, nullptr),
+		Check(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physical, surface->surface, &modeCount, nullptr),
 		      "Querying present modes");
 		Vector<VkPresentModeKHR> modes(modeCount);
 		if (modeCount)
 		{
-			Check(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physical, ctx->surface, &modeCount, modes.data()),
+			Check(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physical, surface->surface, &modeCount, modes.data()),
 			      "Querying present modes");
 		}
 		VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
@@ -2342,7 +2365,7 @@ struct SwapchainImpl final : Swapchain
 			imageCount = std::min(imageCount, caps.maxImageCount);
 		}
 		VkSwapchainCreateInfoKHR info{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
-		info.surface = ctx->surface;
+		info.surface = surface->surface;
 		info.minImageCount = imageCount;
 		info.imageFormat = chosen.format;
 		info.imageColorSpace = chosen.colorSpace;
@@ -2416,12 +2439,12 @@ struct SwapchainImpl final : Swapchain
 		    [&]
 		    {
 			    Require(!acquired, "Previous swapchain image must be presented first");
-			    if (!ctx->window->FramebufferWidth() || !ctx->window->FramebufferHeight())
+			    if (!window->FramebufferWidth() || !window->FramebufferHeight())
 			    {
 				    return AcquiredImage{};
 			    }
-			    if (recreate || !state || state->extent.width != ctx->window->FramebufferWidth() ||
-			        state->extent.height != ctx->window->FramebufferHeight())
+			    if (recreate || !state || state->extent.width != window->FramebufferWidth() ||
+			        state->extent.height != window->FramebufferHeight())
 			    {
 				    Rebuild();
 			    }
@@ -2965,11 +2988,34 @@ struct DeviceImpl final : Device
 		return Guarded<SwapchainPtr>(
 		    [&]
 		    {
-			    Require(ctx->window && ctx->surface, "Device was created without a presentation window");
+			    auto targetWindow = desc.window ? desc.window : ctx->window;
+			    Require(static_cast<bool>(targetWindow),
+			            "Swapchain requires a window; create the Device with a presentation window first");
 			    auto swapchain = std::make_shared<SwapchainImpl>();
 			    swapchain->ctx = ctx;
+			    swapchain->window = std::move(targetWindow);
 			    swapchain->desc = desc;
-			    if (ctx->window->FramebufferWidth() && ctx->window->FramebufferHeight())
+			    auto surface = std::make_shared<SurfaceState>();
+			    surface->ctx = ctx;
+			    if (swapchain->window == ctx->window)
+			    {
+				    Require(ctx->surface, "Device was created without a Vulkan presentation surface");
+				    surface->surface = ctx->surface;
+			    }
+			    else
+			    {
+				    Check(glfwCreateWindowSurface(
+				              ctx->instance, static_cast<GLFWwindow*>(Detail::WindowAccess::Native(*swapchain->window)),
+				              nullptr, &surface->surface),
+				          "Creating additional window surface");
+				    surface->ownsSurface = true;
+			    }
+			    VkBool32 present = VK_FALSE;
+			    Check(vkGetPhysicalDeviceSurfaceSupportKHR(ctx->physical, ctx->family, surface->surface, &present),
+			          "Checking presentation support for the requested window");
+			    Require(present == VK_TRUE, "The selected Vulkan queue cannot present to the requested window");
+			    swapchain->surface = std::move(surface);
+			    if (swapchain->window->FramebufferWidth() && swapchain->window->FramebufferHeight())
 			    {
 				    swapchain->Rebuild();
 			    }

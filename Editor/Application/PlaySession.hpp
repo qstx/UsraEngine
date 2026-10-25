@@ -9,7 +9,8 @@ namespace Ursa::Editor
 {
 using PlayContextSetup = std::function<Result<std::shared_ptr<void>>(ComponentLoadContext&)>;
 
-FrameInput SelectPlayInput(FrameInput polled, bool viewportFocused, bool editorTextActive);
+FrameInput SelectPlayInput(FrameInput polled, bool viewportFocused, bool editorInputCaptured);
+bool EditorInputBlocksPlay(bool wantCaptureKeyboard, bool wantTextInput, bool dragDropActive, bool popupOpen);
 
 class PlaySession final
 {

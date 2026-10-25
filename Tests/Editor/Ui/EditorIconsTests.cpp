@@ -6,6 +6,7 @@
 #include <Core/StringInterop.hpp>
 #include <Scene/Lighting.hpp>
 #include <Scene/RenderingComponents.hpp>
+#include <Workspace/EditorDocuments.hpp>
 #include <Vfs/AssetRoots.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/PakBuilder.hpp>
@@ -22,6 +23,18 @@ using namespace Ursa;
 using namespace Ursa::Editor;
 using namespace Ursa::Rhi;
 using Icons::Icon;
+
+String testClipboard;
+
+void SetTestClipboard(ImGuiContext*, const char* text)
+{
+	testClipboard = text ? String(text) : String{};
+}
+
+const char* GetTestClipboard(ImGuiContext*)
+{
+	return testClipboard.c_str();
+}
 
 void Expect(bool value, const char* message)
 {
@@ -384,6 +397,194 @@ void TestConsoleCounts()
 	panel.Clear();
 	Expect(EditorConsolePanel::Counts(panel.Records()) == Array<Size, 5>{}, "Clear retained severity counts");
 }
+
+void TestPanelContextClose(const DevicePtr& device)
+{
+	auto bridge = Take(ImGuiBridge::Create(device));
+	bool open = true;
+	auto document = Take(EditorDocument::Create(
+	    ResourceKind::Scene, ResourceId::Generate(), Take(VirtualPath::Parse("prj:PanelClose.ursascene")),
+	    [](VirtualFileSystem&, const VirtualPath&, ResourceId) { return Result<void>{}; }));
+	ImGuiID closeItemId = 0;
+	for (int frame = 0; frame < 7; ++frame)
+	{
+		auto& io = ImGui::GetIO();
+		if (frame == 1)
+		{
+			io.AddMousePosEvent(400, 250);
+		}
+		else if (frame == 2)
+		{
+			io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+		}
+		else if (frame == 3)
+		{
+			io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+		}
+		Done(bridge->BeginFrame(1.f / 60.f, 500, 300));
+		ImGui::SetNextWindowPos({0, 0});
+		ImGui::SetNextWindowSize({500, 300});
+		ImGui::Begin("Panel context test", &open);
+		if (frame == 4)
+		{
+			ImGui::ActivateItemByID(closeItemId);
+		}
+		Icons::DrawPanelContextMenu("PanelActions", &open, &closeItemId);
+		if (frame == 3)
+		{
+			auto* context = ImGui::GetCurrentContext();
+			Expect(!context->OpenPopupStack.empty() && context->OpenPopupStack.back().Window,
+			       "Right-clicking panel background did not open its context menu");
+			Expect(closeItemId != 0, "Panel Close menu item has no stable ImGui ID");
+		}
+		ImGui::End();
+		Done(bridge->EndFrame());
+	}
+	Expect(!open, "Panel Close context command did not close the view");
+	Expect(!document->Dirty() && document->Revision() == 0,
+	       "Closing a panel changed the document dirty state or revision");
+}
+
+void TestConsoleContextCopy(const DevicePtr& device)
+{
+	auto bridge = Take(ImGuiBridge::Create(device));
+	ImGui::GetPlatformIO().Platform_SetClipboardTextFn = SetTestClipboard;
+	ImGui::GetPlatformIO().Platform_GetClipboardTextFn = GetTestClipboard;
+	testClipboard.clear();
+	EditorConsolePanel panel;
+	EditorConsolePanel::ContextActionProbe probe;
+	probe.message = "Console context clipboard sentinel";
+	Log::Write(LogLevel::Info, "ContextCopyProbe", probe.message);
+	bool open = true;
+	String diagnostic;
+	for (int frame = 0; frame < 7; ++frame)
+	{
+		auto& io = ImGui::GetIO();
+		if (frame >= 1 && frame <= 3)
+		{
+			io.AddMousePosEvent(probe.messageCenter.x, probe.messageCenter.y);
+			if (frame == 2)
+			{
+				io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+			}
+			else if (frame == 3)
+			{
+				io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+			}
+		}
+		else if (frame == 4)
+		{
+			io.AddMousePosEvent(probe.copyCenter.x, probe.copyCenter.y);
+		}
+		else if (frame == 5)
+		{
+			io.AddMousePosEvent(probe.copyCenter.x, probe.copyCenter.y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		}
+		else if (frame == 6)
+		{
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		}
+		Done(bridge->BeginFrame(1.f / 60.f, 900, 400));
+		ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+		ImGui::SetNextWindowSize({900, 400}, ImGuiCond_Always);
+		panel.Draw(open, diagnostic, {}, &probe);
+		if (frame == 3)
+		{
+			Expect(probe.messageCenter.x > 0 && probe.messageCenter.y > 0 && probe.messageHovered &&
+			           probe.copyCenter.x > 0 && probe.copyItem != 0,
+			       "Right-clicking a Console message did not expose Copy Message");
+		}
+		if (frame == 5)
+		{
+			if (!probe.copyHovered)
+			{
+				throw std::runtime_error("Copy menu hover failed at " + std::to_string(probe.copyCenter.x) + "," +
+				                         std::to_string(probe.copyCenter.y) + " with mouse " +
+				                         std::to_string(ImGui::GetIO().MousePos.x) + "," +
+				                         std::to_string(ImGui::GetIO().MousePos.y));
+			}
+		}
+		Done(bridge->EndFrame());
+	}
+	const char* clipboard = ImGui::GetClipboardText();
+	if (!clipboard || String(clipboard) != probe.message)
+	{
+		throw std::runtime_error("Console Copy Message clipboard mismatch: " +
+		                         (clipboard ? std::string(clipboard) : std::string("<null>")));
+	}
+}
+
+void TestConsoleContextLocate(const DevicePtr& device)
+{
+	auto bridge = Take(ImGuiBridge::Create(device));
+	EditorConsolePanel panel;
+	EditorConsolePanel::ContextActionProbe probe;
+	probe.message = "Console context locate sentinel";
+	LogContext context;
+	context.resourcePath = "prj:Context.ursascene";
+	context.objectId = "00000000000000000000000000000001";
+	Log::Write(LogLevel::Info, "ContextLocateProbe", probe.message, context);
+	bool open = true;
+	String diagnostic;
+	Int32 locateCount = 0;
+	const EditorConsolePanel::ContextHandler handler = [&](const LogRecord& record)
+	{
+		++locateCount;
+		Expect(record.message == probe.message && record.context.resourcePath == context.resourcePath &&
+		           record.context.objectId == context.objectId,
+		       "Console Locate did not receive the selected record's navigation context");
+		return Result<void>{};
+	};
+	for (int frame = 0; frame < 7; ++frame)
+	{
+		auto& io = ImGui::GetIO();
+		if (frame >= 1 && frame <= 3)
+		{
+			io.AddMousePosEvent(probe.messageCenter.x, probe.messageCenter.y);
+			if (frame == 2)
+			{
+				io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+			}
+			else if (frame == 3)
+			{
+				io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+			}
+		}
+		else if (frame == 4)
+		{
+			io.AddMousePosEvent(probe.locateCenter.x, probe.locateCenter.y);
+		}
+		else if (frame == 5)
+		{
+			io.AddMousePosEvent(probe.locateCenter.x, probe.locateCenter.y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		}
+		else if (frame == 6)
+		{
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		}
+		Done(bridge->BeginFrame(1.f / 60.f, 900, 400));
+		ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+		ImGui::SetNextWindowSize({900, 400}, ImGuiCond_Always);
+		panel.Draw(open, diagnostic, handler, &probe);
+		if (frame == 3)
+		{
+			Expect(probe.messageCenter.x > 0 && probe.messageCenter.y > 0 && probe.messageHovered &&
+			           probe.locateCenter.x > 0 && probe.locateItem != 0,
+			       "Right-clicking a navigable Console message did not expose Locate");
+		}
+		if (frame == 5)
+		{
+			Expect(probe.locateHovered, "Moving to Console Locate did not hover the real context menu item");
+		}
+		Done(bridge->EndFrame());
+	}
+	Expect(locateCount == 1, "Console Locate did not invoke navigation exactly once");
+	Expect(diagnostic.empty(), "Successful Console Locate left an error diagnostic");
+	Expect(ImGui::GetCurrentContext()->OpenPopupStack.empty(), "Console Locate navigation left an unrelated menu open");
+}
+
 } // namespace
 
 int main()
@@ -394,6 +595,9 @@ int main()
 		TestConsoleCounts();
 		auto device = Take(CreateDevice({}));
 		TestConsoleFilters(device);
+		TestPanelContextClose(device);
+		TestConsoleContextCopy(device);
+		TestConsoleContextLocate(device);
 		for (Float32 dpi : {1.f, 1.5f, 2.f})
 		{
 			CaptureGallery(device, dpi);

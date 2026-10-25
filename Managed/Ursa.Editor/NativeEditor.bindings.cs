@@ -32,6 +32,10 @@ internal static partial class NativeEditorBindings
 	internal static partial EditorBindingCapability GetRuntimeCapability();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetTargetHandle")]
 	internal static partial NativeHandle GetTargetHandle();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetTargetHandles")]
+	internal static partial NativeHandle[] GetTargetHandles();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetTargetPrimaryIndex")]
+	internal static partial uint GetTargetPrimaryIndex();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetComponentPayload")]
 	internal static partial string GetComponentPayload([HandleKind(2)] NativeHandle component);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ApplyComponentFields")]

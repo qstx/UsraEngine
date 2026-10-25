@@ -29,17 +29,54 @@ internal static class Menus
 }
 
 [CustomEditor(typeof(Ursa.SessionFixtures.SessionProbe))]
+[CanEditMultipleObjects]
 public sealed class ProbeInspector : Inspector
 {
 	private static SerializedProperty? previousProperty;
+	private static int multiEditPhase;
+	private static bool stalePropertyRejected;
 
 	public override void OnInspectorGUI()
 	{
 		var typed = (Ursa.SessionFixtures.SessionProbe)Target;
+		if (SerializedObject.IsEditingMultipleObjects)
+		{
+			if (Targets.Length != 2 || SerializedObject.TargetObjects.Length != 2 ||
+			    !ReferenceEquals(Targets[1], Target) || !ReferenceEquals(SerializedObject.TargetObjects[1], Target) ||
+			    !SerializedObject.FindProperty("value").HasMultipleDifferentValues)
+				throw new InvalidOperationException("Multi-object Inspector lost target order, primary or mixed values.");
+			if (multiEditPhase == 0)
+			{
+				((Ursa.SessionFixtures.SessionProbe)Targets[0]).value = 17;
+				((Ursa.SessionFixtures.SessionProbe)Targets[1]).value = 23;
+				SerializedObject.FindProperty("position.x").DoubleValue = 6.5;
+				SerializedObject.ApplyModifiedProperties();
+				multiEditPhase = 1;
+			}
+			else if (multiEditPhase == 1)
+			{
+				((Ursa.SessionFixtures.SessionProbe)Targets[0]).value = 101;
+				((Ursa.SessionFixtures.SessionProbe)Targets[1]).value = 202;
+				SerializedObject.FindProperty("value").LongValue = 99;
+				SerializedObject.ApplyModifiedProperties();
+				multiEditPhase = 2;
+			}
+			else throw new InvalidOperationException("Multi-object Inspector was invoked more than twice.");
+			return;
+		}
 		if (typed.GameObject.Name.Length == 0 || typed.value != SerializedObject.FindProperty("value").IntValue)
 			throw new InvalidOperationException("Typed component Target did not bind its owner or field snapshot.");
 		if (!ReferenceEquals(typed, typed.GameObject.GetComponent<Ursa.SessionFixtures.SessionProbe>()))
 			throw new InvalidOperationException("GetComponent did not return the same scoped Behaviour target.");
+		if (previousProperty != null)
+		{
+			try { previousProperty.LongValue = 1000L; }
+			catch (InvalidOperationException) { stalePropertyRejected = true; }
+			if (!stalePropertyRejected) throw new InvalidOperationException("A retained property survived its callback.");
+			_ = EditorGui.ObjectField("Object", EditorContext.Selection[0].Reference, EditorReferenceKind.GameObject);
+			_ = EditorGui.AssetField("Asset", null);
+			return;
+		}
 		using (EditorGui.Vertical())
 		{
 			EditorGui.Text(EditorContext.Document!.Path);
@@ -57,8 +94,6 @@ public sealed class ProbeInspector : Inspector
 			EditorGui.ObjectField("Object", EditorContext.Selection[0].Reference, EditorReferenceKind.GameObject);
 			EditorGui.AssetField("Asset", null);
 			if (EditorContext.Target?.Kind != EditorReferenceKind.Component) throw new InvalidOperationException("Inspector target kind was lost.");
-			// A retained property must never write to a later drawing scope.
-			if (previousProperty != null) previousProperty.LongValue = 1000L;
 			var value = SerializedObject.FindProperty("value");
 			if (value.PropertyPath != "value") throw new Exception("Field path exposed storage syntax.");
 			foreach (string path in SerializedObject.GetPropertyPaths())

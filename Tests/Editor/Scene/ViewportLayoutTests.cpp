@@ -1,5 +1,6 @@
 #include <Core/StringInterop.hpp>
 #include <Scene/ViewportLayout.hpp>
+#include <Scene/SceneViewPanel.hpp>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -57,10 +58,37 @@ int main()
 		const auto highDpi = ComputeViewportLayout({0, 0, 960, 540}, 2, {1920, 1080}, 1, {}, true);
 		ExpectNear(highDpi.displayRect.width, 960, "DPI-aware source pixel size is wrong");
 		ExpectNear(highDpi.scale, 1, "Fit should use the full available logical area");
+		const auto secondaryHighDpi = ComputeViewportLayout({-1440, 120, 960, 500}, 1.5f, {1440, 810}, 1, {}, true);
+		const auto secondaryCenter = ScreenToViewportPixel({-960, 370}, secondaryHighDpi);
+		Expect(secondaryCenter.has_value(), "A viewport on a negative desktop origin was not hit-testable");
+		ExpectNear(secondaryCenter->x, 720, "Negative-origin DPI mapping produced the wrong horizontal pixel");
+		ExpectNear(secondaryCenter->y, 405, "Negative-origin DPI mapping produced the wrong vertical pixel");
+		Expect(!ScreenToViewportPixel({-1439, 121}, secondaryHighDpi),
+		       "A high-DPI letterbox gutter on a secondary display mapped into the render target");
 		ExpectNear(SnapViewportScale(0.996f), 1, "Scale was not snapped to an integer");
 		const auto panned = ComputeViewportLayout({0, 0, 640, 360}, 1, {1920, 1080}, 1, {10000, -10000}, false);
 		ExpectNear(panned.displayRect.x, 0, "Horizontal pan exceeded its boundary");
 		ExpectNear(panned.displayRect.y, -720, "Vertical pan exceeded its boundary");
+
+		Camera camera;
+		camera.position = {0.f, 0.f, 5.f};
+		camera.target = {0.f, 0.f, 0.f};
+		camera.up = {0.f, 1.f, 0.f};
+		const auto squareViewport = ComputeViewportLayout({0, 0, 200, 100}, 1, {100, 100}, 1, {}, true);
+		ExpectNear(squareViewport.displayRect.x, 50.f, "Scene image did not preserve its letterboxed bounds");
+		Rendering::RenderObject nearBox;
+		nearBox.worldBounds = {{-1.f, -1.f, 0.f}, {1.f, 1.f, 2.f}, false};
+		Rendering::RenderObject farBox;
+		farBox.worldBounds = {{-1.f, -1.f, -3.f}, {1.f, 1.f, -1.f}, false};
+		auto geometryHit = ResolveSceneDropPoint(camera, 1.f, squareViewport, {100.f, 50.f}, {farBox, nearBox});
+		Expect(geometryHit && geometryHit.value.hitGeometry,
+		       "Scene placement did not prefer a visible geometry hit over the target plane");
+		ExpectNear(geometryHit.value.world.z, 2.f, "Scene placement did not choose the nearest geometry bounds");
+		auto targetPlaneHit = ResolveSceneDropPoint(camera, 1.f, squareViewport, {75.f, 50.f}, {farBox});
+		Expect(targetPlaneHit && !targetPlaneHit.value.hitGeometry && targetPlaneHit.value.world.x < 0.f,
+		       "Scene placement did not map the pointer ray onto the camera target plane");
+		Expect(!ResolveSceneDropPoint(camera, 1.f, squareViewport, {20.f, 50.f}, {}),
+		       "A letterbox area outside the displayed Scene image accepted a placement point");
 		std::cout << "Viewport layout tests passed\n";
 		return 0;
 	}

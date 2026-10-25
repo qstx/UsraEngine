@@ -168,9 +168,9 @@ SavePrefabAssetResource(VirtualFileSystem& filesystem, const VirtualPath& path, 
 }
 
 Result<PrefabAsset> DecodePrefabAssetDocument(const String& label, const Json& json, const ComponentRegistry& registry,
-                                              ComponentLoadContext& context)
+                                              ComponentLoadContext& context, bool preserveExistingMappings)
 {
-	ComponentMappingScope mappings(context);
+	ComponentMappingScope mappings(context, !preserveExistingMappings);
 	DocumentResources localResources;
 	DocumentResourceScope resourceScope(context, localResources);
 	auto restoredResources = localResources.Decode(json, context);
@@ -395,15 +395,182 @@ CapturePrefabAsset(ResourceId id, const Scene& scene, GameObject::Ptr root, cons
 	                                 registry, context);
 }
 
-Result<GameObject::Ptr> PrefabAsset::Instantiate(
-    Scene& scene, const ComponentRegistry& registry, ComponentLoadContext& context,
-    const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId) const
+Result<PrefabAsset>
+CapturePrefabAsset(ResourceId id, const Scene& scene, const Vector<GameObject::Ptr>& roots,
+                   const ComponentRegistry& registry, ComponentLoadContext& context,
+                   const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId)
+{
+	if (!id || roots.empty())
+	{
+		return Result<PrefabAsset>::Failure("Cannot capture an empty or invalid PrefabAsset selection");
+	}
+	Set<String> included;
+	Map<String, Ursa::Size> selectionOrder;
+	Vector<ResourceId> rootIds;
+	std::function<Result<void>(const GameObject::Ptr&, Ursa::Size)> include = [&](const GameObject::Ptr& object,
+	                                                                              Ursa::Size order) -> Result<void>
+	{
+		if (!object || !scene.Contains(object))
+		{
+			return Result<void>::Failure("Cannot capture an invalid PrefabAsset selection");
+		}
+		const auto objectId = scene.PersistentId(object);
+		if (!objectId)
+		{
+			return Result<void>::Failure(objectId.error);
+		}
+		included.insert(objectId.value.ToString());
+		selectionOrder.emplace(objectId.value.ToString(), order);
+		for (const auto& child : object->Children())
+		{
+			auto result = include(child, order);
+			if (!result)
+			{
+				return result;
+			}
+		}
+		return {};
+	};
+	for (Ursa::Size index = 0; index < roots.size(); ++index)
+	{
+		const auto& root = roots[index];
+		if (!root || !scene.Contains(root))
+		{
+			return Result<PrefabAsset>::Failure("Cannot capture an invalid PrefabAsset selection");
+		}
+		rootIds.push_back(root->Id());
+		auto includedRoot = include(root, index);
+		if (!includedRoot)
+		{
+			return Result<PrefabAsset>::Failure(includedRoot.error);
+		}
+	}
+	const String scenePath = "capture-selection.ursascene";
+	auto encoded = EncodeSceneDocument(scenePath, id, scene, registry, materialId);
+	if (!encoded)
+	{
+		return Result<PrefabAsset>::Failure(encoded.error);
+	}
+	const ResourceId wrapperId = ResourceId::Generate();
+	Json objects = Json::array();
+	for (auto& object : encoded.value["gameObjects"])
+	{
+		if (!object.contains("id") || !object["id"].is_string() ||
+		    included.find(ToUrsaString(object["id"].get<std::string>())) == included.end())
+		{
+			continue;
+		}
+		auto objectId = ResourceId::Parse(ToUrsaString(object["id"].get<std::string>()));
+		if (!objectId)
+		{
+			return Result<PrefabAsset>::Failure(objectId.error);
+		}
+		if (std::find(rootIds.begin(), rootIds.end(), objectId.value) != rootIds.end())
+		{
+			object["parentId"] = ToStdString(wrapperId.ToString());
+		}
+		objects.push_back(std::move(object));
+	}
+	std::stable_sort(objects.begin(), objects.end(),
+	                 [&](const Json& left, const Json& right)
+	                 {
+		                 const String leftId = ToUrsaString(left["id"].get<std::string>());
+		                 const String rightId = ToUrsaString(right["id"].get<std::string>());
+		                 return selectionOrder.at(leftId) < selectionOrder.at(rightId);
+	                 });
+	if (objects.size() < roots.size())
+	{
+		return Result<PrefabAsset>::Failure("The selected PrefabAsset objects are no longer in the Scene");
+	}
+	ArchiveWriter writer;
+	auto wrapper = GameObject::Create("Selection");
+	auto saved = wrapper->Serialize(writer);
+	if (!saved)
+	{
+		return Result<PrefabAsset>::Failure(saved.error);
+	}
+	auto wrapperFields = ArchiveToJson(writer);
+	if (!wrapperFields)
+	{
+		return Result<PrefabAsset>::Failure(wrapperFields.error);
+	}
+	wrapperFields.value["id"] = ToStdString(wrapperId.ToString());
+	wrapperFields.value["parentId"] = nullptr;
+	wrapperFields.value["components"] = Json::array();
+	objects.insert(objects.begin(), std::move(wrapperFields.value));
+	std::function<Result<void>(const GameObject::Ptr&)> mapExternal = [&](const GameObject::Ptr& object) -> Result<void>
+	{
+		if (included.find(object->Id().ToString()) == included.end())
+		{
+			auto mappedObject = context.MapGameObject(object->Id(), object);
+			if (!mappedObject)
+			{
+				return mappedObject;
+			}
+			auto components = scene.ComponentsOf(object);
+			if (!components)
+			{
+				return Result<void>::Failure(components.error);
+			}
+			for (ComponentId componentId : components.value)
+			{
+				auto componentIdentity = scene.ComponentPersistentId(componentId);
+				if (!componentIdentity)
+				{
+					return Result<void>::Failure(componentIdentity.error);
+				}
+				auto mappedComponent = context.MapComponent(componentIdentity.value, componentId);
+				if (!mappedComponent)
+				{
+					return mappedComponent;
+				}
+				auto mappedComponentObject =
+				    context.MapComponentObject(componentIdentity.value, scene.GetComponent(componentId));
+				if (!mappedComponentObject)
+				{
+					return mappedComponentObject;
+				}
+			}
+		}
+		for (const auto& child : object->Children())
+		{
+			auto result = mapExternal(child);
+			if (!result)
+			{
+				return result;
+			}
+		}
+		return {};
+	};
+	for (const auto& root : scene.RootGameObjects())
+	{
+		auto mapped = mapExternal(root);
+		if (!mapped)
+		{
+			return Result<PrefabAsset>::Failure(mapped.error);
+		}
+	}
+	return DecodePrefabAssetDocument("capture-selection.ursaprefab",
+	                                 {{"format", "UrsaPrefab"},
+	                                  {"version", resourceFormatVersion},
+	                                  {"prefabGraphVersion", prefabGraphFormatVersion},
+	                                  {"id", ToStdString(id.ToString())},
+	                                  {"gameObjects", std::move(objects)},
+	                                  {"localResourceVersion", UInt32{1}},
+	                                  {"localResources", std::move(encoded.value["localResources"])}},
+	                                 registry, context, true);
+}
+
+Result<GameObject::Ptr>
+PrefabAsset::Instantiate(Scene& scene, const ComponentRegistry& registry, ComponentLoadContext& context,
+                         const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId,
+                         bool preserveExistingMappings) const
 {
 	if (!root)
 	{
 		return Result<GameObject::Ptr>::Failure("Cannot instantiate an empty PrefabAsset");
 	}
-	ComponentMappingScope mappings(context);
+	ComponentMappingScope mappings(context, !preserveExistingMappings);
 	auto sourceDocument = EncodePrefabAssetDocument("instantiate.ursaprefab", *this, registry, materialId);
 	if (!sourceDocument)
 	{

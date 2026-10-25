@@ -9,11 +9,13 @@
 #include <cmath>
 #include <cctype>
 #include <cstring>
+#include <functional>
 
 namespace Ursa::Editor::Icons
 {
 namespace
 {
+std::function<void()> panelResetAction;
 constexpr const char* names[]{"Play",
                               "Stop",
                               "Pause",
@@ -665,5 +667,34 @@ bool ComponentMenu()
 		ImGui::EndPopup();
 	}
 	return remove;
+}
+
+void SetPanelResetAction(std::function<void()> action)
+{
+	panelResetAction = std::move(action);
+}
+
+bool DrawPanelContextMenu(const char* popupId, bool* open, ImGuiID* closeItemId)
+{
+	if (!popupId || !open || !ImGui::BeginPopupContextWindow(popupId, ImGuiPopupFlags_NoOpenOverItems))
+	{
+		return false;
+	}
+	const bool close = ImGui::MenuItem("Close Panel");
+	if (closeItemId)
+	{
+		*closeItemId = ImGui::GetItemID();
+	}
+	const bool reset = ImGui::MenuItem("Reset Layout", nullptr, false, static_cast<bool>(panelResetAction));
+	ImGui::EndPopup();
+	if (reset && panelResetAction)
+	{
+		panelResetAction();
+	}
+	if (close)
+	{
+		*open = false;
+	}
+	return close;
 }
 } // namespace Ursa::Editor::Icons

@@ -14,7 +14,9 @@
 #include <Assets/SceneDraft.hpp>
 #include <Rendering/Pipeline/GraphicsSettings.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
+#include <Serialization/PrefabAsset.hpp>
 #include <Inspector/SceneInspectorPanel.hpp>
+#include <Inspector/ReferencePicker.hpp>
 #if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/DotNet/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
@@ -157,6 +159,7 @@ bool HasManagedScriptComponent(Scene& scene)
 
 EditorApplication::~EditorApplication()
 {
+	Icons::SetPanelResetAction({});
 	if (assetImportJob.valid())
 	{
 		assetImportJob.wait();
@@ -299,6 +302,7 @@ Result<bool> EditorApplication::DrawAssetExtension(ManagedEditorContext& context
 
 void EditorApplication::ConfigureAssetPreview(ManagedEditorContext& context)
 {
+	ConfigureReferencePreviewFactory(context);
 #if defined(URSA_ENABLE_DOTNET)
 	if (!assetPreview || !managedHost || !editingScriptSession || managedHost->IsSessionFaulted())
 	{
@@ -330,14 +334,192 @@ void EditorApplication::ConfigureAssetPreview(ManagedEditorContext& context)
 #endif
 }
 
+void EditorApplication::ConfigureReferencePreviewFactory(ManagedEditorContext& context)
+{
+#if defined(URSA_ENABLE_DOTNET)
+	context.createReferencePreview =
+	    [this](const AssetPreviewTarget& target) -> Result<std::shared_ptr<AssetPreviewExtension>>
+	{
+		if (!managedHost || !editingScriptSession || managedHost->IsSessionFaulted() || !workspace)
+		{
+			return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(
+			    "Managed Preview environment is unavailable");
+		}
+		String targetIdentity;
+		if (target.custom && !target.customTypeId.empty())
+		{
+			targetIdentity = "asset:" + target.customTypeId;
+		}
+		else
+		{
+			switch (target.kind)
+			{
+				case AssetPreviewKind::Material:
+					targetIdentity = "asset:ursa.Material";
+					break;
+				case AssetPreviewKind::Texture:
+					targetIdentity = "asset:ursa.Texture";
+					break;
+				case AssetPreviewKind::Mesh:
+					targetIdentity = "asset:ursa.Mesh";
+					break;
+				case AssetPreviewKind::Prefab:
+					targetIdentity = "asset:ursa.Prefab";
+					break;
+				case AssetPreviewKind::Model:
+					targetIdentity = "asset:ursa.Model";
+					break;
+				default:
+					return Result<std::shared_ptr<AssetPreviewExtension>>::Success({});
+			}
+		}
+		const auto descriptor =
+		    std::find_if(managedExtensions.begin(), managedExtensions.end(), [&](const auto& item)
+		                 { return item.kind == ManagedExtensionKind::Inspector && item.target == targetIdentity; });
+		if (descriptor == managedExtensions.end())
+		{
+			return Result<std::shared_ptr<AssetPreviewExtension>>::Success({});
+		}
+		auto openedResources = ResourceSession::Open(workspace->ContentFiles(), workspace->AssetResolver());
+		if (!openedResources)
+		{
+			return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(openedResources.error);
+		}
+		auto resources = std::shared_ptr<ResourceSession>(std::move(openedResources.value));
+		ManagedEditorContext previewContext;
+		previewContext.workspace = workspace.get();
+		previewContext.registry = project ? &project->components : nullptr;
+		previewContext.targetUsesDocument = false;
+		previewContext.canEditTarget = false;
+		previewContext.assetSelection = target.identity;
+		previewContext.targetIdentity = targetIdentity;
+		switch (target.kind)
+		{
+			case AssetPreviewKind::Material:
+			{
+				auto loaded = resources->LoadMaterial(target.identity.guid, target.identity.localFileId);
+				if (!loaded)
+				{
+					return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(loaded.error);
+				}
+				previewContext.targetMaterial = std::move(loaded.value);
+				break;
+			}
+			case AssetPreviewKind::Texture:
+			{
+				auto loaded = resources->LoadTexture(target.identity.guid, target.identity.localFileId);
+				if (!loaded)
+				{
+					return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(loaded.error);
+				}
+				previewContext.targetTexture = std::move(loaded.value);
+				break;
+			}
+			case AssetPreviewKind::Mesh:
+			{
+				auto loaded = resources->LoadMesh(target.identity.guid, target.identity.localFileId);
+				if (!loaded)
+				{
+					return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(loaded.error);
+				}
+				previewContext.targetMesh = std::move(loaded.value);
+				break;
+			}
+			default:
+				break;
+		}
+		if (target.custom && !target.customTypeId.empty())
+		{
+			nlohmann::json payload{{"Fields", nlohmann::json::object()}, {"FieldTypes", nlohmann::json::object()}};
+			if (PathFromUrsaString(target.path.relative).extension() == ".ursaasset")
+			{
+				auto asset =
+				    LoadScriptableAssetSource(workspace->Index().Filesystem(), target.path, target.identity.guid);
+				if (!asset)
+				{
+					return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(asset.error);
+				}
+				previewContext.assetSelection = AssetReference{asset.value.SourceGuid(), asset.value.LocalFileId()};
+				previewContext.targetIdentity = "asset:" + asset.value.TypeId();
+				payload = asset.value.Payload();
+			}
+			else
+			{
+				auto graph = LoadScriptableAssetGraph(*resources, target.identity);
+				if (!graph)
+				{
+					return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(graph.error);
+				}
+				const auto found = std::find_if(graph.value.assets.begin(), graph.value.assets.end(),
+				                                [&](const auto& item)
+				                                {
+					                                return item.SourceGuid() == graph.value.root.guid &&
+					                                       item.LocalFileId() == graph.value.root.localFileId;
+				                                });
+				if (found == graph.value.assets.end())
+				{
+					return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(
+					    "The custom Preview root asset is missing from its graph");
+				}
+				previewContext.assetSelection = graph.value.root;
+				previewContext.targetIdentity = "asset:" + found->TypeId();
+				payload = found->Payload();
+			}
+			SerializedTargetAdapter adapter;
+			adapter.resources = resources.get();
+			adapter.capture = [payload] { return Result<nlohmann::json>::Success(payload); };
+			previewContext.serializedTarget = std::move(adapter);
+		}
+		const String extensionId = descriptor->id;
+		const std::weak_ptr<Scripting::DotNetHost> weakHost = managedHost;
+		const UInt64 scriptSession = editingScriptSession;
+		auto extension = std::make_shared<AssetPreviewExtension>(
+		    extensionId,
+		    [weakHost, scriptSession, extensionId, resources](UInt64 instance, Scripting::ManagedPreviewPhase phase,
+		                                                      const ViewportRect& rect, ManagedEditorContext& source)
+		    {
+			    const auto host = weakHost.lock();
+			    return host ? InvokeManagedEditorPreview(*host, scriptSession, extensionId, instance, phase, rect,
+			                                             source)
+			                : Result<Scripting::ManagedPreviewResult>::Failure("Preview script environment is closed");
+		    });
+		extension->Bind(previewContext);
+		auto query = extension->Invoke(Scripting::ManagedPreviewPhase::Query);
+		if (!query)
+		{
+			return Result<std::shared_ptr<AssetPreviewExtension>>::Failure(query.error);
+		}
+		if (!query.value.hasPreview)
+		{
+			return Result<std::shared_ptr<AssetPreviewExtension>>::Success({});
+		}
+		return Result<std::shared_ptr<AssetPreviewExtension>>::Success(std::move(extension));
+	};
+#else
+	(void)context;
+#endif
+}
+
 bool EditorApplication::BeforeImporterSelection(const EditorSelectionContext& next)
 {
-	const auto dirtyPath = assetInspectorPanel.HasModifiedSource() ? assetInspectorPanel.ModifiedSourcePath()
+	if (HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
+	{
+		pendingPickerSelection = next;
+		RequestCancelReferencePickerSessions(gui ? gui->Context() : nullptr);
+		return false;
+	}
+	const bool sourceModified = assetInspectorPanel.HasModifiedSource();
+	const auto dirtyPath = sourceModified ? assetInspectorPanel.ModifiedSourcePath()
 	                       : assetImporterInspector && assetImporterInspector->HasModified()
 	                           ? assetImporterInspector->SourcePath()
 	                           : VirtualPath{};
-	if (dirtyPath.scheme.empty() || (next.kind == EditorSelectionKind::Asset && next.assetPath == dirtyPath &&
-	                                 next.assetLocalFileId == selectionContext.assetLocalFileId))
+	const auto* current = selectionContext.PrimaryEntry();
+	const auto* nextPrimary = next.PrimaryEntry();
+	const bool keepsDirtyTarget = sourceModified
+	                                  ? assetInspectorPanel.RetainsModifiedTargets(next)
+	                                  : current && nextPrimary && current->kind == EditorSelectionKind::Asset &&
+	                                        nextPrimary->SameIdentity(*current) && nextPrimary->assetPath == dirtyPath;
+	if (dirtyPath.scheme.empty() || keepsDirtyTarget)
 	{
 		return true;
 	}
@@ -347,8 +529,6 @@ bool EditorApplication::BeforeImporterSelection(const EditorSelectionContext& ne
 	}
 	pendingImporterSelection = next;
 	pendingSourceAsset = assetInspectorPanel.HasModifiedSource();
-	projectBrowser.SelectAsset(dirtyPath);
-	hierarchy.ClearSelection();
 	return false;
 }
 
@@ -381,14 +561,18 @@ void EditorApplication::DrawImporterSelectionPrompt()
 		pendingImporterSelection.reset();
 		pendingSourceAsset = false;
 		assetImporterInspector.reset();
+		if (!selectionContext.SelectEntries(next.entries, next.primaryIndex, next.rangeAnchor))
+		{
+			workspaceError = "The pending selection is no longer valid after resolving the asset draft.";
+			return;
+		}
 		if (next.kind == EditorSelectionKind::Asset)
 		{
-			selectionContext.SelectAsset(next.assetPath, next.assetLocalFileId, next.assetKind, next.assetGuid);
 			projectBrowser.SelectAsset(next.assetPath);
+			hierarchy.ClearSelection();
 		}
 		else if (next.kind == EditorSelectionKind::GameObject)
 		{
-			selectionContext.SelectGameObject(next.documentId, next.objectId);
 			if (documents && documents->Current() && documents->Current()->Id() == next.documentId)
 			{
 				if (const auto draft = documents->Current()->Payload<SceneDraft>())
@@ -420,7 +604,7 @@ void EditorApplication::DrawImporterSelectionPrompt()
 		}
 		else
 		{
-			selectionContext.Clear();
+			hierarchy.ClearSelection();
 		}
 		if (!pendingImporterOpen.scheme.empty())
 		{
@@ -443,6 +627,19 @@ void EditorApplication::DrawImporterSelectionPrompt()
 Result<void> EditorApplication::ReloadEditorScripts()
 {
 #if defined(URSA_ENABLE_DOTNET)
+	if (HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
+	{
+		RequestCancelReferencePickerSessions(gui ? gui->Context() : nullptr,
+		                                     [this]
+		                                     {
+			                                     auto reloaded = ReloadEditorScripts();
+			                                     if (!reloaded)
+			                                     {
+				                                     scriptBuildStatus = reloaded.error;
+			                                     }
+		                                     });
+		return {};
+	}
 	if (play.Active())
 	{
 		return Result<void>::Failure("Stop before reloading editing scripts");
@@ -634,6 +831,7 @@ Result<void> EditorApplication::ReloadEditorScripts()
 			return closed;
 		}
 	}
+	CancelReferencePickerSessions(gui ? gui->Context() : nullptr);
 	auto previousServices = std::move(editingScriptServices);
 	editingScriptSession = candidate.value;
 	if (assetPreview)
@@ -802,6 +1000,7 @@ Result<bool> EditorApplication::InvokeEditorTool(const ManagedExtensionDescripto
 	context.documents = documents.get();
 	context.workspace = workspace.get();
 	context.registry = &project->components;
+	ConfigureReferencePreviewFactory(context);
 	if (selectionContext.kind == EditorSelectionKind::Asset)
 	{
 		const auto* asset = projectBrowser.Find(selectionContext.assetPath);
@@ -1257,8 +1456,31 @@ Result<void> EditorApplication::SetWindowIcon(const std::filesystem::path& path)
 	return DecodeWindowIcon(encoded.data(), encoded.size());
 }
 
+void EditorApplication::ResetEditorLayout()
+{
+	if (!gui)
+	{
+		return;
+	}
+	auto cleared = gui->ClearSavedLayout();
+	workspaceError = cleared ? String{} : cleared.error;
+	if (cleared)
+	{
+		showProjectPanel = true;
+		showHierarchyPanel = true;
+		showInspectorPanel = true;
+		showScenePanel = true;
+		showGamePanel = true;
+		showConsolePanel = true;
+		savedPanelVisibility.clear();
+		ImGui::ClearIniSettings();
+		dockLayoutInitialized = false;
+	}
+}
+
 void EditorApplication::DrawMainMenuBar()
 {
+	Icons::SetPanelResetAction([this] { ResetEditorLayout(); });
 	const auto title = MainWindowTitle();
 	if (window && window->Title() != title)
 	{
@@ -1269,26 +1491,85 @@ void EditorApplication::DrawMainMenuBar()
 		ImGui::TextUnformatted("Ursa Editor");
 		ImGui::Separator();
 		EditorDocument* current = documents ? documents->Current() : nullptr;
+		const auto menuCommandContext =
+		    EditorCommandContext::Capture(selectionContext, current ? current->Id() : selectionContext.activeDocumentId,
+		                                  current ? current->Revision() : selectionContext.revision);
+		EditorCommands fileCommands;
+		fileCommands.Register({"file.save", "Save", "Ctrl+S",
+		                       [this, current](const EditorCommandContext&)
+		                       {
+			                       return !play.Active() && (current || assetInspectorPanel.HasModifiedSource())
+			                                  ? Result<void>{}
+			                                  : Result<void>::Failure("There is no writable document or source asset");
+		                       },
+		                       [this](const EditorCommandContext&)
+		                       {
+			                       const auto sourceSaved = assetInspectorPanel.SaveSelectedSource(selectionContext);
+			                       auto saved = !sourceSaved        ? Result<void>::Failure(sourceSaved.error)
+			                                    : sourceSaved.value ? Result<void>{}
+			                                    : documents         ? documents->SaveCurrent()
+			                                                : Result<void>::Failure("There is no active document");
+			                       if (saved)
+			                       {
+				                       RequestAssetImport();
+			                       }
+			                       return saved;
+		                       }});
+		fileCommands.Register({"assets.refresh", "Refresh", "Ctrl+R",
+		                       [this](const EditorCommandContext&)
+		                       {
+			                       return workspace && !play.Active()
+			                                  ? Result<void>{}
+			                                  : Result<void>::Failure("No editable project is open");
+		                       },
+		                       [this](const EditorCommandContext&)
+		                       {
+			                       RequestAssetImport();
+			                       auto refreshed = workspace->Refresh();
+			                       if (refreshed)
+			                       {
+				                       refreshed = projectBrowser.Refresh(*workspace);
+			                       }
+			                       return refreshed;
+		                       }});
+		fileCommands.Register({"project.rename", "Rename", "F2",
+		                       [this](const EditorCommandContext& context)
+		                       {
+			                       const auto* primary = context.selection.PrimaryEntry();
+			                       return workspace && !play.Active() && context.selection.entries.size() == 1 &&
+			                                      primary && primary->kind == EditorSelectionKind::Asset &&
+			                                      !primary->IsMissing() &&
+			                                      primary->assetRole == EditorAssetSelectionRole::Source
+			                                  ? Result<void>{}
+			                                  : Result<void>::Failure("Rename requires one writable source asset");
+		                       },
+		                       [this](const EditorCommandContext&)
+		                       {
+			                       projectBrowserPanel.RequestRenameSelected();
+			                       return Result<void>{};
+		                       }});
 		if (Icons::BeginMenu("File"))
 		{
-			ImGui::BeginDisabled(!documents || (!current && !assetInspectorPanel.HasModifiedSource()) || play.Active());
+			const auto canSave = fileCommands.CanExecute("file.save", menuCommandContext, menuCommandContext);
+			ImGui::BeginDisabled(!canSave);
 			if (Icons::MenuItem("Save", "Ctrl+S"))
 			{
-				const auto sourceSaved = assetInspectorPanel.SaveSelectedSource(selectionContext);
-				auto saved = !sourceSaved        ? Result<void>::Failure(sourceSaved.error)
-				             : sourceSaved.value ? Result<void>{}
-				                                 : documents->SaveCurrent();
+				auto saved = fileCommands.Execute("file.save", menuCommandContext, menuCommandContext);
 				workspaceError = saved ? String{} : saved.error;
-				if (saved)
-				{
-					RequestAssetImport();
-				}
 			}
 			ImGui::BeginDisabled(!current);
 			if (Icons::MenuItem("Close Document"))
 			{
-				auto closed = documents->RequestClose();
-				workspaceError = closed ? String{} : closed.error;
+				if (HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
+				{
+					RequestCancelReferencePickerSessions(gui ? gui->Context() : nullptr,
+					                                     [this] { closeDocumentAfterPickerCancellation = true; });
+				}
+				else
+				{
+					auto closed = documents->RequestClose();
+					workspaceError = closed ? String{} : closed.error;
+				}
 			}
 			ImGui::EndDisabled();
 			ImGui::EndDisabled();
@@ -1304,10 +1585,18 @@ void EditorApplication::DrawMainMenuBar()
 				else
 				{
 					exitRequested = true;
-					const auto closing = documents->RequestClose();
-					if (!closing)
+					if (HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
 					{
-						workspaceError = closing.error;
+						RequestCancelReferencePickerSessions(gui ? gui->Context() : nullptr,
+						                                     [this] { closeDocumentAfterPickerCancellation = true; });
+					}
+					else
+					{
+						const auto closing = documents->RequestClose();
+						if (!closing)
+						{
+							workspaceError = closing.error;
+						}
 					}
 				}
 			}
@@ -1335,16 +1624,11 @@ void EditorApplication::DrawMainMenuBar()
 			{
 				RequestAssetImport({}, true);
 			}
-			if (Icons::MenuItem("Refresh", "Ctrl+R"))
+			const auto canRefresh = fileCommands.CanExecute("assets.refresh", menuCommandContext, menuCommandContext);
+			if (Icons::MenuItem("Refresh", "Ctrl+R", false, static_cast<bool>(canRefresh)))
 			{
-				RequestAssetImport();
-				auto refreshed = workspace->Refresh();
+				auto refreshed = fileCommands.Execute("assets.refresh", menuCommandContext, menuCommandContext);
 				workspaceError = refreshed ? String{} : refreshed.error;
-				if (refreshed)
-				{
-					refreshed = projectBrowser.Refresh(*workspace);
-					workspaceError = refreshed ? String{} : refreshed.error;
-				}
 			}
 			if (Icons::BeginMenu("Create"))
 			{
@@ -1407,10 +1691,12 @@ void EditorApplication::DrawMainMenuBar()
 				}
 				ImGui::EndMenu();
 			}
-			ImGui::BeginDisabled(selectionContext.kind != EditorSelectionKind::Asset || play.Active());
-			if (Icons::MenuItem("Rename Selected"))
+			const auto canRename = fileCommands.CanExecute("project.rename", menuCommandContext, menuCommandContext);
+			ImGui::BeginDisabled(!canRename);
+			if (Icons::MenuItem("Rename Selected", "F2"))
 			{
-				projectBrowserPanel.RequestRenameSelected();
+				auto renamed = fileCommands.Execute("project.rename", menuCommandContext, menuCommandContext);
+				workspaceError = renamed ? String{} : renamed.error;
 			}
 			ImGui::EndDisabled();
 			ImGui::EndDisabled();
@@ -1419,26 +1705,62 @@ void EditorApplication::DrawMainMenuBar()
 		}
 		if (Icons::BeginMenu("GameObject"))
 		{
-			const bool canCreateObject = current && current->Kind() == ResourceKind::Scene && !play.Active();
+			EditorCommands commands;
+			commands.Register({"game-object.create-empty",
+			                   "Create Empty",
+			                   {},
+			                   [current, playing = play.Active()](const EditorCommandContext& context)
+			                   {
+				                   return current && current->Kind() == ResourceKind::Scene && !playing &&
+				                                  context.activeDocumentId == current->Id()
+				                              ? Result<void>{}
+				                              : Result<void>::Failure("Open an editable Scene to create a GameObject");
+			                   },
+			                   [this, current](const EditorCommandContext& context)
+			                   {
+				                   auto draft = current->Payload<SceneDraft>();
+				                   if (!draft)
+				                   {
+					                   return Result<void>::Failure("The active Scene draft is unavailable");
+				                   }
+				                   auto& scene = draft->GetScene();
+				                   GameObject::Ptr parent;
+				                   const auto* primary = context.selection.PrimaryEntry();
+				                   if (primary && primary->kind == EditorSelectionKind::GameObject &&
+				                       primary->documentId == current->Id() && !primary->IsMissing())
+				                   {
+					                   auto selected = scene.GameObjectById(primary->objectId);
+					                   if (selected)
+					                   {
+						                   parent = selected.value;
+					                   }
+				                   }
+				                   auto created = scene.CreateGameObject("GameObject", parent);
+				                   if (!created)
+				                   {
+					                   return Result<void>::Failure(created.error);
+				                   }
+				                   auto identity = scene.PersistentId(created.value);
+				                   if (!identity)
+				                   {
+					                   scene.DestroyGameObject(created.value);
+					                   return Result<void>::Failure(identity.error);
+				                   }
+				                   hierarchy.Select(scene, created.value);
+				                   selectionContext.SelectGameObject(current->Id(), identity.value);
+				                   current->MarkDirty();
+				                   return Result<void>{};
+			                   }});
+			const auto commandContext =
+			    current ? EditorCommandContext::Capture(selectionContext, current->Id(), current->Revision())
+			            : EditorCommandContext{};
+			const auto canCreateObject =
+			    commands.CanExecute("game-object.create-empty", commandContext, commandContext);
 			ImGui::BeginDisabled(!canCreateObject);
 			if (Icons::MenuItem("Create Empty"))
 			{
-				auto draft = current->Payload<SceneDraft>();
-				auto& scene = draft->GetScene();
-				GameObject::Ptr parent;
-				auto selected = hierarchy.SelectedGameObject(scene);
-				if (selected)
-				{
-					parent = selected.value;
-				}
-				auto created = scene.CreateGameObject("GameObject", parent);
-				workspaceError = created ? String{} : created.error;
-				if (created)
-				{
-					hierarchy.Select(scene, created.value);
-					selectionContext.SelectGameObject(current->Id(), created.value->Id());
-					current->MarkDirty();
-				}
+				const auto executed = commands.Execute("game-object.create-empty", commandContext, commandContext);
+				workspaceError = executed ? String{} : executed.error;
 			}
 			ImGui::EndDisabled();
 			DrawManagedMenus("GameObject");
@@ -1543,20 +1865,7 @@ void EditorApplication::DrawMainMenuBar()
 			ImGui::Separator();
 			if (Icons::MenuItem("Reset Layout"))
 			{
-				auto cleared = gui->ClearSavedLayout();
-				workspaceError = cleared ? String{} : cleared.error;
-				if (cleared)
-				{
-					showProjectPanel = true;
-					showHierarchyPanel = true;
-					showInspectorPanel = true;
-					showScenePanel = true;
-					showGamePanel = true;
-					showConsolePanel = true;
-					savedPanelVisibility.clear();
-					ImGui::ClearIniSettings();
-					dockLayoutInitialized = false;
-				}
+				ResetEditorLayout();
 			}
 			ImGui::Separator();
 			if (Icons::MenuItem("Project", nullptr, showProjectPanel))
@@ -1725,6 +2034,19 @@ void EditorApplication::DrawMainMenuBar()
 			ImGui::Text("Project: %s", name.c_str());
 		}
 		ImGui::EndMainMenuBar();
+		if (!ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive())
+		{
+			if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))
+			{
+				auto saved = fileCommands.Execute("file.save", menuCommandContext, menuCommandContext);
+				workspaceError = saved ? String{} : saved.error;
+			}
+			if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_R, false))
+			{
+				auto refreshed = fileCommands.Execute("assets.refresh", menuCommandContext, menuCommandContext);
+				workspaceError = refreshed ? String{} : refreshed.error;
+			}
+		}
 	}
 	const auto* current = documents ? documents->Current() : nullptr;
 	DrawPlayToolbar(current);
@@ -1829,15 +2151,7 @@ Result<void> EditorApplication::RenameProjectAsset(const VirtualPath& source, co
 	{
 		return Result<void>::Failure("Project AssetDatabase is unavailable");
 	}
-	Result<void> renamed;
-	if (documents && documents->Current() && documents->Current()->Path() == source)
-	{
-		renamed = documents->RenameCurrent(destination);
-	}
-	else
-	{
-		renamed = workspace->Database()->Move(source, destination);
-	}
+	Result<void> renamed = workspace->Database()->Move(source, destination);
 	if (!renamed)
 	{
 		return renamed;
@@ -1847,6 +2161,14 @@ Result<void> EditorApplication::RenameProjectAsset(const VirtualPath& source, co
 	if (!refreshed)
 	{
 		return refreshed;
+	}
+	if (documents)
+	{
+		refreshed = documents->FollowMovedSource();
+		if (!refreshed)
+		{
+			return refreshed;
+		}
 	}
 	refreshed = projectBrowser.Refresh(*workspace);
 	if (!refreshed)
@@ -1901,6 +2223,247 @@ Result<void> EditorApplication::CreateProjectAsset(ResourceKind kind, MaterialTy
 	}
 	auto opened = documents->RequestOpen(std::move(created.value));
 	return opened ? Result<void>{} : opened;
+}
+
+Result<void> EditorApplication::ExportScenePrefabs(const EditorDragSession& session, const String& destinationFolder)
+{
+	if (!documents || !documents->Current() || !workspace || !workspace->Database() || play.Active() ||
+	    session.sources.empty())
+	{
+		return Result<void>::Failure("Export Scene objects to Prefabs after opening a Scene and stopping Play mode");
+	}
+	auto* document = documents->Current();
+	auto draft = document->Payload<SceneDraft>();
+	if (!draft || draft->Kind() != ResourceKind::Scene)
+	{
+		return Result<void>::Failure("Only objects from an editable Scene can be exported as Prefabs");
+	}
+	Scene& scene = draft->GetScene();
+	Vector<GameObject::Ptr> selected;
+	Set<String> selectedIds;
+	for (const auto& source : session.sources)
+	{
+		const auto& identity = source.identity;
+		if (identity.kind != EditorSelectionKind::GameObject || identity.documentId != document->Id() ||
+		    identity.IsMissing())
+		{
+			return Result<void>::Failure("Prefab export requires GameObjects from the active Scene");
+		}
+		auto object = scene.GameObjectById(identity.objectId);
+		if (!object)
+		{
+			return Result<void>::Failure(object.error);
+		}
+		if (selectedIds.insert(identity.objectId.ToString()).second)
+		{
+			selected.push_back(object.value);
+		}
+	}
+	Vector<GameObject::Ptr> roots;
+	for (const auto& object : selected)
+	{
+		auto parent = scene.ParentOf(object);
+		if (!parent)
+		{
+			return Result<void>::Failure(parent.error);
+		}
+		bool covered = false;
+		while (parent.value)
+		{
+			if (selectedIds.count(parent.value->Id().ToString()))
+			{
+				covered = true;
+				break;
+			}
+			parent = scene.ParentOf(parent.value);
+			if (!parent)
+			{
+				return Result<void>::Failure(parent.error);
+			}
+		}
+		if (!covered)
+		{
+			roots.push_back(object);
+		}
+	}
+	if (roots.empty())
+	{
+		return Result<void>::Failure("The Scene selection contains no outermost GameObjects to export");
+	}
+
+	struct PendingPrefab
+	{
+		VirtualPath path;
+		GameObject::Ptr root;
+		ResourceId id;
+		PrefabAsset asset;
+	};
+
+	Vector<PendingPrefab> pending;
+	Set<String> names;
+	auto& filesystem = workspace->Database()->Filesystem();
+	const auto cleanup = [&]
+	{
+		for (const auto& item : pending)
+		{
+			(void)filesystem.Remove(item.path);
+			(void)filesystem.Remove(VirtualPath{item.path.scheme, item.path.relative + ".meta"});
+		}
+		(void)workspace->Refresh();
+		(void)projectBrowser.Refresh(*workspace);
+	};
+	for (const auto& root : roots)
+	{
+		auto nameResult = root->Name();
+		if (!nameResult)
+		{
+			return Result<void>::Failure(nameResult.error);
+		}
+		String base = nameResult.value;
+		for (auto& ch : base)
+		{
+			if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' ||
+			    ch == '|')
+			{
+				ch = '_';
+			}
+		}
+		if (base.empty() || base == "." || base == "..")
+		{
+			base = "GameObject";
+		}
+		for (UInt32 suffix = 1;; ++suffix)
+		{
+			const String stem = suffix == 1 ? base : base + " " + ToUrsaString(std::to_string(suffix));
+			const String relative =
+			    destinationFolder.empty() ? stem + ".ursaprefab" : destinationFolder + "/" + stem + ".ursaprefab";
+			if (names.count(relative))
+			{
+				continue;
+			}
+			auto path = ProjectAssetPath(relative.c_str());
+			if (!path)
+			{
+				return Result<void>::Failure(path.error);
+			}
+			auto exists = filesystem.Exists(path.value);
+			if (!exists)
+			{
+				return Result<void>::Failure(exists.error);
+			}
+			if (exists.value)
+			{
+				continue;
+			}
+			auto sidecarExists = filesystem.Exists(VirtualPath{path.value.scheme, path.value.relative + ".meta"});
+			if (!sidecarExists)
+			{
+				return Result<void>::Failure(sidecarExists.error);
+			}
+			if (sidecarExists.value)
+			{
+				return Result<void>::Failure("Cannot export over an orphaned Project metadata file: " + relative);
+			}
+			auto writable = filesystem.CheckWritable(path.value);
+			if (!writable)
+			{
+				return Result<void>::Failure(writable.error);
+			}
+			names.insert(relative);
+			pending.push_back({path.value, root, {}, {}});
+			break;
+		}
+	}
+	for (const auto& item : pending)
+	{
+		auto placeholder = filesystem.WriteAtomic(item.path, {});
+		if (!placeholder)
+		{
+			cleanup();
+			return placeholder;
+		}
+	}
+	auto refreshed = workspace->Refresh();
+	if (!refreshed)
+	{
+		cleanup();
+		return refreshed;
+	}
+	for (auto& item : pending)
+	{
+		auto metadata = workspace->Database()->Metadata(item.path);
+		if (!metadata)
+		{
+			cleanup();
+			return Result<void>::Failure(metadata.error);
+		}
+		item.id = metadata.value.guid;
+		ComponentLoadContext context(documents->Session());
+		if (draft->ContextSetup())
+		{
+			auto setup = draft->ContextSetup()(context);
+			if (!setup)
+			{
+				cleanup();
+				return setup;
+			}
+		}
+		const MaterialIdResolver materialId = [this](const std::shared_ptr<MaterialInstance>& material)
+		{ return documents->Session().IdentifyMaterial(material); };
+		auto captured = CapturePrefabAsset(item.id, scene, item.root, project->components, context, materialId);
+		if (!captured)
+		{
+			cleanup();
+			return Result<void>::Failure("Cannot export '" + item.path.relative + "': " + captured.error);
+		}
+		Scene detached;
+		auto detachedRoot = captured.value.Instantiate(detached, project->components, context, materialId);
+		if (!detachedRoot)
+		{
+			cleanup();
+			return Result<void>::Failure("Cannot remap '" + item.path.relative + "': " + detachedRoot.error);
+		}
+		auto remapped =
+		    CapturePrefabAsset(item.id, detached, detachedRoot.value, project->components, context, materialId);
+		if (!remapped)
+		{
+			cleanup();
+			return Result<void>::Failure("Cannot preserve references in '" + item.path.relative +
+			                             "': " + remapped.error);
+		}
+		item.asset = std::move(remapped.value);
+	}
+	for (const auto& item : pending)
+	{
+		auto saved = SavePrefabAssetResource(filesystem, item.path, item.asset, project->components,
+		                                     [this](const std::shared_ptr<MaterialInstance>& material)
+		                                     { return documents->Session().IdentifyMaterial(material); });
+		if (!saved)
+		{
+			cleanup();
+			return Result<void>::Failure("Cannot write '" + item.path.relative + "': " + saved.error);
+		}
+	}
+	refreshed = workspace->Refresh();
+	if (!refreshed)
+	{
+		cleanup();
+		return refreshed;
+	}
+	auto browserRefresh = projectBrowser.Refresh(*workspace);
+	if (!browserRefresh)
+	{
+		cleanup();
+		return browserRefresh;
+	}
+	auto first = workspace->Database()->Metadata(pending.front().path);
+	if (first)
+	{
+		projectBrowser.SelectAsset(pending.front().path);
+		selectionContext.SelectAsset(pending.front().path, 0, {}, first.value.guid);
+		hierarchy.ClearSelection();
+	}
+	return {};
 }
 
 Result<void> EditorApplication::CreateProjectScriptableAsset(const ScriptTypeDescriptor& type,
@@ -2410,9 +2973,15 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 		requestRun = false;
 	}
 	ImGui::BeginDisabled(!play.Active() && !canRun);
-	if (Icons::Button("Run", play.Active() ? Icons::Icon::Stop : Icons::Icon::Play, play.Active() ? "Stop" : "Play",
-	                  play.Active()) ||
-	    requestRun)
+	const bool runAction = Icons::Button("Run", play.Active() ? Icons::Icon::Stop : Icons::Icon::Play,
+	                                     play.Active() ? "Stop" : "Play", play.Active()) ||
+	                       requestRun;
+	if (runAction && HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
+	{
+		requestRun = false;
+		RequestCancelReferencePickerSessions(gui ? gui->Context() : nullptr, [this] { requestRun = true; });
+	}
+	else if (runAction)
 	{
 		requestRun = false;
 		runAfterScriptBuild = false;
@@ -2443,6 +3012,7 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 			selectionBeforePlay = {};
 			documents->SetSaveBlocked(false);
 			viewportFocused = false;
+			focusedGameViewport = nullptr;
 		}
 		else
 		{
@@ -2607,6 +3177,15 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 				inspectorError = started ? String{} : started.error;
 				if (started)
 				{
+					auto runtimeSelection = selectionContext.entries;
+					for (auto& entry : runtimeSelection)
+					{
+						if (entry.kind == EditorSelectionKind::GameObject && entry.documentId == selectedDocument->Id())
+						{
+							entry.playSession = true;
+						}
+					}
+					selectionContext.ReconcileEntries(std::move(runtimeSelection));
 					documents->SetSaveBlocked(true);
 				}
 				else
@@ -2702,6 +3281,7 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 
 Result<void> EditorApplication::OnGui()
 {
+	RequestCancelReferencePickerForExternalClick(gui ? gui->Context() : nullptr);
 	if (assetPreview)
 	{
 		auto begun = assetPreview->BeginFrame();
@@ -2711,6 +3291,15 @@ Result<void> EditorApplication::OnGui()
 		}
 	}
 	PumpScriptIde();
+	if (closeDocumentAfterPickerCancellation)
+	{
+		closeDocumentAfterPickerCancellation = false;
+		if (documents)
+		{
+			auto closed = documents->RequestClose();
+			workspaceError = closed ? String{} : closed.error;
+		}
+	}
 	selectionContext.SetActiveDocument(documents && documents->Current() ? documents->Current()->Id() : ResourceId{});
 	if (!pendingManagedAsset.scheme.empty())
 	{
@@ -2795,7 +3384,48 @@ Result<void> EditorApplication::OnGui()
 		                            });
 		nextScriptCheck = checkTime + std::chrono::seconds(2);
 	}
+	const auto drawDockspace = [this]
+	{
+		const ImGuiViewport* viewport = ImGui::GetMainViewport();
+		const Float32 toolbarHeight = EditorToolbarHeight(viewport->WorkSize.x);
+		const ImVec2 dockspacePosition(viewport->WorkPos.x, viewport->WorkPos.y + toolbarHeight);
+		const ImVec2 dockspaceSize(viewport->WorkSize.x, std::max(1.0f, viewport->WorkSize.y - toolbarHeight));
+		ImGui::SetNextWindowPos(dockspacePosition, ImGuiCond_Always);
+		ImGui::SetNextWindowSize(dockspaceSize, ImGuiCond_Always);
+		constexpr ImGuiWindowFlags dockspaceHostFlags =
+		    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+		    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
+		    ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+		ImGui::Begin("##UrsaEditorDockspaceHost", nullptr, dockspaceHostFlags);
+		const ImGuiID dockspace = ImGui::GetID("UrsaEditorDockspace");
+		ImGui::DockSpace(dockspace, ImGui::GetContentRegionAvail());
+		if (!dockLayoutInitialized)
+		{
+			ImGui::DockBuilderRemoveNode(dockspace);
+			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
+			ImGui::DockBuilderSetNodeSize(dockspace, dockspaceSize);
+			ImGuiID inspectorDock = 0;
+			ImGuiID leftDock = 0;
+			ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Right, 0.25f, &inspectorDock, &leftDock);
+			ImGuiID projectDock = 0;
+			ImGuiID upperDock = 0;
+			ImGui::DockBuilderSplitNode(leftDock, ImGuiDir_Down, 0.28f, &projectDock, &upperDock);
+			ImGuiID hierarchyDock = 0;
+			ImGuiID sceneDock = 0;
+			ImGui::DockBuilderSplitNode(upperDock, ImGuiDir_Left, 0.23f, &hierarchyDock, &sceneDock);
+			ImGui::DockBuilderDockWindow("Project", projectDock);
+			ImGui::DockBuilderDockWindow("Console", projectDock);
+			ImGui::DockBuilderDockWindow("Hierarchy", hierarchyDock);
+			ImGui::DockBuilderDockWindow("Scene", sceneDock);
+			ImGui::DockBuilderDockWindow("Game", sceneDock);
+			ImGui::DockBuilderDockWindow("Inspector", inspectorDock);
+			ImGui::DockBuilderFinish(dockspace);
+			dockLayoutInitialized = true;
+		}
+		ImGui::End();
+	};
 	DrawMainMenuBar();
+	drawDockspace();
 	DrawExternalTools();
 	DrawGraphicsSettings();
 	if (!activeEditorTool.empty())
@@ -2886,45 +3516,9 @@ Result<void> EditorApplication::OnGui()
 			managedOpenWindows.erase(extension.id);
 		}
 	}
-	const ImGuiViewport* viewport = ImGui::GetMainViewport();
-	const Float32 toolbarHeight = EditorToolbarHeight(viewport->WorkSize.x);
-	const ImVec2 dockspacePosition(viewport->WorkPos.x, viewport->WorkPos.y + toolbarHeight);
-	const ImVec2 dockspaceSize(viewport->WorkSize.x, std::max(1.0f, viewport->WorkSize.y - toolbarHeight));
-	ImGui::SetNextWindowPos(dockspacePosition, ImGuiCond_Always);
-	ImGui::SetNextWindowSize(dockspaceSize, ImGuiCond_Always);
-	constexpr ImGuiWindowFlags dockspaceHostFlags =
-	    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-	    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
-	    ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-	ImGui::Begin("##UrsaEditorDockspaceHost", nullptr, dockspaceHostFlags);
-	const ImGuiID dockspace = ImGui::GetID("UrsaEditorDockspace");
-	ImGui::DockSpace(dockspace, ImGui::GetContentRegionAvail());
-	if (!dockLayoutInitialized)
-	{
-		ImGui::DockBuilderRemoveNode(dockspace);
-		ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
-		ImGui::DockBuilderSetNodeSize(dockspace, dockspaceSize);
-		ImGuiID inspectorDock = 0;
-		ImGuiID leftDock = 0;
-		ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Right, 0.25f, &inspectorDock, &leftDock);
-		ImGuiID projectDock = 0;
-		ImGuiID upperDock = 0;
-		ImGui::DockBuilderSplitNode(leftDock, ImGuiDir_Down, 0.28f, &projectDock, &upperDock);
-		ImGuiID hierarchyDock = 0;
-		ImGuiID sceneDock = 0;
-		ImGui::DockBuilderSplitNode(upperDock, ImGuiDir_Left, 0.23f, &hierarchyDock, &sceneDock);
-		ImGui::DockBuilderDockWindow("Project", projectDock);
-		ImGui::DockBuilderDockWindow("Console", projectDock);
-		ImGui::DockBuilderDockWindow("Hierarchy", hierarchyDock);
-		ImGui::DockBuilderDockWindow("Scene", sceneDock);
-		ImGui::DockBuilderDockWindow("Game", sceneDock);
-		ImGui::DockBuilderDockWindow("Inspector", inspectorDock);
-		ImGui::DockBuilderFinish(dockspace);
-		dockLayoutInitialized = true;
-	}
-	ImGui::End();
 	if (workspace && showProjectPanel)
 	{
+		Vector<std::pair<EditorDragSession, String>> pendingScenePrefabExports;
 		ProjectBrowserActions actions;
 		actions.refresh = [this]()
 		{
@@ -2948,12 +3542,128 @@ Result<void> EditorApplication::OnGui()
 		{ return CreateProjectScriptableAsset(type, name); };
 		actions.renameAsset = [this](const VirtualPath& source, const VirtualPath& destination)
 		{ return RenameProjectAsset(source, destination); };
+		actions.reimportAssets = [this](const Vector<VirtualPath>& sources)
+		{
+			if (!workspace || play.Active() || sources.empty())
+			{
+				return Result<void>::Failure("Reimport project assets after opening a project and stopping Play mode");
+			}
+			RequestAssetReimport(sources);
+			return Result<void>{};
+		};
+		actions.moveAssets = [this](const Vector<AssetMoveRequest>& moves)
+		{
+			if (!workspace || !workspace->Database() || play.Active())
+			{
+				return Result<void>::Failure("Move project assets after opening a project and stopping Play mode");
+			}
+			auto moved = workspace->Database()->MoveBatch(moves);
+			if (!moved)
+			{
+				return moved;
+			}
+			auto refreshed = workspace->Refresh();
+			if (!refreshed)
+			{
+				return refreshed;
+			}
+			if (documents)
+			{
+				refreshed = documents->FollowMovedSource();
+				if (!refreshed)
+				{
+					return refreshed;
+				}
+			}
+			RequestAssetImport();
+			return Result<void>{};
+		};
+		actions.deleteAssets = [this](const Vector<VirtualPath>& paths)
+		{
+			if (!workspace || !workspace->Database() || play.Active())
+			{
+				return Result<void>::Failure("Delete project assets after opening a project and stopping Play mode");
+			}
+			if (documents && documents->PromptPending())
+			{
+				return Result<void>::Failure("Resolve the current document prompt before deleting Project assets");
+			}
+			const auto* current = documents ? documents->Current() : nullptr;
+			bool containsCurrentDocument = false;
+			if (current)
+			{
+				for (const VirtualPath& path : paths)
+				{
+					auto metadata = workspace->Database()->Metadata(path);
+					if (current->Path() == path ||
+					    (metadata && metadata.value.folder && current->Path().scheme == path.scheme &&
+					     current->Path().relative.size() > path.relative.size() &&
+					     current->Path().relative.compare(0, path.relative.size(), path.relative) == 0 &&
+					     current->Path().relative[path.relative.size()] == '/'))
+					{
+						containsCurrentDocument = true;
+						break;
+					}
+				}
+			}
+			if (containsCurrentDocument && documents->Current()->Dirty())
+			{
+				auto requested = documents->RequestClose();
+				return Result<void>::Failure(
+				    requested ? "Choose Save, Discard, or Cancel for the open document, then confirm Delete"
+				              : requested.error);
+			}
+			auto removed = workspace->Database()->RemoveBatch(paths);
+			if (!removed)
+			{
+				return removed;
+			}
+			if (containsCurrentDocument && documents->Current())
+			{
+				auto closed = documents->RequestClose();
+				if (!closed)
+				{
+					return closed;
+				}
+			}
+			auto refreshed = workspace->Refresh();
+			if (!refreshed)
+			{
+				return refreshed;
+			}
+			RequestAssetImport();
+			refreshed = projectBrowser.Refresh(*workspace);
+			if (!refreshed)
+			{
+				return refreshed;
+			}
+			selectionContext.Clear();
+			hierarchy.ClearSelection();
+			return Result<void>{};
+		};
 		actions.openAsset = [this](const ProjectBrowserEntry& asset) { return OpenProjectBrowserAsset(asset); };
+		actions.exportScenePrefabs =
+		    [&pendingScenePrefabExports](const EditorDragSession& session, const String& folder)
+		{
+			pendingScenePrefabExports.emplace_back(session, folder);
+			return Result<void>{};
+		};
 		auto drawn = projectBrowserPanel.Draw(*workspace, projectBrowser, selectionContext, hierarchy, showProjectPanel,
 		                                      play.Active(), workspaceError, actions);
 		if (!drawn)
 		{
 			workspaceError = drawn.error;
+		}
+		else
+		{
+			for (const auto& [session, folder] : pendingScenePrefabExports)
+			{
+				auto exported = ExportScenePrefabs(session, folder);
+				if (!exported)
+				{
+					workspaceError = exported.error;
+				}
+			}
 		}
 	}
 	else if (showProjectPanel)
@@ -3030,50 +3740,312 @@ Result<void> EditorApplication::OnGui()
 		{
 			if (play.Active())
 			{
-				auto hierarchyResult = hierarchy.Draw(*play.GetScene(), &showHierarchyPanel, draft->LinkedScene());
+				auto hierarchyResult =
+				    hierarchy.Draw(*play.GetScene(), &showHierarchyPanel, draft->LinkedScene(), &selectionContext,
+				                   documents->Current()->Id(), true, documents->Current()->Revision());
 				if (!hierarchyResult)
 				{
 					inspectorError = hierarchyResult.error;
 				}
-				if (hierarchy.SelectedId())
-				{
-					selectionContext.SelectGameObject(documents->Current()->Id(), hierarchy.SelectedId());
-				}
-				else if (selectionContext.kind == EditorSelectionKind::GameObject)
-				{
-					selectionContext.Clear();
-				}
 			}
 			else
 			{
+				struct PendingAssetDrop
+				{
+					EditorDragSession session;
+					ResourceId target;
+					HierarchyDropZone zone;
+					ResourceId document;
+				};
+
+				Vector<PendingAssetDrop> pendingAssetDrops;
+				EditorHierarchy::AssetDropAction queueAssetDrop =
+				    [&pendingAssetDrops](Scene&, const EditorDragSession& drag, ResourceId target,
+				                         HierarchyDropZone zone, ResourceId documentId)
+				{
+					pendingAssetDrops.push_back({drag, target, zone, documentId});
+					return Result<void>{};
+				};
 				auto inspected = DrawSceneInspector(
 				    *documents->Current(), hierarchy, *documents, *workspace, project->components,
 				    project->componentEditors, inspectorError,
 				    scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr, &showHierarchyPanel,
-				    &showInspectorPanel, selectionContext.kind != EditorSelectionKind::Asset && showInspectorPanel);
+				    &showInspectorPanel, selectionContext.kind != EditorSelectionKind::Asset && showInspectorPanel,
+				    &selectionContext, std::move(queueAssetDrop));
 				if (!inspected)
 				{
 					workspaceError = inspected.error;
 				}
-				if (selectionContext.kind != EditorSelectionKind::Asset)
+				else
 				{
-					if (hierarchy.SelectedId())
+					for (const auto& pending : pendingAssetDrops)
 					{
-						selectionContext.SelectGameObject(documents->Current()->Id(), hierarchy.SelectedId());
-					}
-					else
-					{
-						selectionContext.Clear();
+						Vector<SceneAssetPlacement> placements;
+						String placementError;
+						if (!documents->Current() || pending.document != documents->Current()->Id())
+						{
+							placementError = "The Scene document changed before asset placement";
+						}
+						Set<String> seen;
+						for (const auto& source : pending.session.sources)
+						{
+							if (!placementError.empty())
+							{
+								break;
+							}
+							const auto& identity = source.identity;
+							if (identity.kind != EditorSelectionKind::Asset ||
+							    identity.assetRole != EditorAssetSelectionRole::Source || identity.assetLocalFileId ||
+							    !identity.assetGuid || identity.IsMissing())
+							{
+								placementError = "Hierarchy accepts only Prefab or Model main assets";
+								break;
+							}
+							if (!seen.insert(identity.assetGuid.ToString()).second)
+							{
+								continue;
+							}
+							auto artifact = workspace->Database()->ResolveImportedArtifact(identity.assetGuid);
+							if (!artifact || (artifact.value.kind != "Prefab" && artifact.value.kind != "Model"))
+							{
+								placementError =
+								    artifact ? "Hierarchy accepts only Prefab or Model main assets" : artifact.error;
+								break;
+							}
+							SceneAssetPlacement item{identity.assetGuid, artifact.value.kind, nlohmann::json::object()};
+							if (item.kind == "Model")
+							{
+								auto bytes = workspace->Index().Filesystem().Read(artifact.value.path);
+								if (!bytes)
+								{
+									placementError = bytes.error;
+									break;
+								}
+								try
+								{
+									item.modelDocument =
+									    nlohmann::json::from_cbor(bytes.value.begin(), bytes.value.end());
+								}
+								catch (const std::exception& error)
+								{
+									placementError = ToUrsaString(error.what());
+									break;
+								}
+								if (item.modelDocument.value("format", std::string{}) != "UrsaModel" ||
+								    !item.modelDocument.contains("nodes") || !item.modelDocument["nodes"].is_array())
+								{
+									placementError = "Imported Model main asset is invalid";
+									break;
+								}
+							}
+							placements.push_back(std::move(item));
+						}
+						if (placementError.empty() && placements.empty())
+						{
+							placementError = "The drag contains no placeable main assets";
+						}
+						ResourceId parentId = pending.target;
+						Size insertIndex = std::numeric_limits<Size>::max();
+						if (placementError.empty() && pending.target && pending.zone != HierarchyDropZone::Into)
+						{
+							auto target = draft->GetScene().GameObjectById(pending.target);
+							if (!target)
+							{
+								placementError = target.error;
+							}
+							else
+							{
+								auto parent = draft->GetScene().ParentOf(target.value);
+								if (!parent)
+								{
+									placementError = parent.error;
+								}
+								else if (parent.value)
+								{
+									auto parentPersistentId = draft->GetScene().PersistentId(parent.value);
+									if (!parentPersistentId)
+									{
+										placementError = parentPersistentId.error;
+									}
+									else
+									{
+										parentId = parentPersistentId.value;
+									}
+								}
+								else
+								{
+									parentId = {};
+								}
+								Vector<GameObject::Ptr> siblings;
+								if (parent.value)
+								{
+									auto children = draft->GetScene().ChildrenOf(parent.value);
+									if (!children)
+									{
+										placementError = children.error;
+									}
+									else
+									{
+										siblings = std::move(children.value);
+									}
+								}
+								else
+								{
+									siblings = draft->GetScene().RootGameObjects();
+								}
+								auto position = std::find(siblings.begin(), siblings.end(), target.value);
+								if (position == siblings.end())
+								{
+									placementError = "Hierarchy target changed before asset placement";
+								}
+								else
+								{
+									insertIndex = static_cast<Size>(std::distance(siblings.begin(), position)) +
+									              (pending.zone == HierarchyDropZone::Below ? 1 : 0);
+								}
+							}
+						}
+						else if (placementError.empty() && pending.target)
+						{
+							auto parent = draft->GetScene().GameObjectById(pending.target);
+							if (!parent)
+							{
+								placementError = parent.error;
+							}
+							else
+							{
+								auto children = draft->GetScene().ChildrenOf(parent.value);
+								if (!children)
+								{
+									placementError = children.error;
+								}
+								else
+								{
+									insertIndex = children.value.size();
+								}
+							}
+						}
+						else if (placementError.empty())
+						{
+							insertIndex = draft->GetScene().RootGameObjects().size();
+						}
+						Result<Vector<ResourceId>> placed =
+						    placementError.empty()
+						        ? draft->PlaceImportedAssets(placements, parentId, insertIndex,
+						                                     documents->Current()->Path(), documents->Current()->Id())
+						        : Result<Vector<ResourceId>>::Failure(placementError);
+						if (!placed)
+						{
+							placementError = placed.error;
+						}
+						if (!placementError.empty())
+						{
+							inspectorError = placementError;
+						}
 					}
 				}
 			}
 			VirtualFileSystem* settingsFiles = workspace ? &workspace->Index().Filesystem() : nullptr;
 			const String projectKey = workspace ? ProjectSettingsKey(workspace->ProjectRoot()) : String("default");
+			const ResourceId selectionBeforeSceneView = hierarchy.SelectedId();
+			const auto placeSceneAssets = [this, draft](const EditorDragSession& drag, Vec3 position) -> Result<void>
+			{
+				if (!workspace || !documents || !documents->Current() || play.Active() ||
+				    draft->Kind() != ResourceKind::Scene)
+				{
+					return Result<void>::Failure("Drop assets into an open Scene while Play mode is stopped");
+				}
+				Vector<SceneAssetPlacement> placements;
+				Set<String> seen;
+				for (const auto& source : drag.sources)
+				{
+					const auto& identity = source.identity;
+					if (identity.kind != EditorSelectionKind::Asset ||
+					    identity.assetRole != EditorAssetSelectionRole::Source || identity.assetLocalFileId ||
+					    !identity.assetGuid || identity.IsMissing())
+					{
+						return Result<void>::Failure("Scene placement accepts only Prefab or Model main assets");
+					}
+					if (!seen.insert(identity.assetGuid.ToString()).second)
+					{
+						continue;
+					}
+					auto artifact = workspace->Database()->ResolveImportedArtifact(identity.assetGuid);
+					if (!artifact || (artifact.value.kind != "Prefab" && artifact.value.kind != "Model"))
+					{
+						return Result<void>::Failure(
+						    artifact ? "Scene placement accepts only Prefab or Model main assets" : artifact.error);
+					}
+					SceneAssetPlacement placement{identity.assetGuid, artifact.value.kind, nlohmann::json::object()};
+					if (placement.kind == "Model")
+					{
+						auto bytes = workspace->Index().Filesystem().Read(artifact.value.path);
+						if (!bytes)
+						{
+							return Result<void>::Failure(bytes.error);
+						}
+						try
+						{
+							placement.modelDocument = nlohmann::json::from_cbor(bytes.value.begin(), bytes.value.end());
+						}
+						catch (const std::exception& error)
+						{
+							return Result<void>::Failure(ToUrsaString(error.what()));
+						}
+					}
+					placements.push_back(std::move(placement));
+				}
+				const Size rootIndex = draft->GetScene().RootGameObjects().size();
+				auto placed = draft->PlaceImportedAssets(placements, {}, rootIndex, documents->Current()->Path(),
+				                                         documents->Current()->Id());
+				if (!placed)
+				{
+					return Result<void>::Failure(placed.error);
+				}
+				for (const ResourceId id : placed.value)
+				{
+					auto object = draft->GetScene().GameObjectById(id);
+					if (!object)
+					{
+						return Result<void>::Failure(object.error);
+					}
+					auto transform = draft->GetScene().GetLocalTransform(object.value);
+					if (!transform)
+					{
+						return Result<void>::Failure(transform.error);
+					}
+					transform.value.position = position;
+					auto moved = draft->GetScene().SetLocalTransform(object.value, transform.value);
+					if (!moved)
+					{
+						return moved;
+					}
+				}
+				if (!placed.value.empty())
+				{
+					auto first = draft->GetScene().GameObjectById(placed.value.front());
+					if (first)
+					{
+						auto selected = hierarchy.Select(draft->GetScene(), first.value);
+						if (selected)
+						{
+							selectionContext.SelectGameObject(documents->Current()->Id(), placed.value.front());
+						}
+					}
+				}
+				documents->Current()->MarkDirty();
+				return {};
+			};
 			auto drawn = sceneViewPanel->Draw(*draft, *documents->Current(), hierarchy, play, settingsFiles, projectKey,
-			                                  showScenePanel, showGamePanel, viewportFocused, inspectorError);
+			                                  showScenePanel, showGamePanel, viewportFocused, inspectorError,
+			                                  placeSceneAssets, &focusedGameViewport);
 			if (!drawn)
 			{
 				inspectorError = drawn.error;
+			}
+			if (hierarchy.SelectedId() && hierarchy.SelectedId() != selectionBeforeSceneView)
+			{
+				selectionContext.SelectGameObject(documents->Current()->Id(), hierarchy.SelectedId());
 			}
 			if (play.Active() && showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset)
 			{
@@ -3451,6 +4423,13 @@ Result<void> EditorApplication::OnGui()
 	{
 		workspaceError = panelStateSaved.error;
 	}
+	ProcessCompletedReferencePickerCancellations(gui ? gui->Context() : nullptr);
+	if (pendingPickerSelection && !HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
+	{
+		auto selection = std::move(*pendingPickerSelection);
+		pendingPickerSelection.reset();
+		selectionContext.SelectEntries(std::move(selection.entries), selection.primaryIndex, selection.rangeAnchor);
+	}
 	return {};
 }
 
@@ -3611,11 +4590,16 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 				candidateFallbacks[target] = {};
 			}
 			const String extensionId = extension.id;
+			const bool supportsMultipleObjects = extension.canEditMultipleObjects;
 			candidateEditors.ReplaceEditor(
 			    target,
-			    [this, extensionId, sessionId](Component& component, ComponentInspectorContext& selection,
-			                                   InspectorUI&) -> Result<bool>
+			    [this, extensionId, sessionId, supportsMultipleObjects](
+			        Component& component, ComponentInspectorContext& selection, InspectorUI&) -> Result<bool>
 			    {
+				    if (selection.targets.size() > 1 && !supportsMultipleObjects)
+				    {
+					    return Result<bool>::Failure("This Inspector has not declared multi-object editing support");
+				    }
 				    if (!managedHost || managedHost->IsSessionFaulted())
 				    {
 					    return Result<bool>::Failure("Managed Editor environment is unavailable");
@@ -3626,17 +4610,22 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 				    context.workspace = workspace.get();
 				    context.registry = &project->components;
 				    context.target = &component;
+				    context.componentTargets = selection.targets;
+				    context.componentPrimaryIndex = selection.primaryIndex;
+				    context.supportsMultipleObjects = supportsMultipleObjects;
 				    context.selection = selection;
 				    context.saveContext.scene = selection.scene;
 				    context.saveContext.materialId = [this](const std::shared_ptr<MaterialInstance>& material)
 				    { return documents->Session().IdentifyMaterial(material); };
+				    ConfigureReferencePreviewFactory(context);
 				    context.openAsset = [this](const VirtualPath& path)
 				    {
 					    pendingManagedAsset = path;
 					    return Result<void>{};
 				    };
 				    return InvokeManagedEditorExtension(*managedHost, sessionId, extensionId, context);
-			    });
+			    },
+			    supportsMultipleObjects);
 		}
 	}
 	managedEditorFallbacks = std::move(candidateFallbacks);
@@ -3894,10 +4883,15 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	}
 	const auto startupPlayDeadline = previous + std::chrono::seconds(60);
 	Ursa::UInt32 frames = 0;
-	while (result && !window->ShouldClose())
+	while (result)
 	{
 		window->PollEvents();
 		frameCapture.PollWindowCapture();
+		if (window->ShouldClose() && HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
+		{
+			RequestCancelReferencePickerSessions(gui ? gui->Context() : nullptr, [this] { window->RequestClose(); });
+			window->CancelClose();
+		}
 		if (window->ShouldClose() && assetInspectorPanel.HasModifiedSource())
 		{
 			exitAfterInspectorPrompt = true;
@@ -3932,21 +4926,10 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		{
 			break;
 		}
-		if (window->Minimized() || window->FramebufferWidth() == 0 || window->FramebufferHeight() == 0)
-		{
-			if (assetPreview)
-			{
-				result = assetPreview->BeginFrame();
-				if (!result)
-				{
-					break;
-				}
-				result = assetPreview->RenderPending(0, {});
-			}
-			window->WaitEvents();
-			previous = std::chrono::steady_clock::now();
-			continue;
-		}
+		// Keep building the shared ImGui frame while the host window is minimized. The main
+		// swapchain may have no acquired image, but detached platform windows still need input,
+		// UI updates, and rendering. PresentGuiFrame() skips the unavailable host target and
+		// continues through ImGuiBridge::RenderPlatformWindows().
 		Memory::TemporaryScope frameMemory;
 		URSA_PROFILE_SCOPE("Editor.Frame");
 		FinishAssetJobs();
@@ -3956,7 +4939,9 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		previous = now;
 		{
 			URSA_PROFILE_SCOPE("Editor.BeginFrame");
-			result = gui->BeginFrame(deltaSeconds, window->Width(), window->Height(), window->FramebufferWidth(),
+			const Ursa::UInt32 logicalWidth = window->Width() ? window->Width() : width;
+			const Ursa::UInt32 logicalHeight = window->Height() ? window->Height() : height;
+			result = gui->BeginFrame(deltaSeconds, logicalWidth, logicalHeight, window->FramebufferWidth(),
 			                         window->FramebufferHeight());
 		}
 		if (result)
@@ -3980,9 +4965,15 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		if (result && play.Active())
 		{
 			URSA_PROFILE_SCOPE("Editor.PlayModeUpdate");
+			auto inputWindow = gui->InputWindowForViewport(focusedGameViewport);
+			Window* playWindow = inputWindow ? inputWindow.get() : window.get();
+			const ImGuiIO& editorIo = ImGui::GetIO();
+			const bool editorInputCaptured = EditorInputBlocksPlay(
+			    editorIo.WantCaptureKeyboard, editorIo.WantTextInput, ImGui::GetDragDropPayload() != nullptr,
+			    ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
 			const FrameInput input =
-			    SelectPlayInput(FrameInput::Capture(*window), viewportFocused, ImGui::GetIO().WantTextInput);
-			auto ticked = play.Tick(deltaSeconds, window.get(), input);
+			    SelectPlayInput(FrameInput::Capture(*playWindow), viewportFocused, editorInputCaptured);
+			auto ticked = play.Tick(deltaSeconds, playWindow, input);
 			if (!ticked)
 			{
 				inspectorError = ticked.error;
@@ -4048,6 +5039,14 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 					           std::optional<Rendering::CameraType> filter, std::optional<Rendering::CameraData> camera)
 					    { return RenderManagedViewport(scene, target, filter, std::move(camera)); });
 				}
+				if (result)
+				{
+					result = RenderReferencePickerPreviews(
+					    deltaSeconds,
+					    [this](Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+					           std::optional<Rendering::CameraType> filter, std::optional<Rendering::CameraData> camera)
+					    { return RenderManagedViewport(scene, target, filter, std::move(camera)); });
+				}
 			}
 			URSA_PROFILE_SCOPE("Editor.EndFrame");
 			if (result)
@@ -4070,6 +5069,10 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			if (!startupPlay && frameLimit && ++frames >= frameLimit)
 			{
 				break;
+			}
+			if (window->Minimized() || window->FramebufferWidth() == 0 || window->FramebufferHeight() == 0)
+			{
+				window->WaitEventsTimeout(1.0 / 120.0);
 			}
 		}
 	}
@@ -4154,7 +5157,7 @@ Result<void> EditorApplication::PresentGuiFrame(bool capture)
 	}
 	if (!acquired.value.texture)
 	{
-		return {};
+		return gui->RenderPlatformWindows();
 	}
 
 	auto command = device->CreateCommandList();
@@ -4231,13 +5234,36 @@ Result<void> EditorApplication::PresentGuiFrame(bool capture)
 	{
 		result = submittedFence->Wait();
 	}
+	if (result)
+	{
+		result = gui->RenderPlatformWindows();
+	}
 	return result;
 }
 
 void EditorApplication::RequestAssetImport(const VirtualPath& scope, bool force)
 {
 	requestedImportScope = assetImportRequested && requestedImportScope != scope ? VirtualPath{} : scope;
+	requestedImportSources.clear();
 	forceAssetImport = forceAssetImport || force;
+	assetImportRequested = true;
+	assetRequestDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+}
+
+void EditorApplication::RequestAssetReimport(const Vector<VirtualPath>& sources)
+{
+	if (assetImportRequested || assetImportJob.valid())
+	{
+		requestedImportSources.clear();
+		requestedImportScope = {};
+		forceAssetImport = true;
+	}
+	else
+	{
+		requestedImportSources = sources;
+		requestedImportScope = {};
+		forceAssetImport = true;
+	}
 	assetImportRequested = true;
 	assetRequestDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
 }
@@ -4383,6 +5409,7 @@ void EditorApplication::FinishAssetJobs()
 	{
 		AssetImportOptions options;
 		options.scope = requestedImportScope;
+		options.sources = std::move(requestedImportSources);
 		options.force = forceAssetImport;
 		forceAssetImport = false;
 		const auto root = workspace->ProjectRoot();

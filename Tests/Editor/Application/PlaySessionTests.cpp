@@ -171,7 +171,15 @@ int main()
 		Expect(!Editor::SelectPlayInput(pressed, false, false).KeyDown(Key::Space) &&
 		           !Editor::SelectPlayInput(pressed, true, true).KeyDown(Key::Space) &&
 		           Editor::SelectPlayInput(pressed, true, false).KeyDown(Key::Space),
-		       "Editor keyboard input leaked to or was blocked from the game viewport");
+		       "Editor keyboard capture leaked to or was blocked from the game viewport");
+		Expect(Editor::EditorInputBlocksPlay(true, false, false, false) &&
+		           Editor::EditorInputBlocksPlay(false, true, false, false) &&
+		           Editor::EditorInputBlocksPlay(false, false, true, false) &&
+		           Editor::EditorInputBlocksPlay(false, false, false, true) &&
+		           !Editor::EditorInputBlocksPlay(false, false, false, false) &&
+		           !Editor::SelectPlayInput(pressed, true, Editor::EditorInputBlocksPlay(false, false, true, false))
+		                .KeyDown(Key::Space),
+		       "Search, menu, popup or drag input leaked to the game viewport");
 		auto missing = play.Start(*draft, documentId, registry, documents->Session());
 		Expect(!missing && !play.Active() && documents->Current()->Dirty(),
 		       "Missing runtime service changed Edit mode");

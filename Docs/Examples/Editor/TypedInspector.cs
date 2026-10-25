@@ -5,12 +5,15 @@ namespace Ursa.Examples;
 
 // Abstract examples are compiled with the Editor fixtures without registering project extensions.
 [CustomEditor(typeof(CameraComponent))]
+[CanEditMultipleObjects]
 public abstract class TypedCameraInspector : Inspector
 {
 	public override void OnInspectorGUI()
 	{
 		SerializedObject.Update();
 		var nearPlane = SerializedObject.FindProperty("nearPlane");
+		if (SerializedObject.IsEditingMultipleObjects && nearPlane.HasMultipleDifferentValues)
+			EditorGui.Text($"Editing {Targets.Length} cameras; Near Plane has mixed values.");
 		EditorGui.PropertyField(nearPlane, "Near Plane");
 		if (EditorGui.Button("Reset")) nearPlane.DoubleValue = 0.1;
 		SerializedObject.ApplyModifiedProperties();

@@ -8,10 +8,21 @@
 #include <Scene/EditorRenderViewport.hpp>
 #include <Ui/ImGuiBridge.hpp>
 #include <memory>
+#include <Workspace/EditorDragSession.hpp>
 
 namespace Ursa::Editor
 {
 class EditorScenePreview;
+
+struct SceneDropPoint
+{
+	Vec3 world;
+	bool hitGeometry = false;
+};
+
+Result<SceneDropPoint> ResolveSceneDropPoint(const Camera& camera, Float32 aspect, const ViewportLayout& layout,
+                                             ViewportPoint screenPosition,
+                                             const Vector<Rendering::RenderObject>& renderObjects);
 
 class SceneViewPanel final
 {
@@ -25,13 +36,20 @@ public:
 
 	Result<void> Draw(SceneDraft& draft, EditorDocument& document, EditorHierarchy& hierarchy, PlaySession& play,
 	                  VirtualFileSystem* userFiles, const String& projectKey, bool& showScene, bool& showGame,
-	                  bool& viewportFocused, String& diagnostic);
+	                  bool& viewportFocused, String& diagnostic,
+	                  const std::function<Result<void>(const EditorDragSession&, Vec3)>& placeAssets = {},
+	                  ImGuiViewport** focusedGameViewport = nullptr);
 
 	void DrawEmpty(bool& showScene, bool& showGame);
 
 	Result<void> ReloadResources();
 
 	Result<void> RenderPending(SceneDraft& draft, PlaySession& play, const EditorRenderViewport& renderViewport);
+
+	const ViewportLayout& SceneLayout() const
+	{
+		return sceneLayout;
+	}
 
 private:
 	struct ViewportTarget
@@ -65,6 +83,7 @@ private:
 	ImGuiBridge* gui = nullptr;
 	ViewportTarget sceneTarget;
 	ViewportTarget gameTarget;
+	ViewportLayout sceneLayout;
 	Rhi::SamplerPtr sampler;
 	GameViewSizeMode gameSizeMode = GameViewSizeMode::FreeAspect;
 	UInt32 gamePresetWidth = 16;

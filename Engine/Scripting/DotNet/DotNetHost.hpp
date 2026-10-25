@@ -51,6 +51,7 @@ struct ManagedEditorExtension
 	String path;
 	String target;
 	String title;
+	bool canEditMultipleObjects = false;
 };
 
 enum class ManagedPreviewPhase : UInt32

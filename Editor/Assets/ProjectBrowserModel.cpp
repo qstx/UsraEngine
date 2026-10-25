@@ -26,9 +26,306 @@ String FoldCase(String value)
 	return value;
 }
 
+bool IsPathWithin(const String& path, const String& directory)
+{
+	return path.size() > directory.size() && path.compare(0, directory.size(), directory) == 0 &&
+	       path[directory.size()] == '/';
+}
+
 } // namespace
 
+Result<Vector<AssetMoveRequest>> PlanProjectFolderDrop(const AssetDatabase& database, const EditorDragSession& session,
+                                                       const String& destinationFolder, bool readOnly)
+{
+	if (readOnly)
+	{
+		return Result<Vector<AssetMoveRequest>>::Failure(
+		    "Project assets cannot be moved while the project is read-only");
+	}
+	if (session.sources.empty())
+	{
+		return Result<Vector<AssetMoveRequest>>::Failure("The drag contains no project asset sources");
+	}
+	if (!destinationFolder.empty())
+	{
+		auto folderPath = VirtualPath::Parse(database.SourceScheme() + ":" + destinationFolder);
+		if (!folderPath)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(folderPath.error);
+		}
+		auto metadata = database.Metadata(folderPath.value);
+		if (!metadata || !metadata.value.folder)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure("Move target is not an indexed project folder: " +
+			                                                 destinationFolder);
+		}
+	}
+
+	struct Source
+	{
+		VirtualPath path;
+		ResourceId guid;
+		bool folder = false;
+	};
+
+	Vector<Source> sources;
+	Set<String> seenGuids;
+	for (const EditorDragSource& dragSource : session.sources)
+	{
+		const EditorSelectionEntry& entry = dragSource.identity;
+		if (entry.kind != EditorSelectionKind::Asset || entry.assetRole != EditorAssetSelectionRole::Source ||
+		    entry.assetLocalFileId || !entry.assetGuid || entry.IsMissing() || dragSource.componentId)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(
+			    "Project Move accepts only writable source assets and folders, not imported sub-assets");
+		}
+		if (!seenGuids.insert(entry.assetGuid.ToString()).second)
+		{
+			continue;
+		}
+		auto path = database.SourcePath(entry.assetGuid);
+		if (!path || path.value != entry.assetPath || path.value.scheme != database.SourceScheme())
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure("A dragged source changed or disappeared during the move");
+		}
+		auto metadata = database.Metadata(path.value);
+		if (!metadata)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(metadata.error);
+		}
+		auto writable = database.Filesystem().CheckWritable(path.value);
+		if (!writable)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(writable.error);
+		}
+		sources.push_back({path.value, entry.assetGuid, metadata.value.folder});
+	}
+	if (sources.empty())
+	{
+		return Result<Vector<AssetMoveRequest>>::Failure("The drag contains no writable project assets");
+	}
+
+	Vector<AssetMoveRequest> plan;
+	Set<String> destinations;
+	for (const Source& source : sources)
+	{
+		const bool nestedInSelectedFolder =
+		    std::any_of(sources.begin(), sources.end(),
+		                [&](const Source& ancestor)
+		                {
+			                return ancestor.folder && ancestor.path != source.path &&
+			                       IsPathWithin(source.path.relative, ancestor.path.relative);
+		                });
+		if (nestedInSelectedFolder)
+		{
+			continue;
+		}
+		if (source.folder &&
+		    (destinationFolder == source.path.relative || IsPathWithin(destinationFolder, source.path.relative)))
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(
+			    "Cannot move a folder into itself or one of its descendants");
+		}
+		const Ursa::Size separator = source.path.relative.rfind('/');
+		const String name = source.path.relative.substr(separator == String::npos ? 0 : separator + 1);
+		const String relative = destinationFolder.empty() ? name : destinationFolder + "/" + name;
+		if (relative == source.path.relative)
+		{
+			continue;
+		}
+		if (!destinations.insert(relative).second)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(
+			    "Two dragged assets have the same name in the target folder: " + name);
+		}
+		auto destination = VirtualPath::Parse(database.SourceScheme() + ":" + relative);
+		if (!destination)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(destination.error);
+		}
+		auto writable = database.Filesystem().CheckWritable(destination.value);
+		if (!writable)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(writable.error);
+		}
+		auto destinationExists = database.Filesystem().Exists(destination.value);
+		auto sidecar = VirtualPath::Parse(destination.value.ToString() + ".meta");
+		auto sidecarExists =
+		    sidecar ? database.Filesystem().Exists(sidecar.value) : Result<bool>::Failure(sidecar.error);
+		if (!destinationExists || !sidecarExists)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure(!destinationExists ? destinationExists.error
+			                                                                    : sidecarExists.error);
+		}
+		if (destinationExists.value || sidecarExists.value)
+		{
+			return Result<Vector<AssetMoveRequest>>::Failure("Move target already exists: " +
+			                                                 destination.value.ToString());
+		}
+		plan.push_back({source.path, destination.value});
+	}
+	if (plan.empty())
+	{
+		return Result<Vector<AssetMoveRequest>>::Failure("The selected assets are already in the target folder");
+	}
+	return Result<Vector<AssetMoveRequest>>::Success(std::move(plan));
+}
+
+Result<Vector<VirtualPath>> PlanProjectSourceDelete(const AssetDatabase& database,
+                                                    const Vector<EditorSelectionEntry>& selection, bool readOnly)
+{
+	if (readOnly)
+	{
+		return Result<Vector<VirtualPath>>::Failure("Project assets cannot be deleted while the project is read-only");
+	}
+	if (selection.empty())
+	{
+		return Result<Vector<VirtualPath>>::Failure("Select one or more Project source assets to delete");
+	}
+
+	struct Source
+	{
+		VirtualPath path;
+		bool folder = false;
+	};
+
+	Vector<Source> sources;
+	Set<String> seenGuids;
+	for (const EditorSelectionEntry& entry : selection)
+	{
+		if (entry.kind != EditorSelectionKind::Asset || entry.assetRole != EditorAssetSelectionRole::Source ||
+		    entry.assetLocalFileId || !entry.assetGuid || entry.IsMissing())
+		{
+			return Result<Vector<VirtualPath>>::Failure(
+			    "Delete accepts only writable source assets and folders, not imported sub-assets");
+		}
+		if (!seenGuids.insert(entry.assetGuid.ToString()).second)
+		{
+			continue;
+		}
+		auto path = database.SourcePath(entry.assetGuid);
+		if (!path || path.value != entry.assetPath || path.value.scheme != database.SourceScheme())
+		{
+			return Result<Vector<VirtualPath>>::Failure("A selected source changed or disappeared before deletion");
+		}
+		auto metadata = database.Metadata(path.value);
+		if (!metadata)
+		{
+			return Result<Vector<VirtualPath>>::Failure(metadata.error);
+		}
+		auto writable = database.Filesystem().CheckWritable(path.value);
+		if (!writable)
+		{
+			return Result<Vector<VirtualPath>>::Failure(writable.error);
+		}
+		sources.push_back({path.value, metadata.value.folder});
+	}
+	Vector<VirtualPath> plan;
+	for (const Source& source : sources)
+	{
+		const bool nestedInSelectedFolder =
+		    std::any_of(sources.begin(), sources.end(),
+		                [&](const Source& ancestor)
+		                {
+			                return ancestor.folder && ancestor.path != source.path &&
+			                       IsPathWithin(source.path.relative, ancestor.path.relative);
+		                });
+		if (!nestedInSelectedFolder)
+		{
+			plan.push_back(source.path);
+		}
+	}
+	return plan.empty() ? Result<Vector<VirtualPath>>::Failure("The selected Project sources are no longer deletable")
+	                    : Result<Vector<VirtualPath>>::Success(std::move(plan));
+}
+
+Result<Vector<VirtualPath>> PlanProjectSourceReimport(const AssetDatabase& database,
+                                                      const Vector<EditorSelectionEntry>& selection, bool readOnly)
+{
+	if (readOnly)
+	{
+		return Result<Vector<VirtualPath>>::Failure(
+		    "Project assets cannot be reimported while the project is read-only");
+	}
+	if (selection.empty())
+	{
+		return Result<Vector<VirtualPath>>::Failure("Select one or more Project source assets to reimport");
+	}
+	Vector<VirtualPath> roots;
+	Set<String> seen;
+	for (const auto& entry : selection)
+	{
+		if (entry.kind != EditorSelectionKind::Asset || entry.assetRole != EditorAssetSelectionRole::Source ||
+		    entry.assetLocalFileId || !entry.assetGuid || entry.IsMissing())
+		{
+			return Result<Vector<VirtualPath>>::Failure(
+			    "Reimport accepts source assets and folders, not imported sub-assets");
+		}
+		if (!seen.insert(entry.assetGuid.ToString()).second)
+		{
+			continue;
+		}
+		auto path = database.SourcePath(entry.assetGuid);
+		if (!path || path.value != entry.assetPath || path.value.scheme != database.SourceScheme())
+		{
+			return Result<Vector<VirtualPath>>::Failure("A selected source changed or disappeared before reimport");
+		}
+		auto metadata = database.Metadata(path.value);
+		if (!metadata)
+		{
+			return Result<Vector<VirtualPath>>::Failure(metadata.error);
+		}
+		auto writable = database.Filesystem().CheckWritable(path.value);
+		if (!writable)
+		{
+			return Result<Vector<VirtualPath>>::Failure(writable.error);
+		}
+		roots.push_back(path.value);
+	}
+	Vector<VirtualPath> plan;
+	Set<String> planned;
+	for (const auto& asset : database.Assets())
+	{
+		if (asset.metadata.folder)
+		{
+			continue;
+		}
+		const bool included = std::any_of(roots.begin(), roots.end(),
+		                                  [&](const VirtualPath& root)
+		                                  {
+			                                  return root == asset.path ||
+			                                         (database.Metadata(root) && database.Metadata(root).value.folder &&
+			                                          asset.path.relative.rfind(root.relative + "/", 0) == 0);
+		                                  });
+		if (!included)
+		{
+			continue;
+		}
+		if (!database.Filesystem().CheckWritable(asset.path))
+		{
+			return Result<Vector<VirtualPath>>::Failure("A selected folder contains a read-only source: " +
+			                                            asset.path.ToString());
+		}
+		if (planned.insert(asset.path.ToString()).second)
+		{
+			plan.push_back(asset.path);
+		}
+	}
+	if (plan.empty())
+	{
+		return Result<Vector<VirtualPath>>::Failure("The selection contains no source files to reimport");
+	}
+	return Result<Vector<VirtualPath>>::Success(std::move(plan));
+}
+
 Vector<ImportedArtifactRecord> AssetObjectChoices(const ProjectWorkspace& workspace)
+{
+	return QueryAssetObjectChoices(workspace, {});
+}
+
+Vector<ImportedArtifactRecord>
+QueryAssetObjectChoices(const ProjectWorkspace& workspace,
+                        const std::function<bool(const ImportedArtifactRecord&)>& predicate)
 {
 	Vector<ImportedArtifactRecord> result;
 	Set<String> mainGuids;
@@ -84,6 +381,12 @@ Vector<ImportedArtifactRecord> AssetObjectChoices(const ProjectWorkspace& worksp
 		                  true,
 		                  entry.location.path,
 		                  {}});
+	}
+	if (predicate)
+	{
+		result.erase(std::remove_if(result.begin(), result.end(),
+		                            [&](const ImportedArtifactRecord& object) { return !predicate(object); }),
+		             result.end());
 	}
 	return result;
 }
@@ -337,30 +640,51 @@ const ProjectBrowserEntry* ProjectBrowserModel::Find(ResourceId guid) const
 
 void ProjectBrowserModel::ReconcileSelection(EditorSelectionContext& selection)
 {
-	if (selection.kind != EditorSelectionKind::Asset)
+	if (selection.entries.empty())
 	{
 		return;
 	}
-	const auto* entry = selection.assetGuid ? Find(selection.assetGuid) : Find(selection.assetPath);
-	selection.assetMissing = !entry;
-	if (entry)
+	auto reconciled = selection.entries;
+	for (auto& selected : reconciled)
 	{
-		selection.assetGuid = entry->guid;
-		selection.assetPath = entry->path;
-		if (selection.assetLocalFileId)
+		if (selected.kind != EditorSelectionKind::Asset)
+		{
+			continue;
+		}
+		const auto* entry = selected.assetGuid ? Find(selected.assetGuid) : Find(selected.assetPath);
+		selected.assetMissing = !entry;
+		selected.missing = selected.assetMissing;
+		if (!entry)
+		{
+			continue;
+		}
+		selected.assetGuid = entry->guid;
+		selected.assetPath = entry->path;
+		if (selected.assetLocalFileId)
 		{
 			const auto object =
 			    std::find_if(entry->importedObjects.begin(), entry->importedObjects.end(),
-			                 [&](const auto& item) { return item.localFileId == selection.assetLocalFileId; });
-			selection.assetMissing = object == entry->importedObjects.end();
-			if (!selection.assetMissing)
+			                 [&](const auto& item) { return item.localFileId == selected.assetLocalFileId; });
+			selected.assetMissing = object == entry->importedObjects.end();
+			selected.missing = selected.assetMissing;
+			if (!selected.assetMissing)
 			{
-				selection.assetKind = object->kind;
+				selected.assetKind = object->kind;
 			}
 		}
 	}
-	selectedAsset = selection.assetPath;
-	selectedGuid = selection.assetGuid;
+	selection.ReconcileEntries(std::move(reconciled));
+	const auto* primary = selection.PrimaryEntry();
+	if (primary && primary->kind == EditorSelectionKind::Asset)
+	{
+		selectedAsset = primary->assetPath;
+		selectedGuid = primary->assetGuid;
+	}
+	else
+	{
+		selectedAsset = {};
+		selectedGuid = {};
+	}
 }
 
 void ProjectBrowserModel::AddChild(const String& parent, const ProjectBrowserEntry& entry)

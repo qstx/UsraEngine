@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Ursa;
@@ -15,6 +16,13 @@ internal static class CustomEditorRegistrationTests
 	public sealed class AssetInspector : Inspector { public override void OnInspectorGUI() { } }
 	public sealed class DerivedInspector : Inspector { public override void OnInspectorGUI() { } }
 	public sealed class ExactInspector : Inspector { public override void OnInspectorGUI() { } }
+	[EditorWindowMenu("Window/State Probe")]
+	public sealed class StateProbeWindow : EditorWindow
+	{
+		public static int LastDrawCount;
+		private int drawCount;
+		public override void OnGUI() => LastDrawCount = ++drawCount;
+	}
 
 	[CustomEditor(typeof(Material))]
 	public sealed class MaterialInspector : Inspector { public override void OnInspectorGUI() { } }
@@ -26,6 +34,7 @@ internal static class CustomEditorRegistrationTests
 	public sealed class SourceAssetInspector : Inspector { public override void OnInspectorGUI() { } }
 
 	[CustomEditor(typeof(CatalogBehaviour))]
+	[CanEditMultipleObjects]
 	public sealed class BehaviourInspector : Inspector
 	{
 		public override void OnInspectorGUI() { }
@@ -70,10 +79,21 @@ internal static class CustomEditorRegistrationTests
 					? new ScriptIdentity(stableId, 1) : type == typeof(CatalogAsset) ? new ScriptIdentity("test.catalog-asset", 1) : throw new InvalidOperationException("Unexpected catalog lookup.");
 				using var session = Create();
 				EditorExtensionInfo[] descriptors = session.Describe();
-				if (descriptors.Length != 6 || !descriptors.Any(item => item.Target == stableId && item.Id == "inspector:" + stableId) ||
+				if (descriptors.Length != 7 || !descriptors.Any(item => item.Target == stableId && item.Id == "inspector:" + stableId && item.CanEditMultipleObjects) ||
 					!descriptors.Any(item => item.Target == "ursa.Camera" && item.Id == "inspector:ursa.Camera") ||
+					descriptors.Single(item => item.Target == "ursa.Camera").CanEditMultipleObjects ||
 					!new[] { "asset:ursa.Material", "asset:ursa.Prefab", "asset:test.catalog-asset", "importer:ursa.Texture" }.All(target => descriptors.Any(item => item.Target == target)))
 					throw new InvalidOperationException("Typed Inspectors did not resolve current script and native component identities.");
+				var window = descriptors.Single(item => item.Kind == EditorExtensionKind.Window);
+				StateProbeWindow.LastDrawCount = 0;
+				var callbacks = (Dictionary<string, Action>)session.GetType()
+					.GetField("callbacks", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(session)!;
+				var drawWindow = callbacks[window.Id];
+				drawWindow();
+				var firstWindowCount = StateProbeWindow.LastDrawCount;
+				drawWindow();
+				if (firstWindowCount != 1 || StateProbeWindow.LastDrawCount != 2)
+					throw new InvalidOperationException($"A managed EditorWindow did not retain instance state across draws (id={window.Id}, first={firstWindowCount}, second={StateProbeWindow.LastDrawCount}).");
 			}
 
 			BehaviourRegistry.identityResolver = _ => new ScriptIdentity("ursa.Camera", 1);

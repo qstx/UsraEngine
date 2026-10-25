@@ -16,6 +16,21 @@ if(URSA_BUILD_EDITOR)
   set_tests_properties(UrsaEditorWorkspaceWindowTests PROPERTIES
     ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/IconWorkspaceUser;TEMP=${URSA_BINARY_ROOT}/Temp;TMP=${URSA_BINARY_ROOT}/Temp")
 
+  ursa_add_test_executable(UrsaEditorSelectionContextTests EditorSelectionContextTests.cpp)
+  target_link_libraries(UrsaEditorSelectionContextTests PRIVATE Ursa::Editor)
+
+  add_test(NAME UrsaEditorSelectionContextTests COMMAND UrsaEditorSelectionContextTests)
+
+  ursa_add_test_executable(UrsaEditorDragSessionTests EditorDragSessionTests.cpp)
+  target_link_libraries(UrsaEditorDragSessionTests PRIVATE Ursa::Editor)
+
+  add_test(NAME UrsaEditorDragSessionTests COMMAND UrsaEditorDragSessionTests)
+
+  ursa_add_test_executable(UrsaEditorCommandsTests EditorCommandsTests.cpp)
+  target_link_libraries(UrsaEditorCommandsTests PRIVATE Ursa::Editor)
+
+  add_test(NAME UrsaEditorCommandsTests COMMAND UrsaEditorCommandsTests)
+
   ursa_add_test_executable(UrsaProjectWorkspaceTests ProjectWorkspaceTests.cpp)
   target_link_libraries(UrsaProjectWorkspaceTests PRIVATE Ursa::Editor)
 

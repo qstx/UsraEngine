@@ -16,7 +16,13 @@ namespace Ursa::Editor
 namespace
 {
 constexpr Float32 DividerHeight = 10;
+
+Float32 CurrentViewportFramebufferScale()
+{
+	const Float32 viewportScale = ImGui::GetWindowViewport()->FramebufferScale.x;
+	return std::max(.01f, viewportScale > 0.f ? viewportScale : ImGui::GetIO().DisplayFramebufferScale.x);
 }
+} // namespace
 
 AssetPreviewPanel::AssetPreviewPanel(Rhi::DevicePtr selectedDevice, ImGuiBridge& bridge)
     : device(std::move(selectedDevice)), gui(bridge)
@@ -940,7 +946,7 @@ void AssetPreviewPanel::Draw(ProjectWorkspace& workspace, ComponentRegistry& reg
 		visible = area.x >= 1 && area.y >= 1 && ImGui::IsRectVisible(area);
 		if (visible)
 		{
-			const auto dpi = std::max(.01f, ImGui::GetIO().DisplayFramebufferScale.x);
+			const auto dpi = CurrentViewportFramebufferScale();
 			const ViewportSize nextSize{static_cast<UInt32>(std::max(1.f, area.x * dpi)),
 			                            static_cast<UInt32>(std::max(1.f, area.y * dpi))};
 			if (nextSize.width != targetSize.width || nextSize.height != targetSize.height)
@@ -1055,7 +1061,7 @@ void AssetPreviewPanel::Draw(ProjectWorkspace& workspace, ComponentRegistry& reg
 	visible = area.x >= 1 && area.y >= 1 && ImGui::IsRectVisible(area);
 	if (visible)
 	{
-		const auto dpi = std::max(.01f, ImGui::GetIO().DisplayFramebufferScale.x);
+		const auto dpi = CurrentViewportFramebufferScale();
 		const ViewportSize nextSize = {static_cast<UInt32>(std::max(1.f, area.x * dpi)),
 		                               static_cast<UInt32>(std::max(1.f, area.y * dpi))};
 		if (nextSize.width != targetSize.width || nextSize.height != targetSize.height)

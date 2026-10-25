@@ -189,6 +189,76 @@ void TestCandidatePublication()
 	Take(importer.Import(*database, source));
 	Expect(library->writes == writesBeforeRepeat, "Unchanged complete output rewrote persistent Library files");
 }
+
+void TestBatchCandidatePublication()
+{
+	VirtualFileSystem files;
+	auto library = std::make_shared<LibraryProvider>();
+	Done(files.MountProvider("prj", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
+	Done(files.MountProvider("lib", library, MountAccess::ReadWrite));
+	const auto first = Take(VirtualPath::Parse("prj:First.batchprobe"));
+	const auto second = Take(VirtualPath::Parse("prj:Second.batchprobe"));
+	const auto manifest = Take(VirtualPath::Parse("lib:AssetDatabase/prj.json"));
+	Done(files.WriteAtomic(first, {1}));
+	Done(files.WriteAtomic(second, {2}));
+	auto database = Take(AssetDatabase::Open(files));
+	Done(database->Refresh());
+	const auto firstMeta = Take(VirtualPath::Parse(first.ToString() + ".meta"));
+	const auto secondMeta = Take(VirtualPath::Parse(second.ToString() + ".meta"));
+	const auto originalFirstMeta = Take(files.Read(firstMeta));
+	const auto originalSecondMeta = Take(files.Read(secondMeta));
+	UInt8 output = 1;
+	bool failSecond = false;
+	ProjectAssetImporter importer;
+	Done(importer.Register(
+	    ".batchprobe",
+	    [&](AssetDatabase& candidate, const VirtualPath& source, bool) -> Result<AssetImportResult>
+	    {
+		    if (failSecond && source == second)
+		    {
+			    return Result<AssetImportResult>::Failure("Injected second source import failure");
+		    }
+		    auto metadata = candidate.Metadata(source);
+		    if (!metadata)
+		    {
+			    return Result<AssetImportResult>::Failure(metadata.error);
+		    }
+		    auto published = candidate.PublishImport(source, "fixture.BatchProbe", 1, "cpu", nlohmann::json::object(),
+		                                             {}, {{0, "Default", {output}}});
+		    if (!published)
+		    {
+			    return Result<AssetImportResult>::Failure(published.error);
+		    }
+		    auto status = candidate.CurrentImport(source);
+		    return status ? Result<AssetImportResult>::Success(
+		                        {metadata.value.guid, status.value.artifacts, status.value.dependencies, false, {}, 0})
+		                  : Result<AssetImportResult>::Failure(status.error);
+	    }));
+	const Vector<VirtualPath> sources{first, second};
+	Take(importer.ImportBatch(*database, sources));
+	const auto originalManifest = Take(files.Read(manifest));
+	const auto originalLibraryFiles = Take(library->List());
+	auto firstImport = Take(ProjectAssetImporter::LoadCurrent(*database, first));
+	auto secondImport = Take(ProjectAssetImporter::LoadCurrent(*database, second));
+	const auto originalFirstOutput = Take(files.Read(firstImport.artifacts.front().path));
+	const auto originalSecondOutput = Take(files.Read(secondImport.artifacts.front().path));
+	output = 9;
+	failSecond = true;
+	Expect(!importer.ImportBatch(*database, sources, true), "Batch import unexpectedly accepted a failed source");
+	Expect(Take(files.Read(manifest)) == originalManifest && Take(library->List()) == originalLibraryFiles &&
+	           Take(files.Read(firstImport.artifacts.front().path)) == originalFirstOutput &&
+	           Take(files.Read(secondImport.artifacts.front().path)) == originalSecondOutput &&
+	           Take(files.Read(firstMeta)) == originalFirstMeta && Take(files.Read(secondMeta)) == originalSecondMeta,
+	       "A failed batch replaced published imports, source settings, or the complete Library directory");
+	failSecond = false;
+	Take(importer.ImportBatch(*database, sources, true));
+	firstImport = Take(ProjectAssetImporter::LoadCurrent(*database, first));
+	secondImport = Take(ProjectAssetImporter::LoadCurrent(*database, second));
+	Expect(Take(files.Read(firstImport.artifacts.front().path)) == Vector<UInt8>({9}) &&
+	           Take(files.Read(secondImport.artifacts.front().path)) == Vector<UInt8>({9}) &&
+	           Take(files.Read(firstMeta)) == originalFirstMeta && Take(files.Read(secondMeta)) == originalSecondMeta,
+	       "A successful batch did not publish all outputs atomically or persisted staging source settings");
+}
 } // namespace
 
 int main()
@@ -196,6 +266,7 @@ int main()
 	try
 	{
 		TestCandidatePublication();
+		TestBatchCandidatePublication();
 		return 0;
 	}
 	catch (const std::exception& error)

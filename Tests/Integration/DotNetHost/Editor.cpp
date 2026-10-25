@@ -8,6 +8,7 @@
 #include <Assets/ScriptableAssetInspector.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/AssetPreviewExtension.hpp>
+#include <Inspector/ReferencePicker.hpp>
 #include <Serialization/ComponentRegistry.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/PakArchive.hpp>
@@ -105,13 +106,49 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	       "Managed Inspector did not use the unified serialized property transaction");
 	Expect(payload["Fields"]["position"][0] == 9.0 && payload["Fields"]["modes"][1] == 1,
 	       "Unity-style nested and array property edits did not persist");
-	Expect(!draw("inspector:test.session-probe"),
-	       "A retained SerializedProperty was accepted in a later callback scope");
-	Expect(nlohmann::json::parse(ToStdString(script->SerializedPayload()))["Fields"]["value"] == 8,
-	       "A stale managed property modified the editing document");
+	auto* pickerOwnerWindow = ImGui::FindWindowByName("Managed editor fixture");
+	Expect(pickerOwnerWindow != nullptr, "Managed Inspector owner window disappeared before opening the picker");
+	const String pickerScope = ":target:" + script->PersistentId().ToString() + ":object:" + owner->Id().ToString();
+	ImGuiID pickerButtonId = ImHashStr((pickerScope + ":Object").c_str(), 0, pickerOwnerWindow->ID);
+	pickerButtonId = ImHashStr("...", 0, pickerButtonId);
+	ImGui::ActivateItemByID(pickerButtonId);
+	const auto stalePropertyDraw = draw("inspector:test.session-probe");
+	Expect(static_cast<bool>(stalePropertyDraw) && ImGui::GetCurrentContext()->OpenPopupStack.Size == 1,
+	       "The field button did not open the host-owned object picker or the stale wrapper disabled its Inspector");
+	auto* pickerWindow = ImGui::GetCurrentContext()->OpenPopupStack.back().Window;
+	Expect(pickerWindow != nullptr, "Object picker popup did not create its ImGui window");
+	Expect(static_cast<bool>(draw("inspector:test.session-probe")),
+	       "Object picker remained open across its host callback");
+	ImGui::ActivateItemByID(pickerWindow->GetID("Cancel"));
+	Expect(static_cast<bool>(draw("inspector:test.session-probe")) &&
+	           ImGui::GetCurrentContext()->OpenPopupStack.Size == 0,
+	       "Cancel did not dismiss the object picker");
+	ImGui::ActivateItemByID(pickerButtonId);
+	Expect(static_cast<bool>(draw("inspector:test.session-probe")) &&
+	           ImGui::GetCurrentContext()->OpenPopupStack.Size == 1,
+	       "The object picker did not reopen for the reload-cancellation check");
+	CancelReferencePickerSessions(ImGui::GetCurrentContext());
+	Expect(ImGui::GetCurrentContext()->OpenPopupStack.Size == 0 &&
+	           static_cast<bool>(draw("inspector:test.session-probe")) &&
+	           ImGui::GetCurrentContext()->OpenPopupStack.Size == 0,
+	       "Ending a script session did not cancel and retire its object picker before the next callback");
+	const auto afterStaleProperty = nlohmann::json::parse(ToStdString(script->SerializedPayload()))["Fields"]["value"];
+	const std::string stalePropertyDiagnostic =
+	    "A stale managed property modified the editing document (value=" + afterStaleProperty.dump() + ")";
+	Expect(afterStaleProperty == 8, stalePropertyDiagnostic.c_str());
 	context.target = camera;
 	Expect(Take(draw("inspector:ursa.Camera")) && camera->nearPlane == 0.25f,
 	       "Managed Inspector could not edit an exposed native component");
+	const auto otherOwner = Take(draft->GetScene().CreateGameObject("Other Camera Owner"));
+	const auto otherCameraId = Take(draft->GetScene().AddComponent<CameraComponent>(otherOwner));
+	auto* otherCamera = static_cast<CameraComponent*>(draft->GetScene().GetComponent(otherCameraId));
+	context.componentTargets = {camera, otherCamera};
+	context.componentPrimaryIndex = 0;
+	context.supportsMultipleObjects = false;
+	Expect(!draw("inspector:ursa.Camera"),
+	       "An Inspector without multi-object support accepted a multi-target camera invocation");
+	context.componentTargets.clear();
+	context.componentPrimaryIndex = 0;
 	Done(documents->SaveCurrent());
 	auto reopenedScene = Take(
 	    OpenSceneDocument(Path("prj:EditorFixture.ursascene"), ResourceKind::Scene, registry, documents->Session()));
@@ -124,6 +161,39 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	               reopenedScript->SerializedPayload()))["Fields"]["future"]["preserved"] == "unknown data" &&
 	           reopenedOwner->FindComponent<CameraComponent>()->nearPlane == 0.25f,
 	       "Editor Scene save/reopen lost typed changes, stable IDs or unknown fields");
+	auto secondOwner = Take(draft->GetScene().CreateGameObject("Second Editor Probe"));
+	const ComponentId secondScriptId = Take(draft->GetScene().AddComponent<ScriptBehaviourComponent>(
+	    secondOwner, "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures"));
+	auto* secondScript = static_cast<ScriptBehaviourComponent*>(draft->GetScene().GetComponent(secondScriptId));
+	secondScript->SetSerializedPayload(
+	    R"({"FormatVersion":1,"ScriptType":"test.session-probe","Version":1,
+            "Fields":{"value":11,"position":[4.0,5.0,6.0],"modes":[1,3],"future":{"preserved":"second target"}},
+            "FieldTypes":{
+                "value":{"Kind":"SignedInteger","ElementKind":"Unsupported","TypeName":"System.Int32"},
+                "position":{"Kind":"Vector3","ElementKind":"Unsupported","TypeName":"Ursa.Vector3"},
+                "modes":{"Kind":"List","ElementKind":"Enumeration","ElementTypeName":"Ursa.SessionFixtures.ProbeMode",
+                    "EnumUnderlyingType":"System.Byte","EnumValues":["First","Second"],"EnumNumericValues":[1,3]}}})");
+	context.target = secondScript;
+	context.componentTargets = {script, secondScript};
+	context.componentPrimaryIndex = 1;
+	context.supportsMultipleObjects = true;
+	Expect(Take(draw("inspector:test.session-probe")),
+	       "Declared C# multi-object Inspector did not commit target-local and shared property edits");
+	auto firstGroupPayload = nlohmann::json::parse(ToStdString(script->SerializedPayload()));
+	auto secondGroupPayload = nlohmann::json::parse(ToStdString(secondScript->SerializedPayload()));
+	Expect(firstGroupPayload["Fields"]["value"] == 17 && secondGroupPayload["Fields"]["value"] == 23 &&
+	           firstGroupPayload["Fields"]["position"] == nlohmann::json({6.5, 2.0, 3.0}) &&
+	           secondGroupPayload["Fields"]["position"] == nlohmann::json({6.5, 5.0, 6.0}),
+	       "Managed target iteration did not preserve per-object values or the shared vector component patch");
+	Expect(Take(draw("inspector:test.session-probe")),
+	       "Declared C# multi-object Inspector did not apply its second property patch");
+	Expect(nlohmann::json::parse(ToStdString(script->SerializedPayload()))["Fields"]["value"] == 99 &&
+	           nlohmann::json::parse(ToStdString(secondScript->SerializedPayload()))["Fields"]["value"] == 99,
+	       "Stale typed target snapshots overwrote a property already committed through SerializedObject");
+	Done(documents->SaveCurrent());
+	context.componentTargets.clear();
+	context.componentPrimaryIndex = 0;
+	context.supportsMultipleObjects = false;
 	context.target = nullptr;
 	Expect(static_cast<bool>(draw("window:Ursa.EditorFixtures.ProbeWindow")),
 	       "Managed tool window could not query selection and draw controls");
@@ -145,10 +215,17 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 		Expect(path == textureSource, "Managed importer Apply queued a different source");
 		++imports;
 	};
-	Expect(static_cast<bool>(draw("inspector:importer:ursa.Texture")) && importer->HasModified() &&
-	           Take(workspace->Index().Filesystem().Read(Path("prj:TextureProbe.png.meta"))) == initialMetadata &&
-	           !documents->Current()->Dirty(),
-	       "Managed typed importer changed metadata or the active document before Apply");
+	const bool importerDrawSucceeded = static_cast<bool>(draw("inspector:importer:ursa.Texture"));
+	const bool importerDraftModified = importer->HasModified();
+	const bool importerMetadataUnchanged =
+	    Take(workspace->Index().Filesystem().Read(Path("prj:TextureProbe.png.meta"))) == initialMetadata;
+	const bool importerDocumentClean = !documents->Current()->Dirty();
+	const std::string importerDiagnostic =
+	    "Managed importer pre-Apply state: draw=" + std::to_string(importerDrawSucceeded) +
+	    ", draft=" + std::to_string(importerDraftModified) + ", metadata=" + std::to_string(importerMetadataUnchanged) +
+	    ", document=" + std::to_string(importerDocumentClean);
+	Expect(importerDrawSucceeded && importerDraftModified && importerMetadataUnchanged && importerDocumentClean,
+	       importerDiagnostic.c_str());
 	auto* importerWindow = ImGui::FindWindowByName("Managed editor fixture");
 	ImGui::ActivateItemByID(ImHashStr("Apply", 0, importerWindow->ID));
 	Expect(static_cast<bool>(draw("inspector:importer:ursa.Texture")) && !importer->HasModified() && imports == 1 &&
@@ -363,9 +440,11 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	auto prefabEdited = InvokeManagedEditorExtension(host, replacement, "inspector:test.session-probe", context);
 	ImGui::End();
 	ImGui::Render();
-	Expect(prefabEdited && prefabEdited.value &&
-	           nlohmann::json::parse(ToStdString(prefabScript->SerializedPayload()))["Fields"]["value"] == 9,
-	       "Reloaded Inspector retained old state or failed to edit a detached Prefab");
+	const auto prefabValue = nlohmann::json::parse(ToStdString(prefabScript->SerializedPayload()))["Fields"]["value"];
+	const std::string prefabDiagnostic =
+	    "Reloaded Inspector detached Prefab state: success=" + std::to_string(static_cast<bool>(prefabEdited)) +
+	    ", changed=" + std::to_string(prefabEdited ? prefabEdited.value : false) + ", value=" + prefabValue.dump();
+	Expect(prefabEdited && prefabEdited.value && prefabValue == 100, prefabDiagnostic.c_str());
 	Expect(documents->Current()->Dirty(), "Prefab property Apply did not mark the current Prefab document Dirty");
 	context.target = nullptr;
 	ImGui::NewFrame();
@@ -383,7 +462,8 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	auto* reopenedPrefabScript = reopenedPrefabRoot->FindComponent<ScriptBehaviourComponent>();
 	Expect(!documents->Current()->Dirty() && reopenedPrefabRoot->Id() == prefabRoot->Id() && reopenedPrefabScript &&
 	           reopenedPrefabScript->PersistentId() == prefabScript->PersistentId() &&
-	           nlohmann::json::parse(ToStdString(reopenedPrefabScript->SerializedPayload()))["Fields"]["value"] == 11 &&
+	           nlohmann::json::parse(ToStdString(reopenedPrefabScript->SerializedPayload()))["Fields"]["value"] ==
+	               102 &&
 	           nlohmann::json::parse(ToStdString(
 	               reopenedPrefabScript->SerializedPayload()))["Fields"]["future"]["preserved"] == "unknown data",
 	       "Editor Prefab save/reopen lost property changes, unknown fields or stable IDs");

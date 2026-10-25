@@ -38,6 +38,11 @@ public sealed class CustomEditorAttribute : Attribute
 	public bool EditorForChildClasses { get; }
 }
 
+[AttributeUsage(AttributeTargets.Class, Inherited = false)]
+public sealed class CanEditMultipleObjectsAttribute : Attribute
+{
+}
+
 public abstract class Inspector
 {
 	public SerializedObject SerializedObject { get; internal set; } = null!;
@@ -45,6 +50,7 @@ public abstract class Inspector
 	internal PreviewLifetime PreviewLifetime { get; } = new();
 	private InspectorTargetScope? targetScope;
 	public virtual object Target => (targetScope ??= InspectorTargetScope.Create(TargetType)).Target;
+	public virtual object[] Targets => (targetScope ??= InspectorTargetScope.Create(TargetType)).Targets;
 	internal virtual void SynchronizeTarget() => targetScope?.Synchronize();
 	internal void ReleaseTarget() { targetScope?.Dispose(); targetScope = null; }
 
@@ -77,6 +83,10 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 	private readonly Dictionary<string, (Type Inspector, Type Target)> inspectorTypes = new(StringComparer.Ordinal);
 	private readonly Dictionary<ulong, (string Id, Inspector Value)> previews = new();
 	private readonly HashSet<ulong> failedPreviews = new();
+	private static SerializedObject CreateSerializedObject(Inspector inspector)
+		=> inspector is AssetImporterEditor
+			? new SerializedObject(Array.Empty<object>())
+			: new SerializedObject(inspector.Targets);
 
 	// Called through reflection by the stable host; no project delegate is exported to native code.
 	internal static IEditorExtensionSession Create(Assembly[] assemblies)
@@ -135,10 +145,18 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 			inspectors.Add(inspector);
 			if (!inspectorTypes.TryAdd("inspector:" + target, (selected, actual)))
 				throw new InvalidOperationException($"Duplicate editor target identity '{target}'.");
-			Add(new() { Id = "inspector:" + target, Kind = EditorExtensionKind.Inspector, Path = "", Target = target, Title = "" },
+			Add(new()
+			{
+				Id = "inspector:" + target,
+				Kind = EditorExtensionKind.Inspector,
+				Path = "",
+				Target = target,
+				Title = "",
+				CanEditMultipleObjects = selected.GetCustomAttribute<CanEditMultipleObjectsAttribute>(inherit: false) != null
+			},
 				() =>
 				{
-					inspector.SerializedObject = new SerializedObject();
+					inspector.SerializedObject = CreateSerializedObject(inspector);
 					try { inspector.OnInspectorGUI(); inspector.SynchronizeTarget(); }
 					finally { inspector.ReleaseTarget(); }
 				});
@@ -200,7 +218,7 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 				entry = (id, value);
 				previews.Add(instance, entry);
 				PreviewLifetime.Current = value.PreviewLifetime;
-				value.SerializedObject = new SerializedObject();
+				value.SerializedObject = CreateSerializedObject(value);
 				EditorApi.EnsureRuntimeScope();
 				value.OnEnable();
 			}
@@ -208,7 +226,7 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 			Inspector inspector = entry.Value;
 			PreviewLifetime.Current = inspector.PreviewLifetime;
 			if (phase != EditorPreviewPhase.Inspector) EditorApi.EnsureRuntimeScope();
-			inspector.SerializedObject = new SerializedObject();
+			inspector.SerializedObject = CreateSerializedObject(inspector);
 			try
 			{
 				if (phase == EditorPreviewPhase.Inspector) { inspector.OnInspectorGUI(); inspector.SynchronizeTarget(); }

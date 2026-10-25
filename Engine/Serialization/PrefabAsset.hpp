@@ -47,9 +47,10 @@ public:
 		return root;
 	}
 
-	Result<GameObject::Ptr> Instantiate(
-	    Scene& scene, const ComponentRegistry& registry, ComponentLoadContext& context,
-	    const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId = {}) const;
+	Result<GameObject::Ptr>
+	Instantiate(Scene& scene, const ComponentRegistry& registry, ComponentLoadContext& context,
+	            const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId = {},
+	            bool preserveExistingMappings = false) const;
 
 private:
 	ResourceId id;
@@ -61,12 +62,18 @@ CapturePrefabAsset(ResourceId id, const Scene& scene, GameObject::Ptr root, cons
                    ComponentLoadContext& context,
                    const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId = {});
 
+Result<PrefabAsset>
+CapturePrefabAsset(ResourceId id, const Scene& scene, const Vector<GameObject::Ptr>& roots,
+                   const ComponentRegistry& registry, ComponentLoadContext& context,
+                   const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId = {});
+
 Result<nlohmann::json> EncodePrefabAssetDocument(
     const String& label, const PrefabAsset& asset, const ComponentRegistry& registry,
     const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId = {});
 
 Result<PrefabAsset> DecodePrefabAssetDocument(const String& label, const nlohmann::json& document,
-                                              const ComponentRegistry& registry, ComponentLoadContext& context);
+                                              const ComponentRegistry& registry, ComponentLoadContext& context,
+                                              bool preserveExistingMappings = false);
 Result<void> SavePrefabAssetResource(
     VirtualFileSystem& filesystem, const VirtualPath& path, const PrefabAsset& asset, const ComponentRegistry& registry,
     const std::function<Result<ResourceId>(const std::shared_ptr<MaterialInstance>&)>& materialId = {});

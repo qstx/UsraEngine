@@ -143,6 +143,10 @@ public:
 
 	Result<void> RemoveComponent(Component* component);
 
+	// Transfers a component out of a detached staging object without invoking removal callbacks.
+	Result<std::unique_ptr<Component>> ReleaseDetachedComponent(Component* component);
+	Result<Component*> AdoptDetachedComponent(std::unique_ptr<Component> component);
+
 	Vector<Component*> Components() const;
 
 private:

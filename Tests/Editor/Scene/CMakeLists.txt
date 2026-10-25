@@ -15,6 +15,11 @@ if(URSA_BUILD_EDITOR)
 
   add_test(NAME UrsaEditorGizmoTests COMMAND UrsaEditorGizmoTests)
 
+  ursa_add_test_executable(UrsaSceneInspectorMultiObjectTests SceneInspectorMultiObjectTests.cpp)
+  target_link_libraries(UrsaSceneInspectorMultiObjectTests PRIVATE Ursa::Editor)
+
+  add_test(NAME UrsaSceneInspectorMultiObjectTests COMMAND UrsaSceneInspectorMultiObjectTests)
+
   ursa_add_test_executable(UrsaEditorGizmoInteractionTests EditorGizmoInteractionTests.cpp)
   target_link_libraries(UrsaEditorGizmoInteractionTests PRIVATE Ursa::Editor)
 

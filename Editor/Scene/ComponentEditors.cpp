@@ -1,4 +1,6 @@
 #include <Scene/ComponentEditors.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
+#include <algorithm>
 #include <Scene/Lighting.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <Core/StringInterop.hpp>
@@ -8,6 +10,76 @@
 
 namespace Ursa::Editor
 {
+namespace
+{
+String StableComponentType(const Component& component)
+{
+	if (const auto* script = dynamic_cast<const Scripting::ScriptBehaviourComponent*>(&component))
+	{
+		return "script:" + script->TypeName();
+	}
+	return "native:" + component.SerializationType();
+}
+} // namespace
+
+Result<Vector<ComponentTargetGroup>> BuildCommonComponentMapping(const Vector<GameObject::Ptr>& targets,
+                                                                 Size primaryIndex)
+{
+	if (targets.empty() || primaryIndex >= targets.size())
+	{
+		return Result<Vector<ComponentTargetGroup>>::Failure("Component mapping requires a valid primary target");
+	}
+	for (Size index = 0; index < targets.size(); ++index)
+	{
+		if (!targets[index])
+		{
+			return Result<Vector<ComponentTargetGroup>>::Failure("Component mapping contains an empty target");
+		}
+		if (std::find(targets.begin(), targets.begin() + index, targets[index]) != targets.begin() + index)
+		{
+			return Result<Vector<ComponentTargetGroup>>::Failure("Component mapping contains a duplicate target");
+		}
+	}
+
+	Vector<Map<String, Vector<Component*>>> componentsByTarget;
+	componentsByTarget.reserve(targets.size());
+	for (const auto& target : targets)
+	{
+		Map<String, Vector<Component*>> byType;
+		for (Component* component : target->Components())
+		{
+			byType[StableComponentType(*component)].push_back(component);
+		}
+		componentsByTarget.push_back(std::move(byType));
+	}
+
+	Vector<ComponentTargetGroup> common;
+	Map<String, Size> occurrenceByType;
+	for (Component* primaryComponent : targets[primaryIndex]->Components())
+	{
+		const String type = StableComponentType(*primaryComponent);
+		const Size ordinal = occurrenceByType[type]++;
+		ComponentTargetGroup group{type, ordinal, {}};
+		group.targets.reserve(targets.size());
+		bool presentEverywhere = true;
+		for (const auto& byType : componentsByTarget)
+		{
+			auto found = byType.find(type);
+			if (found == byType.end() || ordinal >= found->second.size())
+			{
+				presentEverywhere = false;
+				break;
+			}
+			group.targets.push_back(found->second[ordinal]);
+		}
+		if (presentEverywhere)
+		{
+			common.push_back(std::move(group));
+		}
+	}
+	return Result<Vector<ComponentTargetGroup>>::Success(std::move(common));
+}
+
 Result<void> ComponentEditors::RegisterEditor(String type, ComponentEditor editor)
 {
 	if (type.empty() || !editor)
@@ -25,6 +97,12 @@ const ComponentEditor* ComponentEditors::Find(const String& type) const
 {
 	auto found = editors.find(type);
 	return found == editors.end() ? nullptr : &found->second;
+}
+
+bool ComponentEditors::SupportsMultipleObjects(const String& type) const
+{
+	const auto found = multipleObjectEditors.find(type);
+	return found != multipleObjectEditors.end() && found->second;
 }
 
 Result<void> ComponentEditors::RegisterType(ComponentTypeDescriptor descriptor, ComponentEditor editor)
@@ -47,15 +125,17 @@ Result<void> ComponentEditors::RegisterType(ComponentTypeDescriptor descriptor, 
 	return {};
 }
 
-void ComponentEditors::ReplaceEditor(const String& type, ComponentEditor editor)
+void ComponentEditors::ReplaceEditor(const String& type, ComponentEditor editor, bool supportsMultipleObjects)
 {
 	if (editor)
 	{
 		editors[type] = std::move(editor);
+		multipleObjectEditors[type] = supportsMultipleObjects;
 	}
 	else
 	{
 		editors.erase(type);
+		multipleObjectEditors.erase(type);
 	}
 }
 
@@ -63,6 +143,7 @@ void ComponentEditors::UnregisterType(const String& type)
 {
 	types.erase(type);
 	editors.erase(type);
+	multipleObjectEditors.erase(type);
 }
 
 const ComponentTypeDescriptor* ComponentEditors::FindType(const String& type) const

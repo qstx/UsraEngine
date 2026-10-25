@@ -4,6 +4,8 @@
 
 ## 自定义 Inspector
 
+多对象自定义 Inspector 可在类上声明 `[CanEditMultipleObjects]`。该声明随 Inspector 注册描述传给原生编辑器；只有声明过的扩展才会被允许进入多选回调。未声明的扩展按单目标规则处理。目标集合与组属性接口仍在接入中，当前声明本身不会把单目标字段写入扩展成批量修改。
+
 继承 Ursa.Editor.Inspector，使用 `CustomEditor(typeof(组件类型))` 匹配目标：
 
     using Ursa.Editor;
@@ -55,6 +57,8 @@ DrawDefaultInspector() 可显示其余持久字段。成功 Apply 会标记文�
 
 EditorContext 提供选择、当前文档和资产信息，以及 MarkDirty、Save、OpenAsset。OpenAsset 使用 VFS 路径，并在界面安全边界处理文档切换。Run 中现有保存门槛仍生效。
 
+每个 `EditorWindowMenu` 扩展在当前托管编辑会话注册时创建一个实例，`OnGUI` 重复调用复用该实例；面板使用稳定扩展 ID，跨 ImGui viewport 移动不重新注册扩展。`UrsaManagedProtocolTests` 连续调用同一窗口委托，验证实例字段在绘制间递增且不重建。脚本重载会建立新扩展会话，旧实例随旧会话关闭。
+
 Selection 为 `EditorSelection[]`，Target 为可空 `EditorReference`，Document 为可空 `EditorDocument`，Assets 为 `EditorAsset[]` 快照。文档含 Id/Path/Kind/Dirty；引用含 Kind/PersistentId/TypeId 和可空 AssetReference，资产与子资产保留 GUID/local file ID。`ResolveObject(kind, persistentId)` 与 `ResolveAsset(asset, kind)` 在当前编辑图/资产加载器内校验身份；项目不能构造 native 地址。引用的描述可读取，引用控件或属性写入仍要求当前回调身份。
 
 ## 类型化属性
@@ -70,6 +74,12 @@ Update 重新捕获目标并丢弃未应用编辑；调用后须重新 FindPrope
 ## 控件与会话约束
 
 EditorGui 支持文本、按钮、数字、布尔、字符串、枚举选项、向量、旋转、颜色、对象／资产选择，以及统一 PropertyField 的数组／列表编辑。Vertical 与 SameLine 提供基本布局。不暴露 ImGui、窗口或图形后端指针。
+
+`EditorGui.ObjectField`、`EditorGui.AssetField` 和 `PropertyField` 的引用控件通过字段旁的 `...` 按钮打开共享对象选择器。弹窗可按名称、类型和来源路径搜索，列出 None 与兼容候选；候选侧栏显示类型、来源及 GUID/local ID 等身份信息。双击、Enter 或 Select 接受高亮项，Cancel 取消选择；关闭弹窗接受当前高亮项，Esc 优先清空搜索再取消。当前候选通过稳定对象/资源身份定位，同名候选不会替换字段当前引用；拖放到字段标签或值上都可投递引用。候选浏览不替换 EditorContext 的全局选择，控件会在后续回调重新解析当前引用，不缓存过期的托管包装。原生序列化对象/资产引用、ScriptableObject 引用、材质纹理和 Mesh 资产字段也共用此选择器。
+
+选择器有自己的会话状态和候选预览区域，不复用 Inspector 页脚的 Preview 实例。支持的内置候选（Texture、Material、Model、Mesh、Prefab 和 Animation）使用私有预览内容；注册了 Preview 的资源 `CustomEditor` 候选使用独立扩展实例及其独立资源会话。无适用画面的候选仍显示身份、类型与来源信息及明确的无预览状态。切换候选、关闭弹窗或失败时会清除旧画面，并在 UI 提交安全后退休 GPU 资源。选择器预览只读，不写入资源或 Scene，也不启动游戏生命周期。
+
+属性组中的引用实时试选会对整个目标组应用同一候选；取消时按逐目标检查点恢复原值，接受后保留候选值并将其交给字段事务。候选检查点与外部 Dirty 状态分离，因此取消不会清除其他编辑。Prefab 字段恢复也保留各自原有覆盖。完整操作和验证证据见 [引用字段与对象选择器验收](ReferencePickerAcceptance.md)。
 
 Editor API 限主线程，且仅在菜单、窗口或 Inspector 回调内有效。不要把 SerializedObject、SerializedProperty 或布局对象留到下次回调；需要长期保存的工具状态使用普通 C# 数据、属性路径和持久 GUID。
 
@@ -99,6 +109,16 @@ Importer 的类型化 Target 及 Apply/Revert 示例见 [脚本导入与处理�
 
 回调结束后，临时对象、属性及组件包装失效。被读取的依赖 ScriptableObject 使用独立临时对象缓存，既不污染编辑会话原缓存，也不触发快照的 OnEnable/OnDisable/OnDestroy。通过显式 CreateInstance 创建的对象保留自己的初始化/清理回调。包及只读源不接受字段提交或保存；读取的持久 Mesh/Material 必须先 Clone 才能修改，不能通过资源引用改写其他已发布资产。
 
+### 多对象 Inspector
+
+在 Inspector 类上声明 `[CanEditMultipleObjects]`，宿主才会把公共组件目标组交给该扩展。`Target` 保持主选语义；`Targets` 和 `SerializedObject.TargetObjects` 按选择顺序返回本次回调的对象包装，`SerializedObject.IsEditingMultipleObjects` 区分单选与多选。未声明的 Inspector 不会被多选回调。
+
+`SerializedProperty.HasMultipleDifferentValues` 表示目标字段值不一致；读取访问器返回主选代表值。通过属性写入并 Apply 后，同一值提交到组内全部目标；向量分量和数组元素修改保留每个目标的其他字段及集合尾部。遍历 `Targets` 后直接修改脚本字段时，宿主按每个目标与回调开始时快照的差异分别提交；若同一字段已通过 SerializedObject 显式 Apply，则该属性提交优先，旧 Target 快照不会覆盖它。`Update()` 丢弃候选属性修改并使旧 SerializedProperty 失效，回调结束后所有目标包装失效。上述事务不提供 Undo 历史。
+
+未声明多对象支持的公共脚本组件不会调用自定义 Inspector；Scene Inspector 会退回到所有选中组件共有且语义兼容的可写序列化字段。缺失、只读或类型不兼容的字段不显示为批量编辑项。
+
+`AssetImporterEditor` 使用 importer 专属属性会话，`SerializedObject.TargetObjects` 对它返回空数组；Importer 的真实对象仍由其覆盖的 `Target` 提供。这保持 importer Apply/Revert 草稿与普通组件多选隔离。
+
 
 ## 资源 Preview 与生命周期
 
@@ -114,4 +134,4 @@ Importer 的类型化 Target 及 Apply/Revert 示例见 [脚本导入与处理�
 
 同一目标绘制失败时，显示扩展 ID、资源 GUID/local file ID 和异常，保留并标识最后成功图像；切换目标后清空旧图像。失败的 Preview 不静默回退为默认成功结果。重新加载脚本或重新导入可重建该实例。成功脚本重载先完成旧实例 `OnDisable` 再关闭其会话；失败编译继续保留旧环境。关闭项目、切换目标和提交中的选择变化均持有必要资源到渲染结束，并撤销对应图像注册。
 
-完整可编译示例见 [GeneratedFormatAssetEditor](Examples/Editor/GeneratedFormatAssetEditor.cs) 与 [示例 README](Examples/README.md)。无窗口的生命周期/能力测试与真实 GPU、DPI、SRP 窗口测试分别记录在 [验收记录](ScriptedAssetEditorExtensionsAcceptance.md)。
+多选声明、混合值检测和 PropertyField 的最小组件示例见可编译的 [TypedInspector.cs](Examples/Editor/TypedInspector.cs)。完整资源示例见 [GeneratedFormatAssetEditor](Examples/Editor/GeneratedFormatAssetEditor.cs) 与 [示例 README](Examples/README.md)。无窗口的生命周期/能力测试与真实 GPU、DPI、SRP 窗口测试分别记录在 [验收记录](ScriptedAssetEditorExtensionsAcceptance.md)。

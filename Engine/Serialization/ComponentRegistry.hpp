@@ -85,9 +85,12 @@ private:
 class ComponentMappingScope final
 {
 public:
-	explicit ComponentMappingScope(ComponentLoadContext& context) : context(context)
+	explicit ComponentMappingScope(ComponentLoadContext& context, bool clearExisting = true) : context(context)
 	{
-		context.ClearMappings();
+		if (clearExisting)
+		{
+			context.ClearMappings();
+		}
 	}
 
 	~ComponentMappingScope()

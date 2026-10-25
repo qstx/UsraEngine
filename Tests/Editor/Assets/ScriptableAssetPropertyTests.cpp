@@ -1,6 +1,7 @@
 #include <Assets/ScriptableAssetInspector.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Core/StringInterop.hpp>
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 
@@ -106,6 +107,36 @@ int main()
 		       "Source save overwrote an external modification or discarded the draft");
 		target.reset();
 		Expect(!properties->Update(), "Closed source Inspector retained a writable property adapter");
+
+		const auto secondPath = Take(VirtualPath::Parse("prj:OtherSettings.ursaasset"));
+		Done(files.WriteAtomic(secondPath, {}));
+		Done(workspace->Refresh());
+		const auto secondGuid = Take(workspace->Database()->Metadata(secondPath)).guid;
+		auto secondAsset = Take(CreateScriptableAssetWithDefaults(secondGuid, type));
+		Done(SaveScriptableAssetSource(files, secondPath, secondAsset));
+		Done(workspace->Refresh());
+		auto firstMulti = Take(ScriptableAssetInspector::Open(*workspace, path, type));
+		auto secondMulti = Take(ScriptableAssetInspector::Open(*workspace, secondPath, type));
+		const auto beforeFirstMulti = Take(files.Read(path));
+		const auto beforeSecondMulti = Take(files.Read(secondPath));
+		auto firstMultiProperties = Take(SerializedObject::Create(firstMulti->Properties()));
+		auto secondMultiProperties = Take(SerializedObject::Create(secondMulti->Properties()));
+		auto scriptableGroup =
+		    Take(SerializedObjectGroup::Create({firstMultiProperties.get(), secondMultiProperties.get()}));
+		const auto scriptablePaths = scriptableGroup.CommonPropertyPaths();
+		Expect(std::find(scriptablePaths.begin(), scriptablePaths.end(), "/Fields/strength") != scriptablePaths.end(),
+		       "Same-type ScriptableObjects did not expose a shared typed property");
+		Done(scriptableGroup.SetValue("/Fields/strength", 6.25));
+		Done(scriptableGroup.Apply());
+		Expect(firstMulti->Dirty() && secondMulti->Dirty() && Take(files.Read(path)) == beforeFirstMulti &&
+		           Take(files.Read(secondPath)) == beforeSecondMulti,
+		       "ScriptableObject multi-edit bypassed drafts or failed to dirty every target");
+		Done(firstMulti->Save());
+		Done(secondMulti->Save());
+		Expect(Take(LoadScriptableAssetSource(files, path, guid)).Payload()["Fields"]["strength"] == 6.25f &&
+		           Take(LoadScriptableAssetSource(files, secondPath, secondGuid)).Payload()["Fields"]["strength"] ==
+		               6.25f,
+		       "ScriptableObject multi-edit did not save the common field to every selected source");
 
 		VirtualFileSystem readOnly;
 		Done(readOnly.MountProvider(projectScheme, sources, MountAccess::ReadOnly));

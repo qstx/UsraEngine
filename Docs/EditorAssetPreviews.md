@@ -14,9 +14,11 @@
 
 预览跟随 Inspector 当前资产的 GUID 和 local file ID。打开材质 A 后选中 B，会预览 B；查看 B 不会切换当前文档或触发保存确认。同一模型的两个 Mesh 子资产各有独立身份；重命名不改变 GUID。
 
+Project 多选时，预览仍以主选资产为目标；Inspector 属性区可以编辑兼容的 Material 或 ScriptableObject 源资产组。页脚预览选择不会缩减或替换该属性目标组。
+
 已有同目标文档时，材质使用合法未保存参数，纹理使用未保存像素，Prefab 使用当前对象树的私有快照。属性编辑仍由原有 Inspector 和文档事务负责。预览的相机、形状、通道、Mip 和动画时间都是查看状态，不使文档变脏、不保存资产。
 
-这五类预览属于 Editor 内置能力。C# `CustomEditor` 和 `SerializedObject` 负责组件 Inspector，本次不增加公共 C# Preview 回调。
+Inspector 页脚中的这五类预览属于 Editor 内置能力。C# `CustomEditor` 和 `SerializedObject` 负责组件 Inspector；引用字段弹出的对象选择器另有候选 Preview 扩展入口，且每个选择器候选使用独立预览宿主，不与页脚共享状态。
 
 ## 材质和三维内容
 
@@ -66,3 +68,5 @@ Project 和预览对象选择控件共用当前资产选择。选择源行查看
 源文件移动后，仍存在的对象按 GUID/local file ID 保持选择。成功导入删除对象时停止旧目标预览并显示缺失；重新导入失败则保留有失败标记的最后完整结果。未应用 importer 设置的 Cancel 必须同时保留源选择、高亮和草稿。
 
 界面、字段引用和跨流程验证见 [Unity 风格导入资产验收](UnityImportedAssetsAcceptance.md)。
+
+序列化引用字段通过右侧按钮打开带搜索、来源过滤、兼容候选和身份预览的对象选择器；列表/资产字段与组件引用沿用同一交互。候选可实时试选，取消恢复完整原始目标组，接受保留新引用。候选预览不会更改 Inspector 页脚目标、作者文档 Dirty、源资产字节或游戏生命周期。细节和验收结果见 [引用字段与对象选择器验收](ReferencePickerAcceptance.md)。

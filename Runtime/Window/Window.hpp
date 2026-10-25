@@ -95,7 +95,11 @@ enum class WindowEventType
 	MousePressed,
 	MouseReleased,
 	Scrolled,
-	Focused
+	Focused,
+	PositionChanged,
+	SizeChanged,
+	FramebufferSizeChanged,
+	ContentScaleChanged
 };
 
 struct WindowEvent
@@ -111,11 +115,43 @@ struct WindowEvent
 
 using WindowEventCallback = std::function<void(const WindowEvent&)>;
 
+struct WindowCreateDesc
+{
+	Ursa::UInt32 width = 1;
+	Ursa::UInt32 height = 1;
+	String title;
+	bool visible = true;
+	bool decorated = true;
+	bool floating = false;
+};
+
+struct WindowWorkArea
+{
+	Ursa::Int32 x = 0;
+	Ursa::Int32 y = 0;
+	Ursa::UInt32 width = 0;
+	Ursa::UInt32 height = 0;
+};
+
+struct WindowMonitorInfo
+{
+	WindowWorkArea bounds;
+	WindowWorkArea workArea;
+	Ursa::Float32 scaleX = 1.0f;
+	Ursa::Float32 scaleY = 1.0f;
+};
+
 class Window final
 {
 public:
 	static Result<std::shared_ptr<Window>> Create(Ursa::UInt32 width, Ursa::UInt32 height, const String& title,
 	                                              bool visible = true);
+
+	static Result<std::shared_ptr<Window>> Create(const WindowCreateDesc& desc);
+
+	static Result<WindowWorkArea> PrimaryMonitorWorkArea();
+
+	static Result<Vector<WindowMonitorInfo>> Monitors();
 
 	~Window();
 
@@ -126,6 +162,7 @@ public:
 	void PollEvents() const;
 
 	void WaitEvents() const;
+	void WaitEventsTimeout(Float64 timeoutSeconds) const;
 
 	bool ShouldClose() const;
 
@@ -149,6 +186,18 @@ public:
 	bool MouseDown(MouseButton button) const;
 
 	std::pair<Ursa::Float64, Ursa::Float64> CursorPosition() const;
+
+	std::pair<Ursa::Float64, Ursa::Float64> DesktopCursorPosition() const;
+
+	std::pair<Ursa::Int32, Ursa::Int32> Position() const;
+
+	void SetPosition(Ursa::Int32 x, Ursa::Int32 y);
+
+	std::pair<Ursa::Float32, Ursa::Float32> ContentScale() const;
+
+	bool Focused() const;
+
+	void Focus();
 
 	Result<Ursa::UInt64> Subscribe(WindowEventCallback callback);
 

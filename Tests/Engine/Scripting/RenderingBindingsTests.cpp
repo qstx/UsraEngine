@@ -110,6 +110,8 @@ int main()
 		};
 		const auto text = [](const String& value)
 		{ return B::Utf8View{reinterpret_cast<const UInt8*>(value.data()), value.size(), 1, 0}; };
+		const String batchLabel("test render batch");
+		const auto batchName = text(batchLabel);
 		C::Record_RenderCommands_SetComputeTexture(writer,
 		                                           {asset, kernel.value, text("_Output"), target(texture.value)});
 		C::Record_RenderCommands_SetComputeBuffer(writer, {asset, kernel.value, text("_Data"), buffer.value});
@@ -119,7 +121,7 @@ int main()
 		C::Record_RenderCommands_DispatchCompute(writer, {asset, kernel.value, 1, 1, 1});
 		const auto& bytes = writer.Bytes();
 		B::DataView batch{bytes.data(), bytes.size(), 1, 0};
-		CallVoid(rendering.NativeRenderingBindings_EnqueueBatch, api.Token(), &token.value, &batch);
+		CallVoid(rendering.NativeRenderingBindings_EnqueueBatch, api.Token(), &token.value, &batch, &batchName);
 		writer.Clear();
 		CallVoid(rendering.NativeRenderingBindings_Submit, api.Token(), &token.value);
 		CallVoid(rendering.NativeRenderingBindings_Submit, api.Token(), &token.value);
@@ -151,15 +153,15 @@ int main()
 		const UInt64 accepted = api.AcceptedRenderBatchCount();
 		B::CallbackResult<void> rejected;
 		rejected.status = rendering.NativeRenderingBindings_EnqueueBatch(api.Token(), &failedFrame.value, &invalidBatch,
-		                                                                 &rejected.outcome);
+		                                                                 &batchName, &rejected.outcome);
 		Expect(!rejected && api.AcceptedRenderBatchCount() == accepted,
 		       "A late stale resource allowed a partial batch");
 		auto wrongContract = invalidBytes;
 		wrongContract[16] ^= 1;
 		invalidBatch = {wrongContract.data(), wrongContract.size(), 1, 0};
 		B::CallbackResult<void> incompatible;
-		incompatible.status = rendering.NativeRenderingBindings_EnqueueBatch(api.Token(), &failedFrame.value,
-		                                                                     &invalidBatch, &incompatible.outcome);
+		incompatible.status = rendering.NativeRenderingBindings_EnqueueBatch(
+		    api.Token(), &failedFrame.value, &invalidBatch, &batchName, &incompatible.outcome);
 		Expect(!incompatible && api.AcceptedRenderBatchCount() == accepted,
 		       "An incompatible command contract was accepted");
 		CallVoid(rendering.NativeRenderingBindings_Submit, api.Token(), &failedFrame.value);
@@ -199,7 +201,7 @@ int main()
 		C::Record_RenderCommands_ClearTarget(writer, {3, {0.5f, 0.25f, 0.75f, 1}, 0.125f, 0});
 		const auto& mrtBytes = writer.Bytes();
 		batch = {mrtBytes.data(), mrtBytes.size(), 1, 0};
-		CallVoid(rendering.NativeRenderingBindings_EnqueueBatch, api.Token(), &mrtToken.value, &batch);
+		CallVoid(rendering.NativeRenderingBindings_EnqueueBatch, api.Token(), &mrtToken.value, &batch, &batchName);
 		writer.Clear();
 		CallVoid(rendering.NativeRenderingBindings_ReleaseRenderTexture, api.Token(), &secondColor.value);
 		CallVoid(rendering.NativeRenderingBindings_Submit, api.Token(), &mrtToken.value);

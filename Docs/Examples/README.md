@@ -40,4 +40,4 @@ Use the generated assets from Game scripts through normal `AssetReference` loadi
 ctest --test-dir Engine/Build -C Debug -R '^Ursa(ManagedAssetImportWorkflowTests|ScriptedImporterInspectorWorkflowTests|GeneratedAssetPlayerWorkflowTests|ManagedAssetPreviewTests)$' --output-on-failure
 ```
 
-`TypedInspector.cs` remains a compilable component Inspector/window example. See [ScriptedAssetImporters](../ScriptedAssetImporters.md) and [ManagedEditorExtensions](../ManagedEditorExtensions.md) for ownership, failure and version rules.
+`TypedInspector.cs` remains a compilable component Inspector/window example. Its camera Inspector demonstrates `[CanEditMultipleObjects]`, mixed-value detection and PropertyField. See [ScriptedAssetImporters](../ScriptedAssetImporters.md) and [ManagedEditorExtensions](../ManagedEditorExtensions.md) for ownership, failure and version rules.

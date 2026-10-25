@@ -3,11 +3,22 @@
 #include <Assets/AssetDatabase.hpp>
 #include <Workspace/ProjectWorkspace.hpp>
 #include <Workspace/EditorSelectionContext.hpp>
+#include <Workspace/EditorDragSession.hpp>
+#include <functional>
 #include <optional>
 
 namespace Ursa::Editor
 {
 Vector<ImportedArtifactRecord> AssetObjectChoices(const ProjectWorkspace& workspace);
+Vector<ImportedArtifactRecord>
+QueryAssetObjectChoices(const ProjectWorkspace& workspace,
+                        const std::function<bool(const ImportedArtifactRecord&)>& predicate);
+Result<Vector<AssetMoveRequest>> PlanProjectFolderDrop(const AssetDatabase& database, const EditorDragSession& session,
+                                                       const String& destinationFolder, bool readOnly);
+Result<Vector<VirtualPath>> PlanProjectSourceDelete(const AssetDatabase& database,
+                                                    const Vector<EditorSelectionEntry>& selection, bool readOnly);
+Result<Vector<VirtualPath>> PlanProjectSourceReimport(const AssetDatabase& database,
+                                                      const Vector<EditorSelectionEntry>& selection, bool readOnly);
 
 struct ProjectBrowserEntry
 {

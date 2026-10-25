@@ -2,6 +2,7 @@
 #include <Scripting/Bindings/BindingAssets.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
 #include <imgui.h>
+#include <algorithm>
 #include <limits>
 
 namespace Ursa::Editor::Bindings
@@ -34,6 +35,23 @@ struct ExpectedAssetTypeScope
 	~ExpectedAssetTypeScope()
 	{
 		scope.expectedAssetType = std::move(previous);
+	}
+};
+
+struct ExpectedObjectTypeScope
+{
+	EditorInvocation& scope;
+	String previous;
+
+	ExpectedObjectTypeScope(EditorInvocation& scope, String expected)
+	    : scope(scope), previous(std::move(scope.expectedObjectType))
+	{
+		scope.expectedObjectType = std::move(expected);
+	}
+
+	~ExpectedObjectTypeScope()
+	{
+		scope.expectedObjectType = std::move(previous);
 	}
 };
 
@@ -105,8 +123,57 @@ Json DefaultValue(const Json& descriptor)
 nlohmann::json EditorServices::Descriptor(EditorInvocation& scope, UInt64 revision, const String& path)
 {
 	scope.RequireProperties(revision);
-	return B::TakeBindingResult(scope.properties->DescribeProperty(path));
+	return B::TakeBindingResult(scope.propertyGroup ? scope.propertyGroup->DescribeProperty(path)
+	                                                : scope.properties->DescribeProperty(path));
 }
+
+namespace
+{
+Result<Json> ReadPropertyJson(EditorInvocation& scope, const String& path)
+{
+	if (scope.propertyGroup)
+	{
+		return scope.propertyGroup->TargetValue(scope.source.componentPrimaryIndex, path);
+	}
+	auto property = scope.properties->FindProperty(path);
+	return property ? property.value.Value() : Result<Json>::Failure(property.error);
+}
+
+Result<void> SetPropertyValue(EditorInvocation& scope, const String& path, Json value)
+{
+	Result<void> changed;
+	if (scope.propertyGroup)
+	{
+		changed = scope.propertyGroup->SetValue(path, std::move(value));
+	}
+	else
+	{
+		auto property = scope.properties->FindProperty(path);
+		changed = property ? property.value.SetValue(std::move(value)) : Result<void>::Failure(property.error);
+	}
+	if (changed && std::find(scope.pendingPropertyPaths.begin(), scope.pendingPropertyPaths.end(), path) ==
+	                   scope.pendingPropertyPaths.end())
+	{
+		scope.pendingPropertyPaths.push_back(path);
+	}
+	return changed;
+}
+
+Vector<String> PropertyPaths(EditorInvocation& scope)
+{
+	return scope.propertyGroup ? scope.propertyGroup->CommonPropertyPaths() : scope.properties->PropertyPaths();
+}
+
+bool HasPendingPropertyChanges(EditorInvocation& scope)
+{
+	if (!scope.propertyGroup)
+	{
+		return scope.properties->HasModifiedProperties();
+	}
+	const auto changes = scope.propertyGroup->PendingTargetChanges();
+	return std::any_of(changes.begin(), changes.end(), [](bool changed) { return changed; });
+}
+} // namespace
 
 UInt32 EditorServices::PropertyType(const Json& descriptor)
 {
@@ -423,7 +490,7 @@ Result<EditorServices::PropertyState> EditorServices::GetProperty(B::BindingCall
 	auto& scope = Scope(call);
 	const String fieldPath = B::ReadString(path);
 	const Json descriptor = Descriptor(scope, revision, fieldPath);
-	const auto property = B::TakeBindingResult(scope.properties->FindProperty(fieldPath));
+	const auto propertyValue = B::TakeBindingResult(ReadPropertyJson(scope, fieldPath));
 	PropertyState result;
 	result.F_Type = PropertyType(descriptor);
 	Json element = descriptor;
@@ -458,7 +525,8 @@ Result<EditorServices::PropertyState> EditorServices::GetProperty(B::BindingCall
 	result.F_EnumNames = call.arena.Array(names.data(), names.size());
 	result.F_EnumSignedValues = call.arena.Array(signedValues.data(), signedValues.size());
 	result.F_EnumUnsignedValues = call.arena.Array(unsignedValues.data(), unsignedValues.size());
-	result.F_Value = ReadValue(call, B::TakeBindingResult(property.Value()), descriptor);
+	result.F_Value = ReadValue(call, propertyValue, descriptor);
+	result.F_HasMultipleDifferentValues = descriptor.value("HasMultipleDifferentValues", false);
 	return Result<PropertyState>::Success(result);
 }
 
@@ -468,8 +536,7 @@ Result<void> EditorServices::SetProperty(B::BindingCall& call, UInt64 revision, 
 	auto& scope = Scope(call);
 	const String fieldPath = B::ReadString(path);
 	const auto descriptor = Descriptor(scope, revision, fieldPath);
-	auto property = B::TakeBindingResult(scope.properties->FindProperty(fieldPath));
-	return property.SetValue(WriteValue(scope, value, descriptor));
+	return SetPropertyValue(scope, fieldPath, WriteValue(scope, value, descriptor));
 }
 
 Result<void> EditorServices::ResizeArray(B::BindingCall& call, UInt64 revision, const B::Utf8View& path, Int32 size)
@@ -482,6 +549,16 @@ Result<void> EditorServices::ResizeArray(B::BindingCall& call, UInt64 revision, 
 	    static_cast<UInt64>(size) > scope.TransferBudget() / sizeof(PropertyValue))
 	{
 		throw std::runtime_error("Invalid serialized collection type or size");
+	}
+	if (scope.propertyGroup)
+	{
+		auto resized = scope.propertyGroup->ResizeCollection(fieldPath, static_cast<Size>(size));
+		if (resized && std::find(scope.pendingPropertyPaths.begin(), scope.pendingPropertyPaths.end(), fieldPath) ==
+		                   scope.pendingPropertyPaths.end())
+		{
+			scope.pendingPropertyPaths.push_back(fieldPath);
+		}
+		return resized;
 	}
 	auto property = B::TakeBindingResult(scope.properties->FindProperty(fieldPath));
 	Json value = B::TakeBindingResult(property.Value());
@@ -499,7 +576,13 @@ Result<void> EditorServices::ResizeArray(B::BindingCall& call, UInt64 revision, 
 	{
 		value.erase(value.end() - 1);
 	}
-	return property.SetValue(std::move(value));
+	auto resized = property.SetValue(std::move(value));
+	if (resized && std::find(scope.pendingPropertyPaths.begin(), scope.pendingPropertyPaths.end(), fieldPath) ==
+	                   scope.pendingPropertyPaths.end())
+	{
+		scope.pendingPropertyPaths.push_back(fieldPath);
+	}
+	return resized;
 }
 
 Result<UInt64> EditorServices::UpdateProperties(B::BindingCall& call)
@@ -510,7 +593,8 @@ Result<UInt64> EditorServices::UpdateProperties(B::BindingCall& call)
 	{
 		throw std::runtime_error("SerializedObject revision capacity exhausted");
 	}
-	B::CompleteBindingResult(scope.properties->Update());
+	B::CompleteBindingResult(scope.propertyGroup ? scope.propertyGroup->Update() : scope.properties->Update());
+	scope.pendingPropertyPaths.clear();
 	return Result<UInt64>::Success(++scope.revision);
 }
 
@@ -518,12 +602,24 @@ Result<bool> EditorServices::ApplyProperties(B::BindingCall& call, UInt64 revisi
 {
 	auto& scope = Scope(call);
 	scope.RequireProperties(revision);
-	const bool modified = scope.properties->HasModifiedProperties();
+	const bool modified = HasPendingPropertyChanges(scope);
 	if (modified && !scope.source.canEditTarget)
 	{
 		return Result<bool>::Failure("This Editor target is read-only");
 	}
-	B::CompleteBindingResult(scope.properties->Apply());
+	B::CompleteBindingResult(scope.propertyGroup ? scope.propertyGroup->Apply() : scope.properties->Apply());
+	if (modified)
+	{
+		for (const auto& path : scope.pendingPropertyPaths)
+		{
+			if (std::find(scope.appliedPropertyPaths.begin(), scope.appliedPropertyPaths.end(), path) ==
+			    scope.appliedPropertyPaths.end())
+			{
+				scope.appliedPropertyPaths.push_back(path);
+			}
+		}
+	}
+	scope.pendingPropertyPaths.clear();
 	if (modified)
 	{
 		scope.changed = true;
@@ -543,16 +639,15 @@ Result<bool> EditorServices::HasModifiedProperties(B::BindingCall& call, UInt64 
 {
 	auto& scope = Scope(call);
 	scope.RequireProperties(revision);
-	return Result<bool>::Success(scope.properties->HasModifiedProperties());
+	return Result<bool>::Success(HasPendingPropertyChanges(scope));
 }
 
 Result<B::DataView> EditorServices::GetPropertyPaths(B::BindingCall& call, UInt64 revision)
 {
 	auto& scope = Scope(call);
 	scope.RequireProperties(revision);
-	return Result<B::DataView>::Success(B::WriteArray<B::Utf8View>(call.arena, scope.properties->PropertyPaths(),
-	                                                               [&](const String& value)
-	                                                               { return call.arena.StringValue(value); }));
+	return Result<B::DataView>::Success(B::WriteArray<B::Utf8View>(
+	    call.arena, PropertyPaths(scope), [&](const String& value) { return call.arena.StringValue(value); }));
 }
 
 void EditorServices::DrawProperty(B::BindingCall& call, const String& path, const String& label)
@@ -676,10 +771,15 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			break;
 		}
 		case P::V_ObjectReference:
+		{
+			const auto descriptor = Descriptor(scope, scope.revision, path);
+			ExpectedObjectTypeScope expectedObjectType(scope,
+			                                           ToUrsaString(descriptor.value("TypeName", std::string{})));
 			value.F_Reference =
 			    B::TakeBindingResult(ObjectField(call, caption, value.F_Reference, state.F_ReferenceKind));
 			value.F_IsNull = !value.F_Reference.present;
 			break;
+		}
 		case P::V_AssetReference:
 		{
 			const auto descriptor = Descriptor(scope, scope.revision, path);
@@ -704,10 +804,22 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 				ImGui::PushID(elementPath.c_str());
 				if (index > 0 && ImGui::SmallButton("^"))
 				{
-					auto collection = B::TakeBindingResult(scope.properties->FindProperty(path));
-					Json elements = B::TakeBindingResult(collection.Value());
-					std::swap(elements[index], elements[index - 1]);
-					B::CompleteBindingResult(collection.SetValue(std::move(elements)));
+					if (scope.propertyGroup)
+					{
+						auto moved = scope.propertyGroup->MoveCollectionElement(path, index, index - 1);
+						B::CompleteBindingResult(moved);
+						if (std::find(scope.pendingPropertyPaths.begin(), scope.pendingPropertyPaths.end(), path) ==
+						    scope.pendingPropertyPaths.end())
+						{
+							scope.pendingPropertyPaths.push_back(path);
+						}
+					}
+					else
+					{
+						Json elements = B::TakeBindingResult(ReadPropertyJson(scope, path));
+						std::swap(elements[index], elements[index - 1]);
+						B::CompleteBindingResult(SetPropertyValue(scope, path, std::move(elements)));
+					}
 					ImGui::PopID();
 					return;
 				}
@@ -716,10 +828,22 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 					ImGui::SameLine();
 					if (ImGui::SmallButton("v"))
 					{
-						auto collection = B::TakeBindingResult(scope.properties->FindProperty(path));
-						Json elements = B::TakeBindingResult(collection.Value());
-						std::swap(elements[index], elements[index + 1]);
-						B::CompleteBindingResult(collection.SetValue(std::move(elements)));
+						if (scope.propertyGroup)
+						{
+							auto moved = scope.propertyGroup->MoveCollectionElement(path, index, index + 1);
+							B::CompleteBindingResult(moved);
+							if (std::find(scope.pendingPropertyPaths.begin(), scope.pendingPropertyPaths.end(), path) ==
+							    scope.pendingPropertyPaths.end())
+							{
+								scope.pendingPropertyPaths.push_back(path);
+							}
+						}
+						else
+						{
+							Json elements = B::TakeBindingResult(ReadPropertyJson(scope, path));
+							std::swap(elements[index], elements[index + 1]);
+							B::CompleteBindingResult(SetPropertyValue(scope, path, std::move(elements)));
+						}
 						ImGui::PopID();
 						return;
 					}
@@ -735,8 +859,7 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			return;
 	}
 	const auto descriptor = Descriptor(scope, scope.revision, path);
-	const auto property = B::TakeBindingResult(scope.properties->FindProperty(path));
-	const auto before = B::TakeBindingResult(property.Value());
+	const auto before = B::TakeBindingResult(ReadPropertyJson(scope, path));
 	const auto after = WriteValue(scope, value, descriptor, false);
 	if (before != after)
 	{
@@ -759,7 +882,7 @@ Result<bool> EditorServices::DrawDefaultInspector(B::BindingCall& call, UInt64 r
 	RequireGui(call);
 	auto& scope = Scope(call);
 	scope.RequireProperties(revision);
-	for (const auto& path : scope.properties->PropertyPaths())
+	for (const auto& path : PropertyPaths(scope))
 	{
 		const auto descriptor = Descriptor(scope, scope.revision, path);
 		if (!descriptor.value("Hidden", false))

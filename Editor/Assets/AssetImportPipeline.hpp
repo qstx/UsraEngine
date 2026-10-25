@@ -13,6 +13,7 @@ struct AssetImportOptions
 	String target = "WindowsVulkan";
 	String profile = "Editor";
 	VirtualPath scope;
+	Vector<VirtualPath> sources;
 	bool force = false;
 	bool bootstrapOnly = false;
 	bool buildScripts = true;

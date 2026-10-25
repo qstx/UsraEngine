@@ -9,6 +9,7 @@
 #include <Assets/ModelImporter.hpp>
 #include <Assets/ModelImportView.hpp>
 #include <Inspector/MeshInspector.hpp>
+#include <Inspector/ReferencePicker.hpp>
 #include <Scripting/Bindings/EditorServices.hpp>
 #include <Editor.generated.hpp>
 #include <Assets/TextureImportView.hpp>
@@ -242,7 +243,9 @@ struct Harness
 	std::unique_ptr<AssetPreviewPanel> preview;
 	AssetInspectorPanel inspector;
 	ProjectBrowserPanel projectPanel;
+	ProjectBrowserActions projectActions;
 	bool drawProject = false;
+	bool drawViews = true;
 	std::unique_ptr<SceneViewPanel> views;
 	EditorHierarchy hierarchy;
 	PlaySession play;
@@ -260,6 +263,7 @@ struct Harness
 	bool failRender = false;
 	std::function<void()> duringRender;
 	std::function<void()> extraUi;
+	std::function<Result<void>(const EditorDragSession&, Vec3)> placeAssets;
 	bool focused = false;
 	String diagnostic;
 	String projectKey = "preview-test";
@@ -527,15 +531,19 @@ struct Harness
 			ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
 			ImGui::SetNextWindowSize({640, 410}, ImGuiCond_Always);
 			bool projectOpen = true;
-			Done(projectPanel.Draw(*workspace, browser, selection, hierarchy, projectOpen, false, diagnostic, {}));
+			Done(projectPanel.Draw(*workspace, browser, selection, hierarchy, projectOpen, false, diagnostic,
+			                       projectActions));
 		}
-		bool showScene = true, showGame = true;
-		ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
-		ImGui::SetNextWindowSize({640, 410}, ImGuiCond_Always);
-		Done(views->Draw(*author, *documents->Current(), hierarchy, play, nullptr, "preview-test", showScene, showGame,
-		                 focused, diagnostic));
-		ImGui::SetWindowPos("Game", {0, 420});
-		ImGui::SetWindowSize("Game", {640, 420});
+		if (drawViews)
+		{
+			bool showScene = true, showGame = true;
+			ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+			ImGui::SetNextWindowSize({640, 410}, ImGuiCond_Always);
+			Done(views->Draw(*author, *documents->Current(), hierarchy, play, nullptr, "preview-test", showScene,
+			                 showGame, focused, diagnostic, placeAssets));
+			ImGui::SetWindowPos("Game", {0, 420});
+			ImGui::SetWindowSize("Game", {640, 420});
+		}
 		if (draw)
 		{
 			if (!docked)
@@ -557,6 +565,7 @@ struct Harness
 		{ return Render(scene, output, type, camera); };
 		Done(views->RenderPending(*author, play, render));
 		Done(preview->RenderPending(delta, render));
+		Done(RenderReferencePickerPreviews(delta, render));
 		Done(gui->EndFrame());
 		Expect(Probe::callbacks == 0, "Preview invoked a gameplay lifecycle callback");
 	}
@@ -1194,6 +1203,54 @@ void ContentContracts(Harness& h)
 	       "100% texture pan did not change clipped pixels");
 }
 
+void ReferencePickerPreviewIsolation(Harness& h)
+{
+	Probe::callbacks = 0;
+	const auto sourceBytesBefore = Take(h.files.Read(h.materialPath));
+	const auto metadata = Take(h.workspace->Database()->Metadata(h.materialPath));
+	AssetPreviewTarget target;
+	target.kind = AssetPreviewKind::Material;
+	target.identity = {metadata.guid, 0};
+	target.path = h.materialPath;
+	target.projectSession = ResourceId::Generate();
+	Vector<ReferencePickerOption> options{{"none", "None", "None", {}, true}};
+	ReferencePickerOption candidate{"asset:picker-material", "Picker material", "Material", h.materialPath.ToString(),
+	                                true};
+	candidate.loadAssetPreviewContent = [&h, target] { return LoadAssetPreviewContent(target, *h.workspace); };
+	options.push_back(std::move(candidate));
+	const String controlId = "asset-preview-picker-isolation";
+	const auto pickerButtonId = ImHashStr("...", 0, ImHashStr(controlId.c_str(), 0, ImHashStr("Picker Preview Test")));
+	h.extraUi = [&]
+	{
+		ImGui::SetNextWindowPos({660, 20}, ImGuiCond_Always);
+		ImGui::SetNextWindowSize({560, 430}, ImGuiCond_Always);
+		ImGui::Begin("Picker Preview Test");
+		(void)DrawReferencePickerButton(controlId, "Picker material", "Material", options, "asset:picker-material",
+		                                "picker-preview-isolation");
+		ImGui::End();
+	};
+	const auto* footerContent = h.preview->Content();
+	const auto footerTarget = h.preview->State().Target();
+	const auto registeredBefore = h.gui->RegisteredTextureCount();
+	const auto rendersBefore = h.previewCalls;
+	ImGui::ActivateItemByID(pickerButtonId);
+	h.Frame();
+	Expect(HasActiveReferencePickerSession(h.gui->Context()), "GPU picker preview did not open its own session");
+	Expect(h.preview->Content() == footerContent && h.preview->State().Target().SameIdentity(footerTarget) &&
+	           h.previewCalls >= rendersBefore + 1,
+	       "Candidate rendering shared Inspector state or skipped its private GPU draw");
+	Expect(h.gui->RegisteredTextureCount() > registeredBefore,
+	       "Picker preview did not register a private render target");
+	CancelReferencePickerSessions(h.gui->Context());
+	h.Frame();
+	h.Frame();
+	h.extraUi = {};
+	Expect(h.gui->RegisteredTextureCount() == registeredBefore,
+	       "Closing the picker failed to retire its private GPU preview image");
+	Expect(Take(h.files.Read(h.materialPath)) == sourceBytesBefore && Probe::callbacks == 0,
+	       "Picker preview or cancellation saved its source asset or invoked gameplay lifecycle callbacks");
+}
+
 void ImportedUiContracts(Harness& h)
 {
 	const auto guid = Take(h.workspace->Database()->Metadata(h.modelPath)).guid;
@@ -1251,6 +1308,154 @@ void ImportedUiContracts(Harness& h)
 	Expect(!h.selection.assetLocalFileId && h.selection.assetRole == EditorAssetSelectionRole::Source &&
 	           !h.preview->State().Target().identity.localFileId,
 	       "Project source row did not restore the source selection role");
+	h.projectActions.renameAsset = [](const VirtualPath&, const VirtualPath&) { return Result<void>{}; };
+	if (auto* projectWindow = ImGui::FindWindowByName("Project"))
+	{
+		ImGui::FocusWindow(projectWindow);
+	}
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F2, true);
+	h.Frame();
+	const bool renamePopupOpen =
+	    std::any_of(GImGui->OpenPopupStack.begin(), GImGui->OpenPopupStack.end(), [](const ImGuiPopupData& popup)
+	                { return popup.Window && std::string(popup.Window->Name) == "Rename Project Asset"; });
+	Expect(renamePopupOpen, "F2 did not invoke the Project rename command for a selected source asset");
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F2, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+	h.Frame();
+	ImGuiWindow* projectWindow = ImGui::FindWindowByName("Project");
+	Expect(projectWindow != nullptr, "Project window disappeared after closing rename dialog");
+	ImGui::FocusWindow(projectWindow);
+	ImGui::ActivateItemByID(projectWindow->GetID("##NewAssetPath"));
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F2, true);
+	h.Frame();
+	const bool textFocusedRenamePopupOpen =
+	    std::any_of(GImGui->OpenPopupStack.begin(), GImGui->OpenPopupStack.end(), [](const ImGuiPopupData& popup)
+	                { return popup.Window && std::string(popup.Window->Name) == "Rename Project Asset"; });
+	Expect(!textFocusedRenamePopupOpen, "F2 was intercepted while the Project path input held text focus");
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F2, false);
+	const auto* textFocusSelection = h.selection.PrimaryEntry();
+	Expect(textFocusSelection != nullptr, "Project text-focus test lost the selected asset");
+	const auto textFocusIdentity = *textFocusSelection;
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Delete, true);
+	h.Frame();
+	Expect(h.selection.PrimaryEntry() && h.selection.PrimaryEntry()->SameIdentity(textFocusIdentity) &&
+	           h.browser.Find(textFocusIdentity.assetPath),
+	       "Delete while a Project text field had focus removed or replaced the selected asset");
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Delete, false);
+	h.Frame();
+	UInt32 deleteCalls = 0;
+	h.projectActions.deleteAssets = [&](const Vector<VirtualPath>&) -> Result<void>
+	{
+		++deleteCalls;
+		return {};
+	};
+	h.projectPanel.RequestDeleteSelected(h.selection);
+	h.Frame();
+	ImGuiWindow* deleteDialog = nullptr;
+	for (auto* window : GImGui->Windows)
+	{
+		if (window->Active && std::string(window->Name).find("Delete Project Assets") != std::string::npos)
+		{
+			deleteDialog = window;
+			break;
+		}
+	}
+	Expect(deleteDialog != nullptr && deleteCalls == 0,
+	       "Project Delete did not open a confirmation dialog before invoking its action");
+	ImGui::ActivateItemByID(ImHashStr("Cancel", 0, deleteDialog->ID));
+	h.Frame();
+	Expect(deleteCalls == 0 && Take(h.files.Exists(h.modelPath)),
+	       "Cancelling the Project Delete dialog mutated the selected source");
+	const VirtualPath openScenePath = h.documents->Current()->Path();
+	const ResourceId openSceneGuid = Take(h.workspace->Database()->Metadata(openScenePath)).guid;
+	Expect(h.selection.SelectAsset(openScenePath, 0, {}, openSceneGuid),
+	       "Cannot select the open scene source for the unsaved Delete prompt test");
+	h.projectActions.deleteAssets = [&](const Vector<VirtualPath>& paths)
+	{
+		if (h.documents->Current() && h.documents->Current()->Path() == paths.front() &&
+		    h.documents->Current()->Dirty())
+		{
+			auto requested = h.documents->RequestClose();
+			return Result<void>::Failure(requested ? "Choose Save, Discard, or Cancel before deletion"
+			                                       : requested.error);
+		}
+		++deleteCalls;
+		return h.workspace->Database()->RemoveBatch(paths);
+	};
+	h.projectPanel.RequestDeleteSelected(h.selection);
+	h.Frame();
+	deleteDialog = nullptr;
+	for (auto* window : GImGui->Windows)
+	{
+		if (window->Active && std::string(window->Name).find("Delete Project Assets") != std::string::npos)
+		{
+			deleteDialog = window;
+			break;
+		}
+	}
+	Expect(deleteDialog != nullptr, "Delete prompt disappeared before checking the open draft");
+	ImGui::ActivateItemByID(ImHashStr("Delete", 0, deleteDialog->ID));
+	h.Frame();
+	Expect(h.documents->PromptPending() && h.documents->Current()->Dirty() && Take(h.files.Exists(openScenePath)) &&
+	           deleteCalls == 0,
+	       "Deleting an open dirty source bypassed Save/Discard/Cancel or modified it before a choice");
+	Done(h.documents->ResolvePrompt(UnsavedChoice::Cancel));
+	ImGui::ActivateItemByID(ImHashStr("Cancel", 0, deleteDialog->ID));
+	h.Frame();
+	Expect(h.documents->Current() && h.documents->Current()->Dirty() && Take(h.files.Exists(openScenePath)) &&
+	           deleteCalls == 0,
+	       "Canceling an open-document Delete prompt changed the draft or source");
+	Expect(h.selection.SelectAsset(h.modelPath, 0, {}, Take(h.workspace->Database()->Metadata(h.modelPath)).guid),
+	       "Cannot restore the Project selection after Delete prompt cancellation");
+	const auto* previousProjectTarget = h.selection.PrimaryEntry();
+	Expect(previousProjectTarget != nullptr, "Project blank-context test has no selected target");
+	const auto previousProjectIdentity = *previousProjectTarget;
+	ImGui::FocusWindow(list);
+	const ImGuiID projectSearchId = list->GetID("##ProjectSearch");
+	ImGui::ActivateItemByID(projectSearchId);
+	h.Frame();
+	ImGui::GetIO().AddInputCharactersUTF8("__no_project_assets_match__");
+	h.Frame();
+	Expect(GImGui->InputTextState.ID == projectSearchId, "Project search field did not receive focus");
+	Expect(std::string(GImGui->InputTextState.GetText()) == "__no_project_assets_match__",
+	       "Project search field did not receive the no-results query");
+	h.drawViews = false;
+	h.Frame();
+	list = ImGui::FindWindowByName(list->Name);
+	Expect(list != nullptr, "Project contents window disappeared before testing its background menu");
+	const ImVec2 projectBackground{list->Pos.x + list->Size.x * .65f, list->Pos.y + list->Size.y * .75f};
+	const Size backgroundPopupCount = GImGui->OpenPopupStack.Size;
+	ImGui::GetIO().AddMousePosEvent(projectBackground.x, projectBackground.y);
+	h.Frame();
+	ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+	h.Frame();
+	ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+	h.Frame();
+	const bool backgroundMenuOpen = GImGui->OpenPopupStack.Size > backgroundPopupCount;
+	Expect(backgroundMenuOpen, "Right-clicking Project contents background opened no context menu");
+	Expect(h.selection.PrimaryEntry() && h.selection.PrimaryEntry()->SameIdentity(previousProjectIdentity),
+	       "Opening Project's background menu reused or changed the previous selection target");
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+	h.Frame();
+	ImGui::FocusWindow(list);
+	ImGui::ActivateItemByID(projectSearchId);
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, false);
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Backspace, true);
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Backspace, false);
+	h.Frame();
+	h.drawViews = true;
 	ImGui::FocusWindow(list);
 	ImGui::ActivateItemByID(childId);
 	h.Frame();
@@ -1280,6 +1485,8 @@ void ImportedUiContracts(Harness& h)
 	using FieldResult = Ursa::Scripting::Bindings::CallbackResult<OptionalField>;
 	std::unique_ptr<FieldResult> managedField;
 	ImVec2 meshDrop, managedDrop, materialDrop;
+	bool drawSceneExportSource = false;
+	ImVec2 sceneExportSourceCenter;
 	auto* materialReceiver = Take(receiver->AddComponent<MeshRendererComponent>());
 	Done(materialReceiver->SetSharedMaterials({nullptr}));
 	h.drawProject = true;
@@ -1315,6 +1522,37 @@ void ImportedUiContracts(Harness& h)
 		materialDrop.y += ImGui::GetFrameHeightWithSpacing() * 3 + ImGui::GetFrameHeight() * .5f;
 		Take(DrawMeshInspector(*materialReceiver, *h.workspace, *resources));
 		ImGui::End();
+		if (drawSceneExportSource)
+		{
+			ImGui::SetNextWindowPos({700, 500}, ImGuiCond_Always);
+			ImGui::SetNextWindowSize({300, 100}, ImGuiCond_Always);
+			ImGui::Begin("Scene Export Drag Source");
+			ImGui::Button("Drag Scene roots to Project");
+			const ImVec2 min = ImGui::GetItemRectMin();
+			const ImVec2 max = ImGui::GetItemRectMax();
+			sceneExportSourceCenter = {(min.x + max.x) * .5f, (min.y + max.y) * .5f};
+			if (ImGui::BeginDragDropSource())
+			{
+				const auto sceneRoots = h.author->GetScene().RootGameObjects();
+				Vector<EditorSelectionEntry> entries;
+				for (Size index = 0; index < std::min<Size>(2, sceneRoots.size()); ++index)
+				{
+					EditorSelectionEntry entry;
+					entry.kind = EditorSelectionKind::GameObject;
+					entry.documentId = h.documents->Current()->Id();
+					entry.objectId = Take(h.author->GetScene().PersistentId(sceneRoots[index]));
+					entries.push_back(entry);
+				}
+				const auto drag = BeginEditorDragSession(entries, h.selection.revision);
+				if (drag)
+				{
+					ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value, sizeof(drag.value));
+				}
+				ImGui::TextUnformatted("Scene object roots");
+				ImGui::EndDragDropSource();
+			}
+			ImGui::End();
+		}
 	};
 	h.Frame();
 	h.Frame();
@@ -1350,9 +1588,12 @@ void ImportedUiContracts(Harness& h)
 		h.Mouse(source, true);
 		h.Mouse({source.x + 12, source.y}, true);
 		const auto* payload = ImGui::GetDragDropPayload();
-		Expect(payload && payload->IsDataType("URSA_ASSET_REFERENCE"),
-		       "Actual Project drag did not create an asset payload");
-		const auto sent = *static_cast<const AssetReference*>(payload->Data);
+		Expect(payload && payload->IsDataType(editorDragSessionPayloadType),
+		       "Actual Project drag did not create a DragSession payload");
+		auto decoded = DecodeEditorDragPayload(payload->DataType, payload->Data, payload->DataSize);
+		Expect(decoded && decoded.value.sources.size() == 1,
+		       "A single Project asset did not produce exactly one session source");
+		const auto sent = Take(SingleAssetDragReference(decoded.value));
 		std::cout << "Project drag " << sent.guid.ToString().c_str() << ':' << sent.localFileId << " from " << source.x
 		          << ',' << source.y << " to " << destination.x << ',' << destination.y << " field " << targetField
 		          << '\n'
@@ -1390,6 +1631,113 @@ void ImportedUiContracts(Harness& h)
 	       "Project Material drag did not assign its precise output reference");
 	drag(childId, "Native Material Drop", "Element", true);
 	Expect(materialReceiver->SharedMaterials().front() == assignedMaterial, "A Mesh drop replaced a Material field");
+	// Drive the Project payload through the real Scene image item. The Project window is
+	// shown alone while the drag starts because this harness normally overlays it with Scene.
+	h.drawProject = true;
+	h.drawViews = false;
+	h.Frame();
+	Expect(h.selection.SelectAsset(h.modelPath, h.meshId, "Mesh", guid),
+	       "Cannot seed a two-object Project selection for Scene drag testing");
+	auto sceneDragSources = h.selection.entries;
+	Expect(h.selection.SelectAsset(h.modelPath, materialObject->localFileId, "Material", guid),
+	       "Cannot seed a second Project object for Scene drag testing");
+	sceneDragSources.push_back(h.selection.entries.front());
+	Expect(h.selection.SelectEntries(sceneDragSources, 0, sceneDragSources.front()),
+	       "Cannot select multiple Project objects for Scene drag testing");
+	Vector<Vec3> sceneDropPoints;
+	Vector<Size> sceneDropSourceCounts;
+	h.placeAssets = [&](const EditorDragSession& session, Vec3 point)
+	{
+		sceneDropPoints.push_back(point);
+		sceneDropSourceCounts.push_back(session.sources.size());
+		return Result<void>::Success();
+	};
+	const auto dropOn = [&](ImVec2 destination)
+	{
+		auto* projectWindow = ImGui::FindWindowByName(list->Name);
+		Expect(projectWindow != nullptr, "Project contents disappeared before the Scene drag");
+		const auto source = itemCenter(projectWindow, childId);
+		h.Mouse(source, false);
+		h.Mouse(source, true);
+		h.Mouse({source.x + 14, source.y}, true);
+		Expect(ImGui::GetDragDropPayload() && ImGui::GetDragDropPayload()->IsDataType(editorDragSessionPayloadType),
+		       "Project did not start a unified payload for the Scene drop test");
+		h.drawViews = true;
+		h.Frame();
+		h.Mouse(destination, true);
+		h.Mouse(destination, true);
+		h.Mouse(destination, false);
+	};
+	h.drawViews = true;
+	h.Frame();
+	const auto sceneImage = h.views->SceneLayout().displayRect;
+	Expect(sceneImage.width > 0 && sceneImage.height > 0, "Scene image has no visible layout for drag testing");
+	h.drawViews = false;
+	h.Frame();
+	dropOn({sceneImage.x + sceneImage.width * .5f, sceneImage.y + sceneImage.height * .5f});
+	Expect(sceneDropPoints.size() == 1 && sceneDropSourceCounts.front() == 2 &&
+	           std::isfinite(sceneDropPoints.front().x) && std::isfinite(sceneDropPoints.front().y) &&
+	           std::isfinite(sceneDropPoints.front().z),
+	       "Dropping a Project object on the Scene image did not report its resolved world point");
+	// The toolbar and Game image are separate ImGui items and must not reach the Scene placement callback.
+	h.drawViews = false;
+	h.Frame();
+	const auto beforeRejectedDrops = sceneDropPoints.size();
+	dropOn({sceneImage.x + sceneImage.width * .5f, sceneImage.y - 12.f});
+	Expect(sceneDropPoints.size() == beforeRejectedDrops, "The Scene toolbar accepted an object drop");
+	h.drawViews = true;
+	h.Frame();
+	auto* gameWindow = ImGui::FindWindowByName("Game");
+	Expect(gameWindow != nullptr, "Game view window is missing during Scene drop validation");
+	const ImVec2 gameDrop{gameWindow->Pos.x + gameWindow->Size.x * .5f, gameWindow->Pos.y + gameWindow->Size.y * .6f};
+	h.drawViews = false;
+	h.Frame();
+	dropOn(gameDrop);
+	Expect(sceneDropPoints.size() == beforeRejectedDrops, "The Game view accepted a Scene placement drop");
+	h.placeAssets = {};
+	Size prefabExportCalls = 0;
+	Size exportedRootCount = 0;
+	String exportedFolder;
+	h.projectActions.exportScenePrefabs = [&](const EditorDragSession& session, const String& folder)
+	{
+		++prefabExportCalls;
+		exportedRootCount = session.sources.size();
+		exportedFolder = folder;
+		return Result<void>{};
+	};
+	drawSceneExportSource = true;
+	h.drawProject = true;
+	h.drawViews = false;
+	h.Frame();
+	auto* exportWindow = ImGui::FindWindowByName("Scene Export Drag Source");
+	Expect(exportWindow != nullptr, "Scene export drag source window was not drawn");
+	ImGui::FocusWindow(exportWindow);
+	h.Mouse(sceneExportSourceCenter, false);
+	h.Mouse(sceneExportSourceCenter, true);
+	h.Mouse({sceneExportSourceCenter.x + 14.f, sceneExportSourceCenter.y}, true);
+	Expect(ImGui::GetDragDropPayload() && ImGui::GetDragDropPayload()->IsDataType(editorDragSessionPayloadType),
+	       "Scene root drag did not create a unified payload");
+	ImGuiWindow* projectContents = nullptr;
+	for (auto* window : GImGui->Windows)
+	{
+		if (window->Active && std::string(window->Name).find("ProjectFolderContents") != std::string::npos)
+		{
+			projectContents = window;
+			break;
+		}
+	}
+	Expect(projectContents != nullptr, "Project folder contents window is missing for Prefab export");
+	const ImVec2 projectDrop{projectContents->Pos.x + projectContents->Size.x - 28.f,
+	                         projectContents->Pos.y + projectContents->Size.y - 28.f};
+	h.Mouse(projectDrop, true);
+	h.Mouse(projectDrop, true);
+	h.Mouse(projectDrop, false);
+	Expect(prefabExportCalls == 1 && exportedRootCount == 2 && exportedFolder.empty(),
+	       "Dropping Scene roots on Project did not request one independent Prefab export batch");
+	drawSceneExportSource = false;
+	h.projectActions.exportScenePrefabs = {};
+	h.drawViews = true;
+	h.Frame();
 	const auto exactField = Bindings::EditorServices::ReadReference(invocation, managedField->value.F_value);
 	const nlohmann::json scriptPayload{
 	    {"FormatVersion", 1},
@@ -1574,6 +1922,148 @@ void ImportedUiContracts(Harness& h)
 	       "A failed animation model context displayed another target");
 	Take(ImportedAssetInspector::Open(*h.workspace, {candidate.guid, selectedClip}, "AnimationClip"));
 	Done(h.workspace->Database()->Remove(noGeometryPath));
+}
+
+void ProjectDeleteDraftChoices(Harness& h)
+{
+	const VirtualPath source = h.documents->Current()->Path();
+	const VirtualPath metadataPath = Take(VirtualPath::Parse(source.ToString() + ".meta"));
+	const ResourceId guid = Take(h.workspace->Database()->Metadata(source)).guid;
+	const Vector<UInt8> originalSource = Take(h.files.Read(source));
+	const Vector<UInt8> originalMetadata = Take(h.files.Read(metadataPath));
+	UInt32 removedSources = 0;
+	h.projectActions.deleteAssets = [&](const Vector<VirtualPath>& paths)
+	{
+		if (h.documents->Current() && h.documents->Current()->Path() == paths.front() &&
+		    h.documents->Current()->Dirty())
+		{
+			auto requested = h.documents->RequestClose();
+			return Result<void>::Failure(requested ? "Resolve the document draft before Delete" : requested.error);
+		}
+		++removedSources;
+		auto removed = h.workspace->Database()->RemoveBatch(paths);
+		if (removed)
+		{
+			removed = h.workspace->Refresh();
+		}
+		return removed;
+	};
+	h.drawProject = true;
+	h.selection.beforeChange = {};
+	auto deleteDialog = [&]() -> ImGuiWindow*
+	{
+		for (auto* window : GImGui->Windows)
+		{
+			if (window->Active && std::string(window->Name).find("Delete Project Assets") != std::string::npos)
+			{
+				return window;
+			}
+		}
+		return nullptr;
+	};
+	auto openAndRequestDocumentChoice = [&]
+	{
+		Expect(h.selection.SelectAsset(source, 0, {}, guid), "Cannot select the source for Delete choice testing");
+		h.projectPanel.RequestDeleteSelected(h.selection);
+		h.Frame();
+		Expect(deleteDialog() != nullptr, "Project Delete dialog did not open for a document-backed source");
+		ImGui::ActivateItemByID(ImHashStr("Delete", 0, deleteDialog()->ID));
+		h.Frame();
+		Expect(h.documents->PromptPending(), "Deleting an open dirty source skipped the document prompt");
+	};
+	auto cancelDeleteDialog = [&]
+	{
+		h.Frame();
+		auto* dialog = deleteDialog();
+		Expect(dialog != nullptr, "Delete confirmation closed before the operation was resolved");
+		ImGui::ActivateItemByID(ImHashStr("Cancel", 0, dialog->ID));
+		h.Frame();
+	};
+	auto restoreFixture = [&]
+	{
+		Done(h.files.WriteAtomic(source, originalSource));
+		Done(h.files.WriteAtomic(metadataPath, originalMetadata));
+		Done(h.workspace->Refresh());
+		Done(h.browser.Refresh(*h.workspace));
+		Expect(Take(h.workspace->Database()->Metadata(source)).guid == guid,
+		       "Restoring the Delete prompt fixture changed its source GUID");
+	};
+	openAndRequestDocumentChoice();
+	Done(h.documents->ResolvePrompt(UnsavedChoice::Cancel));
+	cancelDeleteDialog();
+	Expect(h.documents->Current() && h.documents->Current()->Dirty() && Take(h.files.Read(source)) == originalSource &&
+	           removedSources == 0,
+	       "Cancel in the Delete document prompt changed the open draft or source asset");
+	auto resolveAndDelete = [&](UnsavedChoice choice)
+	{
+		openAndRequestDocumentChoice();
+		Done(h.documents->ResolvePrompt(choice));
+		Expect(!h.documents->Current(), "Save/Discard did not close the document before source deletion");
+		h.Frame();
+		ImGuiWindow* dialog = deleteDialog();
+		Expect(dialog != nullptr, "Delete confirmation was lost after resolving the document choice");
+		ImGui::ActivateItemByID(ImHashStr("Delete", 0, dialog->ID));
+		h.Frame();
+		Expect(!Take(h.files.Exists(source)) && removedSources == (choice == UnsavedChoice::Save ? 1u : 2u),
+		       "Confirmed Delete did not follow the Save/Discard document choice");
+		restoreFixture();
+		auto reopened = Take(OpenSceneDocument(source, ResourceKind::Scene, h.registry, h.documents->Session()));
+		Done(h.documents->RequestOpen(std::move(reopened)));
+		h.author = h.documents->Current()->Payload<SceneDraft>();
+		Expect(h.author != nullptr, "Reopened Delete fixture lost its Scene draft");
+		Take(h.author->GetScene().CreateGameObject("Unsaved marker"));
+		h.documents->Current()->MarkDirty();
+	};
+	resolveAndDelete(UnsavedChoice::Save);
+	resolveAndDelete(UnsavedChoice::Discard);
+	Expect(h.selection.SelectAsset(source, 0, {}, guid), "Cannot select the reopened source for the Move test");
+	h.projectActions.renameAsset = [&](const VirtualPath& oldPath, const VirtualPath& newPath)
+	{
+		auto moved = h.workspace->Database()->Move(oldPath, newPath);
+		if (moved)
+		{
+			moved = h.workspace->Refresh();
+		}
+		if (moved)
+		{
+			moved = h.documents->FollowMovedSource();
+		}
+		return moved;
+	};
+	h.projectPanel.RequestRenameSelected();
+	h.Frame();
+	ImGuiWindow* renameDialog = nullptr;
+	for (auto* window : GImGui->Windows)
+	{
+		if (window->Active && std::string(window->Name).find("Rename Project Asset") != std::string::npos)
+		{
+			renameDialog = window;
+			break;
+		}
+	}
+	Expect(renameDialog != nullptr, "Project rename dialog did not open for the active dirty source");
+	ImGui::ActivateItemByID(ImHashStr("New path", 0, renameDialog->ID));
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, false);
+	ImGui::GetIO().AddInputCharactersUTF8("External/Unsaved.ursascene");
+	h.Frame();
+	ImGui::ActivateItemByID(ImHashStr("Rename", 0, renameDialog->ID));
+	h.Frame();
+	const VirtualPath movedPath = Path("prj:External/Unsaved.ursascene");
+	Expect(h.documents->Current()->Path() == movedPath && h.documents->Current()->Dirty() &&
+	           h.documents->Current()->Id() == guid && Take(h.workspace->Database()->SourcePath(guid)) == movedPath,
+	       "Renaming the open dirty source in the Project window lost its GUID-bound draft");
+	Done(h.workspace->Database()->Move(movedPath, source));
+	Done(h.workspace->Refresh());
+	Done(h.documents->FollowMovedSource());
+	Done(h.browser.Refresh(*h.workspace));
+	Expect(h.documents->Current()->Path() == source && h.documents->Current()->Dirty(),
+	       "Restoring the Project rename fixture lost its dirty document draft");
+	h.drawProject = false;
 }
 
 void Run(const std::filesystem::path& evidence, bool managedOnly = false)
@@ -2020,6 +2510,7 @@ void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 	       "Repeated selection leaked registered UI textures");
 	ContentContracts(h);
 	h.Select(h.materialPath);
+	ReferencePickerPreviewIsolation(h);
 	const auto initialHeight = h.preview->ReservedHeight();
 	const auto initialImageHeight = h.preview->ImageRect().height;
 	Expect(h.preview->DividerRect().height >= 10, "Preview divider has an undersized drag target");
@@ -2140,6 +2631,7 @@ void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 	Done(submittedUi->Wait());
 	Expect(previewRoot.expired() && !h.preview->Content() && h.gui->RegisteredTextureCount() == registrationsAtRest,
 	       "Submitted-frame selection/reload retained private scene or registered preview images");
+	ProjectDeleteDraftChoices(h);
 	Expect(Take(h.files.Read(h.modelPath)) == h.sourceBytes && Take(h.files.Read(h.materialPath)) == h.materialBytes &&
 	           Take(h.files.Read(Path("prj:Unsaved.ursascene"))) == h.sceneBytes,
 	       "Viewing changed source bytes");

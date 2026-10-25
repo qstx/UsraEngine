@@ -22,6 +22,7 @@ internal struct EditorExtensionInfo
 	public string Path;
 	public string Target;
 	public string Title;
+	public bool CanEditMultipleObjects;
 }
 
 [WireValue]

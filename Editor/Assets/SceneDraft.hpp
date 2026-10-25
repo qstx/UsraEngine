@@ -7,10 +7,26 @@
 #include <Scene/EditorGizmo.hpp>
 #include <Scene/ComponentEditors.hpp>
 #include <Scripting/ScriptTypeDescriptor.hpp>
+#include <optional>
 
 namespace Ursa::Editor
 {
 using EditContextSetup = std::function<Result<void>(ComponentLoadContext&)>;
+
+struct SceneInstancePropertyOverride
+{
+	ResourceId instanceId;
+	ResourceId sourceObjectId;
+	String path;
+	nlohmann::json value;
+};
+
+struct SceneAssetPlacement
+{
+	ResourceId guid;
+	String kind;
+	nlohmann::json modelDocument = nlohmann::json::object();
+};
 
 class SceneDraft final
 {
@@ -82,11 +98,17 @@ public:
 
 	Result<void> SetInstanceProperty(ResourceId instanceId, ResourceId sourceObjectId, const String& pointer,
 	                                 const nlohmann::json& value);
+	Result<void> SetInstanceProperties(const Vector<SceneInstancePropertyOverride>& overrides);
 
 	Result<void> SetInstanceStructure(ResourceId instanceId, const String& operation, const nlohmann::json& value);
 
 	Result<ResourceId> PlacePrefab(ResourceId prefabId, ResourceId parentId, const VirtualPath& scenePath,
 	                               ResourceId sceneId);
+	Result<Vector<ResourceId>> PlacePrefabBatch(const Vector<std::pair<ResourceId, ResourceId>>& placements,
+	                                            const VirtualPath& scenePath, ResourceId sceneId);
+	Result<Vector<ResourceId>> PlaceImportedAssets(const Vector<SceneAssetPlacement>& placements, ResourceId parentId,
+	                                               std::optional<Size> insertIndex, const VirtualPath& scenePath,
+	                                               ResourceId sceneId);
 
 private:
 	SceneDraft(ResourceKind resourceKind, ComponentRegistry& componentRegistry, ResourceSession& resourceSession,

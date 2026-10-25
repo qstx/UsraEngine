@@ -1,6 +1,8 @@
 #include <Assets/AssetDatabase.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceId.hpp>
+#include <Vfs/DirectoryFileProvider.hpp>
+#include <Vfs/MemoryFileProvider.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +13,227 @@ namespace
 {
 using namespace Ursa;
 using namespace Ursa::Editor;
+
+class FailingMemoryProvider final : public VirtualFileProvider
+{
+public:
+	String Identity() const override
+	{
+		return memory.Identity();
+	}
+
+	String SourceLabel() const override
+	{
+		return memory.SourceLabel();
+	}
+
+	Result<bool> Exists(const String& path) const override
+	{
+		return memory.Exists(path);
+	}
+
+	Result<UInt64> Size(const String& path) const override
+	{
+		return memory.Size(path);
+	}
+
+	Result<Vector<UInt8>> ReadRange(const String& path, UInt64 offset, UInt64 size) const override
+	{
+		return memory.ReadRange(path, offset, size);
+	}
+
+	Result<Vector<String>> List() const override
+	{
+		return memory.List();
+	}
+
+	Result<void> WriteAtomic(const String& path, const Vector<UInt8>& bytes, bool createDirectories) override
+	{
+		if (writesBeforeFailure > 0 && --writesBeforeFailure == 0)
+		{
+			writesBeforeFailure = -1;
+			return Result<void>::Failure("injected atomic write failure");
+		}
+		return memory.WriteAtomic(path, bytes, createDirectories);
+	}
+
+	Result<void> Append(const String& path, const Vector<UInt8>& bytes, bool createDirectories) override
+	{
+		return memory.Append(path, bytes, createDirectories);
+	}
+
+	Result<void> CreateDirectory(const String& path) override
+	{
+		(void)path;
+		return {};
+	}
+
+	Result<void> RemoveDirectory(const String& path, bool removeEmptyChildren) override
+	{
+		(void)path;
+		(void)removeEmptyChildren;
+		return {};
+	}
+
+	Result<void> Remove(const String& path) override
+	{
+		if (removesBeforeFailure > 0 && --removesBeforeFailure == 0)
+		{
+			removesBeforeFailure = -1;
+			return Result<void>::Failure("injected remove failure");
+		}
+		return memory.Remove(path);
+	}
+
+	Result<void> CheckWritable(const String& path) const override
+	{
+		return memory.CheckWritable(path);
+	}
+
+	Result<void> Rename(const String& source, const String& destination) override
+	{
+		return memory.Rename(source, destination);
+	}
+
+	Result<std::shared_ptr<VirtualFileLease>> AcquireExclusiveLease(const String& path) override
+	{
+		return memory.AcquireExclusiveLease(path);
+	}
+
+	void FailWriteOn(Ursa::Size operation)
+	{
+		writesBeforeFailure = static_cast<int>(operation);
+	}
+
+	void FailRemoveOn(Ursa::Size operation)
+	{
+		removesBeforeFailure = static_cast<int>(operation);
+	}
+
+private:
+	MemoryFileProvider memory;
+	int writesBeforeFailure = -1;
+	int removesBeforeFailure = -1;
+};
+
+class FailingDirectoryProvider final : public VirtualFileProvider
+{
+public:
+	explicit FailingDirectoryProvider(std::shared_ptr<DirectoryFileProvider> provider) : provider(std::move(provider))
+	{
+	}
+
+	String Identity() const override
+	{
+		return provider->Identity();
+	}
+
+	String SourceLabel() const override
+	{
+		return provider->SourceLabel();
+	}
+
+	Result<bool> Exists(const String& path) const override
+	{
+		return provider->Exists(path);
+	}
+
+	Result<UInt64> Size(const String& path) const override
+	{
+		return provider->Size(path);
+	}
+
+	Result<Vector<UInt8>> ReadRange(const String& path, UInt64 offset, UInt64 size) const override
+	{
+		return provider->ReadRange(path, offset, size);
+	}
+
+	Result<Vector<String>> List() const override
+	{
+		return provider->List();
+	}
+
+	Result<void> WriteAtomic(const String& path, const Vector<UInt8>& bytes, bool createDirectories) override
+	{
+		if (writesBeforeFailure > 0 && --writesBeforeFailure == 0)
+		{
+			writesBeforeFailure = -1;
+			return Result<void>::Failure("injected directory-provider write failure");
+		}
+		return provider->WriteAtomic(path, bytes, createDirectories);
+	}
+
+	Result<void> Append(const String& path, const Vector<UInt8>& bytes, bool createDirectories) override
+	{
+		return provider->Append(path, bytes, createDirectories);
+	}
+
+	Result<void> CreateDirectory(const String& path) override
+	{
+		return provider->CreateDirectory(path);
+	}
+
+	Result<void> RemoveDirectory(const String& path, bool removeEmptyChildren) override
+	{
+		if (failRemoveDirectory)
+		{
+			failRemoveDirectory = false;
+			return Result<void>::Failure("injected directory removal failure");
+		}
+		return provider->RemoveDirectory(path, removeEmptyChildren);
+	}
+
+	std::filesystem::path DirectoryRoot() const override
+	{
+		return provider->DirectoryRoot();
+	}
+
+	Result<void> Remove(const String& path) override
+	{
+		if (removesBeforeFailure > 0 && --removesBeforeFailure == 0)
+		{
+			removesBeforeFailure = -1;
+			return Result<void>::Failure("injected directory-provider remove failure");
+		}
+		return provider->Remove(path);
+	}
+
+	Result<void> CheckWritable(const String& path) const override
+	{
+		return provider->CheckWritable(path);
+	}
+
+	Result<void> Rename(const String& source, const String& destination) override
+	{
+		return provider->Rename(source, destination);
+	}
+
+	Result<std::shared_ptr<VirtualFileLease>> AcquireExclusiveLease(const String& path) override
+	{
+		return provider->AcquireExclusiveLease(path);
+	}
+
+	void FailWriteOn(Ursa::Size operation)
+	{
+		writesBeforeFailure = static_cast<int>(operation);
+	}
+
+	void FailRemoveOn(Ursa::Size operation)
+	{
+		removesBeforeFailure = static_cast<int>(operation);
+	}
+
+	void FailNextDirectoryRemoval()
+	{
+		failRemoveDirectory = true;
+	}
+
+private:
+	std::shared_ptr<DirectoryFileProvider> provider;
+	int writesBeforeFailure = -1;
+	int removesBeforeFailure = -1;
+	bool failRemoveDirectory = false;
+};
 
 void Expect(bool condition, const char* message)
 {
@@ -156,6 +379,117 @@ void TestDuplicateGuidRepair(const std::filesystem::path& root)
 	const ResourceId copiedGuid = TakeMetadata(*database.value, "prj:Z.txt").guid;
 	Expect(firstGuid == duplicateGuid && copiedGuid != duplicateGuid && copiedGuid != firstGuid,
 	       "Duplicate repair changed the first asset or failed to assign a fresh GUID to the copy");
+}
+
+void TestBatchMoveAndRemoveCompensation()
+{
+	auto provider = std::make_shared<FailingMemoryProvider>();
+	VirtualFileSystem filesystem;
+	Expect(static_cast<bool>(filesystem.MountProvider(projectScheme, provider, MountAccess::ReadWrite)) &&
+	           static_cast<bool>(filesystem.MountProvider(editorLibraryScheme, provider, MountAccess::ReadWrite)),
+	       "Cannot mount the fault-injection asset fixture");
+	Expect(static_cast<bool>(filesystem.WriteAtomic(Path("prj:A.txt"), Bytes("source-a"))) &&
+	           static_cast<bool>(filesystem.WriteAtomic(Path("prj:B.txt"), Bytes("source-b"))),
+	       "Cannot seed batch transaction assets");
+	auto opened = AssetDatabase::Open(filesystem);
+	Expect(opened && static_cast<bool>(opened.value->Refresh()), "Cannot initialize batch transaction database");
+	AssetDatabase& database = *opened.value;
+	const ResourceId aGuid = TakeMetadata(database, "prj:A.txt").guid;
+	const ResourceId bGuid = TakeMetadata(database, "prj:B.txt").guid;
+	auto heldLease = filesystem.AcquireExclusiveLease(Path("lib:Import.lock"));
+	Expect(static_cast<bool>(heldLease), "Cannot hold the project-wide asset write lease");
+	Expect(!database.MoveBatch({{Path("prj:A.txt"), Path("prj:Moved/A.txt")}}) &&
+	           filesystem.ReadText(Path("prj:A.txt")).value == "source-a",
+	       "Asset batch mutation ignored an active import/write lease");
+	heldLease.value.reset();
+
+	provider->FailWriteOn(2);
+	const auto failedMove = database.MoveBatch(
+	    {{Path("prj:A.txt"), Path("prj:Moved/A.txt")}, {Path("prj:B.txt"), Path("prj:Moved/B.txt")}});
+	Expect(!failedMove, "Injected second destination write failure was ignored");
+	Expect(filesystem.ReadText(Path("prj:A.txt")).value == "source-a" &&
+	           filesystem.ReadText(Path("prj:B.txt")).value == "source-b" &&
+	           !filesystem.Exists(Path("prj:Moved/A.txt")).value && !filesystem.Exists(Path("prj:Moved/B.txt")).value &&
+	           !filesystem.Exists(Path("prj:Moved")).value,
+	       "Failed batch move did not restore source files and destination directories");
+	Expect(TakeMetadata(database, "prj:A.txt").guid == aGuid && TakeMetadata(database, "prj:B.txt").guid == bGuid,
+	       "Failed batch move changed indexed source metadata");
+	const auto assetsAfterFailedMove = database.Assets();
+	Expect(std::none_of(assetsAfterFailedMove.begin(), assetsAfterFailedMove.end(),
+	                    [](const AssetRecord& asset) { return asset.path.relative == "Moved"; }),
+	       "Failed batch move left a destination folder in the AssetDatabase index");
+
+	provider->FailRemoveOn(2);
+	const auto failedRemove = database.RemoveBatch({Path("prj:A.txt"), Path("prj:B.txt")});
+	Expect(!failedRemove, "Injected second source removal failure was ignored");
+	Expect(filesystem.ReadText(Path("prj:A.txt")).value == "source-a" &&
+	           filesystem.ReadText(Path("prj:B.txt")).value == "source-b" && database.Contains(aGuid) &&
+	           database.Contains(bGuid),
+	       "Failed batch remove did not restore files and AssetDatabase index entries");
+
+	auto committedMove = database.MoveBatch(
+	    {{Path("prj:A.txt"), Path("prj:Moved/A.txt")}, {Path("prj:B.txt"), Path("prj:Moved/B.txt")}});
+	if (!committedMove)
+	{
+		throw std::runtime_error("AssetDatabase could not commit a multi-source move batch: " +
+		                         ToStdString(committedMove.error));
+	}
+	Expect(!filesystem.Exists(Path("prj:A.txt")).value && !filesystem.Exists(Path("prj:B.txt")).value &&
+	           TakeMetadata(database, "prj:Moved/A.txt").guid == aGuid &&
+	           TakeMetadata(database, "prj:Moved/B.txt").guid == bGuid,
+	       "Successful batch move did not retain source identities at the destination");
+	Expect(static_cast<bool>(database.RemoveBatch({Path("prj:Moved/A.txt"), Path("prj:Moved/B.txt")})) &&
+	           !database.Contains(aGuid) && !database.Contains(bGuid),
+	       "AssetDatabase could not commit a multi-source remove batch");
+}
+
+void TestDirectoryBatchCompensation(const std::filesystem::path& root)
+{
+	std::filesystem::remove_all(root);
+	WriteSource(root / "Foo" / "Nested" / "mesh.fbx", "mesh-source");
+	WriteSource(root / "Foo" / "Nested" / "material.mat", "material-source");
+	auto directory = DirectoryFileProvider::Open(root);
+	Expect(static_cast<bool>(directory), "Cannot open directory batch transaction fixture");
+	auto provider = std::make_shared<FailingDirectoryProvider>(directory.value);
+	VirtualFileSystem filesystem;
+	Expect(static_cast<bool>(filesystem.MountProvider(projectScheme, provider, MountAccess::ReadWrite)),
+	       "Cannot mount directory batch transaction fixture");
+	auto opened = AssetDatabase::Open(filesystem);
+	Expect(opened && static_cast<bool>(opened.value->Refresh()), "Cannot initialize directory batch database");
+	AssetDatabase& database = *opened.value;
+	const auto sourceFiles = filesystem.List(projectScheme);
+	Expect(static_cast<bool>(sourceFiles), "Cannot enumerate directory batch source files");
+	Vector<std::pair<VirtualPath, Vector<UInt8>>> snapshot;
+	for (const VirtualFileEntry& entry : sourceFiles.value)
+	{
+		snapshot.emplace_back(entry.path, filesystem.Read(entry.path).value);
+	}
+	const auto expectRestored = [&]()
+	{
+		for (const auto& entry : snapshot)
+		{
+			auto bytes = filesystem.Read(entry.first);
+			if (!bytes || bytes.value != entry.second)
+			{
+				return false;
+			}
+		}
+		return std::filesystem::is_directory(root / "Foo") && std::filesystem::is_directory(root / "Foo" / "Nested") &&
+		       !std::filesystem::exists(root / "Moved");
+	};
+	const Vector<AssetMoveRequest> move{{Path("prj:Foo"), Path("prj:Moved/Foo")}};
+	provider->FailWriteOn(2);
+	Expect(!database.MoveBatch(move) && expectRestored(),
+	       "A mid-stage directory move failure did not restore source, sidecars, and destination directories");
+	provider->FailNextDirectoryRemoval();
+	Expect(!database.MoveBatch(move) && expectRestored(),
+	       "A late directory move failure did not compensate source removal and staged destinations");
+	provider->FailRemoveOn(2);
+	Expect(!database.RemoveBatch(Vector<VirtualPath>{Path("prj:Foo")}) && expectRestored(),
+	       "A mid-delete file failure did not restore directory assets and sidecars");
+	provider->FailNextDirectoryRemoval();
+	Expect(!database.RemoveBatch(Vector<VirtualPath>{Path("prj:Foo")}) && expectRestored(),
+	       "A directory deletion failure did not restore source files and nested directories");
 }
 
 void TestScriptDiscoveryAndGrouping(const std::filesystem::path& root)
@@ -335,6 +669,8 @@ int main()
 		std::filesystem::remove_all(root);
 		std::filesystem::create_directories(root);
 		TestCreateMoveCopyAndRemove(root / "Operations");
+		TestBatchMoveAndRemoveCompensation();
+		TestDirectoryBatchCompensation(root / "DirectoryTransactions" / "Assets");
 		TestScriptDiscoveryAndGrouping(root / "Scripts");
 		TestDuplicateGuidRepair(root / "Duplicate");
 		TestReadOnlyAndInvalidMetadata(root / "Validation");

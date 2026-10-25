@@ -9,57 +9,83 @@ internal sealed class InspectorTargetScope : IDisposable
 	[ThreadStatic] private static InspectorTargetScope? current;
 	private readonly ulong generation = EditorApi.Generation;
 	private readonly object target;
-	private string? baseline;
+	private readonly object[] targets;
+	private readonly List<(int Index, object Target, string Baseline)> targetBaselines = new();
 	private sealed class ComponentSnapshot(Component value)
 	{
 		internal Component Value = value;
 		internal string Baseline = string.Empty;
 	}
 	private readonly Dictionary<NativeHandle, ComponentSnapshot> components = new();
-	private InspectorTargetScope(object target, bool initializeBaseline = true)
+	private InspectorTargetScope(object[] targets, int primaryIndex)
 	{
-		this.target = target;
+		if (targets.Length == 0 || (uint)primaryIndex >= (uint)targets.Length)
+			throw new InvalidOperationException("Inspector target group is empty or has an invalid primary target.");
+		this.targets = targets;
+		target = targets[primaryIndex];
 		current = this;
-		baseline = initializeBaseline && (target is ScriptableObject or Behaviour) ? Fields(target) : null;
+		for (int index = 0; index < targets.Length; index++)
+			if (targets[index] is ScriptableObject or Behaviour)
+				targetBaselines.Add((index, targets[index], Fields(targets[index])));
 	}
 	internal object Target { get { EditorApi.RequireGeneration(generation); if (target is ScriptableObject asset) asset.RequireValid(); return target; } }
+	internal object[] Targets
+	{
+		get
+		{
+			EditorApi.RequireGeneration(generation);
+			foreach (object item in targets)
+				if (item is ScriptableObject asset) asset.RequireValid();
+			return (object[])targets.Clone();
+		}
+	}
 	internal static InspectorTargetScope Create(Type type)
 	{
 		EditorApi.EnsureRuntimeScope();
-		if (!typeof(ScriptableObject).IsAssignableFrom(type))
+		if (typeof(ScriptableObject).IsAssignableFrom(type))
 		{
-			var handle = NativeEditorBindings.GetTargetHandle();
-			if (type == typeof(Material)) return new(Material.FromHandle(handle)!);
-			if (type == typeof(Mesh)) return new(Mesh.FromHandle(handle)!);
-			if (type == typeof(Texture2D)) return new(Texture2D.FromEditorHandle(EditorContext.Target?.AssetReference ?? default, handle));
-			if (type == typeof(GameObject)) return new(GameObject.FromHandle(handle));
-			if (typeof(Component).IsAssignableFrom(type))
+			var reference = EditorContext.Target?.AssetReference ?? throw new InvalidOperationException("No source asset Inspector target is active.");
+			var asset = ScriptableObject.CreateEditorProxy(type, reference);
+			try
 			{
-				ulong generation = EditorApi.Generation;
-				var component = Component.CreateEditorProxy(type, handle, () => EditorApi.RequireGeneration(generation));
-				var scope = new InspectorTargetScope(component, initializeBaseline: false);
-				try
-				{
-					if (component is Behaviour)
-					{
-						scope.components.Add(handle, new(component));
-						ScriptFieldSchema.Deserialize(component, NativeEditorBindings.GetTargetPayload());
-						scope.baseline = Fields(component);
-					}
-					return scope;
-				}
-				catch { scope.Dispose(); throw; }
+				ScriptFieldSchema.Deserialize(asset, NativeEditorBindings.GetTargetPayload());
+				return new(new object[] { asset }, 0);
 			}
-			throw new InvalidOperationException("This Inspector target does not expose a typed object adapter.");
+			catch { asset.ReleaseEditorProxy(); throw; }
 		}
-		var reference = EditorContext.Target?.AssetReference ?? throw new InvalidOperationException("No source asset Inspector target is active.");
-		var target = ScriptableObject.CreateEditorProxy(type, reference);
+		NativeHandle[] handles = NativeEditorBindings.GetTargetHandles();
+		int primaryIndex = checked((int)NativeEditorBindings.GetTargetPrimaryIndex());
+		if (handles.Length == 0 || (uint)primaryIndex >= (uint)handles.Length)
+			throw new InvalidOperationException("Native Inspector returned an invalid target group.");
+		object[] targets = new object[handles.Length];
+		ulong generation = EditorApi.Generation;
+		for (int index = 0; index < handles.Length; index++)
+		{
+			NativeHandle handle = handles[index];
+			if (type == typeof(Material)) targets[index] = Material.FromHandle(handle)!;
+			else if (type == typeof(Mesh)) targets[index] = Mesh.FromHandle(handle)!;
+			else if (type == typeof(Texture2D)) targets[index] = Texture2D.FromEditorHandle(EditorContext.Target?.AssetReference ?? default, handle);
+			else if (type == typeof(GameObject)) targets[index] = GameObject.FromHandle(handle);
+			else if (typeof(Component).IsAssignableFrom(type))
+			{
+				var component = Component.CreateEditorProxy(type, handle, () => EditorApi.RequireGeneration(generation));
+				targets[index] = component;
+				if (component is Behaviour)
+				{
+					ScriptFieldSchema.Deserialize(component, NativeEditorBindings.GetComponentPayload(handle));
+				}
+			}
+			else throw new InvalidOperationException("This Inspector target does not expose a typed object adapter.");
+		}
+		var scope = new InspectorTargetScope(targets, primaryIndex);
 		try
 		{
-			ScriptFieldSchema.Deserialize(target, NativeEditorBindings.GetTargetPayload());
-			return new(target);
+			for (int index = 0; index < handles.Length; index++)
+				if (targets[index] is Component component)
+					scope.components[handles[index]] = new(component) { Baseline = component is Behaviour ? Fields(component) : string.Empty };
+			return scope;
 		}
-		catch { target.ReleaseEditorProxy(); throw; }
+		catch { scope.Dispose(); throw; }
 	}
 	internal static Component? WrapComponent(NativeHandle handle, Type actual)
 	{
@@ -86,16 +112,36 @@ internal sealed class InspectorTargetScope : IDisposable
 	internal void Synchronize()
 	{
 		EditorApi.RequireGeneration(generation);
-		if (baseline != null)
+	var targetChanges = new Dictionary<string, JsonElement>[targets.Length];
+	for (int index = 0; index < targetChanges.Length; index++) targetChanges[index] = new(StringComparer.Ordinal);
+		bool targetChanged = false;
+		foreach (var item in targetBaselines)
 		{
-			string fields = Fields(target);
-			var changes = ChangedFields(baseline, fields);
-			if (changes.Count != 0) NativeEditorBindings.ApplyTargetFields(JsonSerializer.Serialize(changes));
-			baseline = fields;
+			string fields = Fields(item.Target);
+			var changes = ChangedFields(item.Baseline, fields);
+			targetChanges[item.Index] = changes;
+			targetChanged |= changes.Count != 0;
+		}
+		if (targetChanged)
+		{
+			if (targets.Length == 1)
+			{
+				NativeEditorBindings.ApplyTargetFields(JsonSerializer.Serialize(targetChanges[0]));
+			}
+			else
+			{
+				for (int index = 0; index < targetChanges.Length; index++)
+				NativeEditorBindings.ApplyTargetFields(JsonSerializer.Serialize(new { Targets = targetChanges }));
+			}
+			for (int index = 0; index < targetBaselines.Count; index++)
+			{
+				var item = targetBaselines[index];
+				targetBaselines[index] = (item.Index, item.Target, Fields(item.Target));
+			}
 		}
 		foreach (var entry in new List<KeyValuePair<NativeHandle, ComponentSnapshot>>(components))
 		{
-			if (ReferenceEquals(entry.Value.Value, target)) continue;
+			if (Array.IndexOf(targets, entry.Value.Value) >= 0) continue;
 			string fields = Fields(entry.Value.Value);
 			var changes = ChangedFields(entry.Value.Baseline, fields);
 			if (changes.Count != 0) NativeEditorBindings.ApplyComponentFields(entry.Key, JsonSerializer.Serialize(changes));
@@ -115,6 +161,7 @@ internal sealed class InspectorTargetScope : IDisposable
 	{
 		if (ReferenceEquals(current, this)) current = null;
 		components.Clear();
-		if (target is ScriptableObject asset) asset.ReleaseEditorProxy();
+		foreach (object item in targets)
+			if (item is ScriptableObject asset) asset.ReleaseEditorProxy();
 	}
 }

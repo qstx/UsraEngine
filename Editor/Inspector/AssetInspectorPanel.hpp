@@ -23,6 +23,7 @@ public:
 	ImporterSelectionResult DrawSourceSelectionPrompt(const RequestImport& requestImport, bool canSave);
 	Result<bool> SaveSelectedSource(const EditorSelectionContext& selection);
 	EditorDocument* SelectedDocument(const EditorSelectionContext& selection) const;
+	bool RetainsModifiedTargets(const EditorSelectionContext& next) const;
 
 	void Reset()
 	{
@@ -34,6 +35,11 @@ public:
 		inspectedMesh.reset();
 		inspectedNativeKey.clear();
 		nativeInspector.reset();
+		multiMaterialTargets.clear();
+		multiMaterialSelectionKey.clear();
+		multiMaterialDiagnostic.clear();
+		multiScriptableTargets.clear();
+		multiMaterialPrimaryIndex = 0;
 		nativeDiagnostic.clear();
 		scriptableDiagnostic.clear();
 	}
@@ -48,6 +54,32 @@ public:
 	          EditorDocuments* existingDocuments = nullptr);
 
 private:
+	struct MultiMaterialTarget
+	{
+		VirtualPath source;
+		ResourceId guid;
+		std::shared_ptr<NativeAssetInspector> inspector;
+	};
+
+	struct MultiScriptableTarget
+	{
+		VirtualPath source;
+		ResourceId guid;
+		std::shared_ptr<ScriptableAssetInspector> inspector;
+	};
+
+	Result<bool> DrawMultiMaterialInspector(ProjectWorkspace& workspace, const ProjectBrowserModel& model,
+	                                        const EditorSelectionContext& selection,
+	                                        const ComponentRegistry* components, EditorDocuments* existingDocuments,
+	                                        const RequestImport& requestImport);
+	Result<void> SaveMultiMaterialTargets(const RequestImport& requestImport);
+	Result<bool> DrawMultiScriptableInspector(ProjectWorkspace& workspace, const ProjectBrowserModel& model,
+	                                          const EditorSelectionContext& selection,
+	                                          const Vector<ScriptTypeDescriptor>* scriptTypes,
+	                                          const RequestImport& requestImport);
+	Result<void> SaveMultiScriptableTargets(const RequestImport& requestImport);
+	String MultiSelectionDiagnostic(const ProjectBrowserModel& model, const EditorSelectionContext& selection) const;
+
 	String inspectedImportedKey;
 	String importedDiagnostic;
 	std::shared_ptr<ImportedAssetInspector> importedInspector;
@@ -60,5 +92,10 @@ private:
 	String inspectedNativeKey;
 	String nativeDiagnostic;
 	std::shared_ptr<NativeAssetInspector> nativeInspector;
+	Vector<MultiMaterialTarget> multiMaterialTargets;
+	Vector<MultiScriptableTarget> multiScriptableTargets;
+	String multiMaterialSelectionKey;
+	String multiMaterialDiagnostic;
+	Size multiMaterialPrimaryIndex = 0;
 };
 } // namespace Ursa::Editor

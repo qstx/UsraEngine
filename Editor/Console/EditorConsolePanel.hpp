@@ -2,6 +2,7 @@
 
 #include <Core/Log.hpp>
 #include <functional>
+#include <imgui.h>
 #include <memory>
 
 namespace Ursa::Editor
@@ -10,6 +11,19 @@ class EditorConsolePanel final
 {
 public:
 	using ContextHandler = std::function<Result<void>(const LogRecord&)>;
+
+	struct ContextActionProbe
+	{
+		String message;
+		ImVec2 messageCenter{};
+		bool messageHovered = false;
+		ImVec2 copyCenter{};
+		bool copyHovered = false;
+		ImVec2 locateCenter{};
+		bool locateHovered = false;
+		ImGuiID copyItem = 0;
+		ImGuiID locateItem = 0;
+	};
 
 	EditorConsolePanel();
 
@@ -24,7 +38,8 @@ public:
 
 	static Array<Size, 5> Counts(const Vector<LogRecord>& records);
 
-	void Draw(bool& open, String& diagnostic, const ContextHandler& contextHandler = {});
+	void Draw(bool& open, String& diagnostic, const ContextHandler& contextHandler = {},
+	          ContextActionProbe* contextProbe = nullptr);
 
 private:
 	struct State;

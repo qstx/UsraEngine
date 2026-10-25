@@ -93,4 +93,6 @@ bool MenuItem(const char* label, const char* shortcut = nullptr, bool selected =
 bool MenuItem(const char* label, const char* shortcut, bool* selected, bool enabled = true);
 bool BeginMenu(const char* label, bool enabled = true);
 bool ComponentMenu();
+void SetPanelResetAction(std::function<void()> action);
+bool DrawPanelContextMenu(const char* popupId, bool* open, ImGuiID* closeItemId = nullptr);
 } // namespace Ursa::Editor::Icons

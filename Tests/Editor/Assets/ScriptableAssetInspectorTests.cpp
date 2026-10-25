@@ -50,6 +50,7 @@ int main(int count, char** arguments)
 		Done(files.WriteAtomic(path, {}));
 		auto workspace = Take(ProjectWorkspace::FromFilesystem({}, files));
 		Done(workspace->Refresh());
+		Done(workspace->SetRuntimeContentView(workspace->Index().Filesystem()));
 		const auto guid = Take(workspace->Database()->Metadata(path)).guid;
 		ScriptTypeDescriptor type;
 		type.sourceGuid = ResourceId::Generate();
@@ -63,46 +64,92 @@ int main(int count, char** arguments)
 		payload["Fields"]["unknown"] = "preserve across Inspector saves";
 		Done(asset.SetDescription(guid, type.localFileId, type.scriptType, type.version, payload));
 		Done(SaveScriptableAssetSource(files, path, asset));
+		const auto secondPath = Take(VirtualPath::Parse("prj:OtherSettings.ursaasset"));
+		Done(files.WriteAtomic(secondPath, {}));
+		Done(workspace->Refresh());
+		const auto secondGuid = Take(workspace->Database()->Metadata(secondPath)).guid;
+		auto secondAsset = Take(CreateScriptableAssetWithDefaults(secondGuid, type));
+		Done(SaveScriptableAssetSource(files, secondPath, secondAsset));
 		Done(workspace->Refresh());
 		ProjectBrowserModel browser;
 		Done(browser.Refresh(*workspace));
 		EditorSelectionContext selection;
-		selection.SelectAsset(path);
+		selection.SelectAsset(path, 0, {}, guid);
+		const auto firstSelection = *selection.PrimaryEntry();
+		EditorSelectionEntry secondSelection;
+		secondSelection.kind = EditorSelectionKind::Asset;
+		secondSelection.assetPath = secondPath;
+		secondSelection.assetGuid = secondGuid;
+		Expect(selection.SelectEntries({firstSelection, secondSelection}, 0),
+		       "Could not establish ScriptableObject multi-selection for Inspector interaction");
 		Vector<ScriptTypeDescriptor> types{type};
 		auto device = Take(Rhi::CreateDevice({}));
 		auto gui = Take(ImGuiBridge::Create(device));
 		AssetInspectorPanel panel;
+		selection.beforeChange = [&panel](const EditorSelectionContext& next)
+		{ return !panel.HasModifiedSource() || panel.RetainsModifiedTargets(next); };
 		bool open = true;
 		UInt32 imports = 0;
+		UInt32 footerDraws = 0;
+		ResourceId footerTarget;
 		const auto frame = [&]()
 		{
 			Done(gui->BeginFrame(1.f / 60.f, 720, 480));
 			ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
 			ImGui::SetNextWindowSize({720, 480}, ImGuiCond_Always);
 			ImGui::SetNextWindowFocus();
-			panel.Draw(*workspace, browser, selection, open, &types, {},
-			           [&](const VirtualPath& imported)
-			           {
-				           Expect(imported == path, "Inspector requested import of another asset");
-				           ++imports;
-			           });
+			panel.Draw(
+			    *workspace, browser, selection, open, &types, {},
+			    [&](const VirtualPath& imported)
+			    {
+				    Expect(imported == path || imported == secondPath,
+				           "Inspector requested import of an unselected asset");
+				    ++imports;
+			    },
+			    72.f,
+			    [&](Float32)
+			    {
+				    ++footerDraws;
+				    const auto* primary = selection.PrimaryEntry();
+				    footerTarget = primary ? primary->assetGuid : ResourceId{};
+			    });
 			Done(gui->EndFrame());
 		};
 		frame();
 		frame();
 		auto* inspector = ImGui::FindWindowByName("Inspector");
-		Expect(inspector && guid != type.sourceGuid, "Inspector identity fixture was not independent");
+		ImGuiWindow* propertiesWindow = nullptr;
+		for (ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+		{
+			if (std::strncmp(window->Name, "Inspector/AssetProperties", std::strlen("Inspector/AssetProperties")) == 0)
+			{
+				propertiesWindow = window;
+				break;
+			}
+		}
+		Expect(inspector && propertiesWindow && guid != type.sourceGuid,
+		       "Inspector identity fixture was not independent");
 		// Exercise the actual widgets through ImGui navigation; no desktop input is injected.
-		const ImGuiID field = ImHashStr("enabled", 0, ImHashStr("/Fields/enabled", 0, inspector->ID));
+		const ImGuiID field = ImHashStr("enabled", 0, ImHashStr("/Fields/enabled", 0, propertiesWindow->ID));
 		ImGui::ActivateItemByID(field);
 		frame();
-		Expect(Take(LoadScriptableAssetSource(files, path, guid)).Payload()["Fields"]["enabled"] == true,
+		Expect(Take(LoadScriptableAssetSource(files, path, guid)).Payload()["Fields"]["enabled"] == true &&
+		           Take(LoadScriptableAssetSource(files, secondPath, secondGuid)).Payload()["Fields"]["enabled"] ==
+		               true,
 		       "An unsaved Inspector edit changed the persistent source");
-		ImGui::ActivateItemByID(ImHashStr("Save ScriptableObject", 0, inspector->ID));
+		Expect(panel.HasModifiedSource(), "Multi-object editing did not track dirty ScriptableObject drafts");
+		const bool selectionAccepted = selection.SelectEntries({secondSelection}, 0);
+		Expect(!selectionAccepted && selection.entries.size() == 2 && selection.PrimaryEntry()->assetGuid == guid,
+		       "Changing the Inspector target group discarded an unsaved multi-object draft");
+		ImGui::ActivateItemByID(ImHashStr("Save Selected ScriptableObjects", 0, propertiesWindow->ID));
 		frame();
 		const auto saved = Take(LoadScriptableAssetSource(files, path, guid));
-		Expect(imports == 1 && saved.Payload()["Fields"]["enabled"] == false,
-		       "Inspector did not edit and save a type whose script GUID differs from its asset GUID");
+		const auto secondSaved = Take(LoadScriptableAssetSource(files, secondPath, secondGuid));
+		Expect(imports == 2 && saved.Payload()["Fields"]["enabled"] == false &&
+		           secondSaved.Payload()["Fields"]["enabled"] == false,
+		       "Multi-object Inspector did not edit and save every selected ScriptableObject draft");
+		Expect(footerDraws == 4 && footerTarget == guid,
+		       "Multi-object asset editing changed or hid the primary asset preview footer");
 		Expect(saved.SourceGuid() == guid && saved.Payload()["Fields"]["unknown"] == payload["Fields"]["unknown"],
 		       "Inspector saving changed the asset identity or discarded unknown fields");
 

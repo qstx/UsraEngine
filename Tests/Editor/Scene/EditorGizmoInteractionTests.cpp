@@ -42,15 +42,18 @@ GizmoInteractionReport Frame(ImGuiBridge& gui, Scene& scene, GameObject::Ptr sel
                              ViewportPoint mouse, bool pressed, GizmoOperation operation)
 {
 	ImGui::SetCurrentContext(gui.Context());
-	ImGui::GetIO().AddMousePosEvent(mouse.x, mouse.y);
+	const ImVec2 desktopOrigin = ImGui::GetMainViewport()->Pos;
+	ImGui::GetIO().AddMousePosEvent(desktopOrigin.x + mouse.x, desktopOrigin.y + mouse.y);
 	ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, pressed);
 	done(gui.BeginFrame(1.f / 60.f, 640, 480, 640, 480));
-	ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+	const ImVec2 viewportOrigin = ImGui::GetMainViewport()->Pos;
+	ImGui::SetNextWindowPos(viewportOrigin, ImGuiCond_Always);
 	ImGui::SetNextWindowSize({640, 480}, ImGuiCond_Always);
 	ImGui::Begin("Gizmo Interaction Test", nullptr,
 	             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove);
 	GizmoInteractionReport interaction;
-	const auto result = DrawGizmo(scene, selected, camera, {20, 20, 600, 400}, operation, &interaction);
+	const auto result = DrawGizmo(scene, selected, camera, {viewportOrigin.x + 20, viewportOrigin.y + 20, 600, 400},
+	                              operation, &interaction);
 	if (!result)
 	{
 		ImGui::End();
@@ -67,6 +70,7 @@ int main()
 	try
 	{
 		auto window = Take(Window::Create(640, 480, "Ursa Gizmo Input Test", false));
+		window->SetPosition(-1280, 120);
 		DeviceDesc desc;
 		desc.window = window;
 #ifndef NDEBUG
@@ -100,12 +104,12 @@ int main()
 				break;
 			}
 		}
-		Expect(transformed && sawGizmoUse,
-		       (String("Mouse drag did not hit and use the visible gizmo: over=") +
-		        (lastInteraction.isOver ? "true" : "false") +
-		        ", using=" + (lastInteraction.isUsing ? "true" : "false") +
-		        ", matrixChanged=" + (lastInteraction.matrixChanged ? "true" : "false") + ", rect=(20,20,600,400)")
-		           .c_str());
+		Expect(transformed && sawGizmoUse, (String("Mouse drag did not hit and use the visible gizmo: over=") +
+		                                    (lastInteraction.isOver ? "true" : "false") +
+		                                    ", using=" + (lastInteraction.isUsing ? "true" : "false") +
+		                                    ", matrixChanged=" + (lastInteraction.matrixChanged ? "true" : "false") +
+		                                    ", desktopOrigin=(-1280,120), rect=(origin+20,origin+20,600,400)")
+		                                       .c_str());
 
 		done(scene.SetLocalTransform(selected, LocalTransform{}));
 		bool rotated = false;

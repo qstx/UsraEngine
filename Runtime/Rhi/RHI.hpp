@@ -321,6 +321,8 @@ struct VertexAttribute
 struct SwapchainDesc
 {
 	bool vsync = true;
+	// Omitted to use the DeviceDesc window, preserving the original single-window call.
+	std::shared_ptr<Window> window;
 };
 
 class Buffer

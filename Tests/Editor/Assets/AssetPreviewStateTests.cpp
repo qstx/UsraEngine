@@ -95,6 +95,14 @@ void Targets()
 	Expect(!meshOne.SameIdentity(meshTwo), "Different sub-assets share preview identity");
 	Expect(ResolveAssetPreviewTarget(selection, &entry, nullptr, 2).kind == AssetPreviewKind::Model,
 	       "Model source was not recognized");
+	AssetPreviewTarget customA;
+	customA.identity = {ResourceId::Generate(), 7};
+	customA.custom = true;
+	customA.customTypeId = "Example.FirstAsset";
+	customA.projectSession = ResourceId::Generate();
+	AssetPreviewTarget customB = customA;
+	customB.customTypeId = "Example.SecondAsset";
+	Expect(!customA.SameIdentity(customB), "Different custom asset types shared a preview identity");
 	Expect(state.Select(meshOne) && !state.HasImage(), "Another asset retained the old image");
 	selection.Clear();
 	Expect(state.Select(ResolveAssetPreviewTarget(selection, &entry, document.get(), 2)) && !state.HasImage(),

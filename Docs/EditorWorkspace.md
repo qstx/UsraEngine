@@ -13,26 +13,56 @@ Windows 的 `UrsaEditor.exe` 同时嵌入 `Editor/Resources/UrsaEditor.ico`，�
 ## 菜单与运行控制
 
 - **File**：保存当前文档、关闭文档或退出 Editor。关闭未保存文档时会询问保存、丢弃或取消。
-- **Assets**：刷新资源、创建文件夹/场景/Prefab/材质/纹理，以及重命名选中的 Project 资源。
+- **Edit**：Undo、Redo 目前保持禁用；External Tools 在打开时显示工具窗口。
+- **Assets**：刷新资源、创建文件夹/场景/Prefab/材质/纹理，以及重命名单个可写源资源（F2）。
 - **GameObject**：在当前 Scene 的选中节点下创建空对象；未选节点时创建 Scene 根对象。
 - **Component**：按类别显示当前 GameObject 可添加的组件，包括项目注册的 C# 组件。
-- **Window**：显隐 Project、Hierarchy、Inspector、Scene、Game 和 Console，并重置工作区。
+- **Window**：显隐 Project、Hierarchy、Inspector、Scene、Game 和 Console，并重置工作区。面板背景菜单也提供 Close Panel 和 Reset Layout。
 - **Tools**、项目注册菜单和工具窗口：调用 Engine 或项目 C# 扩展。
 - 顶部工具栏提供 Play、Pause/Resume、Step 和 Stop。Step 只在暂停时可用。
 
-Edit 中的 Undo/Redo 当前不可用，Ursa 尚未提供持久化编辑操作的撤销栈。
+### 常用快捷键与上下文菜单
+
+快捷键仅在对应编辑器面板拥有焦点且文本输入/搜索/模态控件未消费键盘输入时生效。命令执行时会重新检查当前选择和操作资格。
+
+| 操作 | 快捷键 | 菜单入口与限制 |
+|---|---|---|
+| 保存当前文档 | Ctrl+S | File > Save；没有可保存文档时不会执行 |
+| 刷新项目资源 | Ctrl+R | Assets > Refresh；只对已打开工作区可用 |
+| 重命名 GameObject | F2 | Hierarchy 聚焦且单选可用；也可从选中行菜单选择 Rename |
+| 重命名源资产 | F2 | Project 聚焦且单个可写源资产可用；导入子资产、多选和只读资产禁用 |
+| 复制 GameObject | Ctrl+D | Hierarchy 聚焦且 Edit 模式下的有效对象选择可用；选中行菜单会复核资格 |
+| 删除 GameObject | Delete | Hierarchy 聚焦、Edit 模式且未聚焦文本输入时可用；删除前检查图内引用 |
+
+右键菜单按命中目标捕获上下文：Hierarchy 行保留当前选择组，空白区以根级创建为目标；Project 资源/目录/空白区分别提供适用的 Open、Rename、Move、Delete、Reimport 或 Create；组件标题提供 Remove Component；Scene 画面提供 Create Empty；Console 日志提供 Copy Message 和有上下文时的 Locate。引用字段旁的 `...` 提供 Select、Clear 和可用时的 Locate，Select 打开带搜索、候选预览和接受/取消的对象选择器。面板背景菜单的 Close Panel 只改变面板可见状态，Reset Layout 恢复工作区布局。
+
+Undo/Redo 仍不可用并以禁用状态显示；文档/About 等尚未实现的帮助入口也显示为禁用。未实现操作不会作为可执行快捷键注册。
+
+### 菜单交互验收
+
+Release UI 验收以 ImGui 多帧输入验证真实右键和菜单项点击：`UrsaReferencePickerTests` 覆盖引用字段 Clear、Select、Locate，并检查 Locate 不遗留选择弹窗；`UrsaEditorIconsTests` 覆盖 Console 日志右键复制/定位、导航上下文传递，以及关闭面板不改变文档 Dirty/Revision。该组在 2026-10-25 Release 配置通过。Undo/Redo 与未实现帮助入口通过菜单禁用状态和命令注册点检查；编辑操作不创建撤销历史。
 
 ## Project 面板
 
 Project 左侧显示 `Assets` 文件夹树，右侧显示所选文件夹中的直接内容。展开箭头展开子目录；选择文件夹会更新内容视图。顶部路径按钮可以返回 Assets 或跳到上级目录。搜索会按资源名称和相对路径查找项目资产。
 
-单击资源会选中它并在 Inspector 显示路径、GUID、资源类型和导入器信息。双击资源或在右键菜单选择 Open，会打开对应的 Scene、Prefab、材质、纹理或导入器视图。右键文件夹可在该目录下创建资源或子文件夹。`.meta` 文件由资产数据库管理，不单独显示。
+单击资源会选中它并在 Inspector 显示路径、GUID、资源类型和导入器信息。双击资源或在右键菜单选择 Open，会打开对应的 Scene、Prefab、材质、纹理或导入器视图。右键文件夹可在该目录下创建资源或子文件夹。选中单个可写源资源后按 F2，或从右键菜单选择 Rename Selected，可打开重命名对话框；多选、导入子资源和只读资源不可用。`.meta` 文件由资产数据库管理，不单独显示。
 
 创建资源时，留空 Asset path 会在当前文件夹使用默认名称。创建文件夹时，留空 New folder name 会创建 `New Folder`。重命名时在 Asset path 中输入目标虚拟相对路径；资产 GUID 在移动或改名后保持不变。
 
+可写 Scene 中的 Prefab/Model 主资产可拖入 Hierarchy 或 Scene 画面实例化；Scene 画面按当前像素射线选择最近可见几何落点，没有命中时落到编辑相机目标平面，画面上的标记显示即将使用的位置。工具栏、画面留边和 Game 视图不接受该操作。拖动 Hierarchy 中一个或多个最外层 Scene 子树到 Project 内容区，会为每个根创建独立 Prefab；父子同时选中时仅导出外层根。导出的对象、组件身份和可表达的本地资源引用重新映射，跨子树对象引用无法保留时整批拒绝并显示原因。导出不会替换、删除或改成 Prefab 实例化原 Scene 对象；新 Prefab 写入失败时会清理本批新文件和 sidecar。
+
 ## Inspector 与 Hierarchy
 
-Hierarchy 只显示 Scene 或 Prefab 中的 GameObject 层级。选择对象会让单一 Inspector 显示该对象、Transform 和组件。选中 Project 资产时 Inspector 切换为该资产信息；打开资产后由对应的资产文档 Inspector 接管。
+Hierarchy 只显示 Scene 或 Prefab 中的 GameObject 层级。单击一行选择对象；Ctrl/Cmd 单击可增减选择，Shift 单击可按当前可见行范围选择，Ctrl/Cmd+Shift 会将范围加入已有选择。过滤和折叠后的范围只包含当前可见行。主选以行高亮和焦点显示；点击另一面板的对象或资产会切换选择域。Inspector 显示多选数量、公共名称/Active/Transform 和公共组件；混合字段在显式编辑后才会写入，分量编辑保留每个对象未编辑的坐标。Scene Gizmo 仍只操作主选。
+
+Project 面板支持同样的 Ctrl/Cmd 多选和 Shift 可见范围选择。对象与资源选择互相替换，不会混在同一组。Hierarchy 行按住后拖动不会在拖拽开始时改变 Inspector 目标；松开且未形成拖拽才发布点击选择。右键未选中的行会先单独选中它，右键已选行会保留选择组供菜单操作。资源的稳定身份使用 GUID 与子资源 local ID；Hierarchy 对象使用文档及对象身份。资源移动后选择跟随 GUID，删除或目标失效后会保留可诊断的缺失条目并从可操作目标中排除，同时选择有效主选。切换 Play 时 Hierarchy 选择绑定到运行副本，Stop 后恢复 Edit 选择。脏 importer 草稿阻止切换到另一目标；取消保留原选择及高亮。
+
+拖放按来源和落点执行完整性校验：资产或对象拖入引用字段时必须恰好一项且类型兼容；组件引用字段可在所有者对象下消歧组件。支持的引用集合先校验全组再按来源顺序追加。Hierarchy 可将对象组拖到行上方/下方插入、行中央作为子级，或拖到根节点空白区；父子重叠来源只移动最外层对象，拖放保留世界姿态。跨 Scene/Play 文档、移动到自身后代、失效对象、奇异父矩阵或无法表示为 TRS 的剪切会拒绝整组，并在 Hierarchy 显示失败原因。拖动期间只使用稳定身份和会话 token；Escape、焦点/拖放上下文结束、无效释放及来源失效都会结束会话，释放后的帧不会重复执行命令。Hierarchy 的 Scene Gizmo 仍只操作主选，不参与层级拖放。
+
+将面板标签拖到主窗口外可创建独立平台窗口；把标签拖回工作区可重新停靠。浮动面板继续使用同一 Editor 文档、选择状态和 ImGui 上下文。各 viewport 使用所属窗口的 Swapchain 与 DPI，窗口布局保存在用户设置中，不会标记 Scene 或资产草稿为 Dirty。
+
+选择多个源 Material 或同一精确脚本类型的 ScriptableObject 时，Inspector 显示共同可编辑字段；Material 字段按 Shader 属性身份求交集，ScriptableObject 仅绘制当前所有目标都支持的基础类型。单次字段编辑以全组事务提交，**Save Selected** 保存全部脏目标。导入子资产只读，导入器和混合类型多选显示限制说明。资产 Inspector 底部预览始终显示主选资源，不改变属性编辑目标组。未实现聚合绘制的集合或对象引用会明确标注，不会被写入。
 
 材质、纹理、模型、Mesh 和 Prefab 共用 Inspector 底部可折叠、可调整高度的 Preview。查看资产不会切换作者文档或要求保存；匹配的材质、纹理和 Prefab 草稿可预览未保存值。模型包含选片、播放/暂停及时间轴。展开偏好和逻辑高度按项目保存到用户设置，坏设置整组回退到展开/280，写入失败保留本次内存状态并提示。操作与隔离规则见 [资产预览](EditorAssetPreviews.md)。`--view Inspector` 保留折叠偏好；`--view "Material Preview"` 兼容入口在读取偏好后展开并聚焦 Inspector，不创建独立窗口或重置其他停靠面板。
 

@@ -114,6 +114,8 @@ public:
 
 	Result<void> RenameCurrent(const VirtualPath& path);
 
+	Result<void> FollowMovedSource();
+
 	void SetSaveBlocked(bool blocked)
 	{
 		saveBlocked = blocked;
