@@ -22,6 +22,10 @@ if(URSA_BUILD_EDITOR)
   target_link_libraries(UrsaPlaySessionTests PRIVATE Ursa::Editor)
 
   add_test(NAME UrsaPlaySessionTests COMMAND UrsaPlaySessionTests)
+
+  ursa_add_test_executable(UrsaEditorPlayToolbarTests EditorPlayToolbarTests.cpp)
+  target_link_libraries(UrsaEditorPlayToolbarTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaEditorPlayToolbarTests COMMAND UrsaEditorPlayToolbarTests)
 endif()
 ursa_require_test_content(UrsaEditorCompositeWindowTests UrsaEditorCompositeWindowTests)
 

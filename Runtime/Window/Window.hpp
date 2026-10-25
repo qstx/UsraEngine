@@ -123,6 +123,8 @@ struct WindowCreateDesc
 	bool visible = true;
 	bool decorated = true;
 	bool floating = false;
+	bool focused = true;
+	bool focusOnShow = true;
 };
 
 struct WindowWorkArea

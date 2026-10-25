@@ -234,6 +234,8 @@ protected:
 	}
 
 private:
+	friend struct EditorPlayToolbarTest;
+
 	String MainWindowTitle() const;
 
 	Result<void> DecodeWindowIcon(const UInt8* encoded, Size size);

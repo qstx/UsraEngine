@@ -32,6 +32,16 @@ int main()
 		secondEntry.objectId = second;
 
 		EditorSelectionContext selection;
+		selection.ReconcileEntries({});
+		selection.ReconcileEntries({});
+		Expect(selection.revision == 0 && !selection.rangeAnchor,
+		       "Refreshing an empty selection changed its revision without a user selection");
+		PendingEditorSelectionClick initialClick;
+		initialClick.Begin(firstEntry, {firstEntry, secondEntry}, false, false, selection.revision);
+		selection.ReconcileEntries({});
+		initialClick.Finish(selection, true);
+		Expect(selection.objectId == first, "An idle refresh cancelled the first hierarchy click");
+		selection = {};
 		Expect(selection.SelectEntries({firstEntry, secondEntry, firstEntry}, 2), "Cannot publish selection set");
 		Expect(selection.entries.size() == 2 && selection.primaryIndex == 0,
 		       "Selection did not deduplicate stable object identities or keep the requested primary");
@@ -99,6 +109,16 @@ int main()
 		       "Entering Play did not invalidate and rebind the active selection identity");
 
 		selection.beforeChange = {};
+		{
+			EditorSelectionContext missingSelection;
+			auto missingEntry = firstEntry;
+			missingEntry.missing = true;
+			missingSelection.ReconcileEntries({missingEntry});
+			const auto missingRevision = missingSelection.revision;
+			missingSelection.ReconcileEntries({missingEntry});
+			Expect(missingSelection.revision == missingRevision && !missingSelection.rangeAnchor,
+			       "An unchanged missing selection kept advancing its revision");
+		}
 		EditorSelectionEntry assetEntry;
 		assetEntry.kind = EditorSelectionKind::Asset;
 		assetEntry.assetPath = VirtualPath::Parse("prj:Texture.png").value;

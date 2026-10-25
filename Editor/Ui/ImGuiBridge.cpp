@@ -49,8 +49,24 @@ String LayoutSettingsName(const String& layoutKey)
 
 ImVec2 KeepPlatformWindowVisible(ImVec2 position, ImVec2 size)
 {
-	const auto monitors = Window::Monitors();
-	if (!monitors || monitors.value.empty())
+	Vector<WindowWorkArea> workAreas;
+	for (const auto& monitor : ImGui::GetPlatformIO().Monitors)
+	{
+		workAreas.push_back({static_cast<Int32>(monitor.WorkPos.x), static_cast<Int32>(monitor.WorkPos.y),
+		                     static_cast<UInt32>(monitor.WorkSize.x), static_cast<UInt32>(monitor.WorkSize.y)});
+	}
+	if (workAreas.empty())
+	{
+		const auto monitors = Window::Monitors();
+		if (monitors)
+		{
+			for (const auto& monitor : monitors.value)
+			{
+				workAreas.push_back(monitor.workArea);
+			}
+		}
+	}
+	if (workAreas.empty())
 	{
 		return position;
 	}
@@ -68,8 +84,7 @@ ImVec2 KeepPlatformWindowVisible(ImVec2 position, ImVec2 size)
 		    std::min(position.y + height, workBottom) - std::max(position.y, static_cast<float>(area.y));
 		return overlapWidth >= visibleWidth && overlapHeight >= visibleHeight;
 	};
-	if (std::any_of(monitors.value.begin(), monitors.value.end(),
-	                [&](const WindowMonitorInfo& monitor) { return visibleOn(monitor.workArea); }))
+	if (std::any_of(workAreas.begin(), workAreas.end(), visibleOn))
 	{
 		return position;
 	}
@@ -85,10 +100,10 @@ ImVec2 KeepPlatformWindowVisible(ImVec2 position, ImVec2 size)
 		                                                : 0.0f;
 		return gapX * gapX + gapY * gapY;
 	};
-	const auto nearest = std::min_element(monitors.value.begin(), monitors.value.end(),
-	                                      [&](const WindowMonitorInfo& left, const WindowMonitorInfo& right)
-	                                      { return distanceSquared(left.workArea) < distanceSquared(right.workArea); });
-	const auto& area = nearest->workArea;
+	const auto nearest = std::min_element(workAreas.begin(), workAreas.end(),
+	                                      [&](const WindowWorkArea& left, const WindowWorkArea& right)
+	                                      { return distanceSquared(left) < distanceSquared(right); });
+	const auto& area = *nearest;
 	const float minimumX = static_cast<float>(area.x) - width + visibleWidth;
 	const float maximumX = static_cast<float>(area.x) + static_cast<float>(area.width) - visibleWidth;
 	const float minimumY = static_cast<float>(area.y);
@@ -893,8 +908,9 @@ void ImGuiBridge::HandleWindowEvent(const std::shared_ptr<Window>& source, const
 			break;
 		case WindowEventType::CursorMoved:
 		{
-			const auto position = source->DesktopCursorPosition();
-			input.AddMousePosEvent(static_cast<float>(position.first), static_cast<float>(position.second));
+			const auto position = source->Position();
+			input.AddMousePosEvent(static_cast<float>(position.first + event.x),
+			                       static_cast<float>(position.second + event.y));
 			break;
 		}
 		case WindowEventType::MousePressed:
@@ -979,6 +995,8 @@ void ImGuiBridge::CreatePlatformWindow(ImGuiViewport* viewport)
 	desc.height = static_cast<UInt32>(std::max(viewport->Size.y, 1.0f));
 	desc.title = "Ursa Editor";
 	desc.visible = false;
+	desc.focused = false;
+	desc.focusOnShow = false;
 	desc.decorated = (viewport->Flags & ImGuiViewportFlags_NoDecoration) == 0;
 	desc.floating = (viewport->Flags & ImGuiViewportFlags_TopMost) != 0;
 	auto created = Window::Create(desc);
@@ -1257,6 +1275,8 @@ void ImGuiBridge::CreateRendererWindow(ImGuiViewport* viewport)
 	}
 	Rhi::SwapchainDesc desc;
 	desc.window = state->window;
+	// The main swapchain paces the shared frame; extra FIFO waits compound drag latency.
+	desc.vsync = false;
 	auto created = device->CreateSwapchain(desc);
 	if (!created)
 	{

@@ -20,6 +20,7 @@ Windows 的 `UrsaEditor.exe` 同时嵌入 `Editor/Resources/UrsaEditor.ico`，�
 - **Window**：显隐 Project、Hierarchy、Inspector、Scene、Game 和 Console，并重置工作区。面板背景菜单也提供 Close Panel 和 Reset Layout。
 - **Tools**、项目注册菜单和工具窗口：调用 Engine 或项目 C# 扩展。
 - 顶部工具栏提供 Play、Pause/Resume、Step 和 Stop。Step 只在暂停时可用。
+- 后台脚本扫描不会让 Play 按钮周期性变暗。扫描或编译期间点击 Play 会保留启动请求，按钮显示可取消的等待状态；需要编译时会完成编译和重载后再进入 Play。再次点击可取消启动，编译失败不会进入 Play；等待期间切换文档也会取消原启动请求。
 
 ### 常用快捷键与上下文菜单
 
@@ -43,6 +44,8 @@ Undo/Redo 仍不可用并以禁用状态显示；文档/About 等尚未实现的
 Release UI 验收以 ImGui 多帧输入验证真实右键和菜单项点击：`UrsaReferencePickerTests` 覆盖引用字段 Clear、Select、Locate，并检查 Locate 不遗留选择弹窗；`UrsaEditorIconsTests` 覆盖 Console 日志右键复制/定位、导航上下文传递，以及关闭面板不改变文档 Dirty/Revision。该组在 2026-10-25 Release 配置通过。Undo/Redo 与未实现帮助入口通过菜单禁用状态和命令注册点检查；编辑操作不创建撤销历史。
 
 ## Project 面板
+
+目录树与资源列表之间的边界可左右拖动，鼠标悬停时显示水平调整光标。两侧保留最小可见宽度，调整后的目录树宽度随工作区布局保存；调整分隔边界不会改变 Inspector 选择。
 
 Project 左侧显示 `Assets` 文件夹树，右侧显示所选文件夹中的直接内容。展开箭头展开子目录；选择文件夹会更新内容视图。顶部路径按钮可以返回 Assets 或跳到上级目录。搜索会按资源名称和相对路径查找项目资产。
 

@@ -7,6 +7,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <algorithm>
+#include <cfloat>
 #include <functional>
 #include <tuple>
 
@@ -393,7 +394,13 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		diagnostic = refreshed ? String{} : refreshed.error;
 	}
 	ImGui::Separator();
-	ImGui::BeginChild("ProjectFolderTree", ImVec2(190.0f, 0.0f), ImGuiChildFlags_Borders);
+	const float availableWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+	const float minimumTreeWidth = std::min(100.0f, availableWidth * 0.4f);
+	const float minimumContentsWidth = std::min(160.0f, availableWidth * 0.5f);
+	const float maximumTreeWidth =
+	    std::max(minimumTreeWidth, availableWidth - ImGui::GetStyle().ItemSpacing.x - minimumContentsWidth);
+	ImGui::SetNextWindowSizeConstraints({minimumTreeWidth, 0.0f}, {maximumTreeWidth, FLT_MAX});
+	ImGui::BeginChild("ProjectFolderTree", ImVec2(190.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
 	const String currentFolder = model.CurrentFolder();
 	auto selectFolder = [&](const String& path)
 	{

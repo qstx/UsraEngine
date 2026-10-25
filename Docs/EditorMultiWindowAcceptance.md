@@ -1,5 +1,13 @@
 # Editor 多窗口基础验收
 
+## 2026-10-25 手动验收问题回归
+
+`UrsaEditorPanelInteractionTests` 使用实际 Hierarchy、Inspector 和 Project 绘制入口，注入鼠标事件验证 Scene 与 Prefab 从空选择开始点击节点后会绘制该对象的组件 Inspector；同时拖动 Project 目录树右边界，验证两侧宽度改变、窄窗口下保留可见区域、选择不变，以及子窗口宽度进入工作区布局设置。`UrsaEditorSelectionContextTests` 另覆盖空选择和全部缺失选择的重复刷新不递增版本，避免按下与松开之间误取消首次点击。
+
+平台浮窗创建和显示不再主动抢焦点；`UrsaImGuiBridgeTests` 实际显示原生窗口并检查源窗口的按住状态保留、浮窗没有获得焦点，同时验证跨窗鼠标事件按来源窗口及事件坐标转换到桌面坐标。浮窗仍可通过后续点击或平台焦点回调获得焦点，普通 Window 的默认焦点行为保留。额外 viewport 关闭独立 vsync，帧节奏由主窗口控制；窗口移动中的可见区域校验复用本帧显示器列表。GPU 资源仍按原有提交完成点释放。
+
+Release 的面板交互、选择上下文、Window 输入和 ImGuiBridge 回归通过，完整 `UrsaEditorWorkspaceWindowTests` 通过（173.93 秒），覆盖标签拖出/重停靠、独立窗口关闭、活动 Play 的跨 viewport 资产交付及布局恢复。Debug 的面板交互、Window 输入和 ImGuiBridge 回归也通过；窗口测试中补齐了两处遗漏的帧结束调用，使 Debug 断言检查可完整执行。Debug 与 Release Editor 均已重新构建。上述输入为测试注入；实际场景中的物理鼠标流畅度仍可人工补充检查。
+
 2026-10-25 在 Windows、Vulkan GPU 和单个已连接显示器环境完成 Release 自动验收。多窗口验收不要求第二台显示器；跨显示器 DPI 兼容性单独作为可选扩展验证。
 
 `Window` 保持原 `Create(width, height, title, visible)` 入口，并提供可配置窗口描述、桌面位置/鼠标、焦点、逻辑与 framebuffer 尺寸、内容缩放、显示器工作区和逐窗口事件订阅。事件属于产生它的窗口；窗口失焦会发布焦点变化并释放窗口输入状态。

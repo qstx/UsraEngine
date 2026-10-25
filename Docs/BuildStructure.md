@@ -35,6 +35,12 @@ cmake --build Build --config Debug --target UrsaProjectStructureCheck
 
 Editor 位于 `Build/Editor/Debug/UrsaEditor.exe`，Player 位于 `Build/Debug/UrsaScriptPlayer.exe`，导入工具位于 `Build/Editor/Debug/UrsaAssetImport.exe`。其他配置将 Debug 替换为相应配置名。MSVC 默认启用 `/MP`，构建入口同时使用 `--parallel` 调度多个目标。
 
+工作区根的 `GenerateEngineSolutionWithTracy.bat` 会显式开启 `/MP`，覆盖旧 Build 缓存中的并行关闭设置。默认保留 Editor、Player、导入和打包工具，使用 `URSA_BUILD_TESTS=OFF` 避免整解决方案构建连带编译全部测试；运行 `GenerateEngineSolutionWithTracy.bat --tests` 可在同一个解决方案中启用测试工程。直接运行 CMake 的测试默认值保持原样。
+
+在 VS 中右键所需的 Editor、Player 或工具目标并选择 **Build**，会构建该目标及其依赖；**Build Solution** 会构建当前配置勾选的全部目标。命令行可使用上面的 `--target` 选择一个或多个目标。Debug 和 Release 使用各自的编译产物，切换配置后的首次构建仍需要编译对应依赖。
+
+Tracy 的版本和 Git 提交号只传给 `Runtime/Core/Profiler.cpp`。提交后重新生成解决方案时，提交号变化只使该文件重新编译，再更新受影响的库和链接产物。
+
 ## 测试与准备步骤
 
 `Tests/CMakeLists.txt` 调度各层测试，每个模块就近登记独立测试入口、链接、定义和 fixture。共享辅助头文件与实现由 `UrsaTestFixtures` 持有，测试通过链接获得 include 路径，生产目标不会继承测试辅助代码。

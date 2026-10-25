@@ -33,7 +33,9 @@ if(URSA_ENABLE_TRACY_DIAGNOSTICS)
   endif()
 endif()
 target_compile_definitions(UrsaRuntime PRIVATE
-  URSA_TRACY_MEMORY_CALLSTACK_DEPTH=${URSA_TRACY_MEMORY_CALLSTACK_DEPTH}
+  URSA_TRACY_MEMORY_CALLSTACK_DEPTH=${URSA_TRACY_MEMORY_CALLSTACK_DEPTH})
+# Profiling metadata is only consumed here; a new Git revision must not invalidate every Runtime object.
+set_property(SOURCE Core/Profiler.cpp APPEND PROPERTY COMPILE_DEFINITIONS
   URSA_PROFILING_VERSION="${PROJECT_VERSION}"
   URSA_PROFILING_REVISION="${URSA_PROFILING_REVISION}")
 target_link_libraries(UrsaRuntime PRIVATE nlohmann_json::nlohmann_json)

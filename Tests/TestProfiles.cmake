@@ -16,7 +16,7 @@ function(ursa_classify_test test folder)
     UrsaProjectMaterialPlayerSmoke UrsaProjectMaterialEditorSmoke UrsaProjectEditorOpenSmoke
     UrsaProjectSnakePakSmoke)
   set(windowTests
-    UrsaWindowInputTests UrsaRendererWindowTests UrsaEditorCompositeWindowTests
+    UrsaWindowInputTests UrsaImGuiBridgeTests UrsaRendererWindowTests UrsaEditorCompositeWindowTests
     UrsaMeshEditorWindowTests UrsaAssetRefreshWindowTests UrsaEditorWorkspaceWindowTests
     UrsaProfilerEditorWindowTests UrsaEditorSrpAcceptanceTests UrsaAssetPreviewWorkspaceTests
     UrsaProjectMaterialEditorSmoke UrsaProjectEditorOpenSmoke UrsaProjectPipelineSamplesTests

@@ -383,6 +383,39 @@ void TestPlatformViewportLifecycle()
 	const auto viewportInputWindow = bridge->InputWindowForViewport(&viewport);
 	const bool inputWindowMapped = viewportInputWindow && viewportInputWindow != mainWindow &&
 	                               bridge->InputWindowForViewport(ImGui::GetMainViewport()) == mainWindow;
+	if (platformCreated)
+	{
+		mainWindow->Show();
+		mainWindow->Focus();
+		mainWindow->PollEvents();
+		WindowEvent heldMouse;
+		heldMouse.type = WindowEventType::MousePressed;
+		heldMouse.button = MouseButton::Left;
+		Detail::WindowAccess::Dispatch(*mainWindow, heldMouse);
+		done(bridge->BeginFrame(1.0f / 60.0f, 640, 480));
+		done(bridge->EndFrame());
+		platform.Platform_ShowWindow(&viewport);
+		mainWindow->PollEvents();
+		done(bridge->BeginFrame(1.0f / 60.0f, 640, 480));
+		Expect(!viewportInputWindow->Focused() && ImGui::IsMouseDown(ImGuiMouseButton_Left),
+		       "Showing a detached viewport stole focus or released the held docking mouse button");
+		done(bridge->EndFrame());
+		WindowEvent movedMouse;
+		movedMouse.type = WindowEventType::CursorMoved;
+		movedMouse.x = -28;
+		movedMouse.y = 42;
+		Detail::WindowAccess::Dispatch(*mainWindow, movedMouse);
+		done(bridge->BeginFrame(1.0f / 60.0f, 640, 480));
+		const auto sourcePosition = mainWindow->Position();
+		Expect(ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::GetIO().MousePos.x == sourcePosition.first - 28 &&
+		           ImGui::GetIO().MousePos.y == sourcePosition.second + 42,
+		       "Moving outside the source window lost the held mouse or its desktop coordinates");
+		done(bridge->EndFrame());
+		heldMouse.type = WindowEventType::MouseReleased;
+		Detail::WindowAccess::Dispatch(*mainWindow, heldMouse);
+		done(bridge->BeginFrame(1.0f / 60.0f, 640, 480));
+		done(bridge->EndFrame());
+	}
 	bool savedViewportRecovered = false;
 	if (platformCreated && platform.Platform_SetWindowPos && platform.Platform_GetWindowPos)
 	{
@@ -483,6 +516,7 @@ void TestPlatformViewportLifecycle()
 		    searchFieldActive && searchInputCaptured &&
 		    !SelectPlayInput(detachedInput, true, EditorInputBlocksPlay(searchInputCaptured, false, false, false))
 		         .KeyDown(Key::Space);
+		done(bridge->EndFrame());
 		ImVec2 commandButtonPosition{};
 		const auto drawCommandButton = [&]()
 		{
@@ -540,6 +574,7 @@ void TestPlatformViewportLifecycle()
 		                                                    ImGui::GetDragDropPayload() != nullptr, true);
 		const bool menuInputBlocked =
 		    commandMenuCaptured && !SelectPlayInput(detachedInput, true, true).KeyDown(Key::Space);
+		done(bridge->EndFrame());
 		viewport.DrawData = ImGui::GetDrawData();
 		platform.Renderer_RenderWindow(&viewport, nullptr);
 		WindowEvent mainFocus;

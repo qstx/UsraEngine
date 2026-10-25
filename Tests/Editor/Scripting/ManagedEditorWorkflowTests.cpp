@@ -176,20 +176,19 @@ protected:
 				Expect(!RunningScene(), "Run accepted failed latest script inputs");
 				WriteSource(source);
 				Done(CompileScripts());
+				RequestPlayToggle();
 				phase = 3;
 			}
 			else if (phase == 3)
 			{
-				Expect(!RunningScene() && Take(owner->Name()) == "Editor root" &&
+				Expect(Take(owner->Name()) == "Editor root" &&
 				           nlohmann::json::parse(ToStdString(script->SerializedPayload()))["Fields"]["value"] == 19,
 				       "Reload changed an editing object or lost an unsaved field");
-				RequestPlayToggle();
 				phase = 4;
 			}
 			else if (phase == 4 && !RunningScene())
 			{
 				Expect(InspectorStatus().empty(), ("Run failed: " + ToStdString(InspectorStatus())).c_str());
-				RequestPlayToggle();
 			}
 			else if (phase == 4 && RunningScene())
 			{

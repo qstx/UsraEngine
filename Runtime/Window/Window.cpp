@@ -173,6 +173,8 @@ Result<std::shared_ptr<Window>> Window::Create(const WindowCreateDesc& desc)
 	glfwWindowHint(GLFW_VISIBLE, desc.visible ? GLFW_TRUE : GLFW_FALSE);
 	glfwWindowHint(GLFW_DECORATED, desc.decorated ? GLFW_TRUE : GLFW_FALSE);
 	glfwWindowHint(GLFW_FLOATING, desc.floating ? GLFW_TRUE : GLFW_FALSE);
+	glfwWindowHint(GLFW_FOCUSED, desc.focused ? GLFW_TRUE : GLFW_FALSE);
+	glfwWindowHint(GLFW_FOCUS_ON_SHOW, desc.focusOnShow ? GLFW_TRUE : GLFW_FALSE);
 	auto* handle = glfwCreateWindow(static_cast<int>(desc.width), static_cast<int>(desc.height), desc.title.c_str(),
 	                                nullptr, nullptr);
 	if (!handle)

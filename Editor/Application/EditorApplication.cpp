@@ -2966,24 +2966,53 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 	ImGui::Begin("##EditorToolbar", nullptr, toolbarFlags);
 	ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowWidth() - 110.0f) * 0.5f));
 	const bool canRun = selectedDocument && selectedDocument->Kind() == ResourceKind::Scene &&
-	                    !documents->PromptPending() && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
-	                    !scriptIdeJob.valid() && !ideGenerationRequested;
-	if (requestRun && !canRun)
+	                    !documents->PromptPending() && !scriptIdeJob.valid() && !ideGenerationRequested;
+	if (!play.Active() && (requestRun || runAfterScriptBuild) &&
+	    (!canRun || (pendingRunDocument && selectedDocument->Id() != pendingRunDocument)))
 	{
 		requestRun = false;
+		runAfterScriptBuild = false;
+		pendingRunDocument = {};
 	}
+	const bool awaitingPlay = !play.Active() && (requestRun || runAfterScriptBuild);
+	const bool playingOrRequested = play.Active() || awaitingPlay;
 	ImGui::BeginDisabled(!play.Active() && !canRun);
-	const bool runAction = Icons::Button("Run", play.Active() ? Icons::Icon::Stop : Icons::Icon::Play,
-	                                     play.Active() ? "Stop" : "Play", play.Active()) ||
-	                       requestRun;
-	if (runAction && HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
+	const bool runClicked = Icons::Button("Run", playingOrRequested ? Icons::Icon::Stop : Icons::Icon::Play,
+	                                      play.Active()  ? "Stop"
+	                                      : awaitingPlay ? "Cancel Play"
+	                                                     : "Play",
+	                                      playingOrRequested);
+	const bool runAction = runClicked || requestRun;
+	if (runClicked && awaitingPlay)
+	{
+		requestRun = false;
+		runAfterScriptBuild = false;
+		pendingRunDocument = {};
+	}
+	else if (runAction && HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
 	{
 		requestRun = false;
 		RequestCancelReferencePickerSessions(gui ? gui->Context() : nullptr, [this] { requestRun = true; });
 	}
+	else if (runAction && !play.Active() && scriptBuildJob.valid())
+	{
+		requestRun = false;
+		runAfterScriptBuild = true;
+		pendingRunDocument = selectedDocument->Id();
+	}
+	else if (runAction && !play.Active() && scriptCheckJob.valid())
+	{
+		// Keep the periodic source scan from dimming Play, but serialize a requested start behind it.
+		requestRun = true;
+		if (!pendingRunDocument)
+		{
+			pendingRunDocument = selectedDocument->Id();
+		}
+	}
 	else if (runAction)
 	{
 		requestRun = false;
+		pendingRunDocument = {};
 		runAfterScriptBuild = false;
 		if (play.Active())
 		{
@@ -3319,6 +3348,8 @@ Result<void> EditorApplication::OnGui()
 		{
 			scriptBuildStatus = result.error;
 			runAfterScriptBuild = false;
+			requestRun = false;
+			pendingRunDocument = {};
 		}
 		else
 		{
@@ -3331,15 +3362,24 @@ Result<void> EditorApplication::OnGui()
 				{
 					scriptBuildStatus += "\n" + registered.error;
 					runAfterScriptBuild = false;
+					requestRun = false;
+					pendingRunDocument = {};
 				}
 				else if (runAfterScriptBuild)
 				{
 					requestRun = documents && documents->Current() && documents->Current()->Id() == pendingRunDocument;
+					runAfterScriptBuild = false;
+					if (!requestRun)
+					{
+						pendingRunDocument = {};
+					}
 				}
 			}
 			if (!result.value.succeeded)
 			{
 				runAfterScriptBuild = false;
+				requestRun = false;
+				pendingRunDocument = {};
 			}
 		}
 	}
@@ -3356,6 +3396,13 @@ Result<void> EditorApplication::OnGui()
 			ScriptBuildService* service = scriptBuildService.get();
 			scriptBuildJob =
 			    std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
+			if (requestRun && documents && documents->Current() &&
+			    (!pendingRunDocument || documents->Current()->Id() == pendingRunDocument))
+			{
+				runAfterScriptBuild = true;
+				pendingRunDocument = documents->Current()->Id();
+				requestRun = false;
+			}
 			scriptBuildStatus = "检测到脚本变化，正在后台编译……";
 		}
 	}

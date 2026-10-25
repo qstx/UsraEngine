@@ -217,10 +217,15 @@ struct EditorSelectionContext
 		                               { return entry.SameIdentity(*rangeAnchor) && !entry.IsMissing(); });
 		if (!anchorExists)
 		{
-			rangeAnchor = nextPrimary < nextEntries.size()
-			                  ? std::optional<EditorSelectionEntry>(nextEntries[nextPrimary])
-			                  : std::nullopt;
-			changed = true;
+			const auto nextAnchor = nextPrimary < nextEntries.size() && !nextEntries[nextPrimary].IsMissing()
+			                            ? std::optional<EditorSelectionEntry>(nextEntries[nextPrimary])
+			                            : std::nullopt;
+			if (rangeAnchor.has_value() != nextAnchor.has_value() ||
+			    (rangeAnchor && nextAnchor && !rangeAnchor->SameIdentity(*nextAnchor)))
+			{
+				rangeAnchor = nextAnchor;
+				changed = true;
+			}
 		}
 		if (changed)
 		{
