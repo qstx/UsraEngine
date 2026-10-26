@@ -509,6 +509,57 @@ bool DrawSceneRowControl(const char* id, const ImRect& rect, bool eye, bool enab
 }
 } // namespace
 
+void EditorHierarchy::UpdateDragExpansionTracking()
+{
+	if (ImGui::GetDragDropPayload())
+	{
+		if (!hierarchyDragWasActive)
+		{
+			dragExpandedNodes.clear();
+			hierarchyDragDropSucceeded = false;
+			hierarchyDragWasActive = true;
+		}
+		return;
+	}
+
+	if (hierarchyDragWasActive)
+	{
+		if (!hierarchyDragDropSucceeded)
+		{
+			for (const DragExpandedNode& node : dragExpandedNodes)
+			{
+				SetHierarchyNodeOpen(node.key, node.nodeId.c_str(), false);
+			}
+		}
+		dragExpandedNodes.clear();
+		hierarchyDragWasActive = false;
+		hierarchyDragDropSucceeded = false;
+	}
+}
+
+void EditorHierarchy::RecordDragAutoExpandedNode(const String& key, const char* nodeId)
+{
+	if (!hierarchyDragWasActive || !nodeId)
+	{
+		return;
+	}
+	const auto found = std::find_if(dragExpandedNodes.begin(), dragExpandedNodes.end(),
+	                                [&](const DragExpandedNode& node)
+	                                { return node.key == key && node.nodeId == nodeId; });
+	if (found == dragExpandedNodes.end())
+	{
+		dragExpandedNodes.push_back({key, nodeId});
+	}
+}
+
+void EditorHierarchy::MarkDragDropSucceeded()
+{
+	if (hierarchyDragWasActive)
+	{
+		hierarchyDragDropSucceeded = true;
+	}
+}
+
 HierarchyDropZone ClassifyHierarchyDropZone(float rowY, float rowTop, float rowBottom)
 {
 	if (rowBottom <= rowTop)
@@ -1900,6 +1951,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		return Result<bool>::Failure("PrefabAsset has no root GameObject");
 	}
 	ImGui::Begin("Hierarchy", open);
+	UpdateDragExpansionTracking();
 	const bool searchFieldActive = DrawHierarchySearchField(searchText);
 	AutoScrollHierarchyWhileDragging(ImGui::GetCursorScreenPos().y);
 	const String currentSearch(searchText.data());
@@ -2089,10 +2141,15 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		const ImVec2 mousePosition = ImGui::GetIO().MousePos;
 	const ImVec2 rowStart = ImGui::GetCursorScreenPos();
 	const bool hoveringIndentedContent = mousePosition.x >= rowStart.x + ImGui::GetTreeNodeToLabelSpacing();
+	const bool nodeOpen = IsHierarchyNodeOpen(key, "##gameObject");
 		const bool autoExpand = hasContent && dragHoverTarget == id &&
 		                        hoveringIndentedContent &&
 		                        mousePosition.x == dragHoverPosition.x && mousePosition.y == dragHoverPosition.y &&
 		                        ImGui::GetTime() - dragHoverStartedAt > 0.7;
+		if (autoExpand && !nodeOpen)
+		{
+			RecordDragAutoExpandedNode(key, "##gameObject");
+		}
 		if (autoExpand || (filtering && expandFilteredBranches && hasVisibleChildren))
 		{
 			ImGui::SetNextItemOpen(true, ImGuiCond_Always);
@@ -2355,10 +2412,15 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	const ImVec2 mousePosition = ImGui::GetIO().MousePos;
 	const ImVec2 rowStart = ImGui::GetCursorScreenPos();
 	const bool hoveringIndentedContent = mousePosition.x >= rowStart.x + ImGui::GetTreeNodeToLabelSpacing();
+	const bool nodeOpen = IsHierarchyNodeOpen(key, "##node");
 	const bool autoExpand = hasChildren && dragHoverTarget == id.value &&
 	                        hoveringIndentedContent &&
 	                        mousePosition.x == dragHoverPosition.x && mousePosition.y == dragHoverPosition.y &&
 	                        ImGui::GetTime() - dragHoverStartedAt > 0.7;
+	if (autoExpand && !nodeOpen)
+	{
+		RecordDragAutoExpandedNode(key, "##node");
+	}
 	if (autoExpand || (filtering && expandFilteredBranches && hasVisibleChildren))
 	{
 		ImGui::SetNextItemOpen(true, ImGuiCond_Always);
@@ -2561,6 +2623,10 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		    auto result = containsAsset && assetDropAction
 		                      ? assetDropAction(scene, drag, dropTargetId, dropZone, documentId)
 		                      : ApplyHierarchyDrop(scene, drag, dropTargetId, dropZone, documentId);
+		    if (result)
+		    {
+			MarkDragDropSucceeded();
+		    }
 		    changed |= static_cast<bool>(result);
 		    commandDiagnostic = result ? String{} : result.error;
 	    },
@@ -3036,6 +3102,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		}
 	}
 	ImGui::Begin("Hierarchy", open);
+	UpdateDragExpansionTracking();
 	const bool editableScene = linked == nullptr && !playSession;
 	bool createRootRequested = false;
 	bool createChildRequested = false;
@@ -3436,6 +3503,10 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		                    { return source.identity.kind == EditorSelectionKind::Asset; });
 		    auto result = containsAsset && assetDropAction ? assetDropAction(scene, drag, {}, zone, documentId)
 		                                                   : ApplyHierarchyDrop(scene, drag, {}, zone, documentId);
+	    if (result)
+	    {
+		MarkDragDropSucceeded();
+	    }
 		    changed |= static_cast<bool>(result);
 		    commandDiagnostic = result ? String{} : result.error;
 	    });

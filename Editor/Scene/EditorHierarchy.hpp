@@ -138,6 +138,16 @@ public:
 	void DrawEmpty(bool* open = nullptr);
 
 private:
+	struct DragExpandedNode
+	{
+		String key;
+		String nodeId;
+	};
+
+	void UpdateDragExpansionTracking();
+	void RecordDragAutoExpandedNode(const String& key, const char* nodeId);
+	void MarkDragDropSucceeded();
+
 	Result<bool> DrawGameObject(Scene& scene, GameObject::Ptr object, const Vector<EditorSelectionEntry>& visibleRows,
 	                            EditorSelectionContext* selection, ResourceId documentId, bool playSession,
 	                            UInt64 documentRevision, bool editableScene, const Map<String, bool>& searchMatches,
@@ -173,6 +183,9 @@ private:
 	ResourceId dragHoverTarget;
 	double dragHoverStartedAt = 0.0;
 	ImVec2 dragHoverPosition{};
+	Vector<DragExpandedNode> dragExpandedNodes;
+	bool hierarchyDragWasActive = false;
+	bool hierarchyDragDropSucceeded = false;
 	ResourceId renameTarget;
 	bool renameFocusPending = false;
 	ResourceId renameClickCandidate;
