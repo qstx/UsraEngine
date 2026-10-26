@@ -86,6 +86,14 @@ private:
 		bool visible = false;
 	};
 
+	struct FocusTransition
+	{
+		Camera start;
+		Camera target;
+		Float32 elapsed = 0.f;
+		bool active = false;
+	};
+
 	SceneViewPanel(Rhi::DevicePtr selectedDevice, ImGuiBridge& selectedGui)
 	    : device(std::move(selectedDevice)), gui(&selectedGui)
 	{
@@ -97,6 +105,8 @@ private:
 	Result<void> EnsureTarget(ViewportTarget& target, ViewportSize size);
 
 	void DrawGameToolbar(VirtualFileSystem* userFiles, const String& projectKey, String& diagnostic);
+	void StartFocusTransition(const Camera& current, const Camera& target);
+	void AdvanceFocusTransition(Camera& camera, Float32 deltaTime);
 
 	void LoadSettings(VirtualFileSystem& userFiles, const String& projectKey, String& diagnostic);
 
@@ -174,6 +184,7 @@ private:
 	Float32 sceneCameraNearClip = 0.1f;
 	Float32 sceneCameraFarClip = 100.f;
 	SceneNavigationGesture sceneNavigationGesture = SceneNavigationGesture::None;
+	FocusTransition sceneFocusTransition;
 	std::shared_ptr<Window> sceneNavigationWindow;
 	bool sceneCursorCaptured = false;
 	bool sceneSelectionPending = false;

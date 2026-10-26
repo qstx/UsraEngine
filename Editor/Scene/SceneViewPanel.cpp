@@ -1374,6 +1374,41 @@ Result<void> SceneViewPanel::Initialize()
 	return {};
 }
 
+void SceneViewPanel::StartFocusTransition(const Camera& current, const Camera& target)
+{
+	sceneFocusTransition.start = current;
+	sceneFocusTransition.target = target;
+	sceneFocusTransition.elapsed = 0.f;
+	sceneFocusTransition.active = true;
+}
+
+void SceneViewPanel::AdvanceFocusTransition(Camera& camera, Float32 deltaTime)
+{
+	if (!sceneFocusTransition.active)
+	{
+		return;
+	}
+	constexpr Float32 duration = 0.25f;
+	sceneFocusTransition.elapsed = std::min(duration, sceneFocusTransition.elapsed + std::max(0.f, deltaTime));
+	const Float32 progress = sceneFocusTransition.elapsed / duration;
+	const Float32 eased = 1.f - (1.f - progress) * (1.f - progress) * (1.f - progress);
+	const auto interpolate = [eased](Vec3 from, Vec3 to)
+	{
+		return Vec3{from.x + (to.x - from.x) * eased, from.y + (to.y - from.y) * eased,
+		            from.z + (to.z - from.z) * eased};
+	};
+	camera.position = interpolate(sceneFocusTransition.start.position, sceneFocusTransition.target.position);
+	camera.target = interpolate(sceneFocusTransition.start.target, sceneFocusTransition.target.target);
+	camera.orthographicSize = sceneFocusTransition.start.orthographicSize +
+	                          (sceneFocusTransition.target.orthographicSize -
+	                           sceneFocusTransition.start.orthographicSize) * eased;
+	camera.orthographic = sceneFocusTransition.target.orthographic;
+	if (progress >= 1.f)
+	{
+		sceneFocusTransition.active = false;
+	}
+}
+
 Result<void> SceneViewPanel::EnsureTarget(ViewportTarget& target, ViewportSize size)
 {
 	if (!size.width || !size.height)
@@ -2037,6 +2072,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 		camera.verticalFovRadians = sceneCameraFieldOfView * (3.14159265358979323846f / 180.f);
 		camera.nearPlane = sceneCameraNearClip;
 		camera.farPlane = sceneCameraFarClip;
+		AdvanceFocusTransition(camera, ImGui::GetIO().DeltaTime);
 	}
 	const String sceneViewStateKey = projectKey + "/" + document.Id().ToString();
 	if (loadedSceneViewStateKey != sceneViewStateKey)
@@ -3187,9 +3223,11 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 								    hierarchy, nullptr, &focusPoint);
 								if (focused)
 								{
-									const Vec3 shift = focusPoint - camera.target;
-									camera.position = Add(camera.position, shift);
-									camera.target = focusPoint;
+									Camera focusTarget = camera;
+									const Vec3 shift = focusPoint - focusTarget.target;
+									focusTarget.position = Add(focusTarget.position, shift);
+									focusTarget.target = focusPoint;
+									StartFocusTransition(camera, focusTarget);
 								}
 							}
 						}
@@ -3265,6 +3303,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					SetSceneCursorCaptured(sceneNavigationGesture == SceneNavigationGesture::Flythrough);
 					if (sceneNavigationGesture != SceneNavigationGesture::None)
 					{
+						sceneFocusTransition.active = false;
 						clearSceneViewLock();
 					}
 					if (sceneNavigationGesture == SceneNavigationGesture::Pan ||
@@ -3360,6 +3399,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						    (sceneFlythroughTargetSpeed - sceneFlythroughCurrentSpeed) * easeFactor;
 						if (arrowMovement.x != 0.f || arrowMovement.y != 0.f)
 						{
+							sceneFocusTransition.active = false;
 							clearSceneViewLock();
 							MoveSceneView(camera, arrowMovement, io.DeltaTime,
 							              sceneFlythroughCurrentSpeed * sceneFlythroughSpeed, io.KeyShift,
@@ -3370,6 +3410,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					    sceneNavigationGesture != SceneNavigationGesture::Flythrough &&
 					    sceneNavigationGesture != SceneNavigationGesture::DragZoom)
 					{
+						sceneFocusTransition.active = false;
 						clearSceneViewLock();
 						const ViewportPoint zoomPosition =
 						    sceneView2DMode == io.KeyAlt
@@ -3427,7 +3468,9 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							if (!io.KeyShift)
 							{
 								clearSceneViewLock();
-								FocusSceneSelection(scene, focusTargets, camera, aspect);
+								Camera focusTarget = camera;
+								FocusSceneSelection(scene, focusTargets, focusTarget, aspect);
+								StartFocusTransition(camera, focusTarget);
 							}
 							else
 							{
