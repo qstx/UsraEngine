@@ -1798,8 +1798,24 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	Icons::SameLine();
 	const Float32 scaleWidth = std::max(
 	    70.f, std::min(150.f, ImGui::GetContentRegionAvail().x - postScaleControlsWidth));
+	const ImVec2 scaleDpi = CurrentViewportFramebufferScale();
+	const ImVec2 gameContent = ImGui::GetContentRegionAvail();
+	const Float32 viewHeight = std::max(0.f, gameContent.y - ImGui::GetFrameHeightWithSpacing());
+	Float32 fitScale = 1.f;
+	if (gameTarget.size.width > 0 && gameTarget.size.height > 0)
+	{
+		const Float32 targetWidth = static_cast<Float32>(gameTarget.size.width) / scaleDpi.x;
+		const Float32 targetHeight = static_cast<Float32>(gameTarget.size.height) / scaleDpi.y;
+		if (targetWidth > 0.f && targetHeight > 0.f && gameContent.x > 0.f && viewHeight > 0.f)
+		{
+			fitScale = std::min(gameContent.x / targetWidth, viewHeight / targetHeight);
+		}
+	}
+	const Float32 minimumScale = std::min(1.f, fitScale);
+	const Float32 maximumScale = std::max(5.f * scaleDpi.x, fitScale);
 	ImGui::SetNextItemWidth(scaleWidth);
-	if (ImGui::SliderFloat("##GameScale", &gameScale, 0.1f, 5.f, "%.2fx", ImGuiSliderFlags_Logarithmic))
+	if (ImGui::SliderFloat("##GameScale", &gameScale, minimumScale, maximumScale, "%.2fx",
+	                       ImGuiSliderFlags_Logarithmic))
 	{
 		gameScale = SnapViewportScale(gameScale);
 		gameFit = false;

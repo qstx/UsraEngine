@@ -81,7 +81,7 @@ ViewportLayout ComputeViewportLayout(ViewportRect available, Float32 dpiScale, V
 	const Float32 logicalHeight = static_cast<Float32>(targetPixels.height) / result.dpiScale;
 	const Float32 fitScale = std::min(available.width / logicalWidth, available.height / logicalHeight);
 	result.scale = fit ? fitScale
-	                   : Clamp(std::isfinite(scale) && scale > 0 ? scale : fitScale, std::min(0.1f, fitScale),
+	                   : Clamp(std::isfinite(scale) && scale > 0 ? scale : fitScale, std::min(1.f, fitScale),
 	                           std::max(5.f * result.dpiScale, fitScale));
 	const Float32 displayWidth = logicalWidth * result.scale;
 	const Float32 displayHeight = logicalHeight * result.scale;
