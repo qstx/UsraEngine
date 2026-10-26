@@ -514,6 +514,7 @@ struct Value_Ursa_Editor_SerializedPropertyState
 	UInt32 F_Type{};
 	UInt32 F_ElementType{};
 	UInt32 F_HasMultipleDifferentValues{};
+	UInt32 F_HasMultipleDifferentArraySizes{};
 	UInt32 F_ReferenceKind{};
 	Utf8View F_TypeName{};
 	Utf8View F_DisplayName{};
@@ -527,22 +528,23 @@ struct Value_Ursa_Editor_SerializedPropertyState
 	DataView F_EnumUnsignedValues{};
 	Value_Ursa_Editor_SerializedValue F_Value{};
 };
-static_assert(sizeof(Value_Ursa_Editor_SerializedPropertyState) == 368, "Wire type size mismatch");
+static_assert(sizeof(Value_Ursa_Editor_SerializedPropertyState) == 376, "Wire type size mismatch");
 static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Type) == 0, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_ElementType) == 4, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_HasMultipleDifferentValues) == 8, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_ReferenceKind) == 12, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_TypeName) == 16, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_DisplayName) == 40, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Hidden) == 64, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_HasRange) == 68, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Minimum) == 72, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Maximum) == 80, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Hdr) == 88, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumNames) == 96, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumSignedValues) == 120, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumUnsignedValues) == 144, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Value) == 168, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_HasMultipleDifferentArraySizes) == 12, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_ReferenceKind) == 16, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_TypeName) == 24, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_DisplayName) == 48, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Hidden) == 72, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_HasRange) == 76, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Minimum) == 80, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Maximum) == 88, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Hdr) == 96, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumNames) == 104, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumSignedValues) == 128, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumUnsignedValues) == 152, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Value) == 176, "Wire field offset mismatch");
 struct Value_Ursa_EditorBindingCapability
 {
 	UInt64 F_ModuleId{};
@@ -1641,6 +1643,7 @@ inline void Check_Wire_a5654e1c34585bf8(const Wire::Value_Ursa_Editor_Serialized
 	Check_Wire_535900229e3c85e2(value.F_Type);
 	Check_Wire_535900229e3c85e2(value.F_ElementType);
 	Check_Wire_b760f44fa5965c24(value.F_HasMultipleDifferentValues);
+	Check_Wire_b760f44fa5965c24(value.F_HasMultipleDifferentArraySizes);
 	Check_Wire_c94f08ee88a24e17(value.F_ReferenceKind);
 	Check_Wire_473287f8298dba71(value.F_TypeName);
 	Check_Wire_473287f8298dba71(value.F_DisplayName);

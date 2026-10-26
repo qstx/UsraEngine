@@ -184,20 +184,17 @@ public static class EditorGui
 			case SerializedPropertyType.Array:
 			case SerializedPropertyType.List:
 			{
-				// Multi-object collections can have different lengths; the managed API currently exposes only the primary size.
-				// Keep native drawing for those until the group API exposes per-target bounds safely.
-				if (property.HasMultipleDifferentValues)
-				{
-					NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, caption);
-					break;
-				}
 				int originalSize = property.ArraySize;
-				string foldoutLabel = caption + " (" + originalSize + ")##" + property.PropertyPath;
+				string sizeLabel = property.HasMultipleDifferentArraySizes ? "—" : originalSize.ToString(
+					System.Globalization.CultureInfo.InvariantCulture);
+				string foldoutLabel = caption + " (" + sizeLabel + ")##" + property.PropertyPath;
 				if (!FoldoutHeader(foldoutLabel)) break;
 				try
 				{
-					long editedSize = IntField("Size##" + property.PropertyPath, originalSize);
-					if (editedSize >= 0 && editedSize <= int.MaxValue && editedSize != originalSize)
+					long editedSize = IntField("Size##" + property.PropertyPath, originalSize,
+						property.HasMultipleDifferentArraySizes);
+					if (editedSize >= 0 && editedSize <= int.MaxValue &&
+					    (editedSize != originalSize || property.HasMultipleDifferentArraySizes && WasLastControlEdited()))
 						property.ArraySize = (int)editedSize;
 					for (int index = 0; index < property.ArraySize; ++index)
 					{

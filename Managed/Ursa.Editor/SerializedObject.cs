@@ -116,6 +116,7 @@ public sealed class SerializedProperty
 	private void Write(SerializedValue value) { RequireValid(); NativeEditorBindings.SetProperty(Revision, StoragePath, value); }
 	public SerializedPropertyType PropertyType => State.Type;
 	public bool HasMultipleDifferentValues => State.HasMultipleDifferentValues;
+	public bool HasMultipleDifferentArraySizes => State.HasMultipleDifferentArraySizes;
 	public string TypeName => State.TypeName;
 	public string DisplayName => State.DisplayName;
 	public bool Hidden => State.Hidden;

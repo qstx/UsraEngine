@@ -604,6 +604,16 @@ Result<EditorServices::PropertyState> EditorServices::GetProperty(B::BindingCall
 	result.F_EnumUnsignedValues = call.arena.Array(unsignedValues.data(), unsignedValues.size());
 	result.F_Value = ReadValue(call, propertyValue, descriptor);
 	result.F_HasMultipleDifferentValues = descriptor.value("HasMultipleDifferentValues", false);
+	result.F_HasMultipleDifferentArraySizes = descriptor.value("HasMultipleDifferentArraySizes", false);
+	if ((result.F_Type == P::V_Array || result.F_Type == P::V_List) && descriptor.contains("ArraySize"))
+	{
+		const Size commonSize = descriptor.at("ArraySize").get<Size>();
+		if (commonSize > static_cast<Size>(std::numeric_limits<Int32>::max()))
+		{
+			throw std::runtime_error("Serialized collection exceeds the supported common length");
+		}
+		result.F_Value.F_ArraySize = static_cast<Int32>(commonSize);
+	}
 	return Result<PropertyState>::Success(result);
 }
 
