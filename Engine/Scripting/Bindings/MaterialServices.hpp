@@ -40,6 +40,8 @@ struct MaterialServices
 	static Result<OptionalAsset> GetTexture(BindingCall& call, const Handle& material, Int32 slot);
 	static Result<void> SetTexture(BindingCall& call, const Handle& material, Int32 slot, const OptionalAsset& value);
 	static Result<DataView> GetKeywords(BindingCall& call, const Handle& material);
+	static Result<OptionalAsset> GetAssetIdentity(BindingCall& call, const Handle& material);
+	static Result<DataView> GetPropertyDescriptors(BindingCall& call, const Handle& material);
 	static Result<void> SetKeyword(BindingCall& call, const Handle& material, const Utf8View& name, bool enabled);
 	static Result<Float32> GetFloat(BindingCall& call, const Handle& material, const Utf8View& name);
 	static Result<Int32> GetInt(BindingCall& call, const Handle& material, const Utf8View& name);

@@ -271,6 +271,39 @@ Result<DataView> MaterialServices::GetKeywords(BindingCall& call, const Handle& 
 	                                                      [&](const String& v) { return call.arena.StringValue(v); }));
 }
 
+Result<MaterialServices::OptionalAsset> MaterialServices::GetAssetIdentity(BindingCall& call, const Handle& material)
+{
+	return Result<OptionalAsset>::Success(
+	    WriteOptionalAssetValue<OptionalAsset>(call.arena, Resolve(call, material)->AssetIdentity()));
+}
+
+Result<DataView> MaterialServices::GetPropertyDescriptors(BindingCall& call, const Handle& material)
+{
+	auto target = Resolve(call, material);
+	std::shared_ptr<const Shader::ShaderAsset> shader = target->Shader();
+	if (!shader && target->ShaderId())
+	{
+		shader = ShaderFor(call, target);
+	}
+	if (!shader)
+	{
+		return Result<DataView>::Success(call.arena.Array<Wire::Value_Ursa_MaterialPropertyDescriptor>(nullptr, 0));
+	}
+	auto descriptors = WriteArray<Wire::Value_Ursa_MaterialPropertyDescriptor>(
+	    call.arena, shader->properties,
+	    [&](const Shader::PropertyDeclaration& property)
+	    {
+		    Wire::Value_Ursa_MaterialPropertyDescriptor result{};
+		    result.F_Identifier = call.arena.StringValue(property.identifier);
+		    result.F_DisplayName = call.arena.StringValue(property.displayName);
+		    result.F_Type = static_cast<UInt32>(property.type);
+		    result.F_RangeMinimum = property.rangeMinimum;
+		    result.F_RangeMaximum = property.rangeMaximum;
+		    return result;
+	    });
+	return Result<DataView>::Success(descriptors);
+}
+
 Result<void> MaterialServices::SetKeyword(BindingCall& call, const Handle& material, const Utf8View& name, bool enabled)
 {
 	return Resolve(call, material, true)->SetKeywordEnabled(ReadString(name), enabled);

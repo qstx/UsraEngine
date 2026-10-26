@@ -3525,7 +3525,7 @@
     {
       "Id": 11788884058683052816,
       "Name": "Runtime",
-      "Hash": "1c8dd3d60ee55ae5ceb252bbcf5efd14430ff821e2fc88b34891d3267139ba43",
+      "Hash": "df920adfe59571e5f23f2e6e1432de8672d2d239a73375d8fee79bd62eba491e",
       "CommandHash": "",
       "Required": true,
       "CallScoped": false,
@@ -3580,6 +3580,21 @@
           "Identity": "Ursa.NativeMaterialBindings.Destroy",
           "Direction": "NativeMethod",
           "Return": "void",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetAssetIdentity",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.NativeAssetReference?",
           "Parameters": [
             {
               "Name": "material",
@@ -3673,6 +3688,21 @@
           "Identity": "Ursa.NativeMaterialBindings.GetParameters",
           "Direction": "NativeMethod",
           "Return": "global::Ursa.MaterialParametersValue",
+          "Parameters": [
+            {
+              "Name": "material",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 5,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeMaterialBindings.GetPropertyDescriptors",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.MaterialPropertyDescriptor[]",
           "Parameters": [
             {
               "Name": "material",

@@ -20,6 +20,6 @@ inline constexpr std::array<Module, 5> modules{{
 	{0x00ca56bfaa9bff2cull, "Import", "2e814cf85b9b3aa4d4e0d655031c2d97378d3a9eb6137fc1367e66db5f854d37", 24, false, true},
 	{0xc63346392600d9f5ull, "ManagedHost", "7f3e79617db2f014a516faf1879a2d5dd7766cdbbd7a1a139656f03dab0f279d", 35, true, false},
 	{0x1a11e6863935fee2ull, "Rendering", "4ea661d2bfddf6bc2636c6bf84ab9930a837440385c7610793dd6c45c1068693", 19, true, false},
-	{0xa39a879758119310ull, "Runtime", "1c8dd3d60ee55ae5ceb252bbcf5efd14430ff821e2fc88b34891d3267139ba43", 112, true, false},
+	{0xa39a879758119310ull, "Runtime", "df920adfe59571e5f23f2e6e1432de8672d2d239a73375d8fee79bd62eba491e", 114, true, false},
 }};
 } // namespace Ursa::Scripting::Bindings::Manifest

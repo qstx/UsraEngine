@@ -8,6 +8,19 @@ public enum MaterialType { Unlit, PbrMetallicRoughness }
 public enum MaterialTextureSlot { BaseColor, MetallicRoughness, Normal, Occlusion, Emissive }
 
 [Ursa.Bindings.WireValue]
+public enum MaterialPropertyKind : uint { Float, Range, Int, Color, Vector, Texture2D }
+
+[Ursa.Bindings.WireValue]
+public struct MaterialPropertyDescriptor
+{
+	public string Identifier;
+	public string DisplayName;
+	public MaterialPropertyKind Type;
+	public float RangeMinimum;
+	public float RangeMaximum;
+}
+
+[Ursa.Bindings.WireValue]
 public struct MaterialSampler { public bool Linear; public bool Repeat; }
 
 [Ursa.Bindings.WireValue]
@@ -50,6 +63,8 @@ public class Material : RenderResource
 		get => NativeMaterialBindings.GetShader(Handle)?.ToManaged();
 		set => NativeMaterialBindings.SetShader(Handle, NativeAssetReference.From(value ?? throw new ArgumentNullException(nameof(value))));
 	}
+	public AssetReference? AssetIdentity => NativeMaterialBindings.GetAssetIdentity(Handle)?.ToManaged();
+	public MaterialPropertyDescriptor[] ShaderProperties => NativeMaterialBindings.GetPropertyDescriptors(Handle);
 
 	public string[] Keywords => NativeMaterialBindings.GetKeywords(Handle);
 

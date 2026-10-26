@@ -25,6 +25,26 @@ public sealed class MeshRendererComponentInspector : Inspector
 		EditorGui.Separator();
 		EditorGui.PropertyField(SerializedObject.FindProperty("materials"), "Materials");
 		SerializedObject.ApplyModifiedProperties();
+		if (Target is not RendererComponent renderer) return;
+		Material?[] materials = renderer.SharedMaterials;
+		for (int index = 0; index < materials.Length; ++index)
+		{
+			Material? material = materials[index];
+			if (material == null) continue;
+			AssetReference? asset = material.AssetIdentity;
+			if (asset != null)
+			{
+				EditorGui.Text("Asset material");
+				if (EditorGui.Button("Make Local Copy##material" + index))
+				{
+					material = material.Clone();
+					materials[index] = material;
+					renderer.SharedMaterials = materials;
+				}
+			}
+			if (material.AssetIdentity == null)
+				EditorGui.DrawMaterialProperties(material, "Material " + index);
+		}
 	}
 }
 

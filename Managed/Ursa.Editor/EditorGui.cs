@@ -207,6 +207,93 @@ public static class EditorGui
 				break;
 		}
 	}
+	public static bool DrawMaterialProperties(Material material, string? heading = null)
+	{
+		ArgumentNullException.ThrowIfNull(material);
+		_ = EditorApi.Generation;
+		bool changed = false;
+		if (!string.IsNullOrEmpty(heading)) Text(heading);
+		MaterialPropertyDescriptor[] properties = material.ShaderProperties;
+		if (properties.Length == 0)
+		{
+			Color original = material.Color;
+			Color edited = ColorField("Color", original, hdr: true);
+			if (!edited.Equals(original)) { material.Color = edited; changed = true; }
+			return changed;
+		}
+		foreach (MaterialPropertyDescriptor property in properties)
+		{
+			string id = property.Identifier;
+			switch (property.Type)
+			{
+				case MaterialPropertyKind.Float:
+				{
+					float original = material.GetFloat(id);
+					double edited = DragFloat(property.DisplayName + "##" + id, original, 0.01,
+						-float.MaxValue, float.MaxValue);
+					if (edited != original) { material.SetFloat(id, (float)edited); changed = true; }
+					break;
+				}
+				case MaterialPropertyKind.Range:
+				{
+					float original = material.GetFloat(id);
+					double edited = SliderFloat(property.DisplayName + "##" + id, original,
+						property.RangeMinimum, property.RangeMaximum);
+					if (edited != original) { material.SetFloat(id, (float)edited); changed = true; }
+					break;
+				}
+				case MaterialPropertyKind.Int:
+				{
+					int original = material.GetInt(id);
+					long edited = IntField(property.DisplayName + "##" + id, original);
+					if (edited >= int.MinValue && edited <= int.MaxValue && edited != original)
+					{
+						material.SetInt(id, (int)edited);
+						changed = true;
+					}
+					break;
+				}
+				case MaterialPropertyKind.Color:
+				{
+					Color original = material.GetColor(id);
+					Color edited = ColorField(property.DisplayName + "##" + id, original, hdr: true);
+					if (!edited.Equals(original)) { material.SetColor(id, edited); changed = true; }
+					break;
+				}
+				case MaterialPropertyKind.Vector:
+				{
+					Vector4 original = material.GetVector(id);
+					Vector4 edited = Vector4Field(property.DisplayName + "##" + id, original);
+					if (!edited.Equals(original)) { material.SetVector(id, edited); changed = true; }
+					break;
+				}
+				case MaterialPropertyKind.Texture2D:
+				{
+					TextureAsset? original = material.GetTexture(id);
+					EditorReference? originalReference = original == null
+						? null
+						: EditorContext.ResolveAsset(original.Reference, EditorReferenceKind.Texture);
+					EditorReference? edited = AssetField(property.DisplayName + "##" + id, originalReference,
+						EditorReferenceKind.Texture);
+					AssetReference? editedAsset = edited?.AssetReference;
+					if (editedAsset?.Guid != original?.Reference.Guid ||
+					    editedAsset?.LocalFileId != original?.Reference.LocalFileId)
+					{
+						material.SetTexture(id, editedAsset is { } identity ? TextureAsset.Load(identity) : null);
+						changed = true;
+					}
+					break;
+				}
+			}
+			SameLine();
+			if (SmallButton("Reset##" + id))
+			{
+				material.RemovePropertyOverride(id);
+				changed = true;
+			}
+		}
+		return changed;
+	}
 	public static IDisposable Vertical()
 	{
 		_ = EditorApi.Generation;

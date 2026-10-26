@@ -48,6 +48,10 @@ internal static partial class NativeMaterialBindings
 	internal static partial void SetTexture([HandleKind(5)] NativeHandle material, MaterialTextureSlot slot, NativeAssetReference? value);
 	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::GetKeywords")]
 	internal static partial string[] GetKeywords([HandleKind(5)] NativeHandle material);
+	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::GetAssetIdentity")]
+	internal static partial NativeAssetReference? GetAssetIdentity([HandleKind(5)] NativeHandle material);
+	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::GetPropertyDescriptors")]
+	internal static partial MaterialPropertyDescriptor[] GetPropertyDescriptors([HandleKind(5)] NativeHandle material);
 	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::SetKeyword")]
 	internal static partial void SetKeyword([HandleKind(5)] NativeHandle material, string name, bool enabled);
 	[NativeMethod("Ursa::Scripting::Bindings::MaterialServices::GetFloat")]

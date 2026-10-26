@@ -119,6 +119,15 @@ struct Enum_Ursa_EditorPreviewPhase
 	static constexpr UInt32 V_Release = static_cast<UInt32>(0x0000000000000003ull);
 	static constexpr UInt32 V_Settings = static_cast<UInt32>(0x0000000000000001ull);
 };
+struct Enum_Ursa_MaterialPropertyKind
+{
+	static constexpr UInt32 V_Color = static_cast<UInt32>(0x0000000000000003ull);
+	static constexpr UInt32 V_Float = static_cast<UInt32>(0x0000000000000000ull);
+	static constexpr UInt32 V_Int = static_cast<UInt32>(0x0000000000000002ull);
+	static constexpr UInt32 V_Range = static_cast<UInt32>(0x0000000000000001ull);
+	static constexpr UInt32 V_Texture2D = static_cast<UInt32>(0x0000000000000005ull);
+	static constexpr UInt32 V_Vector = static_cast<UInt32>(0x0000000000000004ull);
+};
 struct Enum_Ursa_MaterialTextureSlot
 {
 	static constexpr Int32 V_BaseColor = static_cast<Int32>(0x0000000000000000ull);
@@ -721,6 +730,20 @@ static_assert(offsetof(Value_Ursa_MaterialParametersValue, F_NormalScale) == 40,
 static_assert(offsetof(Value_Ursa_MaterialParametersValue, F_OcclusionStrength) == 44, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_MaterialParametersValue, F_AlphaCutoff) == 48, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_MaterialParametersValue, F_AlphaMode) == 52, "Wire field offset mismatch");
+struct Value_Ursa_MaterialPropertyDescriptor
+{
+	Utf8View F_Identifier{};
+	Utf8View F_DisplayName{};
+	UInt32 F_Type{};
+	Float32 F_RangeMinimum{};
+	Float32 F_RangeMaximum{};
+};
+static_assert(sizeof(Value_Ursa_MaterialPropertyDescriptor) == 64, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_MaterialPropertyDescriptor, F_Identifier) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_MaterialPropertyDescriptor, F_DisplayName) == 24, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_MaterialPropertyDescriptor, F_Type) == 48, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_MaterialPropertyDescriptor, F_RangeMinimum) == 52, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_MaterialPropertyDescriptor, F_RangeMaximum) == 56, "Wire field offset mismatch");
 struct Value_Ursa_MaterialSampler
 {
 	UInt32 F_Linear{};
@@ -1865,6 +1888,39 @@ inline void Check_Wire_d47a4d2239bf5666(const Wire::Value_Ursa_MaterialParameter
 	Check_Wire_76a7e234dc54e9c6(value.F_OcclusionStrength);
 	Check_Wire_76a7e234dc54e9c6(value.F_AlphaCutoff);
 	Check_Wire_e254115197299d82(value.F_AlphaMode);
+}
+inline void Check_Wire_c54c17e2c12c5c2d(const UInt32& value)
+{
+	(void)value;
+}
+inline void Check_Wire_2d498e35d4d28229(const Wire::Value_Ursa_MaterialPropertyDescriptor& value)
+{
+	(void)value;
+	Check_Wire_473287f8298dba71(value.F_Identifier);
+	Check_Wire_473287f8298dba71(value.F_DisplayName);
+	Check_Wire_c54c17e2c12c5c2d(value.F_Type);
+	Check_Wire_76a7e234dc54e9c6(value.F_RangeMinimum);
+	Check_Wire_76a7e234dc54e9c6(value.F_RangeMaximum);
+}
+inline void CheckOwned_Wire_2d498e35d4d28229(const Wire::Value_Ursa_MaterialPropertyDescriptor& value, const BindingArena& arena)
+{
+	CheckOwned_Wire_473287f8298dba71(value.F_Identifier, arena);
+	CheckOwned_Wire_473287f8298dba71(value.F_DisplayName, arena);
+}
+inline void Check_Wire_6d101e27a4863151(const DataView& value)
+{
+	(void)value;
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_MaterialPropertyDescriptor), value.present, value.reserved);
+	if (!value.present) throw std::runtime_error("Required binding array is null");
+	const auto* items = static_cast<const Wire::Value_Ursa_MaterialPropertyDescriptor*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) Check_Wire_2d498e35d4d28229(items[index]);
+}
+inline void CheckOwned_Wire_6d101e27a4863151(const DataView& value, const BindingArena& arena)
+{
+	Validate(value.data, value.length, sizeof(Wire::Value_Ursa_MaterialPropertyDescriptor), value.present, value.reserved);
+	arena.RequireOwned(value.data, value.length, sizeof(Wire::Value_Ursa_MaterialPropertyDescriptor));
+	const auto* items = static_cast<const Wire::Value_Ursa_MaterialPropertyDescriptor*>(value.data);
+	for (UInt64 index = 0; index < value.length; ++index) CheckOwned_Wire_2d498e35d4d28229(items[index], arena);
 }
 inline void Check_Wire_c95a345d75eecc2d(const Wire::Value_Ursa_MaterialSampler& value)
 {
