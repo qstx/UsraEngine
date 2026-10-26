@@ -68,6 +68,10 @@ public static class EditorGui
 		if (!double.IsFinite(width)) throw new ArgumentOutOfRangeException(nameof(width));
 		NativeEditorBindings.SetNextItemWidth(width);
 	}
+	public static double ContentRegionAvailableWidth
+	{
+		get { _ = EditorApi.Generation; return NativeEditorBindings.GetContentRegionAvailableWidth(); }
+	}
 	public static long IntField(string label, long value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.IntField(label, value, mixedValue); }
 	public static ulong ULongField(string label, ulong value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.ULongField(label, value, mixedValue); }
 	public static double FloatField(string label, double value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.FloatField(label, value, mixedValue); }

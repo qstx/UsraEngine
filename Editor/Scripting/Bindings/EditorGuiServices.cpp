@@ -416,6 +416,12 @@ Result<void> EditorServices::SetNextItemWidth(B::BindingCall& call, Float64 widt
 	return {};
 }
 
+Result<Float64> EditorServices::GetContentRegionAvailableWidth(B::BindingCall& call)
+{
+	RequireGui(call);
+	return Result<Float64>::Success(ImGui::GetContentRegionAvail().x);
+}
+
 Result<Int64> EditorServices::IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value, bool mixedValue)
 {
 	RequireGui(call);

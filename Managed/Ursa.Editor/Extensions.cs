@@ -125,8 +125,9 @@ public abstract class Inspector
 		Array.Copy(tags, tagOptions, tags.Length);
 		tagOptions[^1] = "Add Tag...";
 		int selectedTag = Array.IndexOf(tags, tag.StringValue ?? string.Empty);
+		double tagLayerWidth = Math.Max(60, (EditorGui.ContentRegionAvailableWidth - 72) * 0.5);
 		EditorGui.NewLine();
-		EditorGui.SetNextItemWidth(-176);
+		EditorGui.SetNextItemWidth(tagLayerWidth);
 		int editedTag = EditorGui.Popup("Tag", selectedTag, tagOptions, tag.HasMultipleDifferentValues);
 		if (editedTag == tags.Length)
 		{
@@ -146,7 +147,7 @@ public abstract class Inspector
 		layers[^1] = "Add Layer...";
 		int selectedLayer = layer.ULongValue < (ulong)layerNames.Length ? (int)layer.ULongValue : -1;
 		EditorGui.SameLine();
-		EditorGui.SetNextItemWidth(-8);
+		EditorGui.SetNextItemWidth(tagLayerWidth);
 		int editedLayer = EditorGui.Popup("Layer", selectedLayer, layers, layer.HasMultipleDifferentValues);
 		if (editedLayer == layerNames.Length)
 		{

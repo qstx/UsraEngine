@@ -126,6 +126,8 @@ internal static partial class NativeEditorBindings
 	internal static partial bool ToggleLeft(string label, bool value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetNextItemWidth")]
 	internal static partial void SetNextItemWidth(double width);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetContentRegionAvailableWidth")]
+	internal static partial double GetContentRegionAvailableWidth();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IntField")]
 	internal static partial long IntField(string label, long value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ULongField")]

@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "061404d6ec6e95e643838c7b0a8e88679a6f01c659bcc83182a8a56834122527",
+      "Hash": "54dfa1510c61ee585704a4f5db331bda4d37fa99e5b98730a756003a3d3a129f",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -519,6 +519,14 @@
               "Session": false
             }
           ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetContentRegionAvailableWidth",
+          "Direction": "NativeMethod",
+          "Return": "double",
+          "Parameters": [],
           "Thread": 0,
           "NativeOnly": false
         },
