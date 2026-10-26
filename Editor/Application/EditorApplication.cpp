@@ -1755,9 +1755,9 @@ void EditorApplication::DrawMainMenuBar()
 	auto copyGameObjects = [this] { return CopyGameObjectSelection(); };
 	auto cutGameObjects = [this] { return CutGameObjectSelection(); };
 	auto pasteGameObjects = [this](bool asChild) { return PasteGameObjectSelection(asChild); };
-	const bool hierarchyClipboardInputAllowed = editorShortcutsAllowed && !windowShortcutInput.WantTextInput &&
-	                                            !ImGui::IsAnyItemActive() && windowShortcutInput.KeyCtrl &&
-	                                            !windowShortcutInput.KeyAlt;
+	const bool hierarchyClipboardInputAllowed =
+	    editorShortcutsAllowed && !windowShortcutInput.WantTextInput && !ImGui::IsAnyItemActive() &&
+	    (windowShortcutInput.KeyCtrl || windowShortcutInput.KeySuper) && !windowShortcutInput.KeyAlt;
 	if (hierarchyClipboardInputAllowed && !windowShortcutInput.KeyShift && canCopyGameObjects &&
 	    ImGui::IsKeyPressed(ImGuiKey_X, false))
 	{

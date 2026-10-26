@@ -405,7 +405,7 @@ bool DrawHierarchySearchField(std::array<char, 257>& searchText, Float32 trailin
 		ImGui::SetKeyboardFocusHere();
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F))
+	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::IsKeyPressed(ImGuiKey_F))
 	{
 		ImGui::SetKeyboardFocusHere();
 	}
@@ -2008,13 +2008,14 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	                  expandFilteredBranches);
 	visibleSelectionRows = visibleRows;
 	const ImGuiID focusedHierarchyItem = ImGui::GetFocusID();
-	const bool hierarchyRowFocused = focusedHierarchyItem != 0 &&
-	                                 std::find(hierarchyRowIds.begin(), hierarchyRowIds.end(), focusedHierarchyItem) !=
-	                                     hierarchyRowIds.end();
+	const bool hierarchyRowFocused =
+	    focusedHierarchyItem != 0 &&
+	    std::find(hierarchyRowIds.begin(), hierarchyRowIds.end(), focusedHierarchyItem) != hierarchyRowIds.end();
 	hierarchyRowIds.clear();
 	if (selection && hierarchyRowFocused && !visibleRows.empty() &&
 	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) && selection->SelectEntries(visibleRows))
+	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
+	    selection->SelectEntries(visibleRows))
 	{
 		SetLegacySelected(selection, selected);
 	}
@@ -3296,13 +3297,14 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	}
 	visibleSelectionRows = visibleRows;
 	const ImGuiID focusedHierarchyItem = ImGui::GetFocusID();
-	const bool hierarchyRowFocused = focusedHierarchyItem != 0 &&
-	                                 std::find(hierarchyRowIds.begin(), hierarchyRowIds.end(), focusedHierarchyItem) !=
-	                                     hierarchyRowIds.end();
+	const bool hierarchyRowFocused =
+	    focusedHierarchyItem != 0 &&
+	    std::find(hierarchyRowIds.begin(), hierarchyRowIds.end(), focusedHierarchyItem) != hierarchyRowIds.end();
 	hierarchyRowIds.clear();
 	if (selection && hierarchyRowFocused && !visibleRows.empty() &&
 	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) && selection->SelectEntries(visibleRows))
+	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
+	    selection->SelectEntries(visibleRows))
 	{
 		SetLegacySelected(selection, selected);
 	}
@@ -3709,8 +3711,8 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		}
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    ImGui::GetIO().KeyCtrl && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_G, false) &&
-	    selection && !selection->entries.empty() && editableScene)
+	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::GetIO().KeyShift &&
+	    ImGui::IsKeyPressed(ImGuiKey_G, false) && selection && !selection->entries.empty() && editableScene)
 	{
 		auto created = CreateEmptyParent(scene, selection->entries, documentId);
 		commandDiagnostic = created ? String{} : created.error;
@@ -3741,8 +3743,8 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		}
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D) && editableScene && duplicateObjectsAction &&
-	    selection && !selection->entries.empty())
+	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::IsKeyPressed(ImGuiKey_D) && editableScene &&
+	    duplicateObjectsAction && selection && !selection->entries.empty())
 	{
 		bool valid = true;
 		Vector<ResourceId> ids;

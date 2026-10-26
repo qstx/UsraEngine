@@ -2168,7 +2168,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 			Icons::SameLine();
 			const ImGuiIO& sceneSearchInput = ImGui::GetIO();
 			if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !sceneSearchInput.WantTextInput &&
-			    sceneSearchInput.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
+			    (sceneSearchInput.KeyCtrl || sceneSearchInput.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_F, false))
 			{
 				hierarchy.RequestSearchFocus();
 				ImGui::SetWindowFocus("Hierarchy");
