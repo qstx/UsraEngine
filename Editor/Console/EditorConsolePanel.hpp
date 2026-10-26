@@ -63,6 +63,8 @@ private:
 	Int32 messageLineCount = 1;
 	bool wasPlaying = false;
 	std::optional<LogRecord> selectedRecord;
+	Vector<LogRecord> selectedRecords;
+	std::optional<LogRecord> selectionAnchor;
 	std::chrono::system_clock::time_point observedLatestError{};
 	Array<char, 256> searchText{};
 	VirtualFileSystem* settingsFiles = nullptr;

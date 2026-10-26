@@ -22,6 +22,19 @@ namespace
 {
 constexpr Size maximumLogRecords = 10000;
 
+bool SameLogRecord(const LogRecord& left, const LogRecord& right)
+{
+	return left.timestamp == right.timestamp && left.level == right.level && left.category == right.category &&
+	       left.message == right.message && left.context.resourcePath == right.context.resourcePath &&
+	       left.context.objectId == right.context.objectId && left.compilerMessage == right.compilerMessage;
+}
+
+bool IsLogRecordSelected(const Vector<LogRecord>& selection, const LogRecord& record)
+{
+	return std::any_of(selection.begin(), selection.end(),
+	                   [&](const LogRecord& selected) { return SameLogRecord(selected, record); });
+}
+
 bool VisibleLevel(LogLevel level, bool messages, bool warnings, bool errors)
 {
 	switch (level)
@@ -164,6 +177,13 @@ void EditorConsolePanel::Clear()
 	{
 		selectedRecord.reset();
 	}
+	selectedRecords.erase(std::remove_if(selectedRecords.begin(), selectedRecords.end(),
+	                                     [](const LogRecord& record) { return !record.compilerMessage; }),
+	                      selectedRecords.end());
+	if (selectionAnchor && !selectionAnchor->compilerMessage)
+	{
+		selectionAnchor.reset();
+	}
 }
 
 void EditorConsolePanel::ClearAll()
@@ -171,6 +191,8 @@ void EditorConsolePanel::ClearAll()
 	std::lock_guard<std::mutex> lock(state->mutex);
 	state->records.clear();
 	selectedRecord.reset();
+	selectedRecords.clear();
+	selectionAnchor.reset();
 }
 
 void EditorConsolePanel::AddCompilerDiagnostics(const Vector<ScriptDiagnostic>& diagnostics)
@@ -396,11 +418,6 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		ImGui::EndPopup();
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false) && selectedRecord)
-	{
-		ImGui::SetClipboardText(selectedRecord->message.c_str());
-	}
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Enter, false) && selectedRecord && contextHandler &&
 	    (!selectedRecord->context.resourcePath.empty() || !selectedRecord->context.objectId.empty()))
 	{
@@ -408,7 +425,8 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		diagnostic = located ? String{} : located.error;
 	}
 	const Float32 tableContentWidth = ImGui::GetContentRegionAvail().x;
-	const Float32 detailHeight = selectedRecord ? std::clamp(ImGui::GetContentRegionAvail().y * 0.3f, 88.f, 180.f) : 0.f;
+	const Float32 detailHeight =
+	    selectedRecord ? std::clamp(ImGui::GetContentRegionAvail().y * 0.3f, 88.f, 180.f) : 0.f;
 	if (ImGui::BeginTable("ConsoleEntries", 4,
 	                      ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
 	                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp,
@@ -460,7 +478,7 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		Size keyboardTargetIndex = visibleRecords.size();
 		const ImGuiIO& consoleInput = ImGui::GetIO();
 		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !consoleInput.WantTextInput &&
-		    !consoleInput.KeyCtrl && !consoleInput.KeyAlt && !consoleInput.KeyShift && !ImGui::IsAnyItemActive())
+		    !consoleInput.KeyCtrl && !consoleInput.KeySuper && !consoleInput.KeyAlt && !ImGui::IsAnyItemActive())
 		{
 			const bool moveUp = ImGui::IsKeyPressed(ImGuiKey_UpArrow, false);
 			const bool moveDown = ImGui::IsKeyPressed(ImGuiKey_DownArrow, false);
@@ -472,7 +490,8 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 					for (Size index = 0; index < visibleRecords.size(); ++index)
 					{
 						const LogRecord& candidate = *visibleRecords[index].record;
-						if (selectedRecord->timestamp == candidate.timestamp && selectedRecord->category == candidate.category &&
+						if (selectedRecord->timestamp == candidate.timestamp &&
+						    selectedRecord->category == candidate.category &&
 						    selectedRecord->message == candidate.message)
 						{
 							selectedIndex = index;
@@ -482,8 +501,8 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 				}
 				if (selectedIndex == visibleRecords.size())
 				{
-					keyboardTargetIndex = moveUp ? visibleRecords.back().originalIndex
-					                             : visibleRecords.front().originalIndex;
+					keyboardTargetIndex =
+					    moveUp ? visibleRecords.back().originalIndex : visibleRecords.front().originalIndex;
 				}
 				else if (moveUp && selectedIndex > 0)
 				{
@@ -495,14 +514,26 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 				}
 			}
 		}
+		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !consoleInput.WantTextInput &&
+		    (consoleInput.KeyCtrl || consoleInput.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
+		    !selectedRecords.empty())
+		{
+			String copiedMessages;
+			for (const VisibleRecord& visible : visibleRecords)
+			{
+				if (IsLogRecordSelected(selectedRecords, *visible.record))
+				{
+					copiedMessages += visible.record->message;
+					copiedMessages.push_back('\n');
+				}
+			}
+			ImGui::SetClipboardText(copiedMessages.c_str());
+		}
 		for (const VisibleRecord& visible : visibleRecords)
 		{
 			const LogRecord& record = *visible.record;
 			const bool keyboardSelected = visible.originalIndex == keyboardTargetIndex;
-			const bool selected = keyboardSelected ||
-			                      (selectedRecord && selectedRecord->timestamp == record.timestamp &&
-			                       selectedRecord->category == record.category &&
-			                       selectedRecord->message == record.message);
+			const bool selected = keyboardSelected || IsLogRecordSelected(selectedRecords, record);
 			const ImVec2 cellPadding = ImGui::GetStyle().CellPadding;
 			const Float32 messageWidth =
 			    std::max(1.f, tableContentWidth - 142.f - 100.f - 110.f - 24.f - cellPadding.x * 2.f);
@@ -516,19 +547,124 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			ImGui::TableNextRow(ImGuiTableRowFlags_None, messageHeight);
 			if (keyboardSelected)
 			{
-				selectedRecord = record;
+				if (consoleInput.KeyShift)
+				{
+					if (!selectionAnchor && selectedRecord)
+					{
+						selectionAnchor = selectedRecord;
+					}
+					Size anchorIndex = visibleRecords.size();
+					Size targetIndex = visibleRecords.size();
+					for (Size index = 0; index < visibleRecords.size(); ++index)
+					{
+						if (selectionAnchor && SameLogRecord(*visibleRecords[index].record, *selectionAnchor))
+						{
+							anchorIndex = index;
+						}
+						if (SameLogRecord(*visibleRecords[index].record, record))
+						{
+							targetIndex = index;
+						}
+					}
+					if (anchorIndex == visibleRecords.size())
+					{
+						anchorIndex = targetIndex;
+						selectionAnchor = record;
+					}
+					selectedRecords.clear();
+					for (Size index = std::min(anchorIndex, targetIndex);
+					     index <= std::max(anchorIndex, targetIndex) && index < visibleRecords.size(); ++index)
+					{
+						selectedRecords.push_back(*visibleRecords[index].record);
+					}
+					selectedRecord = record;
+				}
+				else
+				{
+					selectedRecord = record;
+					selectedRecords = {record};
+					selectionAnchor = record;
+				}
 				ImGui::SetScrollHereY(0.5f);
 			}
 			ImGui::PushID(static_cast<int>(visible.originalIndex));
 			ImGui::TableSetColumnIndex(0);
 			const bool rowClicked = ImGui::Selectable(
-			    "##ConsoleEntry", selected,
-			    ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_SpanAllColumns, {0.f, messageHeight});
+			    "##ConsoleEntry", selected, ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_SpanAllColumns,
+			    {0.f, messageHeight});
 			const ImVec2 rowMinimum = ImGui::GetItemRectMin();
 			const ImVec2 rowMaximum = ImGui::GetItemRectMax();
 			if (rowClicked)
 			{
-				selectedRecord = record;
+				const bool control = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper;
+				const bool shift = ImGui::GetIO().KeyShift;
+				if (shift)
+				{
+					Size anchorIndex = visibleRecords.size();
+					Size clickedIndex = visibleRecords.size();
+					for (Size index = 0; index < visibleRecords.size(); ++index)
+					{
+						if (selectionAnchor && SameLogRecord(*visibleRecords[index].record, *selectionAnchor))
+						{
+							anchorIndex = index;
+						}
+						if (SameLogRecord(*visibleRecords[index].record, record))
+						{
+							clickedIndex = index;
+						}
+					}
+					if (anchorIndex == visibleRecords.size())
+					{
+						selectionAnchor = record;
+						anchorIndex = clickedIndex;
+					}
+					Vector<LogRecord> nextSelection = control ? selectedRecords : Vector<LogRecord>{};
+					const Size first = std::min(anchorIndex, clickedIndex);
+					const Size last = std::max(anchorIndex, clickedIndex);
+					for (Size index = first; index <= last && index < visibleRecords.size(); ++index)
+					{
+						const LogRecord& candidate = *visibleRecords[index].record;
+						if (!IsLogRecordSelected(nextSelection, candidate))
+						{
+							nextSelection.push_back(candidate);
+						}
+					}
+					selectedRecords = std::move(nextSelection);
+					selectedRecord = record;
+				}
+				else if (control)
+				{
+					const auto existing =
+					    std::find_if(selectedRecords.begin(), selectedRecords.end(), [&](const LogRecord& selectedEntry)
+					                 { return SameLogRecord(selectedEntry, record); });
+					if (existing == selectedRecords.end())
+					{
+						selectedRecords.push_back(record);
+						selectedRecord = record;
+					}
+					else
+					{
+						selectedRecords.erase(existing);
+						if (selectedRecord && SameLogRecord(*selectedRecord, record))
+						{
+							if (selectedRecords.empty())
+							{
+								selectedRecord.reset();
+							}
+							else
+							{
+								selectedRecord = selectedRecords.back();
+							}
+						}
+					}
+					selectionAnchor = record;
+				}
+				else
+				{
+					selectedRecords = {record};
+					selectedRecord = record;
+					selectionAnchor = record;
+				}
 				if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && contextHandler &&
 				    (!record.context.resourcePath.empty() || !record.context.objectId.empty()))
 				{
@@ -539,6 +675,11 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			else if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 			{
 				selectedRecord = record;
+				if (!IsLogRecordSelected(selectedRecords, record))
+				{
+					selectedRecords = {record};
+					selectionAnchor = record;
+				}
 			}
 			if (contextProbe && record.message == contextProbe->message)
 			{
