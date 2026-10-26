@@ -4461,27 +4461,39 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						bool moveComponentUp = false;
 						bool moveComponentDown = false;
 						bool copyComponent = false;
+						bool pasteComponentValues = false;
 						bool pasteComponentAsNew = false;
+						const String stableType = scriptHeader ? "script:" + scriptHeader->TypeName()
+						                                       : "native:" + component->SerializationType();
 						if (ImGui::BeginPopupContextItem("ComponentHeaderActions"))
 						{
-							const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							const String factoryType =
+							    scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
 							ImGui::BeginDisabled(componentEditors.FindType(factoryType) == nullptr);
 							resetComponent = Icons::MenuItem("Reset");
 							ImGui::EndDisabled();
 							ImGui::Separator();
 							copyComponent = Icons::MenuItem("Copy Component");
-							const String stableType = scriptHeader ? "script:" + scriptHeader->TypeName()
-							                                   : "native:" + component->SerializationType();
-							const bool canPasteAsNew = copiedComponentPayload && copiedComponentPayload->is_object() &&
-							                          copiedComponentPayload->contains("type") &&
-							                          copiedComponentPayload->contains("fields") &&
-							                          copiedComponentPayload->at("fields").is_object() &&
-							                          componentEditors.FindType(
-							                              ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
-							                                  .substr(7)) &&
-							                          static_cast<bool>(componentEditors.CanCreate(
-							                              ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
-							                                  .substr(7), inspectorContext));
+							const bool canPasteValues =
+							    copiedComponentPayload && copiedComponentPayload->is_object() &&
+							    copiedComponentPayload->contains("type") &&
+							    copiedComponentPayload->at("type").is_string() &&
+							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>()) == stableType &&
+							    copiedComponentPayload->contains("fields") &&
+							    copiedComponentPayload->at("fields").is_object();
+							ImGui::BeginDisabled(!canPasteValues);
+							pasteComponentValues = Icons::MenuItem("Paste Component Values");
+							ImGui::EndDisabled();
+							const bool canPasteAsNew =
+							    copiedComponentPayload && copiedComponentPayload->is_object() &&
+							    copiedComponentPayload->contains("type") &&
+							    copiedComponentPayload->contains("fields") &&
+							    copiedComponentPayload->at("fields").is_object() &&
+							    componentEditors.FindType(
+							        ToUrsaString(copiedComponentPayload->at("type").get<std::string>()).substr(7)) &&
+							    static_cast<bool>(componentEditors.CanCreate(
+							        ToUrsaString(copiedComponentPayload->at("type").get<std::string>()).substr(7),
+							        inspectorContext));
 							ImGui::BeginDisabled(!canPasteAsNew);
 							pasteComponentAsNew = Icons::MenuItem("Paste Component As New");
 							ImGui::EndDisabled();
@@ -4498,9 +4510,11 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						}
 						if (resetComponent)
 						{
-							const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
-							auto reset = ResetComponentToDefaults(*component, factoryType, componentEditors, inspectorContext,
-							                                    registry, loadContext, nullptr, nullptr);
+							const String factoryType =
+							    scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							auto reset =
+							    ResetComponentToDefaults(*component, factoryType, componentEditors, inspectorContext,
+							                             registry, loadContext, nullptr, nullptr);
 							diagnostic = reset ? String{} : reset.error;
 							changed |= reset && reset.value;
 							resetComponent = false;
@@ -4516,20 +4530,85 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 							}
 							else
 							{
-								const String stableType = scriptHeader ? "script:" + scriptHeader->TypeName()
-								                                   : "native:" + component->SerializationType();
 								SerializedJson payload = SerializedJson::object();
 								payload["type"] = ToStdString(stableType);
 								payload["fields"] = serialized.value->Snapshot().at("Fields");
 								copiedComponentPayload = std::move(payload);
 							}
 						}
+						if (pasteComponentValues && copiedComponentPayload)
+						{
+							ComponentSaveContext saveContext;
+							saveContext.serialization = &loadContext;
+							auto serialized = SerializedObject::Create(*component, registry, loadContext, saveContext);
+							if (!serialized)
+							{
+								diagnostic = serialized.error;
+							}
+							else
+							{
+								Vector<SerializedObject*> targets{serialized.value.get()};
+								auto grouped = SerializedObjectGroup::Create(std::move(targets));
+								if (!grouped)
+								{
+									diagnostic = grouped.error;
+								}
+								else
+								{
+									const auto current = grouped.value.TargetSnapshot(0);
+									Vector<String> copiedFields;
+									if (!current || !current.value.contains("Fields") ||
+									    !current.value.at("Fields").is_object())
+									{
+										diagnostic =
+										    current ? "Component has no writable serialized fields" : current.error;
+									}
+									else
+									{
+										for (auto field = copiedComponentPayload->at("fields").begin();
+										     field != copiedComponentPayload->at("fields").end(); ++field)
+										{
+											if (!current.value.at("Fields").contains(field.key()))
+											{
+												continue;
+											}
+											String escapedField = ToUrsaString(field.key());
+											for (Size offset = 0;
+											     (offset = escapedField.find('~', offset)) != String::npos; offset += 2)
+											{
+												escapedField.replace(offset, 1, "~0");
+											}
+											for (Size offset = 0;
+											     (offset = escapedField.find('/', offset)) != String::npos; offset += 2)
+											{
+												escapedField.replace(offset, 1, "~1");
+											}
+											const String path = "/Fields/" + escapedField;
+											auto set = grouped.value.SetValue(path, field.value());
+											if (!set)
+											{
+												diagnostic = set.error;
+												break;
+											}
+											copiedFields.push_back(path);
+										}
+									}
+									if (diagnostic.empty() && !copiedFields.empty())
+									{
+										auto applied = grouped.value.Apply();
+										diagnostic = applied ? String{} : applied.error;
+										changed |= static_cast<bool>(applied);
+									}
+								}
+							}
+						}
 						if (pasteComponentAsNew && copiedComponentPayload)
 						{
 							const String copiedStableType =
 							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>());
-							auto pasted = PasteComponentAsNew(componentEditors, copiedStableType, *copiedComponentPayload,
-							                                 inspectorContext, registry, loadContext, nullptr);
+							auto pasted =
+							    PasteComponentAsNew(componentEditors, copiedStableType, *copiedComponentPayload,
+							                        inspectorContext, registry, loadContext, nullptr);
 							diagnostic = pasted ? String{} : pasted.error;
 							changed |= static_cast<bool>(pasted);
 						}
