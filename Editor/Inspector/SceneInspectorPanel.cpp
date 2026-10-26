@@ -552,6 +552,23 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 		}
 		return commitObserver ? commitObserver(group, path, changedTargets) : Result<void>{};
 	};
+	const auto drawAxisScrubLabel = [](const char* label, const ImVec4& color, Float32& value, Float32 sensitivity)
+	{
+		const ImVec2 labelSize = ImGui::CalcTextSize(label);
+		const Float32 itemHeight = ImGui::GetFrameHeight();
+		ImGui::InvisibleButton("##AxisScrub", {labelSize.x + 2.f, itemHeight});
+		const ImVec2 minimum = ImGui::GetItemRectMin();
+		ImGui::GetWindowDrawList()->AddText({minimum.x, minimum.y + (itemHeight - labelSize.y) * 0.5f},
+		                                    ImGui::GetColorU32(color), label);
+		if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.f))
+		{
+			const ImGuiIO& input = ImGui::GetIO();
+			const Float32 modifier = input.KeyShift ? 10.f : input.KeyCtrl ? 0.1f : 1.f;
+			value += input.MouseDelta.x * sensitivity * modifier;
+			return true;
+		}
+		return false;
+	};
 	const auto name = group.DescribeProperty("/Fields/name");
 	if (!name)
 	{
@@ -810,9 +827,6 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 			{
 				ImGui::TableSetColumnIndex(index + 1);
 				ImGui::PushID(index);
-				ImGui::AlignTextToFramePadding();
-				ImGui::TextColored(axisColors[index], "%s", axisLabels[index]);
-				ImGui::SameLine(0.f, 4.f);
 				const String componentPath = String(path) + "/" + ToUrsaString(std::to_string(index));
 				auto component = group.DescribeProperty(componentPath);
 				if (!component)
@@ -823,10 +837,12 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 					return Result<bool>::Failure(component.error);
 				}
 				Float32 value = current.at(index).get<Float32>();
+				const bool axisScrubbed = drawAxisScrubLabel(axisLabels[index], axisColors[index], value, 0.05f);
+				ImGui::SameLine(0.f, 4.f);
 				ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,
 				                    component.value.value("HasMultipleDifferentValues", false));
 				ImGui::SetNextItemWidth(-FLT_MIN);
-				const bool edited = ImGui::InputFloat("##Value", &value, 0.f, 0.f, "%.3f");
+				const bool edited = ImGui::InputFloat("##Value", &value, 0.f, 0.f, "%.3f") || axisScrubbed;
 				ImGui::PopItemFlag();
 				if (edited && value != current.at(index).get<Float32>())
 				{
@@ -890,11 +906,11 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 			{
 				ImGui::TableSetColumnIndex(index + 1);
 				ImGui::PushID(index);
-				ImGui::AlignTextToFramePadding();
-				ImGui::TextColored(axisColors[index], "%s", axisLabels[index]);
+				const bool axisScrubbed =
+				    drawAxisScrubLabel(axisLabels[index], axisColors[index], values[index], 0.05f);
 				ImGui::SameLine(0.f, 4.f);
 				ImGui::SetNextItemWidth(-FLT_MIN);
-				if (ImGui::InputFloat("##Value", &values[index], 0.f, 0.f, "%.1f"))
+				if (ImGui::InputFloat("##Value", &values[index], 0.f, 0.f, "%.1f") || axisScrubbed)
 				{
 					editedAxis = index;
 				}
