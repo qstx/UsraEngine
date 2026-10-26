@@ -2258,8 +2258,9 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	{
 		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(125, 195, 255, 255));
 	}
-	const bool open = Icons::TreeNode(
-	    "##node", flags, Icons::ForObject(node, prefabObjects.find(key) != prefabObjects.end()), display.c_str());
+	const bool open =
+	    Icons::TreeNode("##node", flags, Icons::ForObject(node, prefabObjects.find(key) != prefabObjects.end()),
+	                    renameTarget == id.value ? "" : display.c_str());
 	if (isDefaultParent)
 	{
 		ImGui::PopStyleColor();
@@ -2279,9 +2280,41 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	const bool rowLabelDoubleClicked =
 	    rowHovered && ImGui::GetIO().MousePos.x >= rowRect.Min.x + ImGui::GetTreeNodeToLabelSpacing() &&
 	    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+	bool inlineRenameChanged = false;
 	if (active && !active.value)
 	{
 		ImGui::PopStyleVar();
+	}
+	if (renameTarget == id.value)
+	{
+		const Float32 renameX = rowRect.Min.x + ImGui::GetTreeNodeToLabelSpacing();
+		const Float32 renameY = rowRect.Min.y + (rowRect.GetHeight() - ImGui::GetFrameHeight()) * 0.5f;
+		ImGui::SetCursorScreenPos({renameX, renameY});
+		ImGui::SetNextItemWidth(std::max(40.f, rowRect.Max.x - renameX - 44.f));
+		if (renameFocusPending)
+		{
+			ImGui::SetKeyboardFocusHere();
+			renameFocusPending = false;
+		}
+		const bool submit = ImGui::InputText("##HierarchyRename", renameBuffer.data(), renameBuffer.size(),
+		                                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+		const bool cancel = ImGui::IsItemActive() && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+		const bool finish = submit || ImGui::IsItemDeactivated();
+		if (cancel)
+		{
+			renameTarget = {};
+			renameFocusPending = false;
+		}
+		else if (finish)
+		{
+			if (renameBuffer[0] != '\0')
+			{
+				auto renamed = scene.SetGameObjectName(node, renameBuffer.data());
+				inlineRenameChanged = static_cast<bool>(renamed);
+			}
+			renameTarget = {};
+			renameFocusPending = false;
+		}
 	}
 	const bool visibleInScene = SceneObjectVisible(id.value);
 	const bool pickableInScene = SceneObjectPickable(id.value);
@@ -2380,7 +2413,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		auto parentId = scene.PersistentId(parent);
 		return parentId ? parentId.value : ResourceId{};
 	};
-	bool changed = false;
+	bool changed = inlineRenameChanged;
 	const auto targetPrefabInstance = prefabInstanceByObject.find(key);
 	const bool allowHierarchyDrop =
 	    !playSession && (editableScene || targetPrefabInstance != prefabInstanceByObject.end());
@@ -2503,10 +2536,10 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 				                   renameTarget = identity.value;
 				                   std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
 				                   std::copy_n("GameObject", 10, renameBuffer.data());
-				                   renamePopupRequested = true;
+				                   renameFocusPending = true;
 			                   }
 			                   return Result<void>{};
-		                   }});
+	                   }});
 		commands.Register(
 		    {"hierarchy.duplicate", "Duplicate", "Ctrl+D",
 		     [editableScene, documentId, duplicateObjects = duplicateObjectsAction](const EditorCommandContext& context)
@@ -2560,7 +2593,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			                   std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
 			                   std::copy_n(name.value.data(), std::min(name.value.size(), renameBuffer.size() - 1),
 			                               renameBuffer.data());
-			                   renamePopupRequested = true;
+			                   renameFocusPending = true;
 			                   return Result<void>{};
 		                   }});
 		commands.Register(
@@ -2766,10 +2799,10 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 				                   renameTarget = created.value;
 				                   std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
 				                   std::copy_n("GameObject", 10, renameBuffer.data());
-				                   renamePopupRequested = true;
+				                   renameFocusPending = true;
 			                   }
 			                   return Result<void>{};
-	                   }});
+		                   }});
 		const auto canCreateParent = contextMenuTarget
 		                                 ? commands.CanExecute("hierarchy.create-empty-parent", *contextMenuTarget, current)
 		                                 : Result<void>::Failure("The hierarchy menu target is unavailable");
@@ -2862,7 +2895,6 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 			}
 		}
 	}
-	renamePopupRequested = false;
 	duplicateObjectsAction = std::move(duplicateObjects);
 	deleteObjectsAction = std::move(deleteObjects);
 	assetDropAction = std::move(assetDrop);
@@ -3022,7 +3054,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		renameTarget = id;
 		std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
 		std::copy_n("GameObject", 10, renameBuffer.data());
-		renamePopupRequested = true;
+		renameFocusPending = true;
 	};
 	auto createEmptyRoot = [&]() -> Result<void>
 	{
@@ -3309,7 +3341,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 					std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
 					std::copy_n(name.value.data(), std::min(name.value.size(), renameBuffer.size() - 1),
 					            renameBuffer.data());
-					renamePopupRequested = true;
+					renameFocusPending = true;
 				}
 			}
 		}
@@ -3421,44 +3453,16 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 				std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
 				std::copy_n(name.value.data(), std::min(name.value.size(), renameBuffer.size() - 1),
 				            renameBuffer.data());
-				renamePopupRequested = true;
+				renameFocusPending = true;
 			}
 		}
 		renameClickCandidate = {};
 		renameClickReleasedAt = -1.0;
 	}
-	if (renamePopupRequested)
+	if (renameTarget && !scene.GameObjectById(renameTarget))
 	{
-		ImGui::OpenPopup("Rename GameObject");
-		renamePopupRequested = false;
-	}
-	if (renameTarget && ImGui::BeginPopupModal("Rename GameObject", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-	{
-		ImGui::SetNextItemWidth(260.0f);
-		if (ImGui::IsWindowAppearing())
-		{
-			ImGui::SetKeyboardFocusHere();
-		}
-		const bool submit = ImGui::InputText("Name", renameBuffer.data(), renameBuffer.size(),
-		                                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-		if (submit || ImGui::Button("Apply"))
-		{
-			auto target = scene.GameObjectById(renameTarget);
-			if (target)
-			{
-				auto renamed = scene.SetGameObjectName(target.value, renameBuffer.data());
-				changed |= static_cast<bool>(renamed);
-			}
-			renameTarget = {};
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel"))
-		{
-			renameTarget = {};
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndPopup();
+		renameTarget = {};
+		renameFocusPending = false;
 	}
 	ImGui::End();
 	if (selection && pendingSelectionClick.active)

@@ -172,7 +172,7 @@ private:
 	ResourceId dragHoverTarget;
 	double dragHoverStartedAt = 0.0;
 	ResourceId renameTarget;
-	bool renamePopupRequested = false;
+	bool renameFocusPending = false;
 	ResourceId renameClickCandidate;
 	double renameClickReleasedAt = -1.0;
 	bool renameClickDragged = false;
