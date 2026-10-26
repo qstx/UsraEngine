@@ -374,7 +374,16 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		ImGui::EndPopup();
 	}
 	Icons::SameLine();
+	const bool wasCollapsed = collapse;
 	settingsChanged |= ImGui::Checkbox("Collapse", &collapse);
+	const bool collapseChanged = wasCollapsed != collapse;
+	if (collapseChanged)
+	{
+		selectedRecord.reset();
+		selectedRecords.clear();
+		selectionAnchor.reset();
+		searchRestoreRecord.reset();
+	}
 	Icons::SameLine();
 	settingsChanged |= ImGui::Checkbox("Error Pause", &errorPause);
 	Icons::SameLine();
@@ -510,6 +519,10 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 	                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp,
 	                      {0.f, selectedRecord ? -detailHeight : 0.f}))
 	{
+		if (collapseChanged)
+		{
+			ImGui::SetScrollY(ImGui::GetScrollMaxY());
+		}
 		ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 142.0f);
 		ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 100.0f);
 		ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, 110.0f);
