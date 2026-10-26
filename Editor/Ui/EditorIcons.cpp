@@ -70,7 +70,8 @@ constexpr const char* names[]{"Play",
                               "Console",
                               "Link",
                               "Copy",
-                              "Pin"};
+                              "Pin",
+                              "Favorite"};
 static_assert(sizeof(names) / sizeof(*names) == static_cast<Size>(Icon::Count));
 
 struct Region

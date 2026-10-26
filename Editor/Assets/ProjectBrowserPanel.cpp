@@ -1137,7 +1137,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 	const bool favoritesOpen = Icons::TreeNode("Favorites", ImGuiTreeNodeFlags_DefaultOpen |
 		                                                                       ImGuiTreeNodeFlags_SpanAvailWidth,
-	                                          Icons::Icon::Folder, "Favorites");
+	                                          Icons::Icon::Favorite, "Favorites");
 	const ImRect favoritesRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
 	if (ImGui::BeginDragDropTargetCustom(favoritesRect, ImGui::GetID("##favoriteAssetDropTarget")))
 		{
@@ -1209,7 +1209,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				const String query = favoriteSearches[index];
 				ImGui::PushID(static_cast<Int32>(index));
 				const bool active = !std::strcmp(searchText.data(), query.c_str()) && currentFolder.empty();
-				if (ImGui::Selectable(query.c_str(), active, ImGuiSelectableFlags_AllowDoubleClick))
+				if (Icons::Selectable(Icons::Icon::Search, query.c_str(), active,
+				                      ImGuiSelectableFlags_AllowDoubleClick))
 				{
 					std::fill(searchText.begin(), searchText.end(), '\0');
 					std::copy_n(query.data(), std::min(query.size(), searchText.size() - 1), searchText.data());
@@ -1236,9 +1237,14 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				const ProjectBrowserEntry* asset = model.Find(path);
 				const Size separator = path.rfind('/');
 				const String label = asset ? asset->name : separator == String::npos ? path : path.substr(separator + 1);
+				const Icons::Icon icon = asset
+				                             ? Icons::ForAsset(asset->folder, asset->kind, asset->importer,
+				                                               asset->path.relative)
+				                             : Icons::Icon::Folder;
 				ImGui::PushID(static_cast<Int32>(favoriteSearches.size() + index));
 				ImGui::BeginDisabled(!asset);
-				const bool clicked = ImGui::Selectable(label.c_str(), asset && selection.Contains(AssetSelection(*asset)));
+				const bool clicked = Icons::Selectable(icon, label.c_str(),
+				                                       asset && selection.Contains(AssetSelection(*asset)));
 				ImGui::EndDisabled();
 				if (clicked)
 				{

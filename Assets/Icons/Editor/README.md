@@ -1,6 +1,6 @@
 # Editor icons
 
-These 55 icons are original Ursa interface artwork. `Sources/*.svg` contains the
+These 56 icons are original Ursa interface artwork. `Sources/*.svg` contains the
 24-unit vector originals generated from the primitives in `Tools/GenerateEditorIcons.py`.
 They do not contain Unity artwork. They are distributed under the same license
 as the first-party Ursa Editor source.

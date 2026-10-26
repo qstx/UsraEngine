@@ -66,6 +66,7 @@ enum class Icon
 	Link,
 	Copy,
 	Pin,
+	Favorite,
 	Count
 };
 
