@@ -288,10 +288,11 @@ bool SelectHierarchyEntry(const EditorSelectionEntry& entry, const Vector<Editor
 	return true;
 }
 
-bool NavigateHierarchySelection(const Vector<EditorSelectionEntry>& visibleRows, EditorSelectionContext* selection,
-                                ResourceId& selected, Int32 direction, bool extend, ResourceId& keyboardFocusTarget)
+bool NavigateHierarchySelectionByOffset(const Vector<EditorSelectionEntry>& visibleRows,
+                                        EditorSelectionContext* selection, ResourceId& selected, Int32 offset,
+                                        bool extend, ResourceId& keyboardFocusTarget)
 {
-	if (visibleRows.empty() || (direction != -1 && direction != 1))
+	if (visibleRows.empty() || offset == 0)
 	{
 		return false;
 	}
@@ -300,22 +301,23 @@ bool NavigateHierarchySelection(const Vector<EditorSelectionEntry>& visibleRows,
 	    primary && primary->kind == EditorSelectionKind::GameObject ? primary->objectId : selected;
 	const auto current = std::find_if(visibleRows.begin(), visibleRows.end(),
 	                                  [&](const EditorSelectionEntry& entry) { return entry.objectId == currentId; });
-	Size targetIndex = 0;
-	if (current == visibleRows.end())
+	const Int64 currentIndex =
+	    current == visibleRows.end() ? -1 : static_cast<Int64>(std::distance(visibleRows.begin(), current));
+	const Int64 lastIndex = static_cast<Int64>(visibleRows.size() - 1);
+	const Int64 target = std::clamp<Int64>(currentIndex + offset, 0, lastIndex);
+	if (target == currentIndex)
 	{
-		targetIndex = direction > 0 ? 0 : visibleRows.size() - 1;
+		return false;
 	}
-	else
-	{
-		const auto currentIndex = static_cast<Size>(std::distance(visibleRows.begin(), current));
-		if ((direction < 0 && currentIndex == 0) || (direction > 0 && currentIndex + 1 >= visibleRows.size()))
-		{
-			return false;
-		}
-		targetIndex = direction < 0 ? currentIndex - 1 : currentIndex + 1;
-	}
+	const Size targetIndex = static_cast<Size>(target);
 	return SelectHierarchyEntry(visibleRows[targetIndex], visibleRows, selection, selected, extend,
 	                            keyboardFocusTarget);
+}
+
+bool NavigateHierarchySelection(const Vector<EditorSelectionEntry>& visibleRows, EditorSelectionContext* selection,
+                                ResourceId& selected, Int32 direction, bool extend, ResourceId& keyboardFocusTarget)
+{
+	return NavigateHierarchySelectionByOffset(visibleRows, selection, selected, direction, extend, keyboardFocusTarget);
 }
 
 bool NavigateHierarchySelectionToEdge(const Vector<EditorSelectionEntry>& visibleRows,
@@ -1910,6 +1912,14 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 			NavigateHierarchySelectionToEdge(visibleRows, selection, selected, last, hierarchyInput.KeyShift,
 			                                 keyboardFocusTarget);
 		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_PageDown, false) || ImGui::IsKeyPressed(ImGuiKey_PageUp, false))
+		{
+			const Int32 pageStep = static_cast<Int32>(
+			    std::max(1.f, std::floor(ImGui::GetContentRegionAvail().y / ImGui::GetFrameHeight())));
+			const Int32 offset = ImGui::IsKeyPressed(ImGuiKey_PageDown, false) ? pageStep : -pageStep;
+			NavigateHierarchySelectionByOffset(visibleRows, selection, selected, offset, hierarchyInput.KeyShift,
+			                                   keyboardFocusTarget);
+		}
 		else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false))
 		{
 			const bool expand = ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
@@ -3206,6 +3216,14 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 			const bool last = ImGui::IsKeyPressed(ImGuiKey_End, false);
 			NavigateHierarchySelectionToEdge(visibleRows, selection, selected, last, hierarchyInput.KeyShift,
 			                                 keyboardFocusTarget);
+		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_PageDown, false) || ImGui::IsKeyPressed(ImGuiKey_PageUp, false))
+		{
+			const Int32 pageStep = static_cast<Int32>(
+			    std::max(1.f, std::floor(ImGui::GetContentRegionAvail().y / ImGui::GetFrameHeight())));
+			const Int32 offset = ImGui::IsKeyPressed(ImGuiKey_PageDown, false) ? pageStep : -pageStep;
+			NavigateHierarchySelectionByOffset(visibleRows, selection, selected, offset, hierarchyInput.KeyShift,
+			                                   keyboardFocusTarget);
 		}
 		else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false))
 		{
