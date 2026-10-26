@@ -5745,10 +5745,9 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 
 void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic,
                                ProjectWorkspace* workspace, ResourceSession* resources,
-                               EditorSelectionContext* selection, ResourceId documentId)
+                               EditorSelectionContext* selection, ResourceId documentId,
+                               ComponentEditors* componentEditors)
 {
-	(void)selection;
-	(void)documentId;
 	if (inspectorOpen && !*inspectorOpen)
 	{
 		return;
@@ -5785,10 +5784,12 @@ void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* i
 			for (Component* component : selected.value->Components())
 			{
 				ImGui::PushID(component->PersistentId().ToString().c_str());
+				const auto* scriptHeader = dynamic_cast<Scripting::ScriptBehaviourComponent*>(component);
+				const String componentType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+				const auto* descriptor = componentEditors ? componentEditors->FindType(componentType) : nullptr;
 				const bool componentOpen = DrawInspectorComponentFoldout(
-				    Icons::ForComponent(component->SerializationType(),
-				                        dynamic_cast<Scripting::ScriptBehaviourComponent*>(component) != nullptr),
-				    component->SerializationType().c_str());
+				    Icons::ForComponent(componentType, scriptHeader != nullptr),
+				    descriptor ? descriptor->displayName.c_str() : componentType.c_str());
 				if (componentOpen)
 				{
 					if (component->SupportsEnabled())
@@ -5803,7 +5804,30 @@ void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* i
 							}
 						}
 					}
-					if (workspace && resources && HasMeshInspector(*component))
+					const ComponentEditor* managedEditor = componentEditors ? componentEditors->Find(componentType) : nullptr;
+					bool managedDrawn = false;
+					if (managedEditor)
+					{
+						ComponentInspectorContext context;
+						context.object = selected.value;
+						context.roots = {selected.value};
+						context.targets = {component};
+						context.scene = &scene;
+						context.selection = selection;
+						context.documentId = documentId;
+						ImGuiInspectorUI ui;
+						managedDrawn = true;
+						auto edited = (*managedEditor)(*component, context, ui);
+						if (!edited)
+						{
+							diagnostic = edited.error;
+						}
+						else
+						{
+							diagnostic.clear();
+						}
+					}
+					if (!managedDrawn && workspace && resources && HasMeshInspector(*component))
 					{
 						auto edited = DrawMeshInspector(*component, *workspace, *resources);
 						if (!edited)

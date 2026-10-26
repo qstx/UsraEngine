@@ -5779,7 +5779,8 @@ Result<void> EditorApplication::OnGui()
 			if (play.Active() && showInspectorPanel && selectionContext.kind != EditorSelectionKind::Asset)
 			{
 				DrawRuntimeSceneInspector(*play.GetScene(), hierarchy, &showInspectorPanel, inspectorError,
-				                          workspace.get(), play.Resources());
+				                          workspace.get(), play.Resources(), &selectionContext,
+				                          documents->Current()->Id(), &project->componentEditors);
 			}
 		}
 	}

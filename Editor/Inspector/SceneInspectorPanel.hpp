@@ -53,5 +53,6 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 
 void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic,
                                ProjectWorkspace* workspace = nullptr, ResourceSession* resources = nullptr,
-                               EditorSelectionContext* selection = nullptr, ResourceId documentId = {});
+                               EditorSelectionContext* selection = nullptr, ResourceId documentId = {},
+                               ComponentEditors* componentEditors = nullptr);
 } // namespace Ursa::Editor
