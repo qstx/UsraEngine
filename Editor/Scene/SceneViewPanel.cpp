@@ -3494,8 +3494,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						settingsChanged = true;
 					}
 					ImGui::PopClipRect();
-				viewportFocused = play.Active() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-								  (focusGameViewOnPlay || maximizedForPlay || imageHovered) && !panning;
+					viewportFocused =
+					    play.Active() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !panning;
 					if (viewportFocused && focusedGameViewport)
 					{
 						*focusedGameViewport = ImGui::GetWindowViewport();
