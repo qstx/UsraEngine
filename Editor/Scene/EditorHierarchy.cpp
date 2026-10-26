@@ -1237,20 +1237,10 @@ Result<void> EditorHierarchy::SelectChildren(const Scene& scene, EditorSelection
 	{
 		return Result<void>::Failure("Select one or more GameObjects first");
 	}
-	Vector<EditorSelectionEntry> children;
-	for (const auto& entry : selection.entries)
+	Vector<EditorSelectionEntry> children = selection.entries;
+	std::function<Result<void>(const GameObject::Ptr&)> visit = [&](const GameObject::Ptr& object) -> Result<void>
 	{
-		if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId ||
-		    entry.playSession != playSession || entry.IsMissing())
-		{
-			return Result<void>::Failure("Select GameObjects in the active Hierarchy first");
-		}
-		auto object = scene.GameObjectById(entry.objectId);
-		if (!object)
-		{
-			return Result<void>::Failure(object.error);
-		}
-		for (const auto& child : object.value->Children())
+		for (const auto& child : object->Children())
 		{
 			auto id = scene.PersistentId(child);
 			if (!id)
@@ -1267,6 +1257,30 @@ Result<void> EditorHierarchy::SelectChildren(const Scene& scene, EditorSelection
 			{
 				children.push_back(std::move(selectedChild));
 			}
+			auto descendants = visit(child);
+			if (!descendants)
+			{
+				return descendants;
+			}
+		}
+		return {};
+	};
+	for (const auto& entry : selection.entries)
+	{
+		if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId ||
+		    entry.playSession != playSession || entry.IsMissing())
+		{
+			return Result<void>::Failure("Select GameObjects in the active Hierarchy first");
+		}
+		auto object = scene.GameObjectById(entry.objectId);
+		if (!object)
+		{
+			return Result<void>::Failure(object.error);
+		}
+		auto descendants = visit(object.value);
+		if (!descendants)
+		{
+			return descendants;
 		}
 	}
 	if (!selection.SelectEntries(std::move(children)))
@@ -1284,7 +1298,23 @@ Result<void> EditorHierarchy::SelectChildren(const PrefabAsset& asset, EditorSel
 	{
 		return Result<void>::Failure("Select one or more GameObjects in the Prefab Hierarchy first");
 	}
-	Vector<EditorSelectionEntry> children;
+	Vector<EditorSelectionEntry> children = selection.entries;
+	std::function<void(const GameObject::Ptr&)> visit = [&](const GameObject::Ptr& object)
+	{
+		for (const auto& child : object->Children())
+		{
+			EditorSelectionEntry selectedChild;
+			selectedChild.kind = EditorSelectionKind::GameObject;
+			selectedChild.documentId = documentId;
+			selectedChild.objectId = child->Id();
+			if (std::none_of(children.begin(), children.end(), [&](const auto& existing)
+			                 { return existing.SameIdentity(selectedChild); }))
+			{
+				children.push_back(std::move(selectedChild));
+			}
+			visit(child);
+		}
+	};
 	for (const auto& entry : selection.entries)
 	{
 		if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId || entry.playSession ||
@@ -1314,18 +1344,7 @@ Result<void> EditorHierarchy::SelectChildren(const PrefabAsset& asset, EditorSel
 		{
 			return Result<void>::Failure("A selected GameObject no longer exists in the Prefab");
 		}
-		for (const auto& child : parent->Children())
-		{
-			EditorSelectionEntry selectedChild;
-			selectedChild.kind = EditorSelectionKind::GameObject;
-			selectedChild.documentId = documentId;
-			selectedChild.objectId = child->Id();
-			if (std::none_of(children.begin(), children.end(), [&](const auto& existing)
-			                 { return existing.SameIdentity(selectedChild); }))
-			{
-				children.push_back(std::move(selectedChild));
-			}
-		}
+		visit(parent);
 	}
 	if (!selection.SelectEntries(std::move(children)))
 	{
@@ -2530,6 +2549,53 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			     pendingDeletePrimary = primary ? primary->objectId : ResourceId{};
 			     return Result<void>{};
 		     }});
+		commands.Register(
+		    {"hierarchy.select-children", "Select Children", {},
+		     [editableScene, documentId, playSession, &scene](const EditorCommandContext& context)
+		     {
+			     if (!editableScene || context.selection.entries.empty())
+			     {
+				     return Result<void>::Failure("Select editable GameObjects with descendants");
+			     }
+			     bool hasDescendants = false;
+			     std::function<void(const GameObject::Ptr&)> findDescendants = [&](const GameObject::Ptr& object)
+			     {
+				     for (const auto& child : object->Children())
+				     {
+					     hasDescendants = true;
+					     findDescendants(child);
+				     }
+			     };
+			     for (const auto& item : context.selection.entries)
+			     {
+				     if (item.kind != EditorSelectionKind::GameObject || item.documentId != documentId ||
+				         item.playSession != playSession || item.IsMissing())
+				     {
+					     return Result<void>::Failure("Select GameObjects in the active Hierarchy first");
+				     }
+				     auto object = scene.GameObjectById(item.objectId);
+				     if (!object)
+				     {
+					     return Result<void>::Failure(object.error);
+				     }
+				     findDescendants(object.value);
+			     }
+			     return hasDescendants ? Result<void>{}
+			                           : Result<void>::Failure("The selection has no child GameObjects");
+		     },
+	     [this, &scene, selection, documentId, playSession](const EditorCommandContext&)
+		     {
+			     if (!selection)
+			     {
+				     return Result<void>::Failure("Hierarchy selection is unavailable");
+			     }
+			     auto selectedChildren = SelectChildren(scene, *selection, documentId, playSession);
+			     if (selectedChildren)
+			     {
+				     SetLegacySelected(selection, selected);
+			     }
+			     return selectedChildren;
+		     }});
 		const EditorCommandContext current =
 		    selection ? EditorCommandContext::Capture(*selection, documentId, documentRevision)
 		              : EditorCommandContext{};
@@ -2581,6 +2647,14 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		{
 			auto duplicated = commands.Execute("hierarchy.duplicate", *contextMenuTarget, current);
 			changed = static_cast<bool>(duplicated);
+		}
+		const auto canSelectChildren = contextMenuTarget
+		                                  ? commands.CanExecute("hierarchy.select-children", *contextMenuTarget, current)
+		                                  : Result<void>::Failure("The hierarchy menu target is unavailable");
+		if (Icons::MenuItem("Select Children", nullptr, false, static_cast<bool>(canSelectChildren)))
+		{
+			auto selectedChildren = commands.Execute("hierarchy.select-children", *contextMenuTarget, current);
+			commandDiagnostic = selectedChildren ? String{} : selectedChildren.error;
 		}
 		commands.Register({"hierarchy.create-empty-parent",
 		                   "Create Empty Parent",
