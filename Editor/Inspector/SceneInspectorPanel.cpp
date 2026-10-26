@@ -534,7 +534,8 @@ Result<bool> DrawGameObjectGroupProperties(
     const GroupCommitObserver& commitObserver = {}, Scene* scene = nullptr,
     const Vector<GameObject::Ptr>* sceneTargets = nullptr, bool allowWorldTransform = false,
     const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedTransformInspector =
-        {})
+        {},
+    const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedTransformActions = {})
 {
 	if (group.TargetCount() > 1)
 	{
@@ -1126,6 +1127,30 @@ Result<bool> DrawGameObjectGroupProperties(
 				ImGui::EndDisabled();
 			}
 			ImGui::EndMenu();
+		}
+		if (managedActionsVisible && managedTransformActions)
+		{
+			auto actions = managedTransformActions(group,
+			                                       [&](SerializedObjectGroup& currentGroup, const String& path)
+			                                       {
+				                                       const auto changedTargets = currentGroup.PendingTargetChanges();
+				                                       auto applied = currentGroup.Apply();
+				                                       if (!applied)
+				                                       {
+					                                       return applied;
+				                                       }
+				                                       return commitObserver
+				                                                  ? commitObserver(currentGroup, path, changedTargets)
+				                                                  : Result<void>{};
+			                                       });
+			if (!actions)
+			{
+				diagnostic = actions.error;
+			}
+			else
+			{
+				changed |= actions.value;
+			}
 		}
 		if (!managedActionsVisible)
 		{
@@ -4541,7 +4566,8 @@ Result<bool> DrawSceneInspector(
     bool drawInspector, EditorSelectionContext* selection, EditorHierarchy::AssetDropAction assetDrop,
     std::function<void(bool)> openTagLayerSettings, bool canCopyGameObjects, bool canPasteGameObjectsAsChild,
     EditorHierarchy::CopySelectionAction copyGameObjects, EditorHierarchy::CutSelectionAction cutGameObjects,
-    EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild, ManagedTransformInspector managedTransformInspector)
+    EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild, ManagedTransformInspector managedTransformInspector,
+    ManagedTransformActionsInspector managedTransformActionsInspector)
 {
 	auto draft = document.Payload<SceneDraft>();
 	if (!draft)
@@ -5202,6 +5228,22 @@ Result<bool> DrawSceneInspector(
 						              return Result<bool>::Failure("Managed Transform target group is inconsistent");
 					              }
 					              return managedTransformInspector(
+					                  selectedObjects, primaryIndex, serializedTargets[primaryIndex].get(),
+					                  serializedGroup, &scene, &loadContext, std::move(managedCommit));
+				              })
+				        : std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>{},
+				    managedTransformActionsInspector
+				        ? std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>(
+				              [&](SerializedObjectGroup& serializedGroup, ManagedPropertyGroupCommit managedCommit)
+				              {
+					              const Size primaryIndex = serializedGroup.PrimaryIndex();
+					              if (primaryIndex >= selectedObjects.size() ||
+					                  primaryIndex >= serializedTargets.size())
+					              {
+						              return Result<bool>::Failure(
+						                  "Managed Transform action target group is inconsistent");
+					              }
+					              return managedTransformActionsInspector(
 					                  selectedObjects, primaryIndex, serializedTargets[primaryIndex].get(),
 					                  serializedGroup, &scene, &loadContext, std::move(managedCommit));
 				              })

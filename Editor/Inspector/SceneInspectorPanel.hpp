@@ -18,6 +18,9 @@ using ManagedPropertyGroupCommit = std::function<Result<void>(SerializedObjectGr
 using ManagedTransformInspector =
     std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*,
                                ComponentLoadContext*, ManagedPropertyGroupCommit)>;
+using ManagedTransformActionsInspector =
+    std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*,
+                               ComponentLoadContext*, ManagedPropertyGroupCommit)>;
 
 Result<std::unique_ptr<SerializedObject>> CreateGameObjectSerializedProperties(GameObject::Ptr object);
 
@@ -54,7 +57,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
                                 EditorHierarchy::CopySelectionAction copyGameObjects = {},
                                 EditorHierarchy::CutSelectionAction cutGameObjects = {},
                                 EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild = {},
-                                ManagedTransformInspector managedTransformInspector = {});
+                                ManagedTransformInspector managedTransformInspector = {},
+                                ManagedTransformActionsInspector managedTransformActionsInspector = {});
 
 void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic,
                                ProjectWorkspace* workspace = nullptr, ResourceSession* resources = nullptr,

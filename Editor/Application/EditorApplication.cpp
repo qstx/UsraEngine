@@ -5499,6 +5499,41 @@ Result<void> EditorApplication::OnGui()
 					    ConfigureReferencePreviewFactory(context);
 					    return InvokeManagedEditorExtension(*managedHost, editingScriptSession,
 					                                        managedGameObjectInspectorId, context);
+				    },
+				    [this](const Vector<GameObject::Ptr>& targets, Size primaryIndex, SerializedObject* properties,
+				           SerializedObjectGroup& propertyGroup, Scene* scene, ComponentLoadContext* loadContext,
+				           ManagedPropertyGroupCommit commitPropertyGroup) -> Result<bool>
+				    {
+					    if (managedGameObjectInspectorId.empty() || !managedHost || managedHost->IsSessionFaulted())
+					    {
+						    return Result<bool>::Success(false);
+					    }
+					    if (!documents || !documents->Current() || !scene || !properties || !loadContext ||
+					        primaryIndex >= targets.size())
+					    {
+						    return Result<bool>::Failure("Managed Transform actions context is incomplete");
+					    }
+					    ManagedEditorContext context;
+					    context.document = documents->Current();
+					    context.documents = documents.get();
+					    context.workspace = workspace.get();
+					    context.registry = &project->components;
+					    context.supportsMultipleObjects = true;
+					    context.gameObjectTargets = targets;
+					    context.gameObjectPrimaryIndex = primaryIndex;
+					    context.serializedProperties = properties;
+					    context.serializedPropertyGroup = &propertyGroup;
+					    context.commitPropertyGroup = std::move(commitPropertyGroup);
+					    context.selection.object = targets[primaryIndex];
+					    context.selection.roots = scene->RootGameObjects();
+					    context.selection.scene = scene;
+					    context.selection.selection = &selectionContext;
+					    context.selection.documentId = documents->Current()->Id();
+					    context.selection.loadContext = loadContext;
+					    context.saveContext.scene = scene;
+					    ConfigureReferencePreviewFactory(context);
+					    return InvokeManagedEditorExtension(*managedHost, editingScriptSession,
+					                                        "inspector-actions:scene:ursa.GameObject", context);
 				    });
 				if (!inspected)
 				{

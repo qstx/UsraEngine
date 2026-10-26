@@ -60,6 +60,7 @@ public abstract class Inspector
 	internal void ReleaseTarget() { targetScope?.Dispose(); targetScope = null; }
 
 	public virtual void OnInspectorGUI() => DrawDefaultInspector();
+	public virtual void OnTransformActionsGUI() { }
 	public virtual void OnEnable() { }
 	public virtual void OnDisable() { }
 	public virtual bool HasPreviewGUI() => false;
@@ -178,6 +179,12 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 					try { inspector.OnInspectorGUI(); inspector.SynchronizeTarget(); }
 					finally { inspector.ReleaseTarget(); }
 				});
+			callbacks.Add("inspector-actions:" + target, () =>
+			{
+				inspector.SerializedObject = CreateSerializedObject(inspector);
+				try { inspector.OnTransformActionsGUI(); inspector.SynchronizeTarget(); }
+				finally { inspector.ReleaseTarget(); }
+			});
 		}
 	}
 
