@@ -27,6 +27,15 @@ EditorSelectionEntry GameObjectSelection(ResourceId documentId, ResourceId objec
 	return entry;
 }
 
+bool IsHierarchyRenameShortcutPressed()
+{
+#if defined(__APPLE__)
+	return ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+#else
+	return ImGui::IsKeyPressed(ImGuiKey_F2, false);
+#endif
+}
+
 Vector<EditorSelectionEntry> OutermostPrefabRoots(const Scene& scene,
 	                                              const Vector<EditorSelectionEntry>& selection,
 	                                              const Map<String, bool>& prefabObjects, ResourceId documentId)
@@ -3812,8 +3821,8 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		focusSelectionRequested = true;
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && hierarchyRowFocused &&
-	    !ImGui::GetIO().WantTextInput &&
-	    ImGui::IsKeyPressed(ImGuiKey_F2) && selection && selection->entries.size() == 1 && editableScene)
+	    !ImGui::GetIO().WantTextInput && IsHierarchyRenameShortcutPressed() && selection &&
+	    selection->entries.size() == 1 && editableScene)
 	{
 		const auto* primary = selection->PrimaryEntry();
 		if (primary && primary->kind == EditorSelectionKind::GameObject && primary->documentId == documentId &&
