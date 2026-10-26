@@ -14,8 +14,10 @@ class PrefabAsset;
 namespace Ursa::Editor
 {
 class EditorDocuments;
-using ManagedTransformInspector = std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*,
-                                                             SerializedObjectGroup&, Scene*, ComponentLoadContext*)>;
+using ManagedPropertyGroupCommit = std::function<Result<void>(SerializedObjectGroup&, const String&)>;
+using ManagedTransformInspector =
+    std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*,
+                               ComponentLoadContext*, ManagedPropertyGroupCommit)>;
 
 Result<std::unique_ptr<SerializedObject>> CreateGameObjectSerializedProperties(GameObject::Ptr object);
 

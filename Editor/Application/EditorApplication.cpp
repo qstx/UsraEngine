@@ -5466,8 +5466,8 @@ Result<void> EditorApplication::OnGui()
 				    [this] { return CopyGameObjectSelection(); }, [this] { return CutGameObjectSelection(); },
 				    [this] { return PasteGameObjectSelection(true); },
 				    [this](const Vector<GameObject::Ptr>& targets, Size primaryIndex, SerializedObject* properties,
-				           SerializedObjectGroup& propertyGroup, Scene* scene,
-				           ComponentLoadContext* loadContext) -> Result<bool>
+				           SerializedObjectGroup& propertyGroup, Scene* scene, ComponentLoadContext* loadContext,
+				           ManagedPropertyGroupCommit commitPropertyGroup) -> Result<bool>
 				    {
 					    if (managedGameObjectInspectorId.empty() || !managedHost || managedHost->IsSessionFaulted())
 					    {
@@ -5488,6 +5488,7 @@ Result<void> EditorApplication::OnGui()
 					    context.gameObjectPrimaryIndex = primaryIndex;
 					    context.serializedProperties = properties;
 					    context.serializedPropertyGroup = &propertyGroup;
+					    context.commitPropertyGroup = std::move(commitPropertyGroup);
 					    context.selection.object = targets[primaryIndex];
 					    context.selection.roots = scene->RootGameObjects();
 					    context.selection.scene = scene;

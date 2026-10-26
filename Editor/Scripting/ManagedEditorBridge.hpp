@@ -30,6 +30,7 @@ struct ManagedEditorContext
 	Size gameObjectPrimaryIndex = 0;
 	SerializedObject* serializedProperties = nullptr;
 	SerializedObjectGroup* serializedPropertyGroup = nullptr;
+	std::function<Result<void>(SerializedObjectGroup&, const String&)> commitPropertyGroup;
 	bool supportsMultipleObjects = false;
 	std::shared_ptr<MaterialInstance> targetMaterial;
 	MeshPtr targetMesh;

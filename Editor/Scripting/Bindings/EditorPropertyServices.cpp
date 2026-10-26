@@ -745,6 +745,13 @@ Result<bool> EditorServices::ApplyProperties(B::BindingCall& call, UInt64 revisi
 		return Result<bool>::Failure("This Editor target is read-only");
 	}
 	B::CompleteBindingResult(scope.propertyGroup ? scope.propertyGroup->Apply() : scope.properties->Apply());
+	if (modified && scope.propertyGroup && scope.source.commitPropertyGroup)
+	{
+		for (const String& path : scope.pendingPropertyPaths)
+		{
+			B::CompleteBindingResult(scope.source.commitPropertyGroup(*scope.propertyGroup, path));
+		}
+	}
 	if (modified)
 	{
 		for (const auto& path : scope.pendingPropertyPaths)

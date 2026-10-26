@@ -528,13 +528,13 @@ String GameObjectGroupEditKey(ResourceId documentId, const Vector<GameObject::Pt
 	return key;
 }
 
-Result<bool>
-DrawGameObjectGroupProperties(SerializedObjectGroup& group, const String& primaryName, const String& nameEditKey,
-                              String& diagnostic, const ProjectTagLayerSettings& tagLayerSettings,
-                              const std::function<void(bool)>& openTagLayerSettings,
-                              const GroupCommitObserver& commitObserver = {}, Scene* scene = nullptr,
-                              const Vector<GameObject::Ptr>* sceneTargets = nullptr, bool allowWorldTransform = false,
-                              const std::function<Result<bool>(SerializedObjectGroup&)>& managedTransformInspector = {})
+Result<bool> DrawGameObjectGroupProperties(
+    SerializedObjectGroup& group, const String& primaryName, const String& nameEditKey, String& diagnostic,
+    const ProjectTagLayerSettings& tagLayerSettings, const std::function<void(bool)>& openTagLayerSettings,
+    const GroupCommitObserver& commitObserver = {}, Scene* scene = nullptr,
+    const Vector<GameObject::Ptr>* sceneTargets = nullptr, bool allowWorldTransform = false,
+    const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedTransformInspector =
+        {})
 {
 	if (group.TargetCount() > 1)
 	{
@@ -1145,7 +1145,42 @@ DrawGameObjectGroupProperties(SerializedObjectGroup& group, const String& primar
 	{
 		if (managedTransformInspector)
 		{
-			auto managed = managedTransformInspector(group);
+			Map<String, SerializedJson> checkpoints;
+			for (const String& path : {String("/Fields/position"), String("/Fields/rotation"), String("/Fields/scale")})
+			{
+				auto values = group.TargetValues(path);
+				if (!values)
+				{
+					return Result<bool>::Failure(values.error);
+				}
+				checkpoints.emplace(path, std::move(values.value));
+			}
+			ManagedPropertyGroupCommit managedCommit =
+			    [commitObserver, checkpoints = std::move(checkpoints)](SerializedObjectGroup& currentGroup,
+			                                                           const String& path) -> Result<void>
+			{
+				if (!commitObserver)
+				{
+					return {};
+				}
+				const auto checkpoint = checkpoints.find(path);
+				if (checkpoint == checkpoints.end())
+				{
+					return Result<void>::Failure("Managed Transform Inspector changed an unsupported property");
+				}
+				auto values = currentGroup.TargetValues(path);
+				if (!values)
+				{
+					return Result<void>::Failure(values.error);
+				}
+				auto changedTargets = currentGroup.CompareTargetValues(path, checkpoint->second, values.value);
+				if (!changedTargets)
+				{
+					return Result<void>::Failure(changedTargets.error);
+				}
+				return commitObserver(currentGroup, path, changedTargets.value);
+			};
+			auto managed = managedTransformInspector(group, std::move(managedCommit));
 			if (!managed)
 			{
 				return managed;
@@ -5145,9 +5180,9 @@ Result<bool> DrawSceneInspector(
 				    GameObjectGroupEditKey(document.Id(), selectedObjects), diagnostic, tagLayerSettings,
 				    openTagLayerSettings, overrideCommit ? overrideCommit.value : GroupCommitObserver{}, &scene,
 				    &selectedObjects, true,
-				    !overrideCommit.value && managedTransformInspector
-				        ? std::function<Result<bool>(SerializedObjectGroup&)>(
-				              [&](SerializedObjectGroup& serializedGroup)
+				    managedTransformInspector
+				        ? std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>(
+				              [&](SerializedObjectGroup& serializedGroup, ManagedPropertyGroupCommit managedCommit)
 				              {
 					              const Size primaryIndex = serializedGroup.PrimaryIndex();
 					              if (primaryIndex >= selectedObjects.size() ||
@@ -5155,11 +5190,11 @@ Result<bool> DrawSceneInspector(
 					              {
 						              return Result<bool>::Failure("Managed Transform target group is inconsistent");
 					              }
-					              return managedTransformInspector(selectedObjects, primaryIndex,
-					                                               serializedTargets[primaryIndex].get(),
-					                                               serializedGroup, &scene, &loadContext);
+					              return managedTransformInspector(
+					                  selectedObjects, primaryIndex, serializedTargets[primaryIndex].get(),
+					                  serializedGroup, &scene, &loadContext, std::move(managedCommit));
 				              })
-				        : std::function<Result<bool>(SerializedObjectGroup&)>{});
+				        : std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>{});
 				if (!groupProperties)
 				{
 					diagnostic = groupProperties.error;
