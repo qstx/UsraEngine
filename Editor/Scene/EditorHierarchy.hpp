@@ -171,6 +171,7 @@ private:
 	String commandDiagnostic;
 	ResourceId dragHoverTarget;
 	double dragHoverStartedAt = 0.0;
+	ImVec2 dragHoverPosition{};
 	ResourceId renameTarget;
 	bool renameFocusPending = false;
 	ResourceId renameClickCandidate;

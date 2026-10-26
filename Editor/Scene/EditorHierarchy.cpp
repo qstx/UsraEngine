@@ -2051,7 +2051,10 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
 		const auto active = object->ActiveInHierarchy();
-		const bool autoExpand = hasContent && dragHoverTarget == id && ImGui::GetTime() - dragHoverStartedAt >= 0.6;
+		const ImVec2 mousePosition = ImGui::GetIO().MousePos;
+		const bool autoExpand = hasContent && dragHoverTarget == id &&
+		                        mousePosition.x == dragHoverPosition.x && mousePosition.y == dragHoverPosition.y &&
+		                        ImGui::GetTime() - dragHoverStartedAt > 0.7;
 		if (autoExpand || (filtering && expandFilteredBranches && hasVisibleChildren))
 		{
 			ImGui::SetNextItemOpen(true, ImGuiCond_Always);
@@ -2126,10 +2129,12 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		const auto dropZone = DrawHierarchyRowDropFeedback(rowRect, documentId, false, parentOf, false, {});
 		if (dropZone == HierarchyDropZone::Into && hasContent && ImGui::GetDragDropPayload())
 		{
-			if (dragHoverTarget != id)
+			if (dragHoverTarget != id || mousePosition.x != dragHoverPosition.x ||
+			    mousePosition.y != dragHoverPosition.y)
 			{
 				dragHoverTarget = id;
 				dragHoverStartedAt = ImGui::GetTime();
+				dragHoverPosition = mousePosition;
 			}
 		}
 		else if (dragHoverTarget == id)
@@ -2307,7 +2312,10 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		flags |= ImGuiTreeNodeFlags_Selected;
 	}
 	const auto active = scene.ActiveInHierarchy(node);
-	const bool autoExpand = hasChildren && dragHoverTarget == id.value && ImGui::GetTime() - dragHoverStartedAt >= 0.6;
+	const ImVec2 mousePosition = ImGui::GetIO().MousePos;
+	const bool autoExpand = hasChildren && dragHoverTarget == id.value &&
+	                        mousePosition.x == dragHoverPosition.x && mousePosition.y == dragHoverPosition.y &&
+	                        ImGui::GetTime() - dragHoverStartedAt > 0.7;
 	if (autoExpand || (filtering && expandFilteredBranches && hasVisibleChildren))
 	{
 		ImGui::SetNextItemOpen(true, ImGuiCond_Always);
@@ -2515,10 +2523,12 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	    !hierarchyAlphabeticalSort);
 	if (dropZone == HierarchyDropZone::Into && hasChildren && ImGui::GetDragDropPayload())
 	{
-		if (dragHoverTarget != id.value)
+		if (dragHoverTarget != id.value || mousePosition.x != dragHoverPosition.x ||
+		    mousePosition.y != dragHoverPosition.y)
 		{
 			dragHoverTarget = id.value;
 			dragHoverStartedAt = ImGui::GetTime();
+			dragHoverPosition = mousePosition;
 		}
 	}
 	else if (dragHoverTarget == id.value)
