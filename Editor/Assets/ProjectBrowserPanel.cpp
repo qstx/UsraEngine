@@ -1657,7 +1657,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			hierarchy.ClearSelection();
 		}
 	}
-	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Enter, false) &&
+	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput &&
+	    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
 	    selection.entries.size() == 1 && actions.openAsset)
 	{
 		const auto* primary = selection.PrimaryEntry();
