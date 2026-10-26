@@ -2973,7 +2973,9 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 								sceneNavigationGesture = SceneNavigationGesture::Flythrough;
 							}
 						}
-						else if (sceneHandTool && !io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+						else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+						         ((sceneHandTool && !io.KeyAlt) || (sceneView2DMode && io.KeyAlt) ||
+						          (!sceneView2DMode && io.KeyAlt && (io.KeyCtrl || io.KeySuper))))
 						{
 							sceneNavigationGesture = SceneNavigationGesture::HandPan;
 						}
