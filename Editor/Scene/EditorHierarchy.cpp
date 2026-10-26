@@ -2564,7 +2564,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		    changed |= static_cast<bool>(result);
 		    commandDiagnostic = result ? String{} : result.error;
 	    },
-	    !hierarchyAlphabeticalSort);
+	    !hierarchyAlphabeticalSort && !filtering);
 	if (dropZone == HierarchyDropZone::Into && hasChildren && hoveringIndentedContent &&
 	    ImGui::GetDragDropPayload())
 	{
