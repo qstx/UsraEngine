@@ -403,6 +403,35 @@ bool DrawHierarchySearchField(std::array<char, 257>& searchText, Float32 trailin
 	return ImGui::IsItemActive();
 }
 
+void AutoScrollHierarchyWhileDragging(Float32 contentTop)
+{
+	if (!ImGui::GetDragDropPayload() || !ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
+	{
+		return;
+	}
+	const ImGuiIO& input = ImGui::GetIO();
+	const Float32 contentBottom = ImGui::GetWindowPos().y + ImGui::GetWindowHeight() -
+	                              ImGui::GetStyle().WindowPadding.y;
+	constexpr Float32 edgeSize = 48.f;
+	constexpr Float32 maximumSpeed = 720.f;
+	const Float32 timeStep = std::clamp(input.DeltaTime, 0.f, 0.05f);
+	Float32 scrollDelta = 0.f;
+	if (input.MousePos.y < contentTop + edgeSize)
+	{
+		const Float32 proximity = std::clamp((contentTop + edgeSize - input.MousePos.y) / edgeSize, 0.f, 1.f);
+		scrollDelta = -maximumSpeed * proximity * timeStep;
+	}
+	else if (input.MousePos.y > contentBottom - edgeSize)
+	{
+		const Float32 proximity = std::clamp((input.MousePos.y - (contentBottom - edgeSize)) / edgeSize, 0.f, 1.f);
+		scrollDelta = maximumSpeed * proximity * timeStep;
+	}
+	if (scrollDelta != 0.f)
+	{
+		ImGui::SetScrollY(ImGui::GetScrollY() + scrollDelta);
+	}
+}
+
 void DrawEyeGlyph(ImDrawList* drawList, ImVec2 center, Float32 size, bool visible, ImU32 color)
 {
 	const Float32 halfWidth = size * 0.43f;
@@ -1872,6 +1901,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	}
 	ImGui::Begin("Hierarchy", open);
 	const bool searchFieldActive = DrawHierarchySearchField(searchText);
+	AutoScrollHierarchyWhileDragging(ImGui::GetCursorScreenPos().y);
 	const String currentSearch(searchText.data());
 	const bool typeOnly = currentSearch.size() > 2 &&
 	                      (currentSearch.compare(0, 2, "t:") == 0 || currentSearch.compare(0, 2, "T:") == 0);
@@ -3050,6 +3080,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		}
 		ImGui::EndPopup();
 	}
+	AutoScrollHierarchyWhileDragging(ImGui::GetCursorScreenPos().y);
 	const String currentSearch(searchText.data());
 	const bool typeOnly = currentSearch.size() > 2 &&
 	                      (currentSearch.compare(0, 2, "t:") == 0 || currentSearch.compare(0, 2, "T:") == 0);
