@@ -3133,11 +3133,12 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					}
 					else if (sceneNavigationGesture == SceneNavigationGesture::Flythrough)
 					{
-						if (io.MouseWheel != 0.f)
+						const Float32 speedScroll = io.KeyShift ? io.MouseWheelH : io.MouseWheel;
+						if (speedScroll != 0.f)
 						{
 							const Float32 speedRange = sceneFlythroughMaxSpeed - sceneFlythroughMinSpeed;
 							const Float32 normalizedSpeed = std::clamp(
-							    (sceneFlythroughSpeed - sceneFlythroughMinSpeed) / speedRange + io.MouseWheel * 0.01f,
+							    (sceneFlythroughSpeed - sceneFlythroughMinSpeed) / speedRange + speedScroll * 0.03f,
 							    0.f, 1.f);
 							sceneFlythroughSpeed = sceneFlythroughMinSpeed + normalizedSpeed * speedRange;
 							settingsChanged = true;
