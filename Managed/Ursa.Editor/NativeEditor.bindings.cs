@@ -84,8 +84,14 @@ internal static partial class NativeEditorBindings
 	internal static partial bool SmallButton(string label);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SameLine")]
 	internal static partial void SameLine();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::NewLine")]
+	internal static partial void NewLine();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Separator")]
 	internal static partial void Separator();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::FoldoutHeader")]
+	internal static partial bool FoldoutHeader(string label);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::EndFoldout")]
+	internal static partial void EndFoldout();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IsLastItemEdited")]
 	internal static partial bool IsLastItemEdited();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::BeginGroup")]

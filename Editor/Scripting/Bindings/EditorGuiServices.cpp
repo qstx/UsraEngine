@@ -243,10 +243,30 @@ Result<void> EditorServices::SameLine(B::BindingCall& call)
 	return {};
 }
 
+Result<void> EditorServices::NewLine(B::BindingCall& call)
+{
+	RequireGui(call);
+	ImGui::NewLine();
+	return {};
+}
+
 Result<void> EditorServices::Separator(B::BindingCall& call)
 {
 	RequireGui(call);
 	ImGui::Separator();
+	return {};
+}
+
+Result<bool> EditorServices::FoldoutHeader(B::BindingCall& call, const B::Utf8View& label)
+{
+	RequireGui(call);
+	return Result<bool>::Success(ImGui::TreeNodeEx(GuiString(label).c_str(), ImGuiTreeNodeFlags_SpanAvailWidth));
+}
+
+Result<void> EditorServices::EndFoldout(B::BindingCall& call)
+{
+	RequireGui(call);
+	ImGui::TreePop();
 	return {};
 }
 

@@ -147,7 +147,10 @@ struct EditorServices
 	static Result<bool> Button(B::BindingCall& call, const B::Utf8View& label);
 	static Result<bool> SmallButton(B::BindingCall& call, const B::Utf8View& label);
 	static Result<void> SameLine(B::BindingCall& call);
+	static Result<void> NewLine(B::BindingCall& call);
 	static Result<void> Separator(B::BindingCall& call);
+	static Result<bool> FoldoutHeader(B::BindingCall& call, const B::Utf8View& label);
+	static Result<void> EndFoldout(B::BindingCall& call);
 	static Result<bool> IsLastItemEdited(B::BindingCall& call);
 	static Result<void> BeginGroup(B::BindingCall& call);
 	static Result<void> EndGroup(B::BindingCall& call);

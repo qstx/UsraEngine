@@ -26,7 +26,10 @@ public static class EditorGui
 	public static bool Button(string label) { _ = EditorApi.Generation; return NativeEditorBindings.Button(label); }
 	public static bool SmallButton(string label) { _ = EditorApi.Generation; return NativeEditorBindings.SmallButton(label); }
 	public static void SameLine() { _ = EditorApi.Generation; NativeEditorBindings.SameLine(); }
+	public static void NewLine() { _ = EditorApi.Generation; NativeEditorBindings.NewLine(); }
 	public static void Separator() { _ = EditorApi.Generation; NativeEditorBindings.Separator(); }
+	public static bool FoldoutHeader(string label) { _ = EditorApi.Generation; return NativeEditorBindings.FoldoutHeader(label); }
+	public static void EndFoldout() { _ = EditorApi.Generation; NativeEditorBindings.EndFoldout(); }
 	private static bool WasLastControlEdited() { _ = EditorApi.Generation; return NativeEditorBindings.IsLastItemEdited(); }
 	public static bool Toggle(string label, bool value, bool mixedValue = false)
 	{
@@ -176,32 +179,46 @@ public static class EditorGui
 			case SerializedPropertyType.Array:
 			case SerializedPropertyType.List:
 			{
-				int originalSize = property.ArraySize;
-				long editedSize = IntField(caption, originalSize);
-				if (editedSize >= 0 && editedSize <= int.MaxValue && editedSize != originalSize)
-					property.ArraySize = (int)editedSize;
-				for (int index = 0; index < property.ArraySize; ++index)
+				// Multi-object collections can have different lengths; the managed API currently exposes only the primary size.
+				// Keep native drawing for those until the group API exposes per-target bounds safely.
+				if (property.HasMultipleDifferentValues)
 				{
-					string elementIndex = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
-					string elementId = property.PropertyPath + ".Array.data[" + elementIndex + "]";
-					if (index > 0 && SmallButton("^##" + elementId + ".up"))
+					NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, caption);
+					break;
+				}
+				int originalSize = property.ArraySize;
+				string foldoutLabel = caption + " (" + originalSize + ")##" + property.PropertyPath;
+				if (!FoldoutHeader(foldoutLabel)) break;
+				try
+				{
+					long editedSize = IntField("Size##" + property.PropertyPath, originalSize);
+					if (editedSize >= 0 && editedSize <= int.MaxValue && editedSize != originalSize)
+						property.ArraySize = (int)editedSize;
+					for (int index = 0; index < property.ArraySize; ++index)
 					{
-						property.MoveArrayElement(index, index - 1);
-						return;
-					}
-					if (index + 1 < property.ArraySize)
-					{
-						SameLine();
-						if (SmallButton("v##" + elementId + ".down"))
+						string elementIndex = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+						string elementId = property.PropertyPath + ".Array.data[" + elementIndex + "]";
+						if (index > 0 && SmallButton("^##" + elementId + ".up"))
 						{
-							property.MoveArrayElement(index, index + 1);
+							property.MoveArrayElement(index, index - 1);
 							return;
 						}
+						if (index + 1 < property.ArraySize)
+						{
+							SameLine();
+							if (SmallButton("v##" + elementId + ".down"))
+							{
+								property.MoveArrayElement(index, index + 1);
+								return;
+							}
+						}
+						SameLine();
+						SerializedProperty element = property.GetArrayElementAtIndex(index);
+						PropertyField(element, "Element " + index + "##" + elementId + ".value");
+						NewLine();
 					}
-					SameLine();
-					SerializedProperty element = property.GetArrayElementAtIndex(index);
-					PropertyField(element, "Element " + index + "##" + elementId + ".value");
 				}
+				finally { EndFoldout(); }
 				break;
 			}
 			default:
