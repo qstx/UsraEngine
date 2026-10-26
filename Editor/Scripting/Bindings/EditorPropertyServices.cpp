@@ -843,7 +843,8 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			ExpectedObjectTypeScope expectedObjectType(scope,
 			                                           ToUrsaString(descriptor.value("TypeName", std::string{})));
 			value.F_Reference =
-			    B::TakeBindingResult(ObjectField(call, caption, value.F_Reference, state.F_ReferenceKind));
+			    B::TakeBindingResult(ObjectField(call, caption, value.F_Reference, state.F_ReferenceKind,
+			                                     call.arena.StringValue(scope.expectedObjectType)));
 			value.F_IsNull = !value.F_Reference.present;
 			break;
 		}
@@ -852,7 +853,8 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			const auto descriptor = Descriptor(scope, scope.revision, path);
 			ExpectedAssetTypeScope expectedAssetType(scope, ToUrsaString(descriptor.value("TypeName", std::string{})));
 			value.F_Reference =
-			    B::TakeBindingResult(AssetField(call, caption, value.F_Reference, state.F_ReferenceKind));
+			    B::TakeBindingResult(AssetField(call, caption, value.F_Reference, state.F_ReferenceKind,
+			                                    call.arena.StringValue(scope.expectedAssetType)));
 			value.F_IsNull = !value.F_Reference.present;
 			break;
 		}

@@ -62,15 +62,28 @@ public static class EditorGui
 		_ = EditorApi.Generation;
 		return NativeEditorBindings.ColorField(label, value, mixedValue, hdr);
 	}
-	public static EditorReference? ObjectField(string label, EditorReference? value, EditorReferenceKind kind)
+	public static EditorReference? ObjectField(string label, EditorReference? value, EditorReferenceKind kind,
+		string expectedType = "")
 	{
 		_ = EditorApi.Generation;
-		return NativeEditorBindings.ObjectField(label, value?.value, kind) is { } edited ? new(edited) : null;
+		return NativeEditorBindings.ObjectField(label, value?.value, kind, expectedType) is { } edited ? new(edited) : null;
 	}
-	public static EditorReference? AssetField(string label, EditorReference? value, EditorReferenceKind kind = EditorReferenceKind.Asset)
+	public static EditorReference? AssetField(string label, EditorReference? value,
+		EditorReferenceKind kind = EditorReferenceKind.Asset, string expectedType = "")
 	{
 		_ = EditorApi.Generation;
-		return NativeEditorBindings.AssetField(label, value?.value, kind) is { } edited ? new(edited) : null;
+		return NativeEditorBindings.AssetField(label, value?.value, kind, expectedType) is { } edited ? new(edited) : null;
+	}
+	private static bool SameReference(EditorReference? left, EditorReference? right)
+	{
+		if (left == null || right == null) return left == null && right == null;
+		if (left.Kind != right.Kind || !StringComparer.Ordinal.Equals(left.PersistentId, right.PersistentId)) return false;
+		AssetReference? leftAsset = left.AssetReference;
+		AssetReference? rightAsset = right.AssetReference;
+		return leftAsset == null || rightAsset == null
+			? leftAsset == null && rightAsset == null
+			: StringComparer.OrdinalIgnoreCase.Equals(leftAsset.Value.Guid, rightAsset.Value.Guid) &&
+			  leftAsset.Value.LocalFileId == rightAsset.Value.LocalFileId;
 	}
 	public static void PropertyField(SerializedProperty property, string? label = null)
 	{
@@ -145,6 +158,18 @@ public static class EditorGui
 				Color originalColor = property.ColorValue;
 				Color editedColor = ColorField(caption, originalColor, hdr: property.Hdr);
 				if (!editedColor.Equals(originalColor)) property.ColorValue = editedColor;
+				break;
+			case SerializedPropertyType.ObjectReference:
+				if (property.HasMultipleDifferentValues) goto default;
+				EditorReference? originalObject = property.ObjectReferenceValue;
+				EditorReference? editedObject = ObjectField(caption, originalObject, property.ReferenceKind, property.TypeName);
+				if (!SameReference(editedObject, originalObject)) property.ObjectReferenceValue = editedObject;
+				break;
+			case SerializedPropertyType.AssetReference:
+				if (property.HasMultipleDifferentValues) goto default;
+				EditorReference? originalAsset = property.AssetReferenceValue;
+				EditorReference? editedAsset = AssetField(caption, originalAsset, property.ReferenceKind, property.TypeName);
+				if (!SameReference(editedAsset, originalAsset)) property.AssetReferenceValue = editedAsset;
 				break;
 			case SerializedPropertyType.Array:
 			case SerializedPropertyType.List:

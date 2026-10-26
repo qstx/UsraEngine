@@ -167,9 +167,11 @@ struct EditorServices
 	static Result<ColorValue> ColorField(B::BindingCall& call, const B::Utf8View& label, const ColorValue& value,
 	                                     bool mixedValue, bool hdr);
 	static Result<OptionalReference> ObjectField(B::BindingCall& call, const B::Utf8View& label,
-	                                             const OptionalReference& value, UInt32 kind);
+	                                             const OptionalReference& value, UInt32 kind,
+	                                             const B::Utf8View& expectedType);
 	static Result<OptionalReference> AssetField(B::BindingCall& call, const B::Utf8View& label,
-	                                            const OptionalReference& value, UInt32 kind);
+	                                            const OptionalReference& value, UInt32 kind,
+	                                            const B::Utf8View& expectedType);
 	static Result<PropertyState> GetProperty(B::BindingCall& call, UInt64 revision, const B::Utf8View& path);
 	static Result<void> SetProperty(B::BindingCall& call, UInt64 revision, const B::Utf8View& path,
 	                                const PropertyValue& value);

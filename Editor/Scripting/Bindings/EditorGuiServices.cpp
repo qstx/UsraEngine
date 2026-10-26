@@ -16,6 +16,17 @@ namespace Ursa::Editor::Bindings
 {
 namespace
 {
+struct PickerTypeScope
+{
+	String& target;
+	String previous;
+	PickerTypeScope(String& target, String value) : target(target), previous(std::move(target))
+	{
+		target = std::move(value);
+	}
+	~PickerTypeScope() { target = std::move(previous); }
+};
+
 using K = B::Wire::Enum_Ursa_Editor_EditorReferenceKind;
 
 struct ComboScope
@@ -426,10 +437,12 @@ Result<EditorServices::ColorValue> EditorServices::ColorField(B::BindingCall& ca
 }
 
 Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::BindingCall& call, const B::Utf8View& label,
-                                                                      const OptionalReference& value, UInt32 kind)
+                                                                      const OptionalReference& value, UInt32 kind,
+                                                                      const B::Utf8View& expectedType)
 {
 	RequireGui(call);
 	auto& scope = Scope(call);
+	PickerTypeScope expectedTypeScope(scope.expectedObjectType, B::ReadString(expectedType));
 	if (kind != K::V_GameObject && kind != K::V_Component)
 	{
 		throw std::runtime_error("ObjectField requires a GameObject or Component kind");
@@ -659,10 +672,12 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 }
 
 Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingCall& call, const B::Utf8View& label,
-                                                                     const OptionalReference& value, UInt32 kind)
+                                                                     const OptionalReference& value, UInt32 kind,
+                                                                     const B::Utf8View& expectedType)
 {
 	RequireGui(call);
 	auto& scope = Scope(call);
+	PickerTypeScope expectedTypeScope(scope.expectedAssetType, B::ReadString(expectedType));
 	if (kind < K::V_Asset || kind > K::V_ComputeShader)
 	{
 		throw std::runtime_error("AssetField requires an asset reference kind");
@@ -796,10 +811,10 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 	{
 		preview = "Missing " + preview;
 	}
-	const String expectedType = scope.expectedAssetType.empty() ? PickerReferenceType(kind) : scope.expectedAssetType;
+	const String pickerType = scope.expectedAssetType.empty() ? PickerReferenceType(kind) : scope.expectedAssetType;
 	const String currentKey = currentCandidate == candidates.end() ? String{} : currentCandidate->key;
 	const auto chosen =
-	    DrawReferencePicker(PickerTargetKey(scope), GuiString(label), preview, expectedType, candidates, currentKey);
+	    DrawReferencePicker(PickerTargetKey(scope), GuiString(label), preview, pickerType, candidates, currentKey);
 	if (chosen)
 	{
 		result = *chosen == 0

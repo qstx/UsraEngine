@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "04b7bd68572c9eb4c7e5b55cfc1dec54c9dbadf4076a6feebce15ed504f6f47f",
+      "Hash": "95e0ad397130b902d834dd6500ec127c3148c95a5b97c17a8a03db28ee5ed97a",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -94,6 +94,12 @@
             {
               "Name": "kind",
               "Type": "global::Ursa.Editor.EditorReferenceKind",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "expectedType",
+              "Type": "string",
               "HandleKind": 0,
               "Session": false
             }
@@ -631,6 +637,12 @@
             {
               "Name": "kind",
               "Type": "global::Ursa.Editor.EditorReferenceKind",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "expectedType",
+              "Type": "string",
               "HandleKind": 0,
               "Session": false
             }
