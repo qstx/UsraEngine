@@ -779,8 +779,7 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 		diagnostic = layerError;
 		return Result<bool>::Failure(diagnostic);
 	}
-	const auto drawVector = [&](const char* label, const char* path, int componentCount, float speed, float minimum,
-	                            float maximum) -> Result<bool>
+	const auto drawVector = [&](const char* label, const char* path, int componentCount) -> Result<bool>
 	{
 		auto state = group.DescribeProperty(path);
 		if (!state)
@@ -827,7 +826,7 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 				ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,
 				                    component.value.value("HasMultipleDifferentValues", false));
 				ImGui::SetNextItemWidth(-FLT_MIN);
-				const bool edited = ImGui::DragFloat("##Value", &value, speed, minimum, maximum, "%.3f");
+				const bool edited = ImGui::InputFloat("##Value", &value, 0.f, 0.f, "%.3f");
 				ImGui::PopItemFlag();
 				if (edited && value != current.at(index).get<Float32>())
 				{
@@ -895,7 +894,7 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 				ImGui::TextColored(axisColors[index], "%s", axisLabels[index]);
 				ImGui::SameLine(0.f, 4.f);
 				ImGui::SetNextItemWidth(-FLT_MIN);
-				if (ImGui::DragFloat("##Value", &values[index], 0.25f, 0.f, 0.f, "%.1f°"))
+				if (ImGui::InputFloat("##Value", &values[index], 0.f, 0.f, "%.1f"))
 				{
 					editedAxis = index;
 				}
@@ -1118,7 +1117,7 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 	}
 	if (transformOpen)
 	{
-		auto position = drawVector("Position", "/Fields/position", 3, 0.05f, 0.0f, 0.0f);
+		auto position = drawVector("Position", "/Fields/position", 3);
 		if (!position)
 		{
 			return position;
@@ -1130,7 +1129,7 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 			return rotation;
 		}
 		changed |= rotation.value;
-		auto scale = drawVector("Scale", "/Fields/scale", 3, 0.05f, 0.0f, 0.0f);
+		auto scale = drawVector("Scale", "/Fields/scale", 3);
 		if (!scale)
 		{
 			return scale;
