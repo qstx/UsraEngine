@@ -876,7 +876,10 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
                                bool& hovered)
 {
 	const Float32 radius = 30.f;
-	const Float32 hitRadius = 10.f;
+	const Float32 axisHitRadius = 9.f;
+	const Float32 centerHitRadius = 7.f;
+	const Float32 positiveAxisMarkerRadius = 7.f;
+	const Float32 negativeAxisMarkerRadius = 6.f;
 	const ImVec2 center{viewportMaximum.x - 42.f, viewportMaximum.y + 42.f};
 	hovered = false;
 	if (twoDMode)
@@ -1111,20 +1114,34 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 			const Float32 projectedX = Dot(end.direction, right);
 			const Float32 projectedY = -Dot(end.direction, screenUp);
 			const Float32 depth = Dot(end.direction, forward);
-			const ImVec2 point{center.x + projectedX * radius + depth * 6.f,
-			                   center.y + projectedY * radius + depth * 6.f};
+			const ImVec2 point{center.x + projectedX * 29.f, center.y + projectedY * 29.f};
 			const Float32 projectedLength = std::sqrt(projectedX * projectedX + projectedY * projectedY);
+			const bool positiveAxis = end.label[0] != '-';
+			const Float32 markerRadius = positiveAxis ? positiveAxisMarkerRadius : negativeAxisMarkerRadius;
 			const ImVec2 lineStart = projectedLength > 1.0e-4f
 			                             ? ImVec2{center.x + projectedX / projectedLength * cubeHalfSize,
 			                                      center.y + projectedY / projectedLength * cubeHalfSize}
 			                             : center;
-			const bool axisHovered = distanceToMouse(point) <= hitRadius;
+			const bool axisHovered = distanceToMouse(point) <= axisHitRadius;
 			hovered |= axisHovered;
-			drawList->AddLine(lineStart, point, end.color, 3.f);
-			drawList->AddCircleFilled(point, hitRadius, axisHovered ? IM_COL32(245, 245, 245, 255) : end.color, 20);
+			const Float32 fade = depth <= 0.3f ? 1.f : std::clamp((1.f - depth) / 0.7f, 0.f, 1.f);
+			const auto fadedColor = [fade](ImU32 color, Float32 alpha = 1.f)
+			{
+				return IM_COL32(color & 0xff, (color >> 8) & 0xff, (color >> 16) & 0xff,
+				                 static_cast<Int32>(std::round(255.f * fade * alpha)));
+			};
+			drawList->AddLine(lineStart, point, fadedColor(end.color, positiveAxis ? 0.7f : 0.5f), 1.5f);
+			if (positiveAxis)
+			{
+				drawList->AddCircleFilled(point, markerRadius, fadedColor(end.color), 20);
+			}
+			else
+			{
+				drawList->AddCircle(point, markerRadius, fadedColor(end.color, 0.85f), 20, 2.f);
+			}
 			const ImVec2 labelSize = ImGui::CalcTextSize(end.label);
 			drawList->AddText({point.x - labelSize.x * 0.5f, point.y - labelSize.y * 0.5f},
-			                  axisHovered ? end.color : IM_COL32(255, 255, 255, 255), end.label);
+			                  fadedColor(axisHovered ? end.color : IM_COL32(255, 255, 255, 255)), end.label);
 			if (axisHovered && !rotationLocked &&
 			    (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
 			     ImGui::IsMouseClicked(ImGuiMouseButton_Middle)))
@@ -1192,7 +1209,7 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 		ImGui::EndPopup();
 	}
 	const Float32 centerDistance = distanceToMouse(center);
-	if (!rotationLocked && orientationRect.Contains(mouse) && centerDistance <= hitRadius)
+	if (!rotationLocked && orientationRect.Contains(mouse) && centerDistance <= centerHitRadius)
 	{
 		if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
 		    (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::GetIO().KeyShift))
