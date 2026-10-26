@@ -22,9 +22,9 @@ using ManagedTransformInspector =
 using ManagedTransformActionsInspector =
     std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*,
                                ComponentLoadContext*, ManagedPropertyGroupCommit)>;
-using ManagedGameObjectHeaderInspector =
-    std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*,
-                               ComponentLoadContext*, ManagedPropertyGroupCommit)>;
+using ManagedGameObjectHeaderInspector = std::function<Result<bool>(
+    const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*, ComponentLoadContext*,
+    ManagedPropertyGroupCommit, const ProjectTagLayerSettings&, std::function<void(bool)>)>;
 
 Result<std::unique_ptr<SerializedObject>> CreateGameObjectSerializedProperties(GameObject::Ptr object);
 

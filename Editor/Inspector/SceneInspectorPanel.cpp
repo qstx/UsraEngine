@@ -536,7 +536,8 @@ Result<bool> DrawGameObjectGroupProperties(
     const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedTransformInspector =
         {},
     const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedTransformActions = {},
-    const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedGameObjectHeader = {})
+    const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit, const ProjectTagLayerSettings&,
+                                     const std::function<void(bool)>&)>& managedGameObjectHeader = {})
 {
 	if (group.TargetCount() > 1)
 	{
@@ -577,7 +578,8 @@ Result<bool> DrawGameObjectGroupProperties(
 	{
 		auto header = managedGameObjectHeader(
 		    group, [&](SerializedObjectGroup& currentGroup, const String& path, const Vector<bool>& changedTargets)
-		    { return commitObserver ? commitObserver(currentGroup, path, changedTargets) : Result<void>{}; });
+		    { return commitObserver ? commitObserver(currentGroup, path, changedTargets) : Result<void>{}; },
+		    tagLayerSettings, openTagLayerSettings);
 		if (!header)
 		{
 			return Result<bool>::Failure(header.error);
@@ -717,101 +719,104 @@ Result<bool> DrawGameObjectGroupProperties(
 			changed = true;
 		}
 	}
-	const auto tag = group.DescribeProperty("/Fields/tag");
-	if (!tag)
+	if (!managedHeaderDrawn)
 	{
-		return Result<bool>::Failure(tag.error);
-	}
-	String tagValue = ToUrsaString(tag.value.at("Value").get<std::string>());
-	const Float32 tagLayerWidth = std::max(60.f, (ImGui::GetContentRegionAvail().x - 72.f) * 0.5f);
-	ImGui::SetNextItemWidth(tagLayerWidth);
-	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, tag.value.value("HasMultipleDifferentValues", false));
-	const char* selectedTag = tag.value.value("HasMultipleDifferentValues", false) ? "<Mixed>" : tagValue.c_str();
-	bool tagChanged = false;
-	if (ImGui::BeginCombo("Tag", selectedTag))
-	{
-		for (const auto& candidate : tagLayerSettings.tags)
+		const auto tag = group.DescribeProperty("/Fields/tag");
+		if (!tag)
 		{
-			if (ImGui::Selectable(candidate.c_str(),
-			                      !tag.value.value("HasMultipleDifferentValues", false) && candidate == tagValue))
-			{
-				tagValue = candidate;
-				tagChanged = true;
-			}
+			return Result<bool>::Failure(tag.error);
 		}
-		if (openTagLayerSettings)
+		String tagValue = ToUrsaString(tag.value.at("Value").get<std::string>());
+		const Float32 tagLayerWidth = std::max(60.f, (ImGui::GetContentRegionAvail().x - 72.f) * 0.5f);
+		ImGui::SetNextItemWidth(tagLayerWidth);
+		ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, tag.value.value("HasMultipleDifferentValues", false));
+		const char* selectedTag = tag.value.value("HasMultipleDifferentValues", false) ? "<Mixed>" : tagValue.c_str();
+		bool tagChanged = false;
+		if (ImGui::BeginCombo("Tag", selectedTag))
 		{
-			ImGui::Separator();
-			if (Icons::MenuItem("Add Tag..."))
+			for (const auto& candidate : tagLayerSettings.tags)
 			{
-				openTagLayerSettings(false);
+				if (ImGui::Selectable(candidate.c_str(),
+				                      !tag.value.value("HasMultipleDifferentValues", false) && candidate == tagValue))
+				{
+					tagValue = candidate;
+					tagChanged = true;
+				}
 			}
+			if (openTagLayerSettings)
+			{
+				ImGui::Separator();
+				if (Icons::MenuItem("Add Tag..."))
+				{
+					openTagLayerSettings(false);
+				}
+			}
+			ImGui::EndCombo();
 		}
-		ImGui::EndCombo();
-	}
-	ImGui::PopItemFlag();
-	if (tagChanged)
-	{
-		auto set = group.SetValue("/Fields/tag", ToStdString(tagValue));
-		auto applied = set ? apply(ToUrsaString("/Fields/tag")) : Result<void>::Failure(set.error);
-		if (!applied)
+		ImGui::PopItemFlag();
+		if (tagChanged)
 		{
-			diagnostic = applied.error;
+			auto set = group.SetValue("/Fields/tag", ToStdString(tagValue));
+			auto applied = set ? apply(ToUrsaString("/Fields/tag")) : Result<void>::Failure(set.error);
+			if (!applied)
+			{
+				diagnostic = applied.error;
+				return Result<bool>::Failure(diagnostic);
+			}
+			changed = true;
+		}
+		Icons::SameLine();
+		const auto layer = group.DescribeProperty("/Fields/layer");
+		if (!layer)
+		{
+			return Result<bool>::Failure(layer.error);
+		}
+		const UInt32 layerValue = layer.value.at("Value").get<UInt32>();
+		const bool mixedLayer = layer.value.value("HasMultipleDifferentValues", false);
+		const auto layerLabel = [&tagLayerSettings](UInt32 value)
+		{
+			const String& name = tagLayerSettings.layers[value];
+			return name.empty() ? String("Layer ") + ToUrsaString(std::to_string(value)) : name;
+		};
+		const String selectedLayerLabel = mixedLayer ? String("<Mixed>") : layerLabel(layerValue);
+		ImGui::SetNextItemWidth(tagLayerWidth);
+		String layerError;
+		if (ImGui::BeginCombo("Layer", selectedLayerLabel.c_str()))
+		{
+			for (UInt32 candidate = 0; candidate < 32; ++candidate)
+			{
+				const String label = layerLabel(candidate);
+				ImGui::PushID(static_cast<int>(candidate));
+				if (ImGui::Selectable(label.c_str(), !mixedLayer && candidate == layerValue))
+				{
+					auto set = group.SetValue("/Fields/layer", candidate);
+					auto applied = set ? apply(ToUrsaString("/Fields/layer")) : Result<void>::Failure(set.error);
+					if (!applied)
+					{
+						layerError = applied.error;
+					}
+					else
+					{
+						changed = true;
+					}
+				}
+				ImGui::PopID();
+			}
+			if (openTagLayerSettings)
+			{
+				ImGui::Separator();
+				if (Icons::MenuItem("Add Layer..."))
+				{
+					openTagLayerSettings(true);
+				}
+			}
+			ImGui::EndCombo();
+		}
+		if (!layerError.empty())
+		{
+			diagnostic = layerError;
 			return Result<bool>::Failure(diagnostic);
 		}
-		changed = true;
-	}
-	Icons::SameLine();
-	const auto layer = group.DescribeProperty("/Fields/layer");
-	if (!layer)
-	{
-		return Result<bool>::Failure(layer.error);
-	}
-	const UInt32 layerValue = layer.value.at("Value").get<UInt32>();
-	const bool mixedLayer = layer.value.value("HasMultipleDifferentValues", false);
-	const auto layerLabel = [&tagLayerSettings](UInt32 value)
-	{
-		const String& name = tagLayerSettings.layers[value];
-		return name.empty() ? String("Layer ") + ToUrsaString(std::to_string(value)) : name;
-	};
-	const String selectedLayerLabel = mixedLayer ? String("<Mixed>") : layerLabel(layerValue);
-	ImGui::SetNextItemWidth(tagLayerWidth);
-	String layerError;
-	if (ImGui::BeginCombo("Layer", selectedLayerLabel.c_str()))
-	{
-		for (UInt32 candidate = 0; candidate < 32; ++candidate)
-		{
-			const String label = layerLabel(candidate);
-			ImGui::PushID(static_cast<int>(candidate));
-			if (ImGui::Selectable(label.c_str(), !mixedLayer && candidate == layerValue))
-			{
-				auto set = group.SetValue("/Fields/layer", candidate);
-				auto applied = set ? apply(ToUrsaString("/Fields/layer")) : Result<void>::Failure(set.error);
-				if (!applied)
-				{
-					layerError = applied.error;
-				}
-				else
-				{
-					changed = true;
-				}
-			}
-			ImGui::PopID();
-		}
-		if (openTagLayerSettings)
-		{
-			ImGui::Separator();
-			if (Icons::MenuItem("Add Layer..."))
-			{
-				openTagLayerSettings(true);
-			}
-		}
-		ImGui::EndCombo();
-	}
-	if (!layerError.empty())
-	{
-		diagnostic = layerError;
-		return Result<bool>::Failure(diagnostic);
 	}
 	const auto drawVector = [&](const char* label, const char* path, int componentCount) -> Result<bool>
 	{
@@ -5258,8 +5263,11 @@ Result<bool> DrawSceneInspector(
 				              })
 				        : std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>{},
 				    managedGameObjectHeaderInspector
-				        ? std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>(
-				              [&](SerializedObjectGroup& serializedGroup, ManagedPropertyGroupCommit managedCommit)
+				        ? std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit,
+				                                     const ProjectTagLayerSettings&, const std::function<void(bool)>&)>(
+				              [&](SerializedObjectGroup& serializedGroup, ManagedPropertyGroupCommit managedCommit,
+				                  const ProjectTagLayerSettings& settings,
+				                  const std::function<void(bool)>& openSettings)
 				              {
 					              const Size primaryIndex = serializedGroup.PrimaryIndex();
 					              if (primaryIndex >= selectedObjects.size() ||
@@ -5270,9 +5278,12 @@ Result<bool> DrawSceneInspector(
 					              }
 					              return managedGameObjectHeaderInspector(
 					                  selectedObjects, primaryIndex, serializedTargets[primaryIndex].get(),
-					                  serializedGroup, &scene, &loadContext, std::move(managedCommit));
+					                  serializedGroup, &scene, &loadContext, std::move(managedCommit), settings,
+					                  openSettings);
 				              })
-				        : std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>{});
+				        : std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit,
+				                                     const ProjectTagLayerSettings&,
+				                                     const std::function<void(bool)>&)>{});
 				if (!groupProperties)
 				{
 					diagnostic = groupProperties.error;

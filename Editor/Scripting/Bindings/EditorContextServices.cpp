@@ -1079,6 +1079,36 @@ Result<B::DataView> EditorServices::GetAssets(B::BindingCall& call)
 	    }));
 }
 
+Result<B::DataView> EditorServices::GetProjectTags(B::BindingCall& call)
+{
+	const auto& values = Scope(call).source.projectTags;
+	return Result<B::DataView>::Success(B::WriteArray<B::Utf8View>(call.arena, values, [&](const auto& value)
+	                                                               { return call.arena.StringValue(value); }));
+}
+
+Result<B::DataView> EditorServices::GetProjectLayers(B::BindingCall& call)
+{
+	const auto& values = Scope(call).source.projectLayers;
+	Vector<String> layerNames;
+	layerNames.reserve(values.size());
+	for (const auto& value : values)
+	{
+		layerNames.push_back(value);
+	}
+	return Result<B::DataView>::Success(B::WriteArray<B::Utf8View>(call.arena, layerNames, [&](const auto& value)
+	                                                               { return call.arena.StringValue(value); }));
+}
+
+Result<void> EditorServices::OpenTagLayerSettings(B::BindingCall& call, bool layers)
+{
+	auto& callback = Scope(call).source.openTagLayerSettings;
+	if (callback)
+	{
+		callback(layers);
+	}
+	return {};
+}
+
 Result<EditorServices::Reference> EditorServices::ResolveReference(B::BindingCall& call, UInt32 kind,
                                                                    const B::Utf8View& id, const OptionalAsset& asset)
 {

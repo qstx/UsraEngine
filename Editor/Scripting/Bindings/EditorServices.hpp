@@ -139,6 +139,9 @@ struct EditorServices
 	static Result<OptionalReference> GetTarget(B::BindingCall& call);
 	static Result<B::Wire::Value_Ursa_Editor_EditorDocumentValue_> GetDocument(B::BindingCall& call);
 	static Result<B::DataView> GetAssets(B::BindingCall& call);
+	static Result<B::DataView> GetProjectTags(B::BindingCall& call);
+	static Result<B::DataView> GetProjectLayers(B::BindingCall& call);
+	static Result<void> OpenTagLayerSettings(B::BindingCall& call, bool layers);
 	static Result<Reference> ResolveReference(B::BindingCall& call, UInt32 kind, const B::Utf8View& id,
 	                                          const OptionalAsset& asset);
 	static Result<void> MarkDirty(B::BindingCall& call);

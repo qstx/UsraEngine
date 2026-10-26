@@ -119,6 +119,46 @@ public abstract class Inspector
 			changed = true;
 		}
 
+		SerializedProperty tag = SerializedObject.FindProperty("tag");
+		string[] tags = EditorContext.ProjectTags;
+		var tagOptions = new string[tags.Length + 1];
+		Array.Copy(tags, tagOptions, tags.Length);
+		tagOptions[^1] = "Add Tag...";
+		int selectedTag = Array.IndexOf(tags, tag.StringValue ?? string.Empty);
+		EditorGui.NewLine();
+		EditorGui.SetNextItemWidth(-176);
+		int editedTag = EditorGui.Popup("Tag", selectedTag, tagOptions, tag.HasMultipleDifferentValues);
+		if (editedTag == tags.Length)
+		{
+			EditorContext.OpenTagLayerSettings(false);
+		}
+		else if (editedTag >= 0 && editedTag < tags.Length &&
+		         (editedTag != selectedTag || tag.HasMultipleDifferentValues && EditorGui.IsLastControlEdited))
+		{
+			tag.StringValue = tags[editedTag];
+			changed = true;
+		}
+
+		SerializedProperty layer = SerializedObject.FindProperty("layer");
+		string[] layerNames = EditorContext.ProjectLayers;
+		string[] layers = layerNames.Select((value, index) => string.IsNullOrEmpty(value) ? $"Layer {index}" : value).ToArray();
+		Array.Resize(ref layers, layers.Length + 1);
+		layers[^1] = "Add Layer...";
+		int selectedLayer = layer.ULongValue < (ulong)layerNames.Length ? (int)layer.ULongValue : -1;
+		EditorGui.SameLine();
+		EditorGui.SetNextItemWidth(-8);
+		int editedLayer = EditorGui.Popup("Layer", selectedLayer, layers, layer.HasMultipleDifferentValues);
+		if (editedLayer == layerNames.Length)
+		{
+			EditorContext.OpenTagLayerSettings(true);
+		}
+		else if (editedLayer >= 0 && editedLayer < layerNames.Length &&
+		         (editedLayer != selectedLayer || layer.HasMultipleDifferentValues && EditorGui.IsLastControlEdited))
+		{
+			layer.ULongValue = (ulong)editedLayer;
+			changed = true;
+		}
+
 		if (changed) SerializedObject.ApplyModifiedProperties();
 	}
 	public virtual void OnTransformActionsGUI() { }

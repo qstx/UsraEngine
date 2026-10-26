@@ -5537,7 +5537,9 @@ Result<void> EditorApplication::OnGui()
 				    },
 				    [this](const Vector<GameObject::Ptr>& targets, Size primaryIndex, SerializedObject* properties,
 				           SerializedObjectGroup& propertyGroup, Scene* scene, ComponentLoadContext* loadContext,
-				           ManagedPropertyGroupCommit commitPropertyGroup) -> Result<bool>
+				           ManagedPropertyGroupCommit commitPropertyGroup,
+				           const ProjectTagLayerSettings& tagLayerSettings,
+				           std::function<void(bool)> openTagLayerSettings) -> Result<bool>
 				    {
 					    if (managedGameObjectInspectorId.empty() || !managedHost || managedHost->IsSessionFaulted())
 					    {
@@ -5556,6 +5558,9 @@ Result<void> EditorApplication::OnGui()
 					    context.supportsMultipleObjects = true;
 					    context.gameObjectTargets = targets;
 					    context.gameObjectPrimaryIndex = primaryIndex;
+					    context.projectTags = tagLayerSettings.tags;
+					    context.projectLayers = tagLayerSettings.layers;
+					    context.openTagLayerSettings = std::move(openTagLayerSettings);
 					    context.serializedProperties = properties;
 					    context.serializedPropertyGroup = &propertyGroup;
 					    context.commitPropertyGroup = std::move(commitPropertyGroup);

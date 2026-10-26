@@ -6,6 +6,7 @@
 #include <Scripting/ScriptTypeDescriptor.hpp>
 #include <Serialization/SerializedObject.hpp>
 #include <Scene/ViewportLayout.hpp>
+#include <Workspace/ProjectTagLayerSettings.hpp>
 #include <optional>
 
 namespace Ursa::Editor
@@ -28,6 +29,9 @@ struct ManagedEditorContext
 	Size componentPrimaryIndex = 0;
 	Vector<GameObject::Ptr> gameObjectTargets;
 	Size gameObjectPrimaryIndex = 0;
+	Vector<String> projectTags;
+	Array<String, 32> projectLayers;
+	std::function<void(bool)> openTagLayerSettings;
 	SerializedObject* serializedProperties = nullptr;
 	SerializedObjectGroup* serializedPropertyGroup = nullptr;
 	std::function<Result<void>(SerializedObjectGroup&, const String&, const Vector<bool>&)> commitPropertyGroup;
