@@ -1793,6 +1793,7 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	if (Icons::Button("GameStats", Icons::Icon::Info, "Statistics", showGameStats))
 	{
 		showGameStats = !showGameStats;
+		settingsChanged = true;
 	}
 	Icons::SameLine();
 	if (Icons::Button("GameGizmos", Icons::Icon::Debug, "Gizmos", showGameGizmos))
