@@ -92,7 +92,8 @@ public abstract class Inspector
 		}
 
 		EditorGui.SameLine();
-		EditorGui.SetNextItemWidth(-104 * dpiScale);
+		bool multipleTargets = SerializedObject.TargetObjects.Length > 1;
+		EditorGui.SetNextItemWidth((multipleTargets ? -144 : -104) * dpiScale);
 		string editedName = EditorGui.TextField("##GameObjectName", gameObjectNameDraft,
 			name.HasMultipleDifferentValues);
 		bool nameFieldActive = EditorGui.IsLastControlActive();
@@ -109,6 +110,14 @@ public abstract class Inspector
 			gameObjectNameDraft = name.StringValue ?? originalName;
 			gameObjectNameDirty = false;
 			changed = true;
+		}
+
+		if (multipleTargets)
+		{
+			EditorGui.SameLine();
+			string selectionCount = SerializedObject.TargetObjects.Length.ToString(
+				System.Globalization.CultureInfo.InvariantCulture);
+			EditorGui.TextWithTooltip($"({selectionCount})", $"{selectionCount} Objects Selected");
 		}
 
 		EditorGui.SameLine();

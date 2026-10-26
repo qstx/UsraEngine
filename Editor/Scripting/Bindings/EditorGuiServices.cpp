@@ -230,6 +230,17 @@ Result<void> EditorServices::Text(B::BindingCall& call, const B::Utf8View& text)
 	return {};
 }
 
+Result<void> EditorServices::TextWithTooltip(B::BindingCall& call, const B::Utf8View& text,
+	                                          const B::Utf8View& tooltip)
+{
+	RequireGui(call);
+	const String value = B::ReadString(text);
+	const String tooltipValue = B::ReadString(tooltip);
+	ImGui::TextUnformatted(value.data(), value.data() + value.size());
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltipValue.c_str());
+	return {};
+}
+
 Result<bool> EditorServices::Button(B::BindingCall& call, const B::Utf8View& label)
 {
 	RequireGui(call);

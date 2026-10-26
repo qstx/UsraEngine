@@ -86,6 +86,8 @@ internal static partial class NativeEditorBindings
 	internal static partial void SaveMeshComponentAs(string path, bool replaceBinding);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Text")]
 	internal static partial void Text(string text);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::TextWithTooltip")]
+	internal static partial void TextWithTooltip(string text, string tooltip);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Button")]
 	internal static partial bool Button(string label);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SmallButton")]

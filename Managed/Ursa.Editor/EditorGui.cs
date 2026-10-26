@@ -23,6 +23,11 @@ public static class EditorGui
 		NativeEditorBindings.DrawPreviewPixels(rect, checked((uint)width), checked((uint)height), pixels ?? throw new ArgumentNullException(nameof(pixels)), linear);
 	}
 	public static void Text(string text) { _ = EditorApi.Generation; NativeEditorBindings.Text(text); }
+	public static void TextWithTooltip(string text, string tooltip)
+	{
+		_ = EditorApi.Generation;
+		NativeEditorBindings.TextWithTooltip(text, tooltip);
+	}
 	public static bool Button(string label) { _ = EditorApi.Generation; return NativeEditorBindings.Button(label); }
 	public static bool SmallButton(string label) { _ = EditorApi.Generation; return NativeEditorBindings.SmallButton(label); }
 	public static bool BeginPopupButton(string label, string popupId)

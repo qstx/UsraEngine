@@ -150,6 +150,7 @@ struct EditorServices
 	static Result<void> SetActiveCamera(B::BindingCall& call);
 	static Result<void> SaveMeshComponentAs(B::BindingCall& call, const B::Utf8View& path, bool replaceBinding);
 	static Result<void> Text(B::BindingCall& call, const B::Utf8View& text);
+	static Result<void> TextWithTooltip(B::BindingCall& call, const B::Utf8View& text, const B::Utf8View& tooltip);
 	static Result<bool> Button(B::BindingCall& call, const B::Utf8View& label);
 	static Result<bool> SmallButton(B::BindingCall& call, const B::Utf8View& label);
 	static Result<bool> BeginPopupButton(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& popupId);

@@ -529,7 +529,7 @@ String GameObjectGroupEditKey(ResourceId documentId, const Vector<GameObject::Pt
 }
 
 Result<bool> DrawGameObjectGroupProperties(
-    SerializedObjectGroup& group, const String& primaryName, const String& nameEditKey, String& diagnostic,
+    SerializedObjectGroup& group, const String& nameEditKey, String& diagnostic,
     const ProjectTagLayerSettings& tagLayerSettings, const std::function<void(bool)>& openTagLayerSettings,
     const GroupCommitObserver& commitObserver = {}, Scene* scene = nullptr,
     const Vector<GameObject::Ptr>* sceneTargets = nullptr, bool allowWorldTransform = false,
@@ -541,7 +541,6 @@ Result<bool> DrawGameObjectGroupProperties(
 {
 	if (group.TargetCount() > 1)
 	{
-		ImGui::Text("%zu objects selected · %s is active", group.TargetCount(), primaryName.c_str());
 		ImGui::TextDisabled("Scene Gizmo edits all selected objects; the active object sets the Pivot handle.");
 	}
 	bool changed = false;
@@ -4654,9 +4653,8 @@ Result<bool> DrawSceneInspector(
 				inspectorContext.selection = selection;
 				inspectorContext.documentId = document.Id();
 				inspectorContext.loadContext = &loadContext;
-				auto objectName = object->Name();
 				auto groupProperties =
-				    DrawGameObjectGroupProperties(group.value, objectName ? objectName.value : String{},
+				    DrawGameObjectGroupProperties(group.value,
 				                                  GameObjectGroupEditKey(document.Id(), selectedObjects), diagnostic,
 				                                  tagLayerSettings, openTagLayerSettings);
 				if (!groupProperties)
@@ -5220,15 +5218,13 @@ Result<bool> DrawSceneInspector(
 			}
 			else
 			{
-				auto primaryName = scene.GameObjectName(node);
 				auto overrideCommit = MakePrefabOverrideCommit(draft.get(), &scene, selectedObjects);
 				if (!overrideCommit)
 				{
 					diagnostic = overrideCommit.error;
 				}
 				auto groupProperties = DrawGameObjectGroupProperties(
-				    *objectGroup, primaryName ? primaryName.value : String{},
-				    GameObjectGroupEditKey(document.Id(), selectedObjects), diagnostic, tagLayerSettings,
+				    *objectGroup, GameObjectGroupEditKey(document.Id(), selectedObjects), diagnostic, tagLayerSettings,
 				    openTagLayerSettings, overrideCommit ? overrideCommit.value : GroupCommitObserver{}, &scene,
 				    &selectedObjects, true,
 				    managedTransformInspector
