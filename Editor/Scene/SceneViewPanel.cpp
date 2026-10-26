@@ -3066,6 +3066,11 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							sceneNavigationGesture = SceneNavigationGesture::Orbit;
 						}
 					}
+					if (sceneNavigationGesture != SceneNavigationGesture::None &&
+					    ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+					}
 					SetSceneCursorCaptured(sceneNavigationGesture == SceneNavigationGesture::Flythrough);
 					if (sceneNavigationGesture != SceneNavigationGesture::None)
 					{
