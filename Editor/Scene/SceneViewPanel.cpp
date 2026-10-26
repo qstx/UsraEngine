@@ -3091,7 +3091,9 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					    sceneNavigationGesture == SceneNavigationGesture::RightPan ||
 					    sceneNavigationGesture == SceneNavigationGesture::HandPan)
 					{
-						PanSceneView(camera, {io.MouseDelta.x, io.MouseDelta.y}, layout.displayRect.height);
+						const Float32 panSpeed = io.KeyShift ? 4.f : 1.f;
+						PanSceneView(camera, {io.MouseDelta.x * panSpeed, io.MouseDelta.y * panSpeed},
+						             layout.displayRect.height);
 					}
 					else if (sceneNavigationGesture == SceneNavigationGesture::Orbit ||
 					         sceneNavigationGesture == SceneNavigationGesture::RightOrbit)
