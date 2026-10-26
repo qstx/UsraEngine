@@ -27,18 +27,19 @@ public static class EditorGui
 	public static bool SmallButton(string label) { _ = EditorApi.Generation; return NativeEditorBindings.SmallButton(label); }
 	public static void SameLine() { _ = EditorApi.Generation; NativeEditorBindings.SameLine(); }
 	public static void Separator() { _ = EditorApi.Generation; NativeEditorBindings.Separator(); }
+	private static bool WasLastControlEdited() { _ = EditorApi.Generation; return NativeEditorBindings.IsLastItemEdited(); }
 	public static bool Toggle(string label, bool value, bool mixedValue = false)
 	{
 		_ = EditorApi.Generation;
 		return NativeEditorBindings.Toggle(label, value, mixedValue);
 	}
-	public static long IntField(string label, long value) { _ = EditorApi.Generation; return NativeEditorBindings.IntField(label, value); }
-	public static ulong ULongField(string label, ulong value) { _ = EditorApi.Generation; return NativeEditorBindings.ULongField(label, value); }
-	public static double FloatField(string label, double value) { _ = EditorApi.Generation; return NativeEditorBindings.FloatField(label, value); }
-	public static double SliderFloat(string label, double value, double minimum, double maximum)
+	public static long IntField(string label, long value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.IntField(label, value, mixedValue); }
+	public static ulong ULongField(string label, ulong value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.ULongField(label, value, mixedValue); }
+	public static double FloatField(string label, double value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.FloatField(label, value, mixedValue); }
+	public static double SliderFloat(string label, double value, double minimum, double maximum, bool mixedValue = false)
 	{
 		_ = EditorApi.Generation;
-		return NativeEditorBindings.SliderFloat(label, value, minimum, maximum);
+		return NativeEditorBindings.SliderFloat(label, value, minimum, maximum, mixedValue);
 	}
 	public static double DragFloat(string label, double value, double speed, double minimum, double maximum,
 		string format = "%.3f", bool mixedValue = false)
@@ -47,16 +48,16 @@ public static class EditorGui
 		ArgumentException.ThrowIfNullOrEmpty(format);
 		return NativeEditorBindings.DragFloat(label, value, speed, minimum, maximum, format, mixedValue);
 	}
-	public static string TextField(string label, string value) { _ = EditorApi.Generation; return NativeEditorBindings.TextField(label, value); }
+	public static string TextField(string label, string value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.TextField(label, value, mixedValue); }
 	public static int Popup(string label, int selected, string[] options, bool mixedValue = false)
 	{
 		_ = EditorApi.Generation;
 		return NativeEditorBindings.Popup(label, selected, options, mixedValue);
 	}
-	public static Vector2 Vector2Field(string label, Vector2 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector2Field(label, value); }
-	public static Vector3 Vector3Field(string label, Vector3 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector3Field(label, value); }
-	public static Vector4 Vector4Field(string label, Vector4 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector4Field(label, value); }
-	public static Quaternion QuaternionField(string label, Quaternion value) { _ = EditorApi.Generation; return NativeEditorBindings.QuaternionField(label, value); }
+	public static Vector2 Vector2Field(string label, Vector2 value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.Vector2Field(label, value, mixedValue); }
+	public static Vector3 Vector3Field(string label, Vector3 value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.Vector3Field(label, value, mixedValue); }
+	public static Vector4 Vector4Field(string label, Vector4 value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.Vector4Field(label, value, mixedValue); }
+	public static Quaternion QuaternionField(string label, Quaternion value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.QuaternionField(label, value, mixedValue); }
 	public static Color ColorField(string label, Color value, bool mixedValue = false, bool hdr = false)
 	{
 		_ = EditorApi.Generation;
@@ -93,36 +94,35 @@ public static class EditorGui
 		switch (property.PropertyType)
 		{
 			case SerializedPropertyType.Boolean:
-				if (property.HasMultipleDifferentValues) goto default;
 				bool originalBoolean = property.BoolValue;
-				bool editedBoolean = Toggle(caption, originalBoolean);
+				bool editedBoolean = Toggle(caption, originalBoolean, property.HasMultipleDifferentValues);
 				if (editedBoolean != originalBoolean) property.BoolValue = editedBoolean;
 				break;
 			case SerializedPropertyType.Integer:
-				if (property.HasMultipleDifferentValues) goto default;
 				long originalInteger = property.LongValue;
-				long editedInteger = IntField(caption, originalInteger);
-				if (editedInteger != originalInteger) property.LongValue = editedInteger;
+				long editedInteger = IntField(caption, originalInteger, property.HasMultipleDifferentValues);
+				if (editedInteger != originalInteger || property.HasMultipleDifferentValues && WasLastControlEdited())
+					property.LongValue = editedInteger;
 				break;
 			case SerializedPropertyType.UnsignedInteger:
-				if (property.HasMultipleDifferentValues) goto default;
 				ulong originalUnsigned = property.ULongValue;
-				ulong editedUnsigned = ULongField(caption, originalUnsigned);
-				if (editedUnsigned != originalUnsigned) property.ULongValue = editedUnsigned;
+				ulong editedUnsigned = ULongField(caption, originalUnsigned, property.HasMultipleDifferentValues);
+				if (editedUnsigned != originalUnsigned || property.HasMultipleDifferentValues && WasLastControlEdited())
+					property.ULongValue = editedUnsigned;
 				break;
 			case SerializedPropertyType.Float:
-				if (property.HasMultipleDifferentValues) goto default;
 				double originalFloat = property.DoubleValue;
 				double editedFloat = property.HasRange
-					? SliderFloat(caption, originalFloat, property.Minimum, property.Maximum)
-					: FloatField(caption, originalFloat);
-				if (editedFloat != originalFloat) property.DoubleValue = editedFloat;
+					? SliderFloat(caption, originalFloat, property.Minimum, property.Maximum, property.HasMultipleDifferentValues)
+					: FloatField(caption, originalFloat, property.HasMultipleDifferentValues);
+				if (editedFloat != originalFloat || property.HasMultipleDifferentValues && WasLastControlEdited())
+					property.DoubleValue = editedFloat;
 				break;
 			case SerializedPropertyType.String:
-				if (property.HasMultipleDifferentValues) goto default;
 				string originalText = property.StringValue ?? string.Empty;
-				string editedText = TextField(caption, originalText);
-				if (!StringComparer.Ordinal.Equals(editedText, originalText)) property.StringValue = editedText;
+				string editedText = TextField(caption, originalText, property.HasMultipleDifferentValues);
+				if (!StringComparer.Ordinal.Equals(editedText, originalText) ||
+				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.StringValue = editedText;
 				break;
 			case SerializedPropertyType.Enum:
 				int originalIndex = property.HasMultipleDifferentValues ? -1 : property.EnumValueIndex;
@@ -130,34 +130,34 @@ public static class EditorGui
 				if (editedIndex >= 0 && editedIndex != originalIndex) property.EnumValueIndex = editedIndex;
 				break;
 			case SerializedPropertyType.Vector2:
-				if (property.HasMultipleDifferentValues) goto default;
 				Vector2 originalVector2 = property.Vector2Value;
-				Vector2 editedVector2 = Vector2Field(caption, originalVector2);
-				if (!editedVector2.Equals(originalVector2)) property.Vector2Value = editedVector2;
+				Vector2 editedVector2 = Vector2Field(caption, originalVector2, property.HasMultipleDifferentValues);
+				if (!editedVector2.Equals(originalVector2) ||
+				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.Vector2Value = editedVector2;
 				break;
 			case SerializedPropertyType.Vector3:
-				if (property.HasMultipleDifferentValues) goto default;
 				Vector3 originalVector3 = property.Vector3Value;
-				Vector3 editedVector3 = Vector3Field(caption, originalVector3);
-				if (!editedVector3.Equals(originalVector3)) property.Vector3Value = editedVector3;
+				Vector3 editedVector3 = Vector3Field(caption, originalVector3, property.HasMultipleDifferentValues);
+				if (!editedVector3.Equals(originalVector3) ||
+				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.Vector3Value = editedVector3;
 				break;
 			case SerializedPropertyType.Vector4:
-				if (property.HasMultipleDifferentValues) goto default;
 				Vector4 originalVector4 = property.Vector4Value;
-				Vector4 editedVector4 = Vector4Field(caption, originalVector4);
-				if (!editedVector4.Equals(originalVector4)) property.Vector4Value = editedVector4;
+				Vector4 editedVector4 = Vector4Field(caption, originalVector4, property.HasMultipleDifferentValues);
+				if (!editedVector4.Equals(originalVector4) ||
+				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.Vector4Value = editedVector4;
 				break;
 			case SerializedPropertyType.Quaternion:
-				if (property.HasMultipleDifferentValues) goto default;
 				Quaternion originalQuaternion = property.QuaternionValue;
-				Quaternion editedQuaternion = QuaternionField(caption, originalQuaternion);
-				if (!editedQuaternion.Equals(originalQuaternion)) property.QuaternionValue = editedQuaternion;
+				Quaternion editedQuaternion = QuaternionField(caption, originalQuaternion, property.HasMultipleDifferentValues);
+				if (!editedQuaternion.Equals(originalQuaternion) ||
+				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.QuaternionValue = editedQuaternion;
 				break;
 			case SerializedPropertyType.Color:
-				if (property.HasMultipleDifferentValues) goto default;
 				Color originalColor = property.ColorValue;
-				Color editedColor = ColorField(caption, originalColor, hdr: property.Hdr);
-				if (!editedColor.Equals(originalColor)) property.ColorValue = editedColor;
+				Color editedColor = ColorField(caption, originalColor, property.HasMultipleDifferentValues, hdr: property.Hdr);
+				if (!editedColor.Equals(originalColor) || property.HasMultipleDifferentValues && WasLastControlEdited())
+					property.ColorValue = editedColor;
 				break;
 			case SerializedPropertyType.ObjectReference:
 				if (property.HasMultipleDifferentValues) goto default;

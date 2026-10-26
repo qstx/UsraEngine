@@ -20,11 +20,16 @@ struct PickerTypeScope
 {
 	String& target;
 	String previous;
+
 	PickerTypeScope(String& target, String value) : target(target), previous(std::move(target))
 	{
 		target = std::move(value);
 	}
-	~PickerTypeScope() { target = std::move(previous); }
+
+	~PickerTypeScope()
+	{
+		target = std::move(previous);
+	}
 };
 
 using K = B::Wire::Enum_Ursa_Editor_EditorReferenceKind;
@@ -54,6 +59,7 @@ struct MixedValueScope
 			ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
 		}
 	}
+
 	~MixedValueScope()
 	{
 		if (mixed)
@@ -61,6 +67,7 @@ struct MixedValueScope
 			ImGui::PopItemFlag();
 		}
 	}
+
 	bool mixed;
 };
 
@@ -241,6 +248,12 @@ Result<void> EditorServices::Separator(B::BindingCall& call)
 	return {};
 }
 
+Result<bool> EditorServices::IsLastItemEdited(B::BindingCall& call)
+{
+	RequireGui(call);
+	return Result<bool>::Success(ImGui::IsItemEdited());
+}
+
 Result<void> EditorServices::BeginGroup(B::BindingCall& call)
 {
 	RequireGui(call);
@@ -270,23 +283,27 @@ Result<bool> EditorServices::Toggle(B::BindingCall& call, const B::Utf8View& lab
 	return Result<bool>::Success(value);
 }
 
-Result<Int64> EditorServices::IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value)
+Result<Int64> EditorServices::IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Edited(call, ImGui::InputScalar(GuiString(label).c_str(), ImGuiDataType_S64, &value));
 	return Result<Int64>::Success(value);
 }
 
-Result<UInt64> EditorServices::ULongField(B::BindingCall& call, const B::Utf8View& label, UInt64 value)
+Result<UInt64> EditorServices::ULongField(B::BindingCall& call, const B::Utf8View& label, UInt64 value, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Edited(call, ImGui::InputScalar(GuiString(label).c_str(), ImGuiDataType_U64, &value));
 	return Result<UInt64>::Success(value);
 }
 
-Result<Float64> EditorServices::FloatField(B::BindingCall& call, const B::Utf8View& label, Float64 value)
+Result<Float64> EditorServices::FloatField(B::BindingCall& call, const B::Utf8View& label, Float64 value,
+                                           bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Finite(value);
 	Edited(call, ImGui::InputDouble(GuiString(label).c_str(), &value));
 	Finite(value);
@@ -294,9 +311,10 @@ Result<Float64> EditorServices::FloatField(B::BindingCall& call, const B::Utf8Vi
 }
 
 Result<Float64> EditorServices::SliderFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value,
-                                            Float64 minimum, Float64 maximum)
+                                            Float64 minimum, Float64 maximum, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Finite(value);
 	Finite(minimum);
 	Finite(maximum);
@@ -308,8 +326,7 @@ Result<Float64> EditorServices::SliderFloat(B::BindingCall& call, const B::Utf8V
 	}
 	Float32 editedValue = static_cast<Float32>(value);
 	const bool changed = Edited(call, ImGui::SliderFloat(GuiString(label).c_str(), &editedValue,
-	                                                      static_cast<Float32>(minimum),
-	                                                      static_cast<Float32>(maximum)));
+	                                                     static_cast<Float32>(minimum), static_cast<Float32>(maximum)));
 	return Result<Float64>::Success(changed ? editedValue : value);
 }
 
@@ -335,9 +352,11 @@ Result<Float64> EditorServices::DragFloat(B::BindingCall& call, const B::Utf8Vie
 	return Result<Float64>::Success(editedValue);
 }
 
-Result<B::Utf8View> EditorServices::TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value)
+Result<B::Utf8View> EditorServices::TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value,
+                                              bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	const String text = B::ReadString(value);
 	Vector<char> buffer(text.size() + 4096, 0);
 	std::memcpy(buffer.data(), text.data(), text.size());
@@ -379,9 +398,10 @@ Result<Int32> EditorServices::Popup(B::BindingCall& call, const B::Utf8View& lab
 }
 
 Result<EditorServices::Vector2Value> EditorServices::Vector2Field(B::BindingCall& call, const B::Utf8View& label,
-                                                                  const Vector2Value& value)
+                                                                  const Vector2Value& value, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Finite(value.F_X);
 	Finite(value.F_Y);
 	Float32 values[]{value.F_X, value.F_Y};
@@ -390,9 +410,10 @@ Result<EditorServices::Vector2Value> EditorServices::Vector2Field(B::BindingCall
 }
 
 Result<EditorServices::Vector3Value> EditorServices::Vector3Field(B::BindingCall& call, const B::Utf8View& label,
-                                                                  const Vector3Value& value)
+                                                                  const Vector3Value& value, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Finite(value.F_X);
 	Finite(value.F_Y);
 	Finite(value.F_Z);
@@ -402,9 +423,10 @@ Result<EditorServices::Vector3Value> EditorServices::Vector3Field(B::BindingCall
 }
 
 Result<EditorServices::Vector4Value> EditorServices::Vector4Field(B::BindingCall& call, const B::Utf8View& label,
-                                                                  const Vector4Value& value)
+                                                                  const Vector4Value& value, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Finite(value.F_X);
 	Finite(value.F_Y);
 	Finite(value.F_Z);
@@ -415,9 +437,10 @@ Result<EditorServices::Vector4Value> EditorServices::Vector4Field(B::BindingCall
 }
 
 Result<EditorServices::QuaternionValue> EditorServices::QuaternionField(B::BindingCall& call, const B::Utf8View& label,
-                                                                        const QuaternionValue& value)
+                                                                        const QuaternionValue& value, bool mixedValue)
 {
-	const auto result = B::TakeBindingResult(Vector4Field(call, label, {value.F_X, value.F_Y, value.F_Z, value.F_W}));
+	const auto result =
+	    B::TakeBindingResult(Vector4Field(call, label, {value.F_X, value.F_Y, value.F_Z, value.F_W}, mixedValue));
 	return Result<QuaternionValue>::Success({result.F_X, result.F_Y, result.F_Z, result.F_W});
 }
 
@@ -692,11 +715,11 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 			throw std::runtime_error("AssetField reference kind does not match its control");
 		}
 	}
-	String preview = !value.present ? String("None")
-	                : current.hasAsset   ? current.asset.guid.ToString()
-	                                     : (current.kind == K::V_Mesh || current.kind == K::V_Material)
-	                                           ? String("Local ") + PickerReferenceType(current.kind)
-	                                           : current.id;
+	String preview = !value.present     ? String("None")
+	                 : current.hasAsset ? current.asset.guid.ToString()
+	                 : (current.kind == K::V_Mesh || current.kind == K::V_Material)
+	                     ? String("Local ") + PickerReferenceType(current.kind)
+	                     : current.id;
 	const auto choices = AssetChoices(scope);
 	for (const auto& asset : choices)
 	{

@@ -147,24 +147,31 @@ struct EditorServices
 	static Result<bool> SmallButton(B::BindingCall& call, const B::Utf8View& label);
 	static Result<void> SameLine(B::BindingCall& call);
 	static Result<void> Separator(B::BindingCall& call);
+	static Result<bool> IsLastItemEdited(B::BindingCall& call);
 	static Result<void> BeginGroup(B::BindingCall& call);
 	static Result<void> EndGroup(B::BindingCall& call);
 	static Result<bool> Toggle(B::BindingCall& call, const B::Utf8View& label, bool value, bool mixedValue);
-	static Result<Int64> IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value);
-	static Result<UInt64> ULongField(B::BindingCall& call, const B::Utf8View& label, UInt64 value);
-	static Result<Float64> FloatField(B::BindingCall& call, const B::Utf8View& label, Float64 value);
-	static Result<Float64> SliderFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value,
-	                                   Float64 minimum, Float64 maximum);
+	static Result<Int64> IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value, bool mixedValue = false);
+	static Result<UInt64> ULongField(B::BindingCall& call, const B::Utf8View& label, UInt64 value,
+	                                 bool mixedValue = false);
+	static Result<Float64> FloatField(B::BindingCall& call, const B::Utf8View& label, Float64 value,
+	                                  bool mixedValue = false);
+	static Result<Float64> SliderFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value, Float64 minimum,
+	                                   Float64 maximum, bool mixedValue = false);
 	static Result<Float64> DragFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value, Float64 speed,
 	                                 Float64 minimum, Float64 maximum, const B::Utf8View& format, bool mixedValue);
-	static Result<B::Utf8View> TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value);
+	static Result<B::Utf8View> TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value,
+	                                     bool mixedValue = false);
 	static Result<Int32> Popup(B::BindingCall& call, const B::Utf8View& label, Int32 selected,
 	                           const B::DataView& options, bool mixedValue);
-	static Result<Vector2Value> Vector2Field(B::BindingCall& call, const B::Utf8View& label, const Vector2Value& value);
-	static Result<Vector3Value> Vector3Field(B::BindingCall& call, const B::Utf8View& label, const Vector3Value& value);
-	static Result<Vector4Value> Vector4Field(B::BindingCall& call, const B::Utf8View& label, const Vector4Value& value);
+	static Result<Vector2Value> Vector2Field(B::BindingCall& call, const B::Utf8View& label, const Vector2Value& value,
+	                                         bool mixedValue = false);
+	static Result<Vector3Value> Vector3Field(B::BindingCall& call, const B::Utf8View& label, const Vector3Value& value,
+	                                         bool mixedValue = false);
+	static Result<Vector4Value> Vector4Field(B::BindingCall& call, const B::Utf8View& label, const Vector4Value& value,
+	                                         bool mixedValue = false);
 	static Result<QuaternionValue> QuaternionField(B::BindingCall& call, const B::Utf8View& label,
-	                                               const QuaternionValue& value);
+	                                               const QuaternionValue& value, bool mixedValue = false);
 	static Result<ColorValue> ColorField(B::BindingCall& call, const B::Utf8View& label, const ColorValue& value,
 	                                     bool mixedValue, bool hdr);
 	static Result<OptionalReference> ObjectField(B::BindingCall& call, const B::Utf8View& label,

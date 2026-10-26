@@ -86,6 +86,8 @@ internal static partial class NativeEditorBindings
 	internal static partial void SameLine();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Separator")]
 	internal static partial void Separator();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IsLastItemEdited")]
+	internal static partial bool IsLastItemEdited();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::BeginGroup")]
 	internal static partial void BeginGroup();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::EndGroup")]
@@ -93,27 +95,27 @@ internal static partial class NativeEditorBindings
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Toggle")]
 	internal static partial bool Toggle(string label, bool value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IntField")]
-	internal static partial long IntField(string label, long value);
+	internal static partial long IntField(string label, long value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ULongField")]
-	internal static partial ulong ULongField(string label, ulong value);
+	internal static partial ulong ULongField(string label, ulong value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::FloatField")]
-	internal static partial double FloatField(string label, double value);
+	internal static partial double FloatField(string label, double value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SliderFloat")]
-	internal static partial double SliderFloat(string label, double value, double minimum, double maximum);
+	internal static partial double SliderFloat(string label, double value, double minimum, double maximum, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DragFloat")]
 	internal static partial double DragFloat(string label, double value, double speed, double minimum, double maximum, string format, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::TextField")]
-	internal static partial string TextField(string label, string value);
+	internal static partial string TextField(string label, string value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Popup")]
 	internal static partial int Popup(string label, int selected, string[] options, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Vector2Field")]
-	internal static partial Vector2 Vector2Field(string label, Vector2 value);
+	internal static partial Vector2 Vector2Field(string label, Vector2 value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Vector3Field")]
-	internal static partial Vector3 Vector3Field(string label, Vector3 value);
+	internal static partial Vector3 Vector3Field(string label, Vector3 value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Vector4Field")]
-	internal static partial Vector4 Vector4Field(string label, Vector4 value);
+	internal static partial Vector4 Vector4Field(string label, Vector4 value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::QuaternionField")]
-	internal static partial Quaternion QuaternionField(string label, Quaternion value);
+	internal static partial Quaternion QuaternionField(string label, Quaternion value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ColorField")]
 	internal static partial Color ColorField(string label, Color value, bool mixedValue, bool hdr);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ObjectField")]
