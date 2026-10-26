@@ -153,6 +153,7 @@ private:
 	Float32 sceneFlythroughMinSpeed = 0.01f;
 	Float32 sceneFlythroughMaxSpeed = 99.f;
 	Float32 sceneCameraFieldOfView = 45.f;
+	bool showSceneGizmos = true;
 	bool showSceneCameraGizmos = true;
 	bool showSceneLightGizmos = true;
 	bool showSceneGizmoLabels = true;

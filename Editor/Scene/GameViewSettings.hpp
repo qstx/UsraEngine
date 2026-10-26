@@ -41,6 +41,7 @@ struct GameViewSettingsState
 	Float32 sceneCameraFieldOfView = 45.f;
 	Float32 sceneCameraNearClip = 0.1f;
 	Float32 sceneCameraFarClip = 100.f;
+	bool showSceneGizmos = true;
 	bool showSceneCameraGizmos = true;
 	bool showSceneLightGizmos = true;
 	bool showSceneGizmoLabels = true;

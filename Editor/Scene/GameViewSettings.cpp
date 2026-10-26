@@ -140,6 +140,7 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 		settings.sceneCameraFieldOfView = json.value("sceneCameraFieldOfView", 45.f);
 		settings.sceneCameraNearClip = json.value("sceneCameraNearClip", 0.1f);
 		settings.sceneCameraFarClip = json.value("sceneCameraFarClip", 100.f);
+		settings.showSceneGizmos = json.value("showSceneGizmos", true);
 		settings.showSceneCameraGizmos = json.value("showSceneCameraGizmos", true);
 		settings.showSceneLightGizmos = json.value("showSceneLightGizmos", true);
 		settings.showSceneGizmoLabels = json.value("showSceneGizmoLabels", true);
@@ -204,6 +205,7 @@ String SerializeGameViewSettings(const GameViewSettingsState& settings)
 	                       {"sceneCameraFieldOfView", settings.sceneCameraFieldOfView},
 	                       {"sceneCameraNearClip", settings.sceneCameraNearClip},
 	                       {"sceneCameraFarClip", settings.sceneCameraFarClip}};
+	json["showSceneGizmos"] = settings.showSceneGizmos;
 	json["showSceneCameraGizmos"] = settings.showSceneCameraGizmos;
 	json["showSceneLightGizmos"] = settings.showSceneLightGizmos;
 	json["showSceneGizmoLabels"] = settings.showSceneGizmoLabels;

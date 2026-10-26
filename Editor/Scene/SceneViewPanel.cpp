@@ -1372,6 +1372,7 @@ void SceneViewPanel::SaveProjectSettings(VirtualFileSystem& userFiles, const Str
 	settings.sceneCameraFieldOfView = sceneCameraFieldOfView;
 	settings.sceneCameraNearClip = sceneCameraNearClip;
 	settings.sceneCameraFarClip = sceneCameraFarClip;
+	settings.showSceneGizmos = showSceneGizmos;
 	settings.showSceneCameraGizmos = showSceneCameraGizmos;
 	settings.showSceneLightGizmos = showSceneLightGizmos;
 	settings.showSceneGizmoLabels = showSceneGizmoLabels;
@@ -1434,6 +1435,7 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 	sceneCameraFieldOfView = 45.f;
 	sceneCameraNearClip = 0.1f;
 	sceneCameraFarClip = 100.f;
+	showSceneGizmos = true;
 	auto path = VirtualPath::Parse("user:Settings/GameViewProjects/" + projectKey + ".json");
 	if (!path)
 	{
@@ -1469,6 +1471,7 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 		sceneCameraFieldOfView = 45.f;
 		sceneCameraNearClip = 0.1f;
 		sceneCameraFarClip = 100.f;
+		showSceneGizmos = true;
 		diagnostic = settings.error;
 	}
 	else
@@ -1500,6 +1503,7 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			sceneCameraFieldOfView = 45.f;
 			sceneCameraNearClip = 0.1f;
 			sceneCameraFarClip = 100.f;
+			showSceneGizmos = true;
 			diagnostic = "Saved Game resolution exceeds supported limits; restored defaults.";
 		}
 		else
@@ -1530,6 +1534,7 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			sceneCameraFieldOfView = saved.sceneCameraFieldOfView;
 			sceneCameraNearClip = saved.sceneCameraNearClip;
 			sceneCameraFarClip = saved.sceneCameraFarClip;
+			showSceneGizmos = saved.showSceneGizmos;
 			showSceneCameraGizmos = saved.showSceneCameraGizmos;
 			showSceneLightGizmos = saved.showSceneLightGizmos;
 			showSceneGizmoLabels = saved.showSceneGizmoLabels;
@@ -2013,7 +2018,13 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				ImGui::EndPopup();
 			}
 			Icons::SameLine();
-			if (Icons::SmallButton("Gizmos"))
+			if (Icons::Button("SceneGizmos", Icons::Icon::Debug, "Gizmos", showSceneGizmos, true))
+			{
+				showSceneGizmos = !showSceneGizmos;
+				settingsChanged = true;
+			}
+			Icons::SameLine();
+			if (ImGui::ArrowButton("##SceneGizmoSettings", ImGuiDir_Down))
 			{
 				ImGui::OpenPopup("Scene Gizmo Settings");
 			}
@@ -2187,7 +2198,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				                    true);
 				ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 				ImGui::Image(sceneTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
-				if (draft.Kind() == ResourceKind::Scene && layout.visible &&
+				if (draft.Kind() == ResourceKind::Scene && layout.visible && showSceneGizmos &&
 				    (showSceneCameraGizmos || showSceneLightGizmos))
 				{
 					struct SceneGizmoHit
