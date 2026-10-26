@@ -14,6 +14,8 @@ class PrefabAsset;
 namespace Ursa::Editor
 {
 class EditorDocuments;
+using ManagedTransformInspector = std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*,
+                                                             SerializedObjectGroup&, Scene*, ComponentLoadContext*)>;
 
 Result<std::unique_ptr<SerializedObject>> CreateGameObjectSerializedProperties(GameObject::Ptr object);
 
@@ -22,8 +24,8 @@ Result<void> DeleteGameObjectSelection(Scene& scene, const Vector<ResourceId>& s
 
 Result<void> DuplicateGameObjectSelection(Scene& scene, const Vector<ResourceId>& selectedIds, ResourceId primaryId,
                                           ComponentRegistry& registry, EditorDocuments& documents, SceneDraft& draft,
-                                          EditorSelectionContext* selection = nullptr,
-                                          ResourceId parentOverride = {}, const PrefabAsset* prefabSnapshot = nullptr,
+                                          EditorSelectionContext* selection = nullptr, ResourceId parentOverride = {},
+                                          const PrefabAsset* prefabSnapshot = nullptr,
                                           const Vector<Mat4>* sourceWorldTransforms = nullptr);
 Result<std::shared_ptr<PrefabAsset>> CaptureGameObjectSelection(Scene& scene, const Vector<ResourceId>& selectedIds,
                                                                 ResourceId primaryId, ComponentRegistry& registry,
@@ -49,7 +51,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
                                 bool canCopyGameObjects = false, bool canPasteGameObjectsAsChild = false,
                                 EditorHierarchy::CopySelectionAction copyGameObjects = {},
                                 EditorHierarchy::CutSelectionAction cutGameObjects = {},
-                                EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild = {});
+                                EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild = {},
+                                ManagedTransformInspector managedTransformInspector = {});
 
 void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic,
                                ProjectWorkspace* workspace = nullptr, ResourceSession* resources = nullptr,

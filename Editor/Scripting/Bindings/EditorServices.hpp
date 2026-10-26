@@ -25,9 +25,11 @@ public:
 	Result<bool> SynchronizeRuntimeTarget();
 	void* hostToken = nullptr;
 	ManagedEditorContext& source;
-	std::unique_ptr<SerializedObject> properties;
+	std::unique_ptr<SerializedObject> ownedProperties;
+	SerializedObject* properties = nullptr;
 	Vector<std::unique_ptr<SerializedObject>> additionalProperties;
-	std::unique_ptr<SerializedObjectGroup> propertyGroup;
+	std::unique_ptr<SerializedObjectGroup> ownedPropertyGroup;
+	SerializedObjectGroup* propertyGroup = nullptr;
 	UInt64 revision = 1;
 	UInt64 generation = 0;
 	String expectedAssetType;

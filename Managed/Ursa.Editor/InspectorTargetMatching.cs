@@ -47,7 +47,7 @@ internal static class InspectorTargetMatching
 		if (actual == typeof(TextureImporter)) return "importer:ursa.Texture";
 		if (actual == typeof(ModelImporter)) return "importer:ursa.Model";
 		if (typeof(ScriptableObject).IsAssignableFrom(actual)) return "asset:" + BehaviourRegistry.IdentityFor(actual).Id;
-		if (actual == typeof(GameObject)) return "asset:ursa.Prefab";
+		if (actual == typeof(GameObject)) return "scene:ursa.GameObject";
 		if (typeof(Material).IsAssignableFrom(actual)) return "asset:ursa.Material";
 		if (typeof(Mesh).IsAssignableFrom(actual)) return "asset:ursa.Mesh";
 		if (typeof(Texture).IsAssignableFrom(actual)) return "asset:ursa.Texture";

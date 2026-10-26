@@ -394,6 +394,7 @@ private:
 	UInt64 editingScriptSession = 0;
 	std::shared_ptr<void> editingScriptServices;
 	Vector<ManagedExtensionDescriptor> managedExtensions;
+	String managedGameObjectInspectorId;
 	Map<String, ComponentEditor> managedEditorFallbacks;
 	Set<String> managedOpenWindows;
 	VirtualPath pendingManagedAsset;

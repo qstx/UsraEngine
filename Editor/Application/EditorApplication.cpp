@@ -5456,14 +5456,49 @@ Result<void> EditorApplication::OnGui()
 				    project->componentEditors, inspectorError,
 				    scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr, &showHierarchyPanel,
 				    &showInspectorPanel, selectionContext.kind != EditorSelectionKind::Asset && showInspectorPanel,
-					&selectionContext, std::move(queueAssetDrop), [this](bool layers)
-					{
-						showTagLayerSettings = true;
-						requestedTagLayerSettingsTab = layers ? 1 : 0;
-					}, CanCopyGameObjectSelection(), CanPasteGameObjectSelectionAsChild(),
-					[this] { return CopyGameObjectSelection(); },
-					[this] { return CutGameObjectSelection(); },
-					[this] { return PasteGameObjectSelection(true); });
+				    &selectionContext, std::move(queueAssetDrop),
+				    [this](bool layers)
+				    {
+					    showTagLayerSettings = true;
+					    requestedTagLayerSettingsTab = layers ? 1 : 0;
+				    },
+				    CanCopyGameObjectSelection(), CanPasteGameObjectSelectionAsChild(),
+				    [this] { return CopyGameObjectSelection(); }, [this] { return CutGameObjectSelection(); },
+				    [this] { return PasteGameObjectSelection(true); },
+				    [this](const Vector<GameObject::Ptr>& targets, Size primaryIndex, SerializedObject* properties,
+				           SerializedObjectGroup& propertyGroup, Scene* scene,
+				           ComponentLoadContext* loadContext) -> Result<bool>
+				    {
+					    if (managedGameObjectInspectorId.empty() || !managedHost || managedHost->IsSessionFaulted())
+					    {
+						    return Result<bool>::Success(false);
+					    }
+					    if (!documents || !documents->Current() || !scene || !properties || !loadContext ||
+					        primaryIndex >= targets.size())
+					    {
+						    return Result<bool>::Failure("Managed Transform Inspector context is incomplete");
+					    }
+					    ManagedEditorContext context;
+					    context.document = documents->Current();
+					    context.documents = documents.get();
+					    context.workspace = workspace.get();
+					    context.registry = &project->components;
+					    context.supportsMultipleObjects = true;
+					    context.gameObjectTargets = targets;
+					    context.gameObjectPrimaryIndex = primaryIndex;
+					    context.serializedProperties = properties;
+					    context.serializedPropertyGroup = &propertyGroup;
+					    context.selection.object = targets[primaryIndex];
+					    context.selection.roots = scene->RootGameObjects();
+					    context.selection.scene = scene;
+					    context.selection.selection = &selectionContext;
+					    context.selection.documentId = documents->Current()->Id();
+					    context.selection.loadContext = loadContext;
+					    context.saveContext.scene = scene;
+					    ConfigureReferencePreviewFactory(context);
+					    return InvokeManagedEditorExtension(*managedHost, editingScriptSession,
+					                                        managedGameObjectInspectorId, context);
+				    });
 				if (!inspected)
 				{
 					workspaceError = inspected.error;
@@ -6269,6 +6304,7 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 		currentTypes.insert(scriptType.clrTypeName);
 	}
 	Map<String, ComponentEditor> candidateFallbacks;
+	String candidateGameObjectInspectorId;
 	if (extensions)
 	{
 		for (const auto& extension : *extensions)
@@ -6278,6 +6314,15 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 				continue;
 			}
 			String target = extension.target;
+			if (target == "scene:ursa.GameObject")
+			{
+				if (!candidateGameObjectInspectorId.empty())
+				{
+					return Result<void>::Failure("Only one managed GameObject Inspector can be registered");
+				}
+				candidateGameObjectInspectorId = extension.id;
+				continue;
+			}
 			if (target.find("asset:") == 0 || target.find("importer:") == 0)
 			{
 				bool exposed = target == "asset:ursa.Prefab" || target == "asset:ursa.Material" ||
@@ -6367,6 +6412,7 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 		}
 	}
 	managedEditorFallbacks = std::move(candidateFallbacks);
+	managedGameObjectInspectorId = std::move(candidateGameObjectInspectorId);
 	project->componentEditors = std::move(candidateEditors);
 	project->components = std::move(candidateRegistry);
 	registeredScriptComponentTypes = std::move(currentTypes);

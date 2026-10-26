@@ -26,6 +26,10 @@ struct ManagedEditorContext
 	Component* target = nullptr;
 	Vector<Component*> componentTargets;
 	Size componentPrimaryIndex = 0;
+	Vector<GameObject::Ptr> gameObjectTargets;
+	Size gameObjectPrimaryIndex = 0;
+	SerializedObject* serializedProperties = nullptr;
+	SerializedObjectGroup* serializedPropertyGroup = nullptr;
 	bool supportsMultipleObjects = false;
 	std::shared_ptr<MaterialInstance> targetMaterial;
 	MeshPtr targetMesh;

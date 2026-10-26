@@ -528,13 +528,13 @@ String GameObjectGroupEditKey(ResourceId documentId, const Vector<GameObject::Pt
 	return key;
 }
 
-Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const String& primaryName,
-                                           const String& nameEditKey, String& diagnostic,
-                                           const ProjectTagLayerSettings& tagLayerSettings,
-                                           const std::function<void(bool)>& openTagLayerSettings,
-                                           const GroupCommitObserver& commitObserver = {}, Scene* scene = nullptr,
-                                           const Vector<GameObject::Ptr>* sceneTargets = nullptr,
-                                           bool allowWorldTransform = false)
+Result<bool>
+DrawGameObjectGroupProperties(SerializedObjectGroup& group, const String& primaryName, const String& nameEditKey,
+                              String& diagnostic, const ProjectTagLayerSettings& tagLayerSettings,
+                              const std::function<void(bool)>& openTagLayerSettings,
+                              const GroupCommitObserver& commitObserver = {}, Scene* scene = nullptr,
+                              const Vector<GameObject::Ptr>* sceneTargets = nullptr, bool allowWorldTransform = false,
+                              const std::function<Result<bool>(SerializedObjectGroup&)>& managedTransformInspector = {})
 {
 	if (group.TargetCount() > 1)
 	{
@@ -1143,34 +1143,47 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 	}
 	if (transformOpen)
 	{
-		auto position = drawVector("Position", "/Fields/position", 3);
-		if (!position)
+		if (managedTransformInspector)
 		{
-			return position;
+			auto managed = managedTransformInspector(group);
+			if (!managed)
+			{
+				return managed;
+			}
+			changed |= managed.value;
 		}
-		changed |= position.value;
-		auto rotation = drawRotation();
-		if (!rotation)
+		else
 		{
-			return rotation;
+			auto position = drawVector("Position", "/Fields/position", 3);
+			if (!position)
+			{
+				return position;
+			}
+			changed |= position.value;
+			auto rotation = drawRotation();
+			if (!rotation)
+			{
+				return rotation;
+			}
+			changed |= rotation.value;
+			auto scale = drawVector("Scale", "/Fields/scale", 3);
+			if (!scale)
+			{
+				return scale;
+			}
+			changed |= scale.value;
 		}
-		changed |= rotation.value;
-		auto scale = drawVector("Scale", "/Fields/scale", 3);
-		if (!scale)
-		{
-			return scale;
-		}
-		changed |= scale.value;
 	}
 	if (scene && sceneTargets)
 	{
-		const bool largeWorldPosition = std::any_of(sceneTargets->begin(), sceneTargets->end(), [&](const auto& target)
-		{
-			auto world = scene->WorldTransform(target);
-			return world && (std::abs(world.value.At(0, 3)) > 100000.f ||
-			                 std::abs(world.value.At(1, 3)) > 100000.f ||
-			                 std::abs(world.value.At(2, 3)) > 100000.f);
-		});
+		const bool largeWorldPosition = std::any_of(sceneTargets->begin(), sceneTargets->end(),
+		                                            [&](const auto& target)
+		                                            {
+			                                            auto world = scene->WorldTransform(target);
+			                                            return world && (std::abs(world.value.At(0, 3)) > 100000.f ||
+			                                                             std::abs(world.value.At(1, 3)) > 100000.f ||
+			                                                             std::abs(world.value.At(2, 3)) > 100000.f);
+		                                            });
 		if (largeWorldPosition)
 		{
 			constexpr const char* warning =
@@ -4475,17 +4488,14 @@ Result<std::unique_ptr<SerializedObject>> CreateGameObjectSerializedProperties(G
 	return CreateGameObjectSerializedObject(std::move(object));
 }
 
-Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hierarchy, EditorDocuments& documents,
-                                ProjectWorkspace& workspace, const ProjectTagLayerSettings& tagLayerSettings,
-                                ComponentRegistry& registry, ComponentEditors& componentEditors, String& diagnostic,
-                                const Vector<ScriptTypeDescriptor>* scriptTypes, bool* hierarchyOpen,
-                                bool* inspectorOpen, bool drawInspector, EditorSelectionContext* selection,
-                                EditorHierarchy::AssetDropAction assetDrop,
-                                std::function<void(bool)> openTagLayerSettings, bool canCopyGameObjects,
-                                bool canPasteGameObjectsAsChild,
-                                EditorHierarchy::CopySelectionAction copyGameObjects,
-                                EditorHierarchy::CutSelectionAction cutGameObjects,
-                                EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild)
+Result<bool> DrawSceneInspector(
+    EditorDocument& document, EditorHierarchy& hierarchy, EditorDocuments& documents, ProjectWorkspace& workspace,
+    const ProjectTagLayerSettings& tagLayerSettings, ComponentRegistry& registry, ComponentEditors& componentEditors,
+    String& diagnostic, const Vector<ScriptTypeDescriptor>* scriptTypes, bool* hierarchyOpen, bool* inspectorOpen,
+    bool drawInspector, EditorSelectionContext* selection, EditorHierarchy::AssetDropAction assetDrop,
+    std::function<void(bool)> openTagLayerSettings, bool canCopyGameObjects, bool canPasteGameObjectsAsChild,
+    EditorHierarchy::CopySelectionAction copyGameObjects, EditorHierarchy::CutSelectionAction cutGameObjects,
+    EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild, ManagedTransformInspector managedTransformInspector)
 {
 	auto draft = document.Payload<SceneDraft>();
 	if (!draft)
@@ -5134,7 +5144,22 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				    *objectGroup, primaryName ? primaryName.value : String{},
 				    GameObjectGroupEditKey(document.Id(), selectedObjects), diagnostic, tagLayerSettings,
 				    openTagLayerSettings, overrideCommit ? overrideCommit.value : GroupCommitObserver{}, &scene,
-				    &selectedObjects, true);
+				    &selectedObjects, true,
+				    !overrideCommit.value && managedTransformInspector
+				        ? std::function<Result<bool>(SerializedObjectGroup&)>(
+				              [&](SerializedObjectGroup& serializedGroup)
+				              {
+					              const Size primaryIndex = serializedGroup.PrimaryIndex();
+					              if (primaryIndex >= selectedObjects.size() ||
+					                  primaryIndex >= serializedTargets.size())
+					              {
+						              return Result<bool>::Failure("Managed Transform target group is inconsistent");
+					              }
+					              return managedTransformInspector(selectedObjects, primaryIndex,
+					                                               serializedTargets[primaryIndex].get(),
+					                                               serializedGroup, &scene, &loadContext);
+				              })
+				        : std::function<Result<bool>(SerializedObjectGroup&)>{});
 				if (!groupProperties)
 				{
 					diagnostic = groupProperties.error;

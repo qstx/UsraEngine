@@ -66,6 +66,54 @@ public static class EditorGui
 	public static Vector3 Vector3Field(string label, Vector3 value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.Vector3Field(label, value, mixedValue); }
 	public static Vector4 Vector4Field(string label, Vector4 value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.Vector4Field(label, value, mixedValue); }
 	public static Quaternion QuaternionField(string label, Quaternion value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.QuaternionField(label, value, mixedValue); }
+	public static void EulerAnglesField(string label, SerializedProperty property)
+	{
+		ArgumentNullException.ThrowIfNull(property);
+		if (property.PropertyType != SerializedPropertyType.Quaternion)
+			throw new ArgumentException("Euler angle fields require a Quaternion property.", nameof(property));
+		Quaternion original = property.QuaternionValue;
+		Vector3 euler = ToEulerAngles(original);
+		Vector3 edited = Vector3Field(label, euler, property.HasMultipleDifferentValues);
+		if (!edited.Equals(euler) || property.HasMultipleDifferentValues && WasLastControlEdited())
+			property.QuaternionValue = FromEulerAngles(edited);
+	}
+	private static Vector3 ToEulerAngles(Quaternion rotation)
+	{
+		double lengthSquared = (double)rotation.X * rotation.X + (double)rotation.Y * rotation.Y +
+		                       (double)rotation.Z * rotation.Z + (double)rotation.W * rotation.W;
+		if (!double.IsFinite(lengthSquared) || lengthSquared <= 1e-12) return new();
+		double inverseLength = 1.0 / Math.Sqrt(lengthSquared);
+		double x = rotation.X * inverseLength, y = rotation.Y * inverseLength;
+		double z = rotation.Z * inverseLength, w = rotation.W * inverseLength;
+		double r13 = 2 * (x * z + w * y);
+		double r23 = 2 * (y * z - w * x);
+		double r21 = 2 * (x * y + w * z);
+		double r22 = 1 - 2 * (x * x + z * z);
+		double r31 = 2 * (x * z - w * y);
+		double r11 = 1 - 2 * (y * y + z * z);
+		double angleX = Math.Asin(Math.Clamp(-r23, -1, 1));
+		double cosineX = Math.Cos(angleX);
+		double angleY = Math.Abs(cosineX) > 1e-5
+			? Math.Atan2(r13, 1 - 2 * (x * x + y * y))
+			: Math.Atan2(-r31, r11);
+		double angleZ = Math.Abs(cosineX) > 1e-5 ? Math.Atan2(r21, r22) : 0;
+		return new((float)PositiveDegrees(angleX), (float)PositiveDegrees(angleY), (float)PositiveDegrees(angleZ));
+	}
+	private static Quaternion FromEulerAngles(Vector3 degrees)
+	{
+		const double radians = Math.PI / 180.0;
+		double halfX = degrees.X * radians * 0.5, halfY = degrees.Y * radians * 0.5,
+			halfZ = degrees.Z * radians * 0.5;
+		double sx = Math.Sin(halfX), cx = Math.Cos(halfX), sy = Math.Sin(halfY), cy = Math.Cos(halfY),
+			sz = Math.Sin(halfZ), cz = Math.Cos(halfZ);
+		return new((float)(cy * sx * cz + sy * cx * sz), (float)(sy * cx * cz - cy * sx * sz),
+			(float)(cy * cx * sz - sy * sx * cz), (float)(cy * cx * cz + sy * sx * sz));
+	}
+	private static double PositiveDegrees(double radians)
+	{
+		double degrees = radians * (180.0 / Math.PI) % 360.0;
+		return degrees < 0 ? degrees + 360.0 : degrees;
+	}
 	public static Color ColorField(string label, Color value, bool mixedValue = false, bool hdr = false)
 	{
 		_ = EditorApi.Generation;

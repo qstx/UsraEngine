@@ -155,14 +155,20 @@ EditorInvocation::EditorInvocation(ManagedEditorContext& editorContext, UInt64 s
     : source(editorContext), generation(nextEditorGeneration.fetch_add(1, std::memory_order_relaxed)),
       session(scriptSession)
 {
-	if (source.serializedTarget)
+	if (source.serializedProperties)
+	{
+		properties = source.serializedProperties;
+		propertyGroup = source.serializedPropertyGroup;
+	}
+	else if (source.serializedTarget)
 	{
 		auto adapter = *source.serializedTarget;
 		if (!adapter.resources && (source.workspace || source.documents || source.selection.loadContext))
 		{
 			adapter.resources = &Resources();
 		}
-		properties = B::TakeBindingResult(SerializedObject::Create(std::move(adapter)));
+		ownedProperties = B::TakeBindingResult(SerializedObject::Create(std::move(adapter)));
+		properties = ownedProperties.get();
 	}
 	else if (!source.componentTargets.empty())
 	{
@@ -198,8 +204,9 @@ EditorInvocation::EditorInvocation(ManagedEditorContext& editorContext, UInt64 s
 			}
 			if (index == source.componentPrimaryIndex)
 			{
-				properties = std::move(serialized.value);
-				groupTargets[index] = properties.get();
+				ownedProperties = std::move(serialized.value);
+				properties = ownedProperties.get();
+				groupTargets[index] = properties;
 			}
 			else
 			{
@@ -214,7 +221,8 @@ EditorInvocation::EditorInvocation(ManagedEditorContext& editorContext, UInt64 s
 			{
 				throw std::runtime_error(ToStdString(group.error));
 			}
-			propertyGroup = std::make_unique<SerializedObjectGroup>(std::move(group.value));
+			ownedPropertyGroup = std::make_unique<SerializedObjectGroup>(std::move(group.value));
+			propertyGroup = ownedPropertyGroup.get();
 		}
 	}
 	else if (source.target)
@@ -226,8 +234,9 @@ EditorInvocation::EditorInvocation(ManagedEditorContext& editorContext, UInt64 s
 		{
 			throw std::runtime_error("Inspector context has no serialization services");
 		}
-		properties = B::TakeBindingResult(SerializedObject::Create(*source.target, *source.registry,
-		                                                           *source.selection.loadContext, source.saveContext));
+		ownedProperties = B::TakeBindingResult(SerializedObject::Create(
+		    *source.target, *source.registry, *source.selection.loadContext, source.saveContext));
+		properties = ownedProperties.get();
 	}
 }
 
@@ -495,6 +504,19 @@ Result<B::DataView> EditorServices::GetTargetHandles(B::BindingCall& call)
 			    B::TakeBindingResult(scope.RuntimeApi().RegisterComponent(component))));
 		}
 	}
+	else if (!scope.source.gameObjectTargets.empty())
+	{
+		handles.reserve(scope.source.gameObjectTargets.size());
+		for (const auto& object : scope.source.gameObjectTargets)
+		{
+			if (!object)
+			{
+				return Result<B::DataView>::Failure("Inspector target group contains a missing GameObject");
+			}
+			handles.push_back(B::WriteManagedHandle<B::Wire::Value_Ursa_NativeHandle>(
+			    B::TakeBindingResult(scope.RuntimeApi().Register(object))));
+		}
+	}
 	else
 	{
 		auto handle = GetTargetHandle(call);
@@ -511,6 +533,10 @@ Result<B::DataView> EditorServices::GetTargetHandles(B::BindingCall& call)
 Result<UInt32> EditorServices::GetTargetPrimaryIndex(B::BindingCall& call)
 {
 	const auto& scope = Scope(call);
+	if (!scope.source.gameObjectTargets.empty())
+	{
+		return Result<UInt32>::Success(static_cast<UInt32>(scope.source.gameObjectPrimaryIndex));
+	}
 	return Result<UInt32>::Success(
 	    scope.source.componentTargets.empty() ? 0 : static_cast<UInt32>(scope.source.componentPrimaryIndex));
 }
@@ -829,7 +855,7 @@ Result<bool> EditorServices::ApplyTargetFields(B::BindingCall& call, const B::Ut
 	if (scope.propertyGroup && payload.is_object() && payload.contains("Targets"))
 	{
 		auto targets = payload["Targets"];
-		if (!targets.is_array() || targets.size() != scope.source.componentTargets.size())
+		if (!targets.is_array() || targets.size() != scope.propertyGroup->TargetCount())
 		{
 			return Result<bool>::Failure("Managed Inspector target field patch does not match its target group");
 		}

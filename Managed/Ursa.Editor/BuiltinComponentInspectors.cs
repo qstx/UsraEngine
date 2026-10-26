@@ -36,6 +36,20 @@ internal static class BuiltinMeshInspectorGui
 }
 
 [BuiltinEditor]
+[CustomEditor(typeof(GameObject))]
+[CanEditMultipleObjects]
+public sealed class GameObjectTransformInspector : Inspector
+{
+	public override void OnInspectorGUI()
+	{
+		EditorGui.PropertyField(SerializedObject.FindProperty("position"), "Position");
+		EditorGui.EulerAnglesField("Rotation", SerializedObject.FindProperty("rotation"));
+		EditorGui.PropertyField(SerializedObject.FindProperty("scale"), "Scale");
+		SerializedObject.ApplyModifiedProperties();
+	}
+}
+
+[BuiltinEditor]
 [CustomEditor(typeof(MeshFilterComponent))]
 [CanEditMultipleObjects]
 public sealed class MeshFilterComponentInspector : Inspector
