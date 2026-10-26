@@ -70,9 +70,7 @@ private:
 	{
 		None,
 		Orbit,
-		RightOrbit,
 		Pan,
-		RightPan,
 		HandPan,
 		DragZoom,
 		Flythrough

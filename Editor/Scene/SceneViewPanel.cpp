@@ -3005,11 +3005,6 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						}
 						sceneNavigationGesture = SceneNavigationGesture::None;
 					}
-					else if (sceneNavigationGesture == SceneNavigationGesture::RightPan &&
-					         !io.MouseDown[ImGuiMouseButton_Right])
-					{
-						sceneNavigationGesture = SceneNavigationGesture::None;
-					}
 					else if (sceneNavigationGesture == SceneNavigationGesture::HandPan &&
 					         !io.MouseDown[ImGuiMouseButton_Left])
 					{
@@ -3017,11 +3012,6 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					}
 					else if (sceneNavigationGesture == SceneNavigationGesture::Orbit &&
 					         (!io.MouseDown[ImGuiMouseButton_Left] || !io.KeyAlt))
-					{
-						sceneNavigationGesture = SceneNavigationGesture::None;
-					}
-					else if (sceneNavigationGesture == SceneNavigationGesture::RightOrbit &&
-					         !io.MouseDown[ImGuiMouseButton_Right])
 					{
 						sceneNavigationGesture = SceneNavigationGesture::None;
 					}
@@ -3042,7 +3032,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						{
 							// Ctrl+right-click is reserved for selecting overlapping objects.
 						}
-						else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+						else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !sceneView2DMode &&
+						         !sceneViewRotationLocked)
 						{
 							if (io.KeyAlt)
 							{
@@ -3054,14 +3045,6 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 								                         : distance * std::sin(camera.verticalFovRadians * 0.5f);
 								sceneDragZoomSpeed = std::max(std::abs(sceneDragZoomStart), 0.3f);
 								sceneDragZoomTotalMotion = 0.f;
-							}
-							else if (sceneView2DMode || sceneViewRotationLocked)
-							{
-								sceneNavigationGesture = SceneNavigationGesture::RightPan;
-							}
-							else if (camera.orthographic)
-							{
-								sceneNavigationGesture = SceneNavigationGesture::RightOrbit;
 							}
 							else
 							{
@@ -3095,15 +3078,13 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						clearSceneViewLock();
 					}
 					if (sceneNavigationGesture == SceneNavigationGesture::Pan ||
-					    sceneNavigationGesture == SceneNavigationGesture::RightPan ||
 					    sceneNavigationGesture == SceneNavigationGesture::HandPan)
 					{
 						const Float32 panSpeed = io.KeyShift ? 4.f : 1.f;
 						PanSceneView(camera, {io.MouseDelta.x * panSpeed, io.MouseDelta.y * panSpeed},
 						             layout.displayRect.height);
 					}
-					else if (sceneNavigationGesture == SceneNavigationGesture::Orbit ||
-					         sceneNavigationGesture == SceneNavigationGesture::RightOrbit)
+					else if (sceneNavigationGesture == SceneNavigationGesture::Orbit)
 					{
 						OrbitSceneView(camera, {io.MouseDelta.x, io.MouseDelta.y});
 					}
