@@ -498,6 +498,11 @@ Result<EditorServices::PropertyState> EditorServices::GetProperty(B::BindingCall
 	result.F_ElementType = PropertyType(element);
 	result.F_ReferenceKind = ReferenceKind(descriptor);
 	result.F_TypeName = call.arena.StringValue(ToUrsaString(descriptor.value("TypeName", std::string{})));
+	const String fallbackFieldName = fieldPath.substr(fieldPath.find_last_of('/') + 1);
+	const std::string fallbackDisplayName = ToStdString(fallbackFieldName);
+	result.F_DisplayName = call.arena.StringValue(
+	    ToUrsaString(descriptor.value("DisplayName", fallbackDisplayName)));
+	result.F_Hidden = descriptor.value("Hidden", false);
 	Vector<B::Utf8View> names;
 	Vector<Int64> signedValues;
 	Vector<UInt64> unsignedValues;
@@ -899,4 +904,5 @@ Result<bool> EditorServices::DrawDefaultInspector(B::BindingCall& call, UInt64 r
 	}
 	return ApplyProperties(call, revision);
 }
+
 } // namespace Ursa::Editor::Bindings

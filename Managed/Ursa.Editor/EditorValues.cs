@@ -134,6 +134,8 @@ internal struct SerializedPropertyState
 	public bool HasMultipleDifferentValues;
 	public EditorReferenceKind ReferenceKind;
 	public string TypeName;
+	public string DisplayName;
+	public bool Hidden;
 	public string[] EnumNames;
 	public long[] EnumSignedValues;
 	public ulong[] EnumUnsignedValues;

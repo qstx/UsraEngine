@@ -69,7 +69,7 @@ public abstract class Inspector
 	public virtual string GetInfoString() => string.Empty;
 	public virtual bool RequiresConstantRepaint() => false;
 
-	protected bool DrawDefaultInspector() => SerializedObject.DrawDefaultInspector();
+	protected bool DrawDefaultInspector() => SerializedObject.DrawDefaultInspectorManaged();
 }
 
 public abstract class EditorWindow

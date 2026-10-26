@@ -74,6 +74,17 @@ public sealed class SerializedObject
 	}
 	public bool ApplyModifiedProperties() { RequireValid(); return NativeEditorBindings.ApplyProperties(Revision); }
 	internal bool DrawDefaultInspector() { RequireValid(); return NativeEditorBindings.DrawDefaultInspector(Revision); }
+	internal bool DrawDefaultInspectorManaged()
+	{
+		RequireValid();
+		foreach (string path in GetPropertyPaths())
+		{
+			SerializedProperty property = FindProperty(path);
+			if (!property.Hidden)
+				EditorGui.PropertyField(property, property.DisplayName);
+		}
+		return ApplyModifiedProperties();
+	}
 }
 
 public sealed class SerializedProperty
@@ -106,6 +117,8 @@ public sealed class SerializedProperty
 	public SerializedPropertyType PropertyType => State.Type;
 	public bool HasMultipleDifferentValues => State.HasMultipleDifferentValues;
 	public string TypeName => State.TypeName;
+	public string DisplayName => State.DisplayName;
+	public bool Hidden => State.Hidden;
 	public EditorReferenceKind ReferenceKind => State.ReferenceKind;
 	public bool IsNull
 	{

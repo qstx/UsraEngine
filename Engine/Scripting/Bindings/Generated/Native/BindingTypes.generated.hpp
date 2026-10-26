@@ -507,21 +507,25 @@ struct Value_Ursa_Editor_SerializedPropertyState
 	UInt32 F_HasMultipleDifferentValues{};
 	UInt32 F_ReferenceKind{};
 	Utf8View F_TypeName{};
+	Utf8View F_DisplayName{};
+	UInt32 F_Hidden{};
 	DataView F_EnumNames{};
 	DataView F_EnumSignedValues{};
 	DataView F_EnumUnsignedValues{};
 	Value_Ursa_Editor_SerializedValue F_Value{};
 };
-static_assert(sizeof(Value_Ursa_Editor_SerializedPropertyState) == 312, "Wire type size mismatch");
+static_assert(sizeof(Value_Ursa_Editor_SerializedPropertyState) == 344, "Wire type size mismatch");
 static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Type) == 0, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_ElementType) == 4, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_HasMultipleDifferentValues) == 8, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_ReferenceKind) == 12, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_TypeName) == 16, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumNames) == 40, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumSignedValues) == 64, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumUnsignedValues) == 88, "Wire field offset mismatch");
-static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Value) == 112, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_DisplayName) == 40, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Hidden) == 64, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumNames) == 72, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumSignedValues) == 96, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_EnumUnsignedValues) == 120, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_Editor_SerializedPropertyState, F_Value) == 144, "Wire field offset mismatch");
 struct Value_Ursa_EditorBindingCapability
 {
 	UInt64 F_ModuleId{};
@@ -1608,6 +1612,8 @@ inline void Check_Wire_a5654e1c34585bf8(const Wire::Value_Ursa_Editor_Serialized
 	Check_Wire_b760f44fa5965c24(value.F_HasMultipleDifferentValues);
 	Check_Wire_c94f08ee88a24e17(value.F_ReferenceKind);
 	Check_Wire_473287f8298dba71(value.F_TypeName);
+	Check_Wire_473287f8298dba71(value.F_DisplayName);
+	Check_Wire_b760f44fa5965c24(value.F_Hidden);
 	Check_Wire_5444db1618399858(value.F_EnumNames);
 	Check_Wire_3c34a9e7f850a080(value.F_EnumSignedValues);
 	Check_Wire_f74e6cbff3740f65(value.F_EnumUnsignedValues);
@@ -1616,6 +1622,7 @@ inline void Check_Wire_a5654e1c34585bf8(const Wire::Value_Ursa_Editor_Serialized
 inline void CheckOwned_Wire_a5654e1c34585bf8(const Wire::Value_Ursa_Editor_SerializedPropertyState& value, const BindingArena& arena)
 {
 	CheckOwned_Wire_473287f8298dba71(value.F_TypeName, arena);
+	CheckOwned_Wire_473287f8298dba71(value.F_DisplayName, arena);
 	CheckOwned_Wire_5444db1618399858(value.F_EnumNames, arena);
 	CheckOwned_Wire_3c34a9e7f850a080(value.F_EnumSignedValues, arena);
 	CheckOwned_Wire_f74e6cbff3740f65(value.F_EnumUnsignedValues, arena);
