@@ -1050,35 +1050,50 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 	}
 	if (ImGui::BeginPopup("SceneViewAngles"))
 	{
+		const Vec3 viewDirection = Normalized(camera.target - camera.position);
+		Int32 alignedAxis = -1;
+		for (Int32 index = 0; index < 6; ++index)
+		{
+			if (Dot(viewDirection, Scale(ends[index].direction, -1.f)) > 0.999f)
+			{
+				alignedAxis = index;
+				break;
+			}
+		}
 		ImGui::BeginDisabled(rotationLocked);
-		if (ImGui::MenuItem("Free"))
+		if (ImGui::MenuItem("Free", nullptr, alignedAxis < 0))
 		{
 			snapToNiceAngle(false);
 		}
 		ImGui::Separator();
-		if (ImGui::MenuItem("Front"))
-		{
-			snapToDirection({0.f, 0.f, 1.f});
-		}
-		if (ImGui::MenuItem("Back"))
-		{
-			snapToDirection({0.f, 0.f, -1.f});
-		}
-		if (ImGui::MenuItem("Left"))
-		{
-			snapToDirection({-1.f, 0.f, 0.f});
-		}
-		if (ImGui::MenuItem("Right"))
+		if (ImGui::MenuItem("Right", nullptr, alignedAxis == 0))
 		{
 			snapToDirection({1.f, 0.f, 0.f});
 		}
-		if (ImGui::MenuItem("Top"))
+		if (ImGui::MenuItem("Top", nullptr, alignedAxis == 2))
 		{
 			snapToDirection({0.f, 1.f, 0.f});
 		}
-		if (ImGui::MenuItem("Bottom"))
+		if (ImGui::MenuItem("Front", nullptr, alignedAxis == 4))
+		{
+			snapToDirection({0.f, 0.f, 1.f});
+		}
+		if (ImGui::MenuItem("Left", nullptr, alignedAxis == 1))
+		{
+			snapToDirection({-1.f, 0.f, 0.f});
+		}
+		if (ImGui::MenuItem("Bottom", nullptr, alignedAxis == 3))
 		{
 			snapToDirection({0.f, -1.f, 0.f});
+		}
+		if (ImGui::MenuItem("Back", nullptr, alignedAxis == 5))
+		{
+			snapToDirection({0.f, 0.f, -1.f});
+		}
+		ImGui::Separator();
+		if (ImGui::MenuItem("Perspective", nullptr, !camera.orthographic))
+		{
+			toggleProjection();
 		}
 		ImGui::EndDisabled();
 		ImGui::EndPopup();
