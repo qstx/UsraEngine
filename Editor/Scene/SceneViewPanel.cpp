@@ -1971,6 +1971,13 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 			Icons::SameLine();
 			ImGui::BeginChild("SceneViewportArea", ImVec2(0.f, 0.f), false,
 			                  ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+			bool requestedTwoDMode = sceneView2DMode;
+			if (ImGui::Checkbox("2D", &requestedTwoDMode))
+			{
+				sceneView2DModePending = true;
+				sceneView2DModePendingTarget = requestedTwoDMode;
+			}
+			Icons::SameLine();
 			const ImGuiIO& sceneSearchInput = ImGui::GetIO();
 			if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !sceneSearchInput.WantTextInput &&
 			    sceneSearchInput.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
@@ -1983,13 +1990,6 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 			if (draft.Kind() == ResourceKind::Scene)
 			{
 				hierarchy.RefreshSceneSearchMatches(scene, document.Id());
-			}
-			Icons::SameLine();
-			bool requestedTwoDMode = sceneView2DMode;
-			if (ImGui::Checkbox("2D", &requestedTwoDMode))
-			{
-				sceneView2DModePending = true;
-				sceneView2DModePendingTarget = requestedTwoDMode;
 			}
 			Icons::SameLine();
 			if (Icons::SmallButton(gizmoPivotMode == GizmoPivotMode::Pivot ? "Pivot" : "Center"))
