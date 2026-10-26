@@ -116,6 +116,8 @@ private:
 	Float32 gameScale = 1;
 	ViewportPoint gamePan;
 	bool gameFit = true;
+	bool gameScaleSnapPending = false;
+	Float64 gameScaleSnapAt = 0;
 	bool showGameStats = false;
 	bool showGameGizmos = true;
 	bool focusGameViewOnPlay = true;

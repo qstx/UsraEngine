@@ -80,9 +80,10 @@ ViewportLayout ComputeViewportLayout(ViewportRect available, Float32 dpiScale, V
 	const Float32 logicalWidth = static_cast<Float32>(targetPixels.width) / result.dpiScale;
 	const Float32 logicalHeight = static_cast<Float32>(targetPixels.height) / result.dpiScale;
 	const Float32 fitScale = std::min(available.width / logicalWidth, available.height / logicalHeight);
+	const ViewportScaleLimits scaleLimits = GetViewportScaleLimits(available, result.dpiScale, targetPixels);
 	result.scale = fit ? fitScale
-	                   : Clamp(std::isfinite(scale) && scale > 0 ? scale : fitScale, std::min(1.f, fitScale),
-	                           std::max(5.f * result.dpiScale, fitScale));
+	                   : Clamp(std::isfinite(scale) && scale > 0 ? scale : fitScale, scaleLimits.minimum,
+	                           scaleLimits.maximum);
 	const Float32 displayWidth = logicalWidth * result.scale;
 	const Float32 displayHeight = logicalHeight * result.scale;
 	const ViewportSize displaySize{static_cast<UInt32>(std::ceil(displayWidth)),
@@ -96,6 +97,19 @@ ViewportLayout ComputeViewportLayout(ViewportRect available, Float32 dpiScale, V
 	result.clipRect = Intersect(result.displayRect, available);
 	result.visible = result.clipRect.width > 0 && result.clipRect.height > 0;
 	return result;
+}
+
+ViewportScaleLimits GetViewportScaleLimits(ViewportRect available, Float32 dpiScale, ViewportSize targetPixels)
+{
+	const Float32 safeDpiScale = std::isfinite(dpiScale) && dpiScale > 0 ? dpiScale : 1.f;
+	if (!targetPixels.width || !targetPixels.height || available.width <= 0 || available.height <= 0)
+	{
+		return {};
+	}
+	const Float32 logicalWidth = static_cast<Float32>(targetPixels.width) / safeDpiScale;
+	const Float32 logicalHeight = static_cast<Float32>(targetPixels.height) / safeDpiScale;
+	const Float32 fitScale = std::min(available.width / logicalWidth, available.height / logicalHeight);
+	return {std::min(1.f, fitScale), std::max(5.f * safeDpiScale, fitScale)};
 }
 
 ViewportPoint ClampViewportPan(ViewportPoint pan, ViewportSize displaySize, ViewportSize availableSize)
@@ -122,13 +136,41 @@ std::optional<ViewportPoint> ScreenToViewportPixel(ViewportPoint screenPosition,
 	return ViewportPoint{u * layout.targetPixels.width, v * layout.targetPixels.height};
 }
 
-Float32 SnapViewportScale(Float32 scale)
+Float32 SnapViewportScale(Float32 scale, Float32 minimumScale, Float32 maximumScale)
 {
-	if (!std::isfinite(scale) || scale <= 0)
+	if (!std::isfinite(scale) || !std::isfinite(minimumScale) || !std::isfinite(maximumScale) || scale <= 0 ||
+	    minimumScale <= 0 || maximumScale <= minimumScale || scale <= minimumScale || scale >= maximumScale)
 	{
-		return 1.f;
+		return scale;
 	}
-	const Float32 integer = std::round(scale);
-	return std::abs(scale - integer) <= 0.025f * std::max(1.f, scale) ? integer : scale;
+	constexpr Float32 sliderWidth = 150.f;
+	constexpr Float32 snapThreshold = 4.f;
+	const Float32 logMinimum = std::log10(minimumScale);
+	const Float32 logMaximum = std::log10(maximumScale);
+	const Float32 logScale = std::log10(scale);
+	const Float32 logRange = logMaximum - logMinimum;
+	if (!std::isfinite(logRange) || logRange <= 0.f)
+	{
+		return scale;
+	}
+
+	const Float32 lowerInteger = std::floor(scale);
+	const Float32 upperInteger = std::ceil(scale);
+	Float32 nearest = scale;
+	Float32 nearestSliderDistance = snapThreshold;
+	for (const Float32 candidate : {lowerInteger, upperInteger})
+	{
+		if (candidate < 1.f || candidate < minimumScale || candidate > maximumScale)
+		{
+			continue;
+		}
+		const Float32 sliderDistance = sliderWidth * std::abs(logScale - std::log10(candidate)) / logRange;
+		if (sliderDistance < nearestSliderDistance)
+		{
+			nearest = candidate;
+			nearestSliderDistance = sliderDistance;
+		}
+	}
+	return nearest;
 }
 } // namespace Ursa::Editor

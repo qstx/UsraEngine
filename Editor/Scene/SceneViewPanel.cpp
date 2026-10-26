@@ -1801,23 +1801,14 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	const ImVec2 scaleDpi = CurrentViewportFramebufferScale();
 	const ImVec2 gameContent = ImGui::GetContentRegionAvail();
 	const Float32 viewHeight = std::max(0.f, gameContent.y - ImGui::GetFrameHeightWithSpacing());
-	Float32 fitScale = 1.f;
-	if (gameTarget.size.width > 0 && gameTarget.size.height > 0)
-	{
-		const Float32 targetWidth = static_cast<Float32>(gameTarget.size.width) / scaleDpi.x;
-		const Float32 targetHeight = static_cast<Float32>(gameTarget.size.height) / scaleDpi.y;
-		if (targetWidth > 0.f && targetHeight > 0.f && gameContent.x > 0.f && viewHeight > 0.f)
-		{
-			fitScale = std::min(gameContent.x / targetWidth, viewHeight / targetHeight);
-		}
-	}
-	const Float32 minimumScale = std::min(1.f, fitScale);
-	const Float32 maximumScale = std::max(5.f * scaleDpi.x, fitScale);
+	const ViewportScaleLimits scaleLimits = GetViewportScaleLimits(
+	    {0.f, 0.f, gameContent.x, viewHeight}, scaleDpi.x, gameTarget.size);
 	ImGui::SetNextItemWidth(scaleWidth);
-	if (ImGui::SliderFloat("##GameScale", &gameScale, minimumScale, maximumScale, "%.2fx",
+	if (ImGui::SliderFloat("##GameScale", &gameScale, scaleLimits.minimum, scaleLimits.maximum, "%.2fx",
 	                       ImGuiSliderFlags_Logarithmic))
 	{
-		gameScale = SnapViewportScale(gameScale);
+		gameScale = SnapViewportScale(gameScale, scaleLimits.minimum, scaleLimits.maximum);
+		gameScaleSnapPending = false;
 		gameFit = false;
 		settingsChanged = true;
 	}
@@ -1825,6 +1816,7 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	if (Icons::Button("Fit", Icons::Icon::Fit, "Fit game view"))
 	{
 		gameFit = true;
+		gameScaleSnapPending = false;
 		gamePan = {};
 		settingsChanged = true;
 	}
@@ -3361,6 +3353,14 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				{
 					gameTarget.visible = true;
 					const ViewportRect content{position.x, position.y, available.x, available.y};
+					if (gameScaleSnapPending && ImGui::GetTime() >= gameScaleSnapAt)
+					{
+						const ViewportScaleLimits limits = GetViewportScaleLimits(content, dpi.x, gameTarget.size);
+						const Float32 snappedScale = SnapViewportScale(gameScale, limits.minimum, limits.maximum);
+						settingsChanged |= snappedScale != gameScale;
+						gameScale = snappedScale;
+						gameScaleSnapPending = false;
+					}
 					const auto layout = ComputeViewportLayout(content, dpi.x, gameTarget.size, gameScale, gamePan, gameFit);
 					const Float32 clipX = std::max(content.x, layout.displayRect.x);
 					const Float32 clipY = std::max(content.y, layout.displayRect.y);
@@ -3384,7 +3384,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					const ImGuiIO& gameInput = ImGui::GetIO();
 					if (imageHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
 					{
-						const Float32 requestedScale = SnapViewportScale(layout.scale * std::exp(gameInput.MouseWheel * 0.15f));
+						const Float32 requestedScale = layout.scale * std::exp(gameInput.MouseWheel * 0.15f);
 						const auto zoomedLayout =
 						    ComputeViewportLayout(content, dpi.x, gameTarget.size, requestedScale, gamePan, false);
 						const ImVec2 mouse = gameInput.MousePos;
@@ -3393,6 +3393,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						gamePan.x += (anchorX - 0.5f) * (layout.displayRect.width - zoomedLayout.displayRect.width);
 						gamePan.y += (anchorY - 0.5f) * (layout.displayRect.height - zoomedLayout.displayRect.height);
 						gameScale = zoomedLayout.scale;
+						gameScaleSnapPending = true;
+						gameScaleSnapAt = ImGui::GetTime() + 0.2;
 						gameFit = false;
 						settingsChanged = true;
 					}
@@ -3422,6 +3424,14 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				{
 					gameTarget.visible = true;
 					const ViewportRect content{position.x, position.y, available.x, available.y};
+					if (gameScaleSnapPending && ImGui::GetTime() >= gameScaleSnapAt)
+					{
+						const ViewportScaleLimits limits = GetViewportScaleLimits(content, dpi.x, gameTarget.size);
+						const Float32 snappedScale = SnapViewportScale(gameScale, limits.minimum, limits.maximum);
+						settingsChanged |= snappedScale != gameScale;
+						gameScale = snappedScale;
+						gameScaleSnapPending = false;
+					}
 					const auto layout =
 					    ComputeViewportLayout(content, dpi.x, gameTarget.size, gameScale, gamePan, gameFit);
 					if (gameScale != layout.scale)
@@ -3454,7 +3464,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					const ImGuiIO& gameInput = ImGui::GetIO();
 					if (imageHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
 					{
-						const Float32 requestedScale = SnapViewportScale(layout.scale * std::exp(gameInput.MouseWheel * 0.15f));
+						const Float32 requestedScale = layout.scale * std::exp(gameInput.MouseWheel * 0.15f);
 						const auto zoomedLayout =
 						    ComputeViewportLayout(content, dpi.x, gameTarget.size, requestedScale, gamePan, false);
 						const ImVec2 mouse = gameInput.MousePos;
@@ -3463,6 +3473,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						gamePan.x += (anchorX - 0.5f) * (layout.displayRect.width - zoomedLayout.displayRect.width);
 						gamePan.y += (anchorY - 0.5f) * (layout.displayRect.height - zoomedLayout.displayRect.height);
 						gameScale = zoomedLayout.scale;
+						gameScaleSnapPending = true;
+						gameScaleSnapAt = ImGui::GetTime() + 0.2;
 						gameFit = false;
 						settingsChanged = true;
 					}

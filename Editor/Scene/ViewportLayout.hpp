@@ -43,15 +43,23 @@ struct ViewportLayout
 	bool visible = false;
 };
 
+struct ViewportScaleLimits
+{
+	Float32 minimum = 1.f;
+	Float32 maximum = 5.f;
+};
+
 Result<ViewportSize> ResolveViewportSize(ViewportSize availablePixels, GameViewSizeMode mode, UInt32 width,
                                          UInt32 height, UInt32 maxDimension, UInt64 maxPixelCount);
 
 ViewportLayout ComputeViewportLayout(ViewportRect available, Float32 dpiScale, ViewportSize targetPixels, Float32 scale,
                                      ViewportPoint pan, bool fit);
 
+ViewportScaleLimits GetViewportScaleLimits(ViewportRect available, Float32 dpiScale, ViewportSize targetPixels);
+
 ViewportPoint ClampViewportPan(ViewportPoint pan, ViewportSize displaySize, ViewportSize availableSize);
 
 std::optional<ViewportPoint> ScreenToViewportPixel(ViewportPoint screenPosition, const ViewportLayout& layout);
 
-Float32 SnapViewportScale(Float32 scale);
+Float32 SnapViewportScale(Float32 scale, Float32 minimumScale, Float32 maximumScale);
 } // namespace Ursa::Editor
