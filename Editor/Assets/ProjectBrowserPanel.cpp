@@ -1133,6 +1133,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		ImGui::SetNextWindowSizeConstraints({minimumTreeWidth, 0.0f}, {maximumTreeWidth, FLT_MAX});
 		ImGui::BeginChild("ProjectFolderTree", ImVec2(190.0f, -projectFooterHeight),
 		                  ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
+		ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 14.f);
 		const ImGuiIO& folderTreeInput = ImGui::GetIO();
 		if (!columnFocusMoved && ImGui::IsWindowFocused() && !folderTreeInput.WantTextInput &&
 		    !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Tab, false))
@@ -1141,7 +1142,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 	const bool favoritesOpen = Icons::TreeNode("Favorites", ImGuiTreeNodeFlags_DefaultOpen |
 		                                                                       ImGuiTreeNodeFlags_SpanAvailWidth,
-	                                          Icons::Icon::Favorite, "Favorites");
+	                                          Icons::Icon::Favorite, "Favorites", 16.f);
 	const ImRect favoritesRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
 	if (ImGui::BeginDragDropTargetCustom(favoritesRect, ImGui::GetID("##favoriteAssetDropTarget")))
 		{
@@ -1287,7 +1288,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	const bool assetsOpen = Icons::TreeNode("Assets",
 	                                        ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
 	                                            (currentFolder.empty() ? ImGuiTreeNodeFlags_Selected : 0),
-	                                        Icons::Icon::Folder, "Assets");
+	                                        Icons::Icon::Folder, "Assets", 16.f);
 	const bool recursivelyToggleAssets = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
 	if (assetsOpen)
 	{
@@ -1307,7 +1308,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			{
 				flags |= ImGuiTreeNodeFlags_Selected;
 			}
-			const bool folderOpen = Icons::TreeNode("##folder", flags, Icons::Icon::Folder, folder.name.c_str());
+			const bool folderOpen = Icons::TreeNode("##folder", flags, Icons::Icon::Folder, folder.name.c_str(), 16.f);
 			const bool recursivelyToggleChildren = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
 			if (ImGui::IsItemClicked())
 			{
@@ -1349,6 +1350,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 		ImGui::PopID();
 	}
+		ImGui::PopStyleVar();
 		ImGui::EndChild();
 		Icons::SameLine();
 	}
@@ -1633,7 +1635,14 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		const ImVec2 inputPosition =
 		    grid ? ImVec2{minimum.x + 5.f, minimum.y + static_cast<Float32>(gridIconSize) + 10.f}
 		         : ImVec2{minimum.x + std::max(16.f, ImGui::GetFontSize()) + ImGui::GetStyle().ItemInnerSpacing.x,
-		                  minimum.y + (maximum.y - minimum.y - ImGui::GetFrameHeight()) * 0.5f};
+		                  minimum.y};
+		if (!grid)
+		{
+			const ImVec2 framePadding = ImGui::GetStyle().FramePadding;
+			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+			                    {framePadding.x,
+			                     std::max(0.f, (maximum.y - minimum.y - ImGui::GetTextLineHeight()) * 0.5f)});
+		}
 		ImGui::SetCursorScreenPos(inputPosition);
 		ImGui::SetNextItemWidth(std::max(72.f, maximum.x - inputPosition.x - (grid ? 10.f : 6.f)));
 		if (renameFocusRequested)
@@ -1645,6 +1654,10 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
 		{
 			renameCommitRequested = true;
+		}
+		if (!grid)
+		{
+			ImGui::PopStyleVar();
 		}
 		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
 		{

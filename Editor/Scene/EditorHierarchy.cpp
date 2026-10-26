@@ -1958,6 +1958,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		return Result<bool>::Failure("PrefabAsset has no root GameObject");
 	}
 	ImGui::Begin("Hierarchy", open);
+	ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 14.f);
 	UpdateDragExpansionTracking();
 	const bool searchFieldActive = DrawHierarchySearchField(searchText);
 	AutoScrollHierarchyWhileDragging(ImGui::GetCursorScreenPos().y);
@@ -2217,7 +2218,8 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.45f);
 		}
 		const bool open =
-		    Icons::TreeNode("##gameObject", flags, Icons::ForObject(object, object == asset.Root()), label.c_str());
+		    Icons::TreeNode("##gameObject", flags, Icons::ForObject(object, object == asset.Root()), label.c_str(),
+		                    16.f);
 		hierarchyRowIds.push_back(ImGui::GetItemID());
 		const bool recursivelyToggleDescendants = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
 		const ImRect rowRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
@@ -2319,6 +2321,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		}
 	};
 	draw(asset.Root());
+	ImGui::PopStyleVar();
 	if (!pointerOverHierarchyRow)
 	{
 		Icons::DrawPanelContextMenu("PrefabHierarchyPanelActions", open);
@@ -2493,7 +2496,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	}
 	const bool open =
 	    Icons::TreeNode("##node", flags, Icons::ForObject(node, prefabObjects.find(key) != prefabObjects.end()),
-	                    renameTarget == id.value ? "" : display.c_str());
+	                    renameTarget == id.value ? "" : display.c_str(), 16.f);
 	hierarchyRowIds.push_back(ImGui::GetItemID());
 	if (isDefaultParent)
 	{
@@ -2522,9 +2525,13 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	if (renameTarget == id.value)
 	{
 		const Float32 renameX = rowRect.Min.x + ImGui::GetTreeNodeToLabelSpacing();
-		const Float32 renameY = rowRect.Min.y + (rowRect.GetHeight() - ImGui::GetFrameHeight()) * 0.5f;
+		const Float32 renameY = rowRect.Min.y;
 		ImGui::SetCursorScreenPos({renameX, renameY});
 		ImGui::SetNextItemWidth(std::max(40.f, rowRect.Max.x - renameX - 44.f));
+		const ImVec2 framePadding = ImGui::GetStyle().FramePadding;
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+		                    {framePadding.x,
+		                     std::max(0.f, (rowRect.GetHeight() - ImGui::GetTextLineHeight()) * 0.5f)});
 		if (renameFocusPending)
 		{
 			ImGui::SetKeyboardFocusHere();
@@ -2532,6 +2539,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		}
 		const bool submit = ImGui::InputText("##HierarchyRename", renameBuffer.data(), renameBuffer.size(),
 		                                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+		ImGui::PopStyleVar();
 		const bool cancel = ImGui::IsItemActive() && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 		const bool finish = submit || ImGui::IsItemDeactivated();
 		if (cancel)
@@ -3160,6 +3168,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		}
 	}
 	ImGui::Begin("Hierarchy", open);
+	ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 14.f);
 	UpdateDragExpansionTracking();
 	const bool editableScene = linked == nullptr && !playSession;
 	bool createRootRequested = false;
@@ -3248,7 +3257,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	const bool sceneRootsOpen = Icons::TreeNode("##sceneGroup", ImGuiTreeNodeFlags_SpanAvailWidth |
 	                                                        ImGuiTreeNodeFlags_OpenOnArrow |
 	                                                        ImGuiTreeNodeFlags_OpenOnDoubleClick,
-	                                           Icons::Icon::Scene, sceneName.c_str());
+	                                           Icons::Icon::Scene, sceneName.c_str(), 16.f);
 	ImGui::PopID();
 	if (ImGui::IsItemToggledOpen())
 	{
@@ -3589,11 +3598,20 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 			                   expandFilteredBranches);
 			if (!drawn)
 			{
+				if (sceneRootsOpen)
+				{
+					ImGui::TreePop();
+				}
+				ImGui::PopStyleVar();
 				ImGui::End();
 				return drawn;
 			}
 			changed |= drawn.value;
 		}
+	}
+	if (sceneRootsOpen)
+	{
+		ImGui::TreePop();
 	}
 	if (!pointerOverHierarchyRow)
 	{
@@ -3803,6 +3821,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		renameTarget = {};
 		renameFocusPending = false;
 	}
+	ImGui::PopStyleVar();
 	ImGui::End();
 	if (selection && pendingSelectionClick.active)
 	{

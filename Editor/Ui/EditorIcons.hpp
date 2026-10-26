@@ -90,7 +90,7 @@ bool Button(const char* label, const ImVec2& size = {});
 bool SmallButton(const char* label);
 bool Selectable(Icon icon, const char* label, bool selected = false, ImGuiSelectableFlags flags = 0,
                 ImVec2 size = {});
-bool TreeNode(const char* id, ImGuiTreeNodeFlags flags, Icon icon, const char* label);
+bool TreeNode(const char* id, ImGuiTreeNodeFlags flags, Icon icon, const char* label, Float32 rowHeight = 0.f);
 bool MenuItem(const char* label, const char* shortcut = nullptr, bool selected = false, bool enabled = true);
 bool MenuItem(const char* label, const char* shortcut, bool* selected, bool enabled = true);
 bool BeginMenu(const char* label, bool enabled = true);

@@ -602,14 +602,33 @@ bool Selectable(Icon icon, const char* label, bool selected, ImGuiSelectableFlag
 	return clicked;
 }
 
-bool TreeNode(const char* id, ImGuiTreeNodeFlags flags, Icon icon, const char* label)
+bool TreeNode(const char* id, ImGuiTreeNodeFlags flags, Icon icon, const char* label, Float32 rowHeight)
 {
 	const auto origin = ImGui::GetCursorScreenPos();
 	const String padded = Available() ? Padded(label) : String(label);
+	if (rowHeight > 0.f)
+	{
+		const ImVec2 framePadding = ImGui::GetStyle().FramePadding;
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+		                    {framePadding.x, std::max(0.f, (rowHeight - ImGui::GetTextLineHeight()) * 0.5f)});
+	}
 	const bool open = ImGui::TreeNodeEx(id, flags, "%s", padded.c_str());
+	if (rowHeight > 0.f)
+	{
+		ImGui::PopStyleVar();
+	}
 	if (Available())
 	{
-		RowImage(icon, origin, ImGui::GetTreeNodeToLabelSpacing());
+		if (rowHeight > 0.f)
+		{
+			Draw(icon, {origin.x + ImGui::GetTreeNodeToLabelSpacing(),
+			            origin.y + (rowHeight - Extent()) * 0.5f},
+			     Extent(), Color(icon));
+		}
+		else
+		{
+			RowImage(icon, origin, ImGui::GetTreeNodeToLabelSpacing());
+		}
 	}
 	return open;
 }
