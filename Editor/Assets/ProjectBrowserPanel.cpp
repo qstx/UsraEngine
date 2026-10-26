@@ -1408,6 +1408,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		ImGui::SetKeyboardFocusHere();
 	}
 	ImGui::InputTextWithHint("##ProjectSearch", "Search Assets (t:Type, l:Label)", searchText.data(), searchText.size());
+	const bool projectSearchActive = ImGui::IsItemActive();
 	ImGui::SameLine();
 	auto foldSearchToken = [](String value)
 	{
@@ -1697,7 +1698,13 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 		}
 	}
-	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput && !projectInput.KeyAlt && !visibleRows.empty())
+	const bool searchNavigationKey = projectSearchActive && !projectInput.KeyCtrl && !projectInput.KeySuper &&
+	                                 !projectInput.KeyAlt &&
+	                                 (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
+	                                  ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
+	std::optional<EditorSelectionEntry> projectKeyboardFocusTarget;
+	if (ImGui::IsWindowFocused() && (!projectInput.WantTextInput || searchNavigationKey) && !projectInput.KeyAlt &&
+	    !visibleRows.empty())
 	{
 		const bool up = ImGui::IsKeyPressed(ImGuiKey_UpArrow, false);
 		const bool down = ImGui::IsKeyPressed(ImGuiKey_DownArrow, false);
@@ -1707,7 +1714,27 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		const bool end = ImGui::IsKeyPressed(ImGuiKey_End, false);
 		const bool pageUp = ImGui::IsKeyPressed(ImGuiKey_PageUp, false);
 		const bool pageDown = ImGui::IsKeyPressed(ImGuiKey_PageDown, false);
-		if (up || down || left || right || home || end || pageUp || pageDown)
+		if (searchNavigationKey)
+		{
+			const auto* primary = selection.PrimaryEntry();
+			const auto current = primary ? std::find_if(visibleRows.begin(), visibleRows.end(),
+			                                           [&](const auto& entry) { return entry.SameIdentity(*primary); })
+			                           : visibleRows.end();
+			if (current != visibleRows.end())
+			{
+				projectKeyboardFocusTarget = *current;
+			}
+			else
+			{
+				projectKeyboardFocusTarget = visibleRows.front();
+				if (selection.SelectEntries({*projectKeyboardFocusTarget}, 0, projectKeyboardFocusTarget))
+				{
+					model.SelectAsset(projectKeyboardFocusTarget->assetPath);
+					hierarchy.ClearSelection();
+				}
+			}
+		}
+		else if (up || down || left || right || home || end || pageUp || pageDown)
 		{
 			const Float32 iconSize = static_cast<Float32>(gridIconSize);
 			const Float32 tileWidth = std::clamp(iconSize + 26.f, 80.f, 152.f);
@@ -1811,6 +1838,14 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 		}
 	}
+	auto focusProjectEntry = [&](const EditorSelectionEntry& entry)
+	{
+		if (projectKeyboardFocusTarget && entry.SameIdentity(*projectKeyboardFocusTarget))
+		{
+			ImGui::SetKeyboardFocusHere();
+			projectKeyboardFocusTarget.reset();
+		}
+	};
 	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput && projectInput.KeyCtrl &&
 	    ImGui::IsKeyPressed(ImGuiKey_A, false) && !visibleRows.empty())
 	{
@@ -1882,6 +1917,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				const String localId = ToUrsaString(std::to_string(entry.assetLocalFileId));
 				ImGui::PushID(localId.c_str());
 			}
+			focusProjectEntry(entry);
 			const bool clicked = ImGui::Selectable("##ProjectAssetTile", selection.Contains(entry),
 			                                       ImGuiSelectableFlags_AllowDoubleClick, {tileWidth, tileHeight});
 			const ImVec2 minimum = ImGui::GetItemRectMin();
@@ -2020,9 +2056,11 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			{
 				ImGui::PushID(folder.path.relative.c_str());
 				const bool editingName = renameEditing && renameSourcePath == folder.path.relative;
+				const auto folderEntry = AssetSelection(folder);
+				focusProjectEntry(folderEntry);
 				const bool folderClicked = Icons::Selectable(
 				    Icons::Icon::Folder, editingName ? "" : folder.name.c_str(),
-				    selection.Contains(AssetSelection(folder)), ImGuiSelectableFlags_AllowDoubleClick);
+				    selection.Contains(folderEntry), ImGuiSelectableFlags_AllowDoubleClick);
 				const ImVec2 folderMinimum = ImGui::GetItemRectMin();
 				const ImVec2 folderMaximum = ImGui::GetItemRectMax();
 				const ImRect folderRect(folderMinimum, folderMaximum);
@@ -2039,7 +2077,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					}
 					else
 					{
-						selectAsset(AssetSelection(folder));
+						selectAsset(folderEntry);
 						model.SelectAsset(folder.path);
 					}
 				}
@@ -2292,6 +2330,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			const String label = search.empty() ? asset.name : asset.path.relative;
 			const bool editingName =
 			    !assetEntry.assetLocalFileId && renameEditing && renameSourcePath == asset.path.relative;
+			focusProjectEntry(assetEntry);
 			const bool assetClicked =
 			    Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative),
 			                      editingName ? "" : label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick);
@@ -2547,6 +2586,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					const String objectLabel = object.Label();
 					const auto resourceKind = ResourceKindForPath(object.path);
 					const auto objectEntry = AssetSelection(asset, object.localFileId, object.kind);
+					focusProjectEntry(objectEntry);
 					if (Icons::Selectable(Icons::ForAsset(false,
 					                                      resourceKind ? std::optional<ResourceKind>(resourceKind.value)
 					                                                   : std::nullopt,
