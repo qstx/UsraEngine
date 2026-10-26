@@ -146,6 +146,11 @@ struct EditorServices
 	static Result<void> SetComponentMenuCommand(B::BindingCall& call, UInt32 command);
 	static Result<UInt32> GetHierarchyMenuState(B::BindingCall& call);
 	static Result<void> SetHierarchyMenuCommand(B::BindingCall& call, UInt32 command);
+	static Result<UInt32> GetHierarchyInputState(B::BindingCall& call);
+	static Result<void> SetHierarchyInputCommand(B::BindingCall& call, UInt32 command);
+	static Result<bool> IsKeyPressed(B::BindingCall& call, UInt32 key);
+	static Result<UInt32> GetKeyModifiers(B::BindingCall& call);
+	static Result<bool> WantsTextInput(B::BindingCall& call);
 	static Result<Reference> ResolveReference(B::BindingCall& call, UInt32 kind, const B::Utf8View& id,
 	                                          const OptionalAsset& asset);
 	static Result<void> MarkDirty(B::BindingCall& call);

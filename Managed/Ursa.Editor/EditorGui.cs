@@ -44,6 +44,19 @@ public static class EditorGui
 		_ = EditorApi.Generation;
 		return NativeEditorBindings.MenuItem(label, enabled);
 	}
+	internal static bool IsHierarchyKeyPressed(uint key)
+	{
+		_ = EditorApi.Generation;
+		return NativeEditorBindings.IsKeyPressed(key);
+	}
+	internal static uint KeyModifiers
+	{
+		get { _ = EditorApi.Generation; return NativeEditorBindings.GetKeyModifiers(); }
+	}
+	internal static bool WantsTextInput
+	{
+		get { _ = EditorApi.Generation; return NativeEditorBindings.WantsTextInput(); }
+	}
 	internal static bool MenuItem(string label, string shortcut, bool enabled)
 	{
 		_ = EditorApi.Generation;
@@ -82,6 +95,20 @@ public static class EditorGui
 		Item(state, 13, "Create Empty Parent", "Ctrl+Shift+G", Enabled(state, 13));
 		Item(state, 14, "Rename", "F2", Enabled(state, 14));
 		Item(state, 15, "Delete", "Delete", Enabled(state, 15));
+	}
+	internal static void DrawHierarchyInput()
+	{
+		uint state = EditorContext.HierarchyInputState;
+		if ((state & (1u << 31)) == 0 || WantsTextInput) return;
+		uint modifiers = KeyModifiers;
+		bool control = (modifiers & 9u) != 0;
+		bool shift = (modifiers & 2u) != 0;
+		uint command = 0;
+		if (control && IsHierarchyKeyPressed(1) && (state & 1u) != 0) command = 1;
+		else if (shift && IsHierarchyKeyPressed(3) && (state & 2u) != 0) command = 2;
+		else if (control && !shift && IsHierarchyKeyPressed(4) && (state & 4u) != 0) command = 3;
+		else if (shift && IsHierarchyKeyPressed(2) && (state & 8u) != 0) command = 4;
+		if (command != 0) EditorContext.SetHierarchyInputCommand(command);
 	}
 	public static int DragDropArrayElement(string id, int index, int count)
 	{

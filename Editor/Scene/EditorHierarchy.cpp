@@ -2062,9 +2062,33 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	    focusedHierarchyItem != 0 &&
 	    std::find(hierarchyRowIds.begin(), hierarchyRowIds.end(), focusedHierarchyItem) != hierarchyRowIds.end();
 	hierarchyRowIds.clear();
-	if (selection && hierarchyRowFocused && !visibleRows.empty() &&
-	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
+	const bool hierarchyCommandFocused = selection && hierarchyRowFocused &&
+	                                     ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	                                     !ImGui::GetIO().WantTextInput;
+	UInt32 inputCapabilities = hierarchyRowFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+	                              ? (1u << 31)
+	                              : 0;
+	if (hierarchyCommandFocused && !visibleRows.empty()) inputCapabilities |= 1u;
+	if (hierarchyCommandFocused && !selection->entries.empty()) inputCapabilities |= 2u | 4u | 8u;
+	bool managedInput = false;
+	UInt32 inputCommand = 0;
+	if (inputAction)
+	{
+		auto input = inputAction(inputCapabilities);
+		if (input)
+		{
+			managedInput = true;
+			if (input.value > 0 && input.value <= 4 &&
+			    (inputCapabilities & (1u << (input.value - 1))) != 0)
+			{
+				inputCommand = input.value;
+			}
+		}
+	}
+	if (selection && (managedInput ? inputCommand == 1
+	                  : hierarchyCommandFocused && !visibleRows.empty() &&
+	                        (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) &&
+	                        ImGui::IsKeyPressed(ImGuiKey_A, false)) &&
 	    selection->SelectEntries(visibleRows))
 	{
 		SetLegacySelected(selection, selected);
@@ -2377,22 +2401,24 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		}
 	};
 	draw(asset.Root());
-	const bool hierarchyCommandFocused = selection && hierarchyRowFocused &&
-	                                     ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	                                     !ImGui::GetIO().WantTextInput;
-	if (hierarchyCommandFocused && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_D, false))
+	if (managedInput ? inputCommand == 2
+	                 : hierarchyCommandFocused && ImGui::GetIO().KeyShift &&
+	                       ImGui::IsKeyPressed(ImGuiKey_D, false))
 	{
 		selection->SelectEntries({});
 		SetLegacySelected(selection, selected);
 	}
-	else if (hierarchyCommandFocused && (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) &&
-	         !ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_I, false) && !selection->entries.empty())
+	else if (managedInput ? inputCommand == 3
+	                      : hierarchyCommandFocused && (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) &&
+	                            !ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_I, false) &&
+	                            !selection->entries.empty())
 	{
 		InvertSelection(asset, *selection, documentId);
 		SetLegacySelected(selection, selected);
 	}
-	else if (hierarchyCommandFocused && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
-	         !selection->entries.empty())
+	else if (managedInput ? inputCommand == 4
+	                      : hierarchyCommandFocused && ImGui::GetIO().KeyShift &&
+	                            ImGui::IsKeyPressed(ImGuiKey_C, false) && !selection->entries.empty())
 	{
 		SelectChildren(asset, *selection, documentId);
 		SetLegacySelected(selection, selected);
@@ -3460,31 +3486,57 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	    focusedHierarchyItem != 0 &&
 	    std::find(hierarchyRowIds.begin(), hierarchyRowIds.end(), focusedHierarchyItem) != hierarchyRowIds.end();
 	hierarchyRowIds.clear();
-	if (selection && hierarchyRowFocused && !visibleRows.empty() &&
-	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
+	const bool hierarchyCommandFocused = selection && hierarchyRowFocused &&
+	                                     ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	                                     !ImGui::GetIO().WantTextInput;
+	UInt32 inputCapabilities = hierarchyRowFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+	                              ? (1u << 31)
+	                              : 0;
+	if (hierarchyCommandFocused && !visibleRows.empty()) inputCapabilities |= 1u;
+	if (hierarchyCommandFocused && !selection->entries.empty()) inputCapabilities |= 2u | 4u | 8u;
+	bool managedInput = false;
+	UInt32 inputCommand = 0;
+	if (inputAction)
+	{
+		auto input = inputAction(inputCapabilities);
+		if (input)
+		{
+			managedInput = true;
+			if (input.value > 0 && input.value <= 4 &&
+			    (inputCapabilities & (1u << (input.value - 1))) != 0)
+			{
+				inputCommand = input.value;
+			}
+		}
+	}
+	if (selection && (managedInput ? inputCommand == 1
+	                              : hierarchyCommandFocused && !visibleRows.empty() &&
+	                                    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) &&
+	                                    ImGui::IsKeyPressed(ImGuiKey_A, false)) &&
 	    selection->SelectEntries(visibleRows))
 	{
 		SetLegacySelected(selection, selected);
 	}
 	bool changed = false;
-	const bool hierarchyCommandFocused = selection && hierarchyRowFocused &&
-	                                     ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	                                     !ImGui::GetIO().WantTextInput;
-	if (hierarchyCommandFocused && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_D, false))
+	if (managedInput ? inputCommand == 2
+	                 : hierarchyCommandFocused && ImGui::GetIO().KeyShift &&
+	                       ImGui::IsKeyPressed(ImGuiKey_D, false))
 	{
 		changed |= selection->SelectEntries({});
 		SetLegacySelected(selection, selected);
 	}
-	else if (hierarchyCommandFocused && (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) &&
-	         !ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_I, false) && !selection->entries.empty())
+	else if (managedInput ? inputCommand == 3
+	                      : hierarchyCommandFocused && (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) &&
+	                            !ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_I, false) &&
+	                            !selection->entries.empty())
 	{
 		auto inverted = InvertSelection(scene, *selection, documentId, playSession);
 		changed |= static_cast<bool>(inverted);
 		SetLegacySelected(selection, selected);
 	}
-	else if (hierarchyCommandFocused && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
-	         !selection->entries.empty())
+	else if (managedInput ? inputCommand == 4
+	                      : hierarchyCommandFocused && ImGui::GetIO().KeyShift &&
+	                            ImGui::IsKeyPressed(ImGuiKey_C, false) && !selection->entries.empty())
 	{
 		auto children = SelectChildren(scene, *selection, documentId, playSession);
 		changed |= static_cast<bool>(children);

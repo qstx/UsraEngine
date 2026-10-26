@@ -80,6 +80,16 @@ internal static partial class NativeEditorBindings
 	internal static partial uint GetHierarchyMenuState();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetHierarchyMenuCommand")]
 	internal static partial void SetHierarchyMenuCommand(uint command);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetHierarchyInputState")]
+	internal static partial uint GetHierarchyInputState();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetHierarchyInputCommand")]
+	internal static partial void SetHierarchyInputCommand(uint command);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IsKeyPressed")]
+	internal static partial bool IsKeyPressed(uint key);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetKeyModifiers")]
+	internal static partial uint GetKeyModifiers();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::WantsTextInput")]
+	internal static partial bool WantsTextInput();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ResolveReference")]
 	internal static partial EditorReferenceValue ResolveReference(EditorReferenceKind kind, string id, NativeAssetReference? asset);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::MarkDirty")]

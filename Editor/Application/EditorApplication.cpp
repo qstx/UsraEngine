@@ -4741,6 +4741,29 @@ Result<void> EditorApplication::OnGui()
 		    }
 		    return Result<UInt32>::Success(context.hierarchyMenuCommand);
 	    });
+	hierarchy.SetInputAction(
+	    [this](UInt32 capabilities) -> Result<UInt32>
+	    {
+		    if (!managedHost || !editingScriptSession || managedHost->IsSessionFaulted())
+		    {
+			    return Result<UInt32>::Failure("Managed Editor environment is unavailable");
+		    }
+		    ManagedEditorContext context;
+		    context.document = documents ? documents->Current() : nullptr;
+		    context.documents = documents.get();
+		    context.workspace = workspace.get();
+		    context.hierarchyInputState = capabilities;
+		    auto invoked = InvokeManagedEditorExtension(*managedHost, editingScriptSession, "hierarchy-input", context);
+		    if (!invoked)
+		    {
+			    return Result<UInt32>::Failure(invoked.error);
+		    }
+		    if (!invoked.value)
+		    {
+			    return Result<UInt32>::Failure("Managed Hierarchy input handler is unavailable");
+		    }
+		    return Result<UInt32>::Success(context.hierarchyInputCommand);
+	    });
 	if (!pendingManagedAsset.scheme.empty())
 	{
 		const VirtualPath path = std::move(pendingManagedAsset);

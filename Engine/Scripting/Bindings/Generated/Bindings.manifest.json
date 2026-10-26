@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "74948e65fa700f5009b8598a0407f23ab773eb6293d97f2dff584e4943c32a3c",
+      "Hash": "40b4b17ba06a4b1a797e1a8e5c1fac9926be975b6faca49cf86a93c1dc15a8fc",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -555,6 +555,14 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetHierarchyInputState",
+          "Direction": "NativeMethod",
+          "Return": "uint",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.GetHierarchyMenuState",
           "Direction": "NativeMethod",
           "Return": "uint",
@@ -566,6 +574,14 @@
           "Identity": "Ursa.Editor.NativeEditorBindings.GetImporterInfo",
           "Direction": "NativeMethod",
           "Return": "global::Ursa.Editor.EditorImporterInfo?",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.GetKeyModifiers",
+          "Direction": "NativeMethod",
+          "Return": "uint",
           "Parameters": [],
           "Thread": 0,
           "NativeOnly": false
@@ -779,6 +795,21 @@
             {
               "Name": "mixedValue",
               "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.IsKeyPressed",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "key",
+              "Type": "uint",
               "HandleKind": 0,
               "Session": false
             }
@@ -1281,6 +1312,21 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SetHierarchyInputCommand",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "command",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.SetHierarchyMenuCommand",
           "Direction": "NativeMethod",
           "Return": "void",
@@ -1702,6 +1748,14 @@
               "Session": false
             }
           ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.WantsTextInput",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [],
           "Thread": 0,
           "NativeOnly": false
         }

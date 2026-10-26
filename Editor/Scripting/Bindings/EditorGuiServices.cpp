@@ -302,6 +302,35 @@ Result<bool> EditorServices::MenuItemWithShortcut(B::BindingCall& call, const B:
 	    ImGui::MenuItem(labelText.c_str(), shortcutText.empty() ? nullptr : shortcutText.c_str(), false, enabled));
 }
 
+Result<bool> EditorServices::IsKeyPressed(B::BindingCall& call, UInt32 key)
+{
+	RequireGui(call);
+	ImGuiKey nativeKey = ImGuiKey_None;
+	switch (key)
+	{
+	case 1: nativeKey = ImGuiKey_A; break;
+	case 2: nativeKey = ImGuiKey_C; break;
+	case 3: nativeKey = ImGuiKey_D; break;
+	case 4: nativeKey = ImGuiKey_I; break;
+	default: return Result<bool>::Failure("Unknown editor key");
+	}
+	return Result<bool>::Success(ImGui::IsKeyPressed(nativeKey, false));
+}
+
+Result<UInt32> EditorServices::GetKeyModifiers(B::BindingCall& call)
+{
+	RequireGui(call);
+	const ImGuiIO& io = ImGui::GetIO();
+	return Result<UInt32>::Success((io.KeyCtrl ? 1u : 0u) | (io.KeyShift ? 2u : 0u) |
+	                               (io.KeyAlt ? 4u : 0u) | (io.KeySuper ? 8u : 0u));
+}
+
+Result<bool> EditorServices::WantsTextInput(B::BindingCall& call)
+{
+	RequireGui(call);
+	return Result<bool>::Success(ImGui::GetIO().WantTextInput);
+}
+
 Result<Int32> EditorServices::DragDropArrayElement(B::BindingCall& call, const B::Utf8View& id, Int32 index,
                                                    Int32 count)
 {
