@@ -148,8 +148,17 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 		foreach (Type actual in targets.OrderBy(type => type.FullName, StringComparer.Ordinal))
 		{
 			// Project Inspectors override the editor's built-in defaults for the same target.
-			Type? selected = InspectorTargetMatching.Select(actual, projectRegistrations) ??
-			                 InspectorTargetMatching.Select(actual, builtinRegistrations);
+			Type? projectInspector = InspectorTargetMatching.Select(actual, projectRegistrations);
+			Type? builtinInspector = InspectorTargetMatching.Select(actual, builtinRegistrations);
+			// Mesh components have editor workflows backed by the asset database and resource session.
+			// Keep those specialized native inspectors until the managed GUI exposes the same operations.
+			if (builtinInspector == typeof(DefaultComponentInspector) &&
+			    (actual == typeof(MeshFilterComponent) || actual == typeof(MeshRendererComponent) ||
+			     actual == typeof(SkinnedMeshRendererComponent)))
+			{
+				builtinInspector = null;
+			}
+			Type? selected = projectInspector ?? builtinInspector;
 			if (selected == null) continue;
 			string target = InspectorTargetMatching.Identity(actual);
 			var inspector = (Inspector)Activator.CreateInstance(selected)!;
