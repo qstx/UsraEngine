@@ -4717,6 +4717,30 @@ Result<void> EditorApplication::OnGui()
 		}
 	}
 	selectionContext.SetActiveDocument(documents && documents->Current() ? documents->Current()->Id() : ResourceId{});
+	hierarchy.SetContextMenuDrawer(
+	    [this](UInt32 capabilities) -> Result<UInt32>
+	    {
+		    if (!managedHost || !editingScriptSession || managedHost->IsSessionFaulted())
+		    {
+			    return Result<UInt32>::Failure("Managed Editor environment is unavailable");
+		    }
+		    ManagedEditorContext context;
+		    context.document = documents ? documents->Current() : nullptr;
+		    context.documents = documents.get();
+		    context.workspace = workspace.get();
+		    context.hierarchyMenuState = capabilities;
+		    auto invoked = InvokeManagedEditorExtension(*managedHost, editingScriptSession,
+		                                               "hierarchy-context-menu", context);
+		    if (!invoked)
+		    {
+			    return Result<UInt32>::Failure(invoked.error);
+		    }
+		    if (!invoked.value)
+		    {
+			    return Result<UInt32>::Failure("Managed Hierarchy context menu is unavailable");
+		    }
+		    return Result<UInt32>::Success(context.hierarchyMenuCommand);
+	    });
 	if (!pendingManagedAsset.scheme.empty())
 	{
 		const VirtualPath path = std::move(pendingManagedAsset);

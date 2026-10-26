@@ -263,6 +263,7 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 		var registry = new ExtensionRegistry();
 		try
 		{
+			registry.callbacks.Add("hierarchy-context-menu", EditorGui.DrawHierarchyContextMenu);
 			foreach (Type type in types)
 			{
 				foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly))

@@ -44,6 +44,45 @@ public static class EditorGui
 		_ = EditorApi.Generation;
 		return NativeEditorBindings.MenuItem(label, enabled);
 	}
+	internal static bool MenuItem(string label, string shortcut, bool enabled)
+	{
+		_ = EditorApi.Generation;
+		return NativeEditorBindings.MenuItemWithShortcut(label, shortcut, enabled);
+	}
+	internal static void DrawHierarchyContextMenu()
+	{
+		uint state = EditorContext.HierarchyMenuState;
+		static bool Enabled(uint value, int command) => (value & (1u << (command - 1))) != 0;
+		static bool Item(uint value, int command, string label, string shortcut = "", bool enabled = true)
+		{
+			if (!EditorGui.MenuItem(label, shortcut, enabled)) return false;
+			EditorContext.SetHierarchyMenuCommand((uint)command);
+			return true;
+		}
+		Item(state, 1, "Create Empty", "", Enabled(state, 1));
+		EditorGui.Separator();
+		Item(state, 2, "Copy", "Ctrl+C", Enabled(state, 2));
+		Item(state, 3, "Cut", "Ctrl+X", Enabled(state, 3));
+		Item(state, 4, "Paste as Child", "Ctrl+Shift+V", Enabled(state, 4));
+		EditorGui.Separator();
+		Item(state, 5, "Select All", "", Enabled(state, 5));
+		Item(state, 6, "Deselect All", "", Enabled(state, 6));
+		Item(state, 7, "Invert Selection", "", Enabled(state, 7));
+		if (Enabled(state, 8)) Item(state, 8, "Clear Default Parent");
+		if (Enabled(state, 9)) Item(state, 9, "Set as Default Parent");
+		EditorGui.Separator();
+		Item(state, 10, "Duplicate", "Ctrl+D", Enabled(state, 10));
+		Item(state, 11, "Select Children", "", Enabled(state, 11));
+		if (Enabled(state, 12) && EditorGui.BeginMenu("Prefab"))
+		{
+			Item(state, 12, "Select Root", "Ctrl+Shift+R");
+			EditorGui.EndMenu();
+		}
+		EditorGui.Separator();
+		Item(state, 13, "Create Empty Parent", "Ctrl+Shift+G", Enabled(state, 13));
+		Item(state, 14, "Rename", "F2", Enabled(state, 14));
+		Item(state, 15, "Delete", "Delete", Enabled(state, 15));
+	}
 	public static int DragDropArrayElement(string id, int index, int count)
 	{
 		_ = EditorApi.Generation;

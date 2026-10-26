@@ -76,6 +76,10 @@ internal static partial class NativeEditorBindings
 	internal static partial uint GetComponentMenuState();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetComponentMenuCommand")]
 	internal static partial void SetComponentMenuCommand(uint command);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetHierarchyMenuState")]
+	internal static partial uint GetHierarchyMenuState();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetHierarchyMenuCommand")]
+	internal static partial void SetHierarchyMenuCommand(uint command);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ResolveReference")]
 	internal static partial EditorReferenceValue ResolveReference(EditorReferenceKind kind, string id, NativeAssetReference? asset);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::MarkDirty")]
@@ -106,6 +110,8 @@ internal static partial class NativeEditorBindings
 	internal static partial void EndMenu();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::MenuItem")]
 	internal static partial bool MenuItem(string label, bool enabled);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::MenuItemWithShortcut")]
+	internal static partial bool MenuItemWithShortcut(string label, string shortcut, bool enabled);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DragDropArrayElement")]
 	internal static partial int DragDropArrayElement(string id, int index, int count);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SameLine")]

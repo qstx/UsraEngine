@@ -30,6 +30,8 @@ struct ManagedEditorContext
 	std::optional<bool> componentHeaderExpanded;
 	UInt32 componentMenuState = 0;
 	UInt32 componentMenuCommand = 0;
+	UInt32 hierarchyMenuState = 0;
+	UInt32 hierarchyMenuCommand = 0;
 	Vector<GameObject::Ptr> gameObjectTargets;
 	Size gameObjectPrimaryIndex = 0;
 	Vector<String> projectTags;

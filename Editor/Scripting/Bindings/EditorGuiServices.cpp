@@ -292,6 +292,16 @@ Result<bool> EditorServices::MenuItem(B::BindingCall& call, const B::Utf8View& l
 	return Result<bool>::Success(ImGui::MenuItem(GuiString(label).c_str(), nullptr, false, enabled));
 }
 
+Result<bool> EditorServices::MenuItemWithShortcut(B::BindingCall& call, const B::Utf8View& label,
+                                                   const B::Utf8View& shortcut, bool enabled)
+{
+	RequireGui(call);
+	const String labelText = GuiString(label);
+	const String shortcutText = GuiString(shortcut);
+	return Result<bool>::Success(
+	    ImGui::MenuItem(labelText.c_str(), shortcutText.empty() ? nullptr : shortcutText.c_str(), false, enabled));
+}
+
 Result<Int32> EditorServices::DragDropArrayElement(B::BindingCall& call, const B::Utf8View& id, Int32 index,
                                                    Int32 count)
 {

@@ -3028,40 +3028,83 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		const EditorCommandContext current =
 		    selection ? EditorCommandContext::Capture(*selection, documentId, documentRevision)
 		              : EditorCommandContext{};
+		const auto menuCanExecute = [&](const char* command)
+		{
+			return contextMenuTarget && static_cast<bool>(commands.CanExecute(command, *contextMenuTarget, current));
+		};
+		UInt32 menuCapabilities = 0;
+		const auto addCapability = [&](UInt32 command, bool enabled)
+		{
+			if (enabled)
+			{
+				menuCapabilities |= 1u << (command - 1);
+			}
+		};
+		addCapability(1, menuCanExecute("hierarchy.create-empty-child"));
+		addCapability(2, canCopySelection && static_cast<bool>(copySelectionAction));
+		addCapability(3, canCopySelection && static_cast<bool>(cutSelectionAction));
+		addCapability(4, canPasteAsChild && static_cast<bool>(pasteAsChildAction));
+		addCapability(5, selection && !visibleRows.empty());
+		addCapability(6, selection && !selection->entries.empty());
+		addCapability(7, selection && !selection->entries.empty());
+		if (editableScene && contextMenuTarget)
+		{
+			addCapability(DefaultParent(scene, documentId) == entry.objectId ? 8 : 9, true);
+		}
+		addCapability(10, menuCanExecute("hierarchy.duplicate"));
+		addCapability(11, menuCanExecute("hierarchy.select-children"));
+		addCapability(12, menuCanExecute("hierarchy.select-prefab-root"));
+		addCapability(13, menuCanExecute("hierarchy.create-empty-parent"));
+		addCapability(14, menuCanExecute("hierarchy.rename"));
+		addCapability(15, menuCanExecute("hierarchy.delete"));
+		bool managedMenu = false;
+		UInt32 managedCommand = 0;
+		if (contextMenuDrawer)
+		{
+			auto drawn = contextMenuDrawer(menuCapabilities);
+			if (drawn && drawn.value <= 15)
+			{
+				managedMenu = true;
+				managedCommand = drawn.value;
+			}
+		}
+		const auto menuItem = [&](UInt32 command, const char* label, const char* shortcut, bool enabled)
+		{
+			return managedMenu ? managedCommand == command : Icons::MenuItem(label, shortcut, false, enabled);
+		};
 		const auto canCreate = contextMenuTarget
 		                           ? commands.CanExecute("hierarchy.create-empty-child", *contextMenuTarget, current)
 		                           : Result<void>::Failure("The hierarchy menu target is unavailable");
-		if (Icons::MenuItem("Create Empty", nullptr, false, static_cast<bool>(canCreate)))
+		if (menuItem(1, "Create Empty", nullptr, static_cast<bool>(canCreate)))
 		{
 			auto executed = commands.Execute("hierarchy.create-empty-child", *contextMenuTarget, current);
 			changed = static_cast<bool>(executed);
 		}
-		if (Icons::MenuItem("Copy", "Ctrl+C", false, canCopySelection && static_cast<bool>(copySelectionAction)))
+		if (menuItem(2, "Copy", "Ctrl+C", canCopySelection && static_cast<bool>(copySelectionAction)))
 		{
 			auto copied = copySelectionAction();
 			commandDiagnostic = copied ? String{} : copied.error;
 		}
-		if (Icons::MenuItem("Cut", "Ctrl+X", false, canCopySelection && static_cast<bool>(cutSelectionAction)))
+		if (menuItem(3, "Cut", "Ctrl+X", canCopySelection && static_cast<bool>(cutSelectionAction)))
 		{
 			auto cut = cutSelectionAction();
 			commandDiagnostic = cut ? String{} : cut.error;
 			changed |= static_cast<bool>(cut);
 		}
-		if (Icons::MenuItem("Paste as Child", "Ctrl+Shift+V", false,
-		                    canPasteAsChild && static_cast<bool>(pasteAsChildAction)))
+		if (menuItem(4, "Paste as Child", "Ctrl+Shift+V", canPasteAsChild && static_cast<bool>(pasteAsChildAction)))
 		{
 			auto pasted = pasteAsChildAction();
 			commandDiagnostic = pasted ? String{} : pasted.error;
 			changed |= static_cast<bool>(pasted);
 		}
-		if (Icons::MenuItem("Select All", nullptr, false, selection && !visibleRows.empty()))
+		if (menuItem(5, "Select All", nullptr, selection && !visibleRows.empty()))
 		{
 			if (selection->SelectEntries(visibleRows))
 			{
 				SetLegacySelected(selection, selected);
 			}
 		}
-		if (Icons::MenuItem("Deselect All", nullptr, false, selection && !selection->entries.empty()))
+		if (menuItem(6, "Deselect All", nullptr, selection && !selection->entries.empty()))
 		{
 			if (selection->SelectEntries({}))
 			{
@@ -3069,7 +3112,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 				ClearSelection();
 			}
 		}
-		if (Icons::MenuItem("Invert Selection", nullptr, false, selection && !selection->entries.empty()))
+		if (menuItem(7, "Invert Selection", nullptr, selection && !selection->entries.empty()))
 		{
 			Vector<EditorSelectionEntry> inverted;
 			for (const auto& visibleRow : visibleRows)
@@ -3089,12 +3132,12 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			const ResourceId currentDefaultParent = DefaultParent(scene, documentId);
 			if (currentDefaultParent == id.value)
 			{
-				if (Icons::MenuItem("Clear Default Parent"))
+				if (menuItem(8, "Clear Default Parent", nullptr, true))
 				{
 					ClearDefaultParent();
 				}
 			}
-			else if (Icons::MenuItem("Set as Default Parent"))
+			else if (menuItem(9, "Set as Default Parent", nullptr, true))
 			{
 				SetDefaultParent(documentId, id.value);
 			}
@@ -3102,7 +3145,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		const auto canDuplicate = contextMenuTarget
 		                              ? commands.CanExecute("hierarchy.duplicate", *contextMenuTarget, current)
 		                              : Result<void>::Failure("The hierarchy menu target is unavailable");
-		if (Icons::MenuItem("Duplicate", "Ctrl+D", false, static_cast<bool>(canDuplicate)))
+		if (menuItem(10, "Duplicate", "Ctrl+D", static_cast<bool>(canDuplicate)))
 		{
 			auto duplicated = commands.Execute("hierarchy.duplicate", *contextMenuTarget, current);
 			changed = static_cast<bool>(duplicated);
@@ -3110,7 +3153,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		const auto canSelectChildren = contextMenuTarget
 		                                  ? commands.CanExecute("hierarchy.select-children", *contextMenuTarget, current)
 		                                  : Result<void>::Failure("The hierarchy menu target is unavailable");
-		if (Icons::MenuItem("Select Children", nullptr, false, static_cast<bool>(canSelectChildren)))
+		if (menuItem(11, "Select Children", nullptr, static_cast<bool>(canSelectChildren)))
 		{
 			auto selectedChildren = commands.Execute("hierarchy.select-children", *contextMenuTarget, current);
 			commandDiagnostic = selectedChildren ? String{} : selectedChildren.error;
@@ -3119,14 +3162,19 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		                                    ? commands.CanExecute("hierarchy.select-prefab-root", *contextMenuTarget,
 		                                                          current)
 		                                    : Result<void>::Failure("The hierarchy menu target is unavailable");
-		if (Icons::BeginMenu("Prefab", static_cast<bool>(canSelectPrefabRoot)))
+		const bool prefabMenuOpen = managedMenu ? managedCommand == 12
+		                                       : Icons::BeginMenu("Prefab", static_cast<bool>(canSelectPrefabRoot));
+		if (prefabMenuOpen)
 		{
-			if (Icons::MenuItem("Select Root", "Ctrl+Shift+R"))
+			if (managedMenu || Icons::MenuItem("Select Root", "Ctrl+Shift+R"))
 			{
 				auto selectedRoot = commands.Execute("hierarchy.select-prefab-root", *contextMenuTarget, current);
 				commandDiagnostic = selectedRoot ? String{} : selectedRoot.error;
 			}
-			ImGui::EndMenu();
+			if (!managedMenu)
+			{
+				ImGui::EndMenu();
+			}
 		}
 		commands.Register({"hierarchy.create-empty-parent",
 		                   "Create Empty Parent",
@@ -3172,20 +3220,20 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		const auto canCreateParent = contextMenuTarget
 		                                 ? commands.CanExecute("hierarchy.create-empty-parent", *contextMenuTarget, current)
 		                                 : Result<void>::Failure("The hierarchy menu target is unavailable");
-		if (Icons::MenuItem("Create Empty Parent", "Ctrl+Shift+G", false, static_cast<bool>(canCreateParent)))
+		if (menuItem(13, "Create Empty Parent", "Ctrl+Shift+G", static_cast<bool>(canCreateParent)))
 		{
 			auto created = commands.Execute("hierarchy.create-empty-parent", *contextMenuTarget, current);
 			changed = static_cast<bool>(created);
 		}
 		const auto canRename = contextMenuTarget ? commands.CanExecute("hierarchy.rename", *contextMenuTarget, current)
 		                                         : Result<void>::Failure("The hierarchy menu target is unavailable");
-		if (Icons::MenuItem("Rename", "F2", false, static_cast<bool>(canRename)))
+		if (menuItem(14, "Rename", "F2", static_cast<bool>(canRename)))
 		{
 			commands.Execute("hierarchy.rename", *contextMenuTarget, current);
 		}
 		const auto canDelete = contextMenuTarget ? commands.CanExecute("hierarchy.delete", *contextMenuTarget, current)
 		                                         : Result<void>::Failure("The hierarchy menu target is unavailable");
-		if (Icons::MenuItem("Delete", "Delete", false, static_cast<bool>(canDelete)))
+		if (menuItem(15, "Delete", "Delete", static_cast<bool>(canDelete)))
 		{
 			commands.Execute("hierarchy.delete", *contextMenuTarget, current);
 		}

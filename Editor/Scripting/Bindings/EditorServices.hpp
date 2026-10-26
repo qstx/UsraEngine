@@ -144,6 +144,8 @@ struct EditorServices
 	static Result<void> OpenTagLayerSettings(B::BindingCall& call, bool layers);
 	static Result<UInt32> GetComponentMenuState(B::BindingCall& call);
 	static Result<void> SetComponentMenuCommand(B::BindingCall& call, UInt32 command);
+	static Result<UInt32> GetHierarchyMenuState(B::BindingCall& call);
+	static Result<void> SetHierarchyMenuCommand(B::BindingCall& call, UInt32 command);
 	static Result<Reference> ResolveReference(B::BindingCall& call, UInt32 kind, const B::Utf8View& id,
 	                                          const OptionalAsset& asset);
 	static Result<void> MarkDirty(B::BindingCall& call);
@@ -160,6 +162,8 @@ struct EditorServices
 	static Result<bool> BeginMenu(B::BindingCall& call, const B::Utf8View& label);
 	static Result<void> EndMenu(B::BindingCall& call);
 	static Result<bool> MenuItem(B::BindingCall& call, const B::Utf8View& label, bool enabled);
+	static Result<bool> MenuItemWithShortcut(B::BindingCall& call, const B::Utf8View& label,
+	                                         const B::Utf8View& shortcut, bool enabled);
 	static Result<Int32> DragDropArrayElement(B::BindingCall& call, const B::Utf8View& id, Int32 index, Int32 count);
 	static Result<void> SameLine(B::BindingCall& call);
 	static Result<void> SameLineAtContentX(B::BindingCall& call, Float64 offsetFromContentX);

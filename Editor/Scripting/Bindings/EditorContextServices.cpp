@@ -1124,6 +1124,21 @@ Result<void> EditorServices::SetComponentMenuCommand(B::BindingCall& call, UInt3
 	return {};
 }
 
+Result<UInt32> EditorServices::GetHierarchyMenuState(B::BindingCall& call)
+{
+	return Result<UInt32>::Success(Scope(call).source.hierarchyMenuState);
+}
+
+Result<void> EditorServices::SetHierarchyMenuCommand(B::BindingCall& call, UInt32 command)
+{
+	if (command > 15)
+	{
+		return Result<void>::Failure("Unknown Hierarchy menu command");
+	}
+	Scope(call).source.hierarchyMenuCommand = command;
+	return {};
+}
+
 Result<EditorServices::Reference> EditorServices::ResolveReference(B::BindingCall& call, UInt32 kind,
                                                                    const B::Utf8View& id, const OptionalAsset& asset)
 {

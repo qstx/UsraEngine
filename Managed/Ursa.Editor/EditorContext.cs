@@ -17,6 +17,12 @@ public static class EditorContext
 		_ = EditorApi.Generation;
 		NativeEditorBindings.SetComponentMenuCommand(command);
 	}
+	internal static uint HierarchyMenuState { get { _ = EditorApi.Generation; return NativeEditorBindings.GetHierarchyMenuState(); } }
+	internal static void SetHierarchyMenuCommand(uint command)
+	{
+		_ = EditorApi.Generation;
+		NativeEditorBindings.SetHierarchyMenuCommand(command);
+	}
 	public static void OpenTagLayerSettings(bool layers) { _ = EditorApi.Generation; NativeEditorBindings.OpenTagLayerSettings(layers); }
 	public static EditorReference ResolveObject(EditorReferenceKind kind, string persistentId)
 	{

@@ -44,6 +44,11 @@ public:
 	using CopySelectionAction = std::function<Result<void>()>;
 	using CutSelectionAction = std::function<Result<void>()>;
 	using PasteAsChildAction = std::function<Result<void>()>;
+	using ContextMenuDrawer = std::function<Result<UInt32>(UInt32 capabilities)>;
+	void SetContextMenuDrawer(ContextMenuDrawer drawer)
+	{
+		contextMenuDrawer = std::move(drawer);
+	}
 	Result<void> Select(const Scene& scene, GameObject::Ptr node);
 	Result<void> SelectChildren(const Scene& scene, EditorSelectionContext& selection, ResourceId documentId,
                             bool playSession);
@@ -186,6 +191,7 @@ private:
 	CopySelectionAction copySelectionAction;
 	CutSelectionAction cutSelectionAction;
 	PasteAsChildAction pasteAsChildAction;
+	ContextMenuDrawer contextMenuDrawer;
 	bool canCopySelection = false;
 	bool canPasteAsChild = false;
 	Vector<ResourceId> pendingDeleteIds;
