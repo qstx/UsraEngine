@@ -6002,7 +6002,7 @@ Result<void> EditorApplication::OnGui()
 			    play.Pause();
 		    }
 	    },
-	    play.Active());
+	    play.Active(), workspace ? &workspace->Index().Filesystem() : nullptr);
 	DrawImporterSelectionPrompt();
 	if (documents)
 	{

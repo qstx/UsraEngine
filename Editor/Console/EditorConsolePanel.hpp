@@ -45,7 +45,7 @@ public:
 
 	void Draw(bool& open, String& diagnostic, const ContextHandler& contextHandler = {},
 	          ContextActionProbe* contextProbe = nullptr, const std::function<void()>& pauseOnError = {},
-	          bool isPlaying = false);
+	          bool isPlaying = false, VirtualFileSystem* userFiles = nullptr);
 
 private:
 	struct State;
@@ -65,5 +65,7 @@ private:
 	std::optional<LogRecord> selectedRecord;
 	std::chrono::system_clock::time_point observedLatestError{};
 	Array<char, 256> searchText{};
+	VirtualFileSystem* settingsFiles = nullptr;
+	bool settingsLoaded = false;
 };
 } // namespace Ursa::Editor
