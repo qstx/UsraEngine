@@ -129,6 +129,14 @@ void ZoomSceneView(Camera& camera, Float32 wheelDelta, ViewportPoint mousePositi
 	camera.position = Add(camera.target, Scale(offset, distanceRatio));
 }
 
+void ZoomSceneViewByWheel(Camera& camera, Float32 wheelDelta, ViewportPoint mousePosition, ViewportPoint viewportSize)
+{
+	// Unity scales view size by 0.015 per scroll delta; one GLFW wheel notch is one ImGui wheel unit,
+	// corresponding to roughly three Unity scroll delta units.
+	const Float32 zoomRatio = std::max(0.001f, 1.f - wheelDelta * 0.045f);
+	ZoomSceneView(camera, -std::log(zoomRatio) / 0.12f, mousePosition, viewportSize);
+}
+
 void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint movement, Float32 verticalMovement,
                          Float32 deltaTime, Float32 speed, bool fast)
 {

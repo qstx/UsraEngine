@@ -3147,8 +3147,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						        ? ViewportPoint{layout.displayRect.width * 0.5f, layout.displayRect.height * 0.5f}
 						        : ViewportPoint{io.MousePos.x - layout.displayRect.x,
 						                        io.MousePos.y - layout.displayRect.y};
-						ZoomSceneView(camera, io.MouseWheel, zoomPosition,
-						              {layout.displayRect.width, layout.displayRect.height});
+						ZoomSceneViewByWheel(camera, io.MouseWheel, zoomPosition,
+						                     {layout.displayRect.width, layout.displayRect.height});
 					}
 					const bool hierarchyFocusRequested = hierarchy.ConsumeFocusSelectionRequest();
 					if (hierarchyFocusRequested ||
