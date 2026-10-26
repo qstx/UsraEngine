@@ -1252,8 +1252,8 @@ Result<void> EditorHierarchy::SelectChildren(const Scene& scene, EditorSelection
 			selectedChild.documentId = documentId;
 			selectedChild.objectId = id.value;
 			selectedChild.playSession = playSession;
-			if (std::none_of(children.begin(), children.end(), [&](const auto& existing)
-			                 { return existing.SameIdentity(selectedChild); }))
+			if (std::none_of(children.begin(), children.end(),
+			                 [&](const auto& existing) { return existing.SameIdentity(selectedChild); }))
 			{
 				children.push_back(std::move(selectedChild));
 			}
@@ -1307,8 +1307,8 @@ Result<void> EditorHierarchy::SelectChildren(const PrefabAsset& asset, EditorSel
 			selectedChild.kind = EditorSelectionKind::GameObject;
 			selectedChild.documentId = documentId;
 			selectedChild.objectId = child->Id();
-			if (std::none_of(children.begin(), children.end(), [&](const auto& existing)
-			                 { return existing.SameIdentity(selectedChild); }))
+			if (std::none_of(children.begin(), children.end(),
+			                 [&](const auto& existing) { return existing.SameIdentity(selectedChild); }))
 			{
 				children.push_back(std::move(selectedChild));
 			}
@@ -2549,53 +2549,55 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			     pendingDeletePrimary = primary ? primary->objectId : ResourceId{};
 			     return Result<void>{};
 		     }});
-		commands.Register(
-		    {"hierarchy.select-children", "Select Children", {},
-		     [editableScene, documentId, playSession, &scene](const EditorCommandContext& context)
-		     {
-			     if (!editableScene || context.selection.entries.empty())
-			     {
-				     return Result<void>::Failure("Select editable GameObjects with descendants");
-			     }
-			     bool hasDescendants = false;
-			     std::function<void(const GameObject::Ptr&)> findDescendants = [&](const GameObject::Ptr& object)
-			     {
-				     for (const auto& child : object->Children())
-				     {
-					     hasDescendants = true;
-					     findDescendants(child);
-				     }
-			     };
-			     for (const auto& item : context.selection.entries)
-			     {
-				     if (item.kind != EditorSelectionKind::GameObject || item.documentId != documentId ||
-				         item.playSession != playSession || item.IsMissing())
-				     {
-					     return Result<void>::Failure("Select GameObjects in the active Hierarchy first");
-				     }
-				     auto object = scene.GameObjectById(item.objectId);
-				     if (!object)
-				     {
-					     return Result<void>::Failure(object.error);
-				     }
-				     findDescendants(object.value);
-			     }
-			     return hasDescendants ? Result<void>{}
-			                           : Result<void>::Failure("The selection has no child GameObjects");
-		     },
-	     [this, &scene, selection, documentId, playSession](const EditorCommandContext&)
-		     {
-			     if (!selection)
-			     {
-				     return Result<void>::Failure("Hierarchy selection is unavailable");
-			     }
-			     auto selectedChildren = SelectChildren(scene, *selection, documentId, playSession);
-			     if (selectedChildren)
-			     {
-				     SetLegacySelected(selection, selected);
-			     }
-			     return selectedChildren;
-		     }});
+		commands.Register({"hierarchy.select-children",
+		                   "Select Children",
+		                   {},
+		                   [editableScene, documentId, playSession, &scene](const EditorCommandContext& context)
+		                   {
+			                   if (!editableScene || context.selection.entries.empty())
+			                   {
+				                   return Result<void>::Failure("Select editable GameObjects with descendants");
+			                   }
+			                   bool hasDescendants = false;
+			                   std::function<void(const GameObject::Ptr&)> findDescendants =
+			                       [&](const GameObject::Ptr& object)
+			                   {
+				                   for (const auto& child : object->Children())
+				                   {
+					                   hasDescendants = true;
+					                   findDescendants(child);
+				                   }
+			                   };
+			                   for (const auto& item : context.selection.entries)
+			                   {
+				                   if (item.kind != EditorSelectionKind::GameObject || item.documentId != documentId ||
+				                       item.playSession != playSession || item.IsMissing())
+				                   {
+					                   return Result<void>::Failure("Select GameObjects in the active Hierarchy first");
+				                   }
+				                   auto object = scene.GameObjectById(item.objectId);
+				                   if (!object)
+				                   {
+					                   return Result<void>::Failure(object.error);
+				                   }
+				                   findDescendants(object.value);
+			                   }
+			                   return hasDescendants ? Result<void>{}
+			                                         : Result<void>::Failure("The selection has no child GameObjects");
+		                   },
+		                   [this, &scene, selection, documentId, playSession](const EditorCommandContext&)
+		                   {
+			                   if (!selection)
+			                   {
+				                   return Result<void>::Failure("Hierarchy selection is unavailable");
+			                   }
+			                   auto selectedChildren = SelectChildren(scene, *selection, documentId, playSession);
+			                   if (selectedChildren)
+			                   {
+				                   SetLegacySelected(selection, selected);
+			                   }
+			                   return selectedChildren;
+		                   }});
 		const EditorCommandContext current =
 		    selection ? EditorCommandContext::Capture(*selection, documentId, documentRevision)
 		              : EditorCommandContext{};
@@ -2624,6 +2626,36 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			auto pasted = pasteAsChildAction();
 			commandDiagnostic = pasted ? String{} : pasted.error;
 			changed |= static_cast<bool>(pasted);
+		}
+		if (Icons::MenuItem("Select All", nullptr, false, selection && !visibleRows.empty()))
+		{
+			if (selection->SelectEntries(visibleRows))
+			{
+				SetLegacySelected(selection, selected);
+			}
+		}
+		if (Icons::MenuItem("Deselect All", nullptr, false, selection && !selection->entries.empty()))
+		{
+			if (selection->SelectEntries({}))
+			{
+				SetLegacySelected(selection, selected);
+				ClearSelection();
+			}
+		}
+		if (Icons::MenuItem("Invert Selection", nullptr, false, selection && !selection->entries.empty()))
+		{
+			Vector<EditorSelectionEntry> inverted;
+			for (const auto& visibleRow : visibleRows)
+			{
+				if (!selection->Contains(visibleRow))
+				{
+					inverted.push_back(visibleRow);
+				}
+			}
+			if (selection->SelectEntries(std::move(inverted)))
+			{
+				SetLegacySelected(selection, selected);
+			}
 		}
 		if (editableScene)
 		{
