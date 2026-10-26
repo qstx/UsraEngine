@@ -823,6 +823,12 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 			ImGui::TableSetColumnIndex(0);
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted(label);
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip(label == String("Position")
+				                     ? "The local position of this GameObject relative to the parent."
+				                     : "The local scaling of this GameObject relative to the parent.");
+			}
 			for (int index = 0; index < componentCount; ++index)
 			{
 				ImGui::TableSetColumnIndex(index + 1);
@@ -900,6 +906,10 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 			ImGui::TableSetColumnIndex(0);
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted("Rotation");
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("The local rotation of this GameObject relative to the parent.");
+			}
 			ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,
 			                    state.value.value("HasMultipleDifferentValues", false));
 			for (int index = 0; index < 3; ++index)
@@ -1151,6 +1161,22 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 			return scale;
 		}
 		changed |= scale.value;
+	}
+	if (scene && sceneTargets)
+	{
+		const bool largeWorldPosition = std::any_of(sceneTargets->begin(), sceneTargets->end(), [&](const auto& target)
+		{
+			auto world = scene->WorldTransform(target);
+			return world && (std::abs(world.value.At(0, 3)) > 100000.f ||
+			                 std::abs(world.value.At(1, 3)) > 100000.f ||
+			                 std::abs(world.value.At(2, 3)) > 100000.f);
+		});
+		if (largeWorldPosition)
+		{
+			ImGui::TextWrapped(
+			    "Due to floating-point precision limitations, it is recommended to bring the world coordinates of the "
+			    "GameObject within a smaller range.");
+		}
 	}
 	diagnostic.clear();
 	return Result<bool>::Success(changed);
