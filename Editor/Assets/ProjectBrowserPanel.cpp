@@ -1703,7 +1703,11 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		const bool down = ImGui::IsKeyPressed(ImGuiKey_DownArrow, false);
 		const bool left = ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false);
 		const bool right = ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
-		if (up || down || left || right)
+		const bool home = ImGui::IsKeyPressed(ImGuiKey_Home, false);
+		const bool end = ImGui::IsKeyPressed(ImGuiKey_End, false);
+		const bool pageUp = ImGui::IsKeyPressed(ImGuiKey_PageUp, false);
+		const bool pageDown = ImGui::IsKeyPressed(ImGuiKey_PageDown, false);
+		if (up || down || left || right || home || end || pageUp || pageDown)
 		{
 			const Float32 iconSize = static_cast<Float32>(gridIconSize);
 			const Float32 tileWidth = std::clamp(iconSize + 26.f, 80.f, 152.f);
@@ -1713,7 +1717,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			    gridView ? std::max<Size>(1, static_cast<Size>(std::floor((ImGui::GetContentRegionAvail().x + spacing) /
 			                                                              (tileWidth + spacing))))
 			             : 1;
-			Size currentIndex = down || right ? 0 : visibleRows.size() - 1;
+			Size currentIndex = 0;
+			bool hasVisibleSelection = false;
 			if (const auto* primary = selection.PrimaryEntry())
 			{
 				const auto current = std::find_if(visibleRows.begin(), visibleRows.end(),
@@ -1721,18 +1726,44 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				if (current != visibleRows.end())
 				{
 					currentIndex = static_cast<Size>(std::distance(visibleRows.begin(), current));
+					hasVisibleSelection = true;
 				}
 			}
-			Int64 nextIndex = static_cast<Int64>(currentIndex);
-			if (gridView && (up || down))
+			const Float32 rowHeight = gridView ? tileHeight : ImGui::GetFrameHeight();
+			const Float32 rowStep = rowHeight + ImGui::GetStyle().ItemSpacing.y;
+			const Int64 lastIndex = static_cast<Int64>(visibleRows.size() - 1);
+			Int64 nextIndex = 0;
+			if (!hasVisibleSelection)
 			{
-				nextIndex += down ? static_cast<Int64>(columns) : -static_cast<Int64>(columns);
+				nextIndex = 0;
+			}
+			else if (home)
+			{
+				nextIndex = 0;
+			}
+			else if (end)
+			{
+				nextIndex = lastIndex;
+			}
+			else if (pageUp || pageDown)
+			{
+				const Size pageRows =
+				    std::max<Size>(1, static_cast<Size>(std::round(ImGui::GetContentRegionAvail().y / rowStep)));
+				const Size maxPageRows =
+				    pageDown ? (visibleRows.size() - 1 - currentIndex) / columns : currentIndex / columns;
+				const Int64 pageOffset = static_cast<Int64>(std::min(pageRows, maxPageRows) * columns);
+				nextIndex = static_cast<Int64>(currentIndex) + (pageDown ? pageOffset : -pageOffset);
+			}
+			else if (gridView && (up || down))
+			{
+				nextIndex = static_cast<Int64>(currentIndex) +
+				            (down ? static_cast<Int64>(columns) : -static_cast<Int64>(columns));
 			}
 			else
 			{
-				nextIndex += (down || right) ? 1 : -1;
+				nextIndex = static_cast<Int64>(currentIndex) + ((down || right) ? 1 : -1);
 			}
-			nextIndex = std::clamp<Int64>(nextIndex, 0, static_cast<Int64>(visibleRows.size() - 1));
+			nextIndex = std::clamp<Int64>(nextIndex, 0, lastIndex);
 			const Size targetIndex = static_cast<Size>(nextIndex);
 			Vector<EditorSelectionEntry> nextSelection{visibleRows[targetIndex]};
 			Size nextPrimary = 0;
@@ -1763,8 +1794,6 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					model.SelectAsset(primary->assetPath);
 					hierarchy.ClearSelection();
 				}
-				const Float32 rowHeight = gridView ? tileHeight : ImGui::GetFrameHeight();
-				const Float32 rowStep = rowHeight + ImGui::GetStyle().ItemSpacing.y;
 				const Float32 targetTop =
 				    ImGui::GetCursorPosY() +
 				    static_cast<Float32>(gridView ? targetIndex / columns : targetIndex) * rowStep;
