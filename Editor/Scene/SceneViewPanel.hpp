@@ -159,6 +159,8 @@ private:
 	Float32 sceneDragZoomTotalMotion = 0.f;
 	bool sceneZoomUseYSign = false;
 	Float32 sceneCameraFieldOfView = 45.f;
+	bool showSceneGrid = true;
+	Float32 sceneGridSize = 1.f;
 	bool showSceneGizmos = true;
 	bool showSceneCameraGizmos = true;
 	bool showSceneLightGizmos = true;

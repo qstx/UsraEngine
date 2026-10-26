@@ -567,6 +567,99 @@ void DrawProjectedBounds(ImDrawList* drawList, const Mat4& viewProjection, const
 	}
 }
 
+bool ProjectScenePoint(const Mat4& viewProjection, const ViewportLayout& layout, Vec3 point, ImVec2& screen)
+{
+	const Vec4 clip = Transform(viewProjection, {point.x, point.y, point.z, 1.f});
+	if (!std::isfinite(clip.w) || clip.w <= 1.0e-7f || clip.z < 0.f || clip.z > clip.w)
+	{
+		return false;
+	}
+	screen = {layout.displayRect.x + (clip.x / clip.w + 1.f) * layout.displayRect.width * 0.5f,
+	          layout.displayRect.y + (1.f - clip.y / clip.w) * layout.displayRect.height * 0.5f};
+	return std::isfinite(screen.x) && std::isfinite(screen.y);
+}
+
+void DrawSceneGrid(ImDrawList* drawList, const Camera& camera, Float32 aspect, const ViewportLayout& layout,
+                   bool twoDMode, Float32 gridSize)
+{
+	if (!drawList || !layout.visible || !std::isfinite(aspect) || aspect <= 0.f || !std::isfinite(gridSize) ||
+	    gridSize <= 0.f)
+	{
+		return;
+	}
+	const Vec3 viewDirection = camera.target - camera.position;
+	const Float32 viewDistance = std::sqrt(Dot(viewDirection, viewDirection));
+	const Float32 halfHeight = camera.orthographic
+	                                ? camera.orthographicSize
+	                                : viewDistance * std::tan(camera.verticalFovRadians * 0.5f);
+	if (!std::isfinite(halfHeight) || halfHeight <= 0.f)
+	{
+		return;
+	}
+	const Float32 halfWidth = halfHeight * aspect;
+	const Float32 halfSpan = std::max(halfWidth, halfHeight) * 1.5f;
+	if (!std::isfinite(halfSpan) || halfSpan <= 0.f)
+	{
+		return;
+	}
+	Float32 spacing = gridSize * std::pow(
+	                            10.f, std::floor(std::log10(std::max(0.0001f, std::min(halfWidth, halfHeight) / 8.f) /
+	                                                       gridSize)));
+	while (halfSpan / spacing > 80.f)
+	{
+		spacing *= 10.f;
+	}
+	if (!std::isfinite(spacing) || spacing <= 0.f)
+	{
+		return;
+	}
+
+	const Float32 centerX = camera.target.x;
+	const Float32 centerOther = twoDMode ? camera.target.y : camera.target.z;
+	const Float32 indexLimit = static_cast<Float32>(std::numeric_limits<Int64>::max() / 4);
+	if (!std::isfinite(centerX) || !std::isfinite(centerOther) ||
+	    std::max(std::abs(centerX), std::abs(centerOther)) / spacing > indexLimit)
+	{
+		return;
+	}
+	const Int64 firstX = static_cast<Int64>(std::ceil((centerX - halfSpan) / spacing));
+	const Int64 lastX = static_cast<Int64>(std::floor((centerX + halfSpan) / spacing));
+	const Int64 firstOther = static_cast<Int64>(std::ceil((centerOther - halfSpan) / spacing));
+	const Int64 lastOther = static_cast<Int64>(std::floor((centerOther + halfSpan) / spacing));
+	const Mat4 viewProjection = camera.ViewProjection(aspect);
+	auto project = [&](Float32 x, Float32 other, ImVec2& screen)
+	{
+		return ProjectScenePoint(viewProjection, layout,
+		                        twoDMode ? Vec3{x, other, 0.f} : Vec3{x, 0.f, other}, screen);
+	};
+	for (Int64 index = firstX; index <= lastX; ++index)
+	{
+		const Float32 x = static_cast<Float32>(index) * spacing;
+		ImVec2 first{};
+		ImVec2 second{};
+		if (project(x, centerOther - halfSpan, first) && project(x, centerOther + halfSpan, second))
+		{
+			const ImU32 color = index == 0 ? IM_COL32(224, 92, 92, 190)
+			                             : index % 10 == 0 ? IM_COL32(150, 160, 174, 110)
+			                                               : IM_COL32(140, 150, 164, 48);
+			drawList->AddLine(first, second, color, index == 0 ? 1.4f : 1.f);
+		}
+	}
+	for (Int64 index = firstOther; index <= lastOther; ++index)
+	{
+		const Float32 other = static_cast<Float32>(index) * spacing;
+		ImVec2 first{};
+		ImVec2 second{};
+		if (project(centerX - halfSpan, other, first) && project(centerX + halfSpan, other, second))
+		{
+			const ImU32 color = index == 0 ? (twoDMode ? IM_COL32(110, 205, 128, 190) : IM_COL32(105, 155, 230, 190))
+			                             : index % 10 == 0 ? IM_COL32(150, 160, 174, 110)
+			                                               : IM_COL32(140, 150, 164, 48);
+			drawList->AddLine(first, second, color, index == 0 ? 1.4f : 1.f);
+		}
+	}
+}
+
 Vector<ResourceId> PickSceneObjectsInRectangle(const Camera& camera, Float32 aspect, const ViewportLayout& layout,
                                                ViewportPoint first, ViewportPoint second,
                                                const Vector<Rendering::RenderObject>& renderObjects, Scene& scene,
@@ -1390,6 +1483,8 @@ void SceneViewPanel::SaveProjectSettings(VirtualFileSystem& userFiles, const Str
 	settings.sceneCameraFieldOfView = sceneCameraFieldOfView;
 	settings.sceneCameraNearClip = sceneCameraNearClip;
 	settings.sceneCameraFarClip = sceneCameraFarClip;
+	settings.showSceneGrid = showSceneGrid;
+	settings.sceneGridSize = sceneGridSize;
 	settings.showSceneGizmos = showSceneGizmos;
 	settings.showSceneCameraGizmos = showSceneCameraGizmos;
 	settings.showSceneLightGizmos = showSceneLightGizmos;
@@ -1453,6 +1548,8 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 	sceneCameraFieldOfView = 45.f;
 	sceneCameraNearClip = 0.1f;
 	sceneCameraFarClip = 100.f;
+	showSceneGrid = true;
+	sceneGridSize = 1.f;
 	showSceneGizmos = true;
 	auto path = VirtualPath::Parse("user:Settings/GameViewProjects/" + projectKey + ".json");
 	if (!path)
@@ -1489,6 +1586,8 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 		sceneCameraFieldOfView = 45.f;
 		sceneCameraNearClip = 0.1f;
 		sceneCameraFarClip = 100.f;
+		showSceneGrid = true;
+		sceneGridSize = 1.f;
 		showSceneGizmos = true;
 		diagnostic = settings.error;
 	}
@@ -1521,6 +1620,8 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			sceneCameraFieldOfView = 45.f;
 			sceneCameraNearClip = 0.1f;
 			sceneCameraFarClip = 100.f;
+			showSceneGrid = true;
+			sceneGridSize = 1.f;
 			showSceneGizmos = true;
 			diagnostic = "Saved Game resolution exceeds supported limits; restored defaults.";
 		}
@@ -1552,6 +1653,8 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			sceneCameraFieldOfView = saved.sceneCameraFieldOfView;
 			sceneCameraNearClip = saved.sceneCameraNearClip;
 			sceneCameraFarClip = saved.sceneCameraFarClip;
+			showSceneGrid = saved.showSceneGrid;
+			sceneGridSize = saved.sceneGridSize;
 			showSceneGizmos = saved.showSceneGizmos;
 			showSceneCameraGizmos = saved.showSceneCameraGizmos;
 			showSceneLightGizmos = saved.showSceneLightGizmos;
@@ -1978,6 +2081,21 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				sceneView2DModePendingTarget = requestedTwoDMode;
 			}
 			Icons::SameLine();
+			if (ImGui::Checkbox("Grid", &showSceneGrid))
+			{
+				settingsChanged = true;
+			}
+			Icons::SameLine();
+			ImGui::SetNextItemWidth(64.f);
+			if (ImGui::DragFloat("##SceneGridSize", &sceneGridSize, 0.01f, 0.0001f, 10000.f, "%.3g"))
+			{
+				settingsChanged = true;
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Grid size");
+			}
+			Icons::SameLine();
 			const ImGuiIO& sceneSearchInput = ImGui::GetIO();
 			if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !sceneSearchInput.WantTextInput &&
 			    sceneSearchInput.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
@@ -2003,7 +2121,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				gizmoSpace = gizmoSpace == GizmoSpace::Global ? GizmoSpace::Local : GizmoSpace::Global;
 			}
 			Icons::SameLine();
-			if (Icons::Button("GridSnap", Icons::Icon::Trace, "Toggle grid snapping (Ctrl temporarily snaps)",
+			if (Icons::Button("Snap", Icons::Icon::Trace, "Toggle transform snapping (Ctrl temporarily snaps)",
 			                  gizmoSnapSettings.enabled, true))
 			{
 				gizmoSnapSettings.enabled = !gizmoSnapSettings.enabled;
@@ -2224,6 +2342,13 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				                    true);
 				ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 				ImGui::Image(sceneTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
+				const Float32 sceneAspect = static_cast<Float32>(sceneTarget.size.width) /
+				                            static_cast<Float32>(sceneTarget.size.height);
+				if (draft.Kind() == ResourceKind::Scene && showSceneGrid)
+				{
+					DrawSceneGrid(ImGui::GetWindowDrawList(), sceneTarget.preview->GetCamera(), sceneAspect, layout,
+					             sceneView2DMode, sceneGridSize);
+				}
 				if (draft.Kind() == ResourceKind::Scene && layout.visible && showSceneGizmos &&
 				    (showSceneCameraGizmos || showSceneLightGizmos))
 				{
@@ -2239,8 +2364,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						bool occluded = false;
 				};
 					Vector<SceneGizmoHit> gizmos;
-					const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
-					                       static_cast<Float32>(sceneTarget.size.height);
+					const Float32 aspect = sceneAspect;
 					auto* drawList = ImGui::GetWindowDrawList();
 					Vector<Rendering::RenderObject> sceneGizmoOccluders;
 					if (sceneGizmo3DIcons)
