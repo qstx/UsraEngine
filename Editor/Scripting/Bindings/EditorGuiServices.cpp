@@ -325,6 +325,18 @@ Result<void> EditorServices::SameLine(B::BindingCall& call)
 	return {};
 }
 
+Result<void> EditorServices::SameLineAt(B::BindingCall& call, Float64 offsetFromStartX)
+{
+	RequireGui(call);
+	if (!std::isfinite(offsetFromStartX) || offsetFromStartX < 0.0 ||
+	    offsetFromStartX > std::numeric_limits<Float32>::max())
+	{
+		throw std::runtime_error("Editor same-line offset must be finite, non-negative, and representable");
+	}
+	ImGui::SameLine(static_cast<Float32>(offsetFromStartX), 0.0f);
+	return {};
+}
+
 Result<void> EditorServices::NewLine(B::BindingCall& call)
 {
 	RequireGui(call);

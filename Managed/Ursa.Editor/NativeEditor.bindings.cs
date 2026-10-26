@@ -104,6 +104,8 @@ internal static partial class NativeEditorBindings
 	internal static partial int DragDropArrayElement(string id, int index, int count);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SameLine")]
 	internal static partial void SameLine();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SameLineAt")]
+	internal static partial void SameLineAt(double offsetFromStartX);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::NewLine")]
 	internal static partial void NewLine();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Separator")]

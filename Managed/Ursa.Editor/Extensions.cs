@@ -81,7 +81,7 @@ public abstract class Inspector
 		if (!gameObjectNameDirty) gameObjectNameDraft = originalName;
 		bool changed = false;
 
-		EditorGui.SameLine();
+		EditorGui.SameLine(72);
 		bool editedActive = EditorGui.Toggle("##GameObjectActive", active.BoolValue,
 			active.HasMultipleDifferentValues);
 		if (editedActive != active.BoolValue || active.HasMultipleDifferentValues && EditorGui.IsLastControlEdited)

@@ -45,6 +45,13 @@ public static class EditorGui
 		return NativeEditorBindings.DragDropArrayElement(id, index, count);
 	}
 	public static void SameLine() { _ = EditorApi.Generation; NativeEditorBindings.SameLine(); }
+	public static void SameLine(double offsetFromStartX)
+	{
+		_ = EditorApi.Generation;
+		if (!double.IsFinite(offsetFromStartX) || offsetFromStartX < 0)
+			throw new ArgumentOutOfRangeException(nameof(offsetFromStartX));
+		NativeEditorBindings.SameLineAt(offsetFromStartX);
+	}
 	public static void NewLine() { _ = EditorApi.Generation; NativeEditorBindings.NewLine(); }
 	public static void Separator() { _ = EditorApi.Generation; NativeEditorBindings.Separator(); }
 	public static bool FoldoutHeader(string label) { _ = EditorApi.Generation; return NativeEditorBindings.FoldoutHeader(label); }

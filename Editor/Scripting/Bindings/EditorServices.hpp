@@ -159,6 +159,7 @@ struct EditorServices
 	static Result<bool> MenuItem(B::BindingCall& call, const B::Utf8View& label, bool enabled);
 	static Result<Int32> DragDropArrayElement(B::BindingCall& call, const B::Utf8View& id, Int32 index, Int32 count);
 	static Result<void> SameLine(B::BindingCall& call);
+	static Result<void> SameLineAt(B::BindingCall& call, Float64 offsetFromStartX);
 	static Result<void> NewLine(B::BindingCall& call);
 	static Result<void> Separator(B::BindingCall& call);
 	static Result<bool> FoldoutHeader(B::BindingCall& call, const B::Utf8View& label);

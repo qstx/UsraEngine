@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "c313629f2de23df8465fe2cce648d1ea5192c80ea7615b9674799265ce48db08",
+      "Hash": "89c6c1591bd5609488739ab485d96a611b5fdd71579f1b6435e542ad6ac4add1",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -1124,6 +1124,21 @@
           "Direction": "NativeMethod",
           "Return": "void",
           "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SameLineAt",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "offsetFromStartX",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
           "Thread": 0,
           "NativeOnly": false
         },
