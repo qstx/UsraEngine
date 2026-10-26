@@ -83,7 +83,7 @@ private:
 	bool twoColumnLayout = true;
 	bool contentRowKeyboardFocused = false;
 	ColumnFocusRequest columnFocusRequest = ColumnFocusRequest::None;
-	bool gridView = true;
+	bool gridView = false;
 	Int32 gridIconSize = 64;
 	Ursa::Array<char, 256> searchText{};
 	Ursa::Array<char, 256> destinationPath{};

@@ -2882,13 +2882,13 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	ImGui::TextDisabled("%s", footerPath.c_str());
 	ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - iconSliderWidth));
 	ImGui::SetNextItemWidth(iconSliderWidth);
-	Int32 iconScale = gridView ? gridIconSize : 0;
-	if (ImGui::SliderInt("##ProjectIconSize", &iconScale, 0, 112, iconScale == 0 ? "List" : "Icon %d"))
+	Int32 iconScale = gridView ? gridIconSize : 16;
+	if (ImGui::SliderInt("##ProjectIconSize", &iconScale, 16, 96, iconScale == 16 ? "List" : "Icon %d"))
 	{
-		gridView = iconScale > 0;
+		gridView = iconScale >= 20;
 		if (gridView)
 		{
-			gridIconSize = std::max(40, iconScale);
+			gridIconSize = std::max(32, iconScale);
 		}
 	}
 	if (deleteRequested)
