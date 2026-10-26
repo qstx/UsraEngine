@@ -2327,6 +2327,26 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		}
 	};
 	draw(asset.Root());
+	const bool hierarchyCommandFocused = selection && hierarchyRowFocused &&
+	                                     ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	                                     !ImGui::GetIO().WantTextInput;
+	if (hierarchyCommandFocused && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_D, false))
+	{
+		selection->SelectEntries({});
+		SetLegacySelected(selection, selected);
+	}
+	else if (hierarchyCommandFocused && (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) &&
+	         !ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_I, false) && !selection->entries.empty())
+	{
+		InvertSelection(asset, *selection, documentId);
+		SetLegacySelected(selection, selected);
+	}
+	else if (hierarchyCommandFocused && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
+	         !selection->entries.empty())
+	{
+		SelectChildren(asset, *selection, documentId);
+		SetLegacySelected(selection, selected);
+	}
 	ImGui::PopStyleVar();
 	if (!pointerOverHierarchyRow)
 	{
@@ -3309,6 +3329,28 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		SetLegacySelected(selection, selected);
 	}
 	bool changed = false;
+	const bool hierarchyCommandFocused = selection && hierarchyRowFocused &&
+	                                     ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	                                     !ImGui::GetIO().WantTextInput;
+	if (hierarchyCommandFocused && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_D, false))
+	{
+		changed |= selection->SelectEntries({});
+		SetLegacySelected(selection, selected);
+	}
+	else if (hierarchyCommandFocused && (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) &&
+	         !ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_I, false) && !selection->entries.empty())
+	{
+		auto inverted = InvertSelection(scene, *selection, documentId, playSession);
+		changed |= static_cast<bool>(inverted);
+		SetLegacySelected(selection, selected);
+	}
+	else if (hierarchyCommandFocused && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
+	         !selection->entries.empty())
+	{
+		auto children = SelectChildren(scene, *selection, documentId, playSession);
+		changed |= static_cast<bool>(children);
+		SetLegacySelected(selection, selected);
+	}
 	auto beginRename = [this](ResourceId id)
 	{
 		if (!renameNewObjects)
