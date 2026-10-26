@@ -1493,15 +1493,32 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	if (ImGui::BeginPopup("ProjectSearchTypeFilter"))
 	{
-		const std::pair<const char*, const char*> types[] = {{"Folder", "folder"},   {"Scene", "scene"},
-		                                                    {"Prefab", "prefab"},   {"Material", "material"},
-		                                                    {"Shader", "shader"},   {"Mesh", "mesh"},
-		                                                    {"Texture", "texture"}, {"Texture 2D", "texture2d"},
-		                                                    {"Script", "script"}};
+		Vector<std::pair<String, String>> types{{"Folder", "folder"},     {"Scene", "scene"},
+		                                        {"Prefab", "prefab"},     {"Material", "material"},
+		                                        {"Shader", "shader"},     {"Mesh", "mesh"},
+		                                        {"Texture", "texture"},   {"Texture 2D", "texture2d"},
+		                                        {"Script", "script"}};
+		if (const auto* database = workspace.Database())
+		{
+			for (const ImportedArtifactRecord& object : database->VisibleImportedObjects())
+			{
+				if (!object.visibleInProject || object.kind.empty())
+				{
+					continue;
+				}
+				const String filter = foldSearchToken(object.kind);
+				if (std::none_of(types.begin(), types.end(), [&](const auto& type) { return type.second == filter; }))
+				{
+					types.emplace_back(object.kind, filter);
+				}
+			}
+		}
+		std::sort(types.begin() + 9, types.end(), [](const auto& left, const auto& right)
+		          { return left.first < right.first; });
 		for (const auto& type : types)
 		{
 			const String filter = String("t:") + type.second;
-			if (ImGui::MenuItem(type.first, nullptr, hasSearchFilter(filter)))
+			if (ImGui::MenuItem(type.first.c_str(), nullptr, hasSearchFilter(filter)))
 			{
 				toggleSearchFilter(filter);
 			}
