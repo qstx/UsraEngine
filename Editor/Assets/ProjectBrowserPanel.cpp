@@ -261,6 +261,7 @@ void ProjectBrowserPanel::Reset()
 	favoritesSettingsProject.clear();
 	searchText.fill(0);
 	columnFocusRequest = ColumnFocusRequest::None;
+	contentRowKeyboardFocused = false;
 	destinationPath.fill(0);
 	folderName.fill(0);
 	createFolderRequested = false;
@@ -903,7 +904,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 		ImGui::EndPopup();
 	}
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	if (contentRowKeyboardFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	    !ImGui::GetIO().WantTextInput &&
 	    ImGui::IsKeyPressed(ImGuiKey_F2))
 	{
 		const auto captured = EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision);
@@ -939,7 +941,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			diagnostic = registered.error;
 		}
 	}
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	if (contentRowKeyboardFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	    !ImGui::GetIO().WantTextInput &&
 	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false) && !selection.entries.empty())
 	{
 		auto duplicated = duplicateEntries(selection.entries);
@@ -962,7 +965,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		auto pasted = pasteAssetClipboard(model.CurrentFolder());
 		diagnostic = pasted ? String{} : pasted.error;
 	}
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	if (contentRowKeyboardFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	    !ImGui::GetIO().WantTextInput &&
 	    !selection.entries.empty() && ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&
 	    std::all_of(selection.entries.begin(), selection.entries.end(),
 	                [](const EditorSelectionEntry& entry)
@@ -2649,6 +2653,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	const bool projectContentRowFocused = focusedItemId != 0 &&
 	                                      std::find(projectContentRowIds.begin(), projectContentRowIds.end(),
 	                                                focusedItemId) != projectContentRowIds.end();
+	contentRowKeyboardFocused = projectContentRowFocused;
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && projectContentRowFocused &&
 	    !projectInput.WantTextInput && !ImGui::IsAnyItemActive() && projectInput.KeyCtrl &&
 	    ImGui::IsKeyPressed(ImGuiKey_A, false) && !visibleRows.empty())

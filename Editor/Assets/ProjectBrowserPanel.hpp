@@ -81,6 +81,7 @@ private:
 	VirtualPath favoritesSettingsPath;
 	String favoritesSettingsProject;
 	bool twoColumnLayout = true;
+	bool contentRowKeyboardFocused = false;
 	ColumnFocusRequest columnFocusRequest = ColumnFocusRequest::None;
 	bool gridView = true;
 	Int32 gridIconSize = 64;
