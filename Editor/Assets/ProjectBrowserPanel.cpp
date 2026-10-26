@@ -1404,7 +1404,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	ImGui::SetNextItemWidth(std::max(80.f, ImGui::GetContentRegionAvail().x - searchButtonsWidth));
 	const ImGuiIO& projectInput = ImGui::GetIO();
 	const bool focusProjectSearch = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	                                !projectInput.WantTextInput && projectInput.KeyCtrl &&
+	                                !projectInput.WantTextInput && (projectInput.KeyCtrl || projectInput.KeySuper) &&
+	                                !projectInput.KeyAlt && !projectInput.KeyShift &&
 	                                ImGui::IsKeyPressed(ImGuiKey_F, false);
 	if (focusProjectSearch)
 	{
