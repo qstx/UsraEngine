@@ -515,14 +515,14 @@ HierarchyDropZone ClassifyHierarchyDropZone(float rowY, float rowTop, float rowB
 	{
 		return HierarchyDropZone::Into;
 	}
-	const float fraction = std::clamp((rowY - rowTop) / (rowBottom - rowTop), 0.0f, 1.0f);
-	if (fraction < 0.25f)
-	{
-		return HierarchyDropZone::Above;
-	}
-	if (fraction > 0.75f)
+	constexpr float halfDropBetweenHeight = 4.f;
+	if (rowY >= rowBottom - halfDropBetweenHeight)
 	{
 		return HierarchyDropZone::Below;
+	}
+	if (rowY <= rowTop + halfDropBetweenHeight)
+	{
+		return HierarchyDropZone::Above;
 	}
 	return HierarchyDropZone::Into;
 }
