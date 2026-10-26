@@ -488,6 +488,19 @@ NormalizeHierarchyDragSources(const EditorDragSession& session, ResourceId docum
 
 namespace
 {
+bool IsHierarchyAssetDropSession(const EditorDragSession& session)
+{
+	return !session.sources.empty() &&
+	       std::all_of(session.sources.begin(), session.sources.end(),
+	                   [](const EditorDragSource& source)
+	                   {
+		                   const auto& entry = source.identity;
+		                   return !source.componentId && entry.kind == EditorSelectionKind::Asset &&
+		                          entry.assetRole == EditorAssetSelectionRole::Source && !entry.assetLocalFileId &&
+		                          entry.assetGuid && !entry.IsMissing();
+	                   });
+}
+
 float VectorLength3(float x, float y, float z)
 {
 	return std::sqrt(x * x + y * y + z * z);
@@ -610,7 +623,8 @@ DrawHierarchyRowDropFeedback(const ImRect& rect, ResourceId documentId, bool pla
 	                                                                       ImGuiDragDropFlags_AcceptBeforeDelivery))
 	{
 		auto session = DecodeEditorDragPayload(payload->DataType, payload->Data, static_cast<Size>(payload->DataSize));
-		if (session && NormalizeHierarchyDragSources(session.value, documentId, playSession, parentOf))
+		if (session && (NormalizeHierarchyDragSources(session.value, documentId, playSession, parentOf) ||
+		                (onDrop && IsHierarchyAssetDropSession(session.value))))
 		{
 			const HierarchyDropZone classified =
 			    ClassifyHierarchyDropZone(ImGui::GetIO().MousePos.y, rect.Min.y, rect.Max.y);
@@ -659,7 +673,8 @@ void DrawHierarchyRootDropFeedback(ResourceId documentId, bool playSession,
 	                                                                       ImGuiDragDropFlags_AcceptBeforeDelivery))
 	{
 		auto session = DecodeEditorDragPayload(payload->DataType, payload->Data, static_cast<Size>(payload->DataSize));
-		if (session && NormalizeHierarchyDragSources(session.value, documentId, playSession, parentOf))
+		if (session && (NormalizeHierarchyDragSources(session.value, documentId, playSession, parentOf) ||
+		                (onDrop && IsHierarchyAssetDropSession(session.value))))
 		{
 			if (onDrop && ClaimEditorDragDropDelivery(payload))
 			{
