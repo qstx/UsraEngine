@@ -249,7 +249,7 @@ Vec3 TransformSceneVertex(const Mat4& world, Vec3 position)
 Result<ResourceId> PickSceneObject(const Camera& camera, Float32 aspect, const ViewportLayout& layout,
                                    ViewportPoint screenPosition, const Vector<Rendering::RenderObject>& renderObjects,
                                    Scene& scene, const EditorHierarchy& hierarchy,
-                                   Vector<ResourceId>* overlapping = nullptr)
+                                   Vector<ResourceId>* overlapping = nullptr, Vec3* pickedPosition = nullptr)
 {
 	auto ray = CreateSceneViewRay(camera, aspect, layout, screenPosition);
 	if (!ray)
@@ -387,8 +387,18 @@ Result<ResourceId> PickSceneObject(const Camera& camera, Float32 aspect, const V
 			overlapping->push_back(candidate.second);
 		}
 	}
-	return !candidates.empty() ? Result<ResourceId>::Success(candidates.front().second)
-	                           : Result<ResourceId>::Failure("No scene object is under the pointer");
+	if (!candidates.empty())
+	{
+		if (pickedPosition)
+		{
+			const Float32 distance = candidates.front().first;
+			*pickedPosition = {ray.value.origin.x + ray.value.direction.x * distance,
+			                   ray.value.origin.y + ray.value.direction.y * distance,
+			                   ray.value.origin.z + ray.value.direction.z * distance};
+		}
+		return Result<ResourceId>::Success(candidates.front().second);
+	}
+	return Result<ResourceId>::Failure("No scene object is under the pointer");
 }
 
 bool ProjectObjectOrigin(const Camera& camera, Float32 aspect, const ViewportLayout& layout, const Scene& scene,
@@ -2915,6 +2925,31 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					}
 					if (sceneNavigationGesture == SceneNavigationGesture::Pan && !io.MouseDown[ImGuiMouseButton_Middle])
 					{
+						if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle) &&
+						    !ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 5.f) &&
+						    io.MousePos.x >= layout.displayRect.x &&
+						    io.MousePos.x <= layout.displayRect.x + layout.displayRect.width &&
+						    io.MousePos.y >= layout.displayRect.y &&
+						    io.MousePos.y <= layout.displayRect.y + layout.displayRect.height)
+						{
+							const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
+							                       static_cast<Float32>(sceneTarget.size.height);
+							auto renderData = scene.CollectPreviewRenderData(camera, aspect);
+							if (renderData)
+							{
+								FilterSceneViewRenderObjects(renderData.value.objects, hierarchy, true);
+								Vec3 focusPoint{};
+								auto focused = PickSceneObject(
+								    camera, aspect, layout, {io.MousePos.x, io.MousePos.y}, renderData.value.objects, scene,
+								    hierarchy, nullptr, &focusPoint);
+								if (focused)
+								{
+									const Vec3 shift = focusPoint - camera.target;
+									camera.position = Add(camera.position, shift);
+									camera.target = focusPoint;
+								}
+							}
+						}
 						sceneNavigationGesture = SceneNavigationGesture::None;
 					}
 					else if (sceneNavigationGesture == SceneNavigationGesture::RightPan &&
