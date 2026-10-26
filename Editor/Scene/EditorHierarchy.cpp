@@ -1862,6 +1862,12 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	}
 	pendingClickHovered = false;
 	pointerOverHierarchyRow = false;
+	if (renameClickCandidate && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+	    ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
+	{
+		renameClickCandidate = {};
+		renameClickReleasedAt = -1.0;
+	}
 	Vector<EditorSelectionEntry> visibleRows;
 	AppendVisibleRows(asset.Root(), documentId, visibleRows, "##gameObject", searchMatches, filtering,
 	                  expandFilteredBranches);
@@ -2233,7 +2239,8 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 	}
 	const auto entry = GameObjectSelection(documentId, id.value, playSession);
-	if (selection ? selection->Contains(entry) : selected == id.value)
+	const bool selectedBeforeClick = selection ? selection->Contains(entry) : selected == id.value;
+	if (selectedBeforeClick)
 	{
 		flags |= ImGuiTreeNodeFlags_Selected;
 	}
@@ -2299,6 +2306,22 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	}
 	if (rowClicked && !sceneControlHovered)
 	{
+		const ImGuiIO& clickInput = ImGui::GetIO();
+		const bool labelClicked = clickInput.MousePos.x >= rowRect.Min.x + ImGui::GetTreeNodeToLabelSpacing();
+		const bool singleUnmodifiedClick = !clickInput.KeyCtrl && !clickInput.KeySuper && !clickInput.KeyShift &&
+		                                   !clickInput.KeyAlt && !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+		if (renameClickCandidate)
+		{
+			renameClickCandidate = {};
+			renameClickReleasedAt = -1.0;
+		}
+		if (selectedBeforeClick && labelClicked && singleUnmodifiedClick && editableScene && !playSession &&
+		    (!selection || selection->entries.size() == 1))
+		{
+			renameClickCandidate = id.value;
+			renameClickReleasedAt = -1.0;
+			renameClickDragged = false;
+		}
 		if (selection)
 		{
 			pendingSelectionClick.Begin(entry, visibleRows, ImGui::GetIO().KeyCtrl, ImGui::GetIO().KeyShift,
@@ -2309,8 +2332,26 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			selected = id.value;
 		}
 	}
+	if (renameClickCandidate == id.value)
+	{
+		renameClickDragged |= ImGui::IsMouseDragging(ImGuiMouseButton_Left, 5.0f);
+		if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+		{
+			if (rowHovered && !renameClickDragged)
+			{
+				renameClickReleasedAt = ImGui::GetTime();
+			}
+			else
+			{
+				renameClickCandidate = {};
+				renameClickReleasedAt = -1.0;
+			}
+		}
+	}
 	if (rowLabelDoubleClicked && !sceneControlHovered)
 	{
+		renameClickCandidate = {};
+		renameClickReleasedAt = -1.0;
 		focusSelectionRequested = true;
 	}
 	if (!sceneControlHovered && ImGui::BeginDragDropSource())
@@ -2949,6 +2990,12 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	}
 	pendingClickHovered = false;
 	pointerOverHierarchyRow = false;
+	if (renameClickCandidate && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+	    ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
+	{
+		renameClickCandidate = {};
+		renameClickReleasedAt = -1.0;
+	}
 	Vector<EditorSelectionEntry> visibleRows;
 	if (showSceneRoots)
 	{
@@ -3350,6 +3397,35 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 			changed = static_cast<bool>(executed);
 		}
 		ImGui::EndPopup();
+	}
+	if (renameClickCandidate && !ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+	{
+		renameClickCandidate = {};
+		renameClickReleasedAt = -1.0;
+	}
+	if (renameClickCandidate && renameClickReleasedAt >= 0.0 && ImGui::GetTime() - renameClickReleasedAt >= 0.5)
+	{
+		const bool stillSelected = selection ? selection->entries.size() == 1 && selection->PrimaryEntry() &&
+		                                           selection->PrimaryEntry()->kind == EditorSelectionKind::GameObject &&
+		                                           selection->PrimaryEntry()->documentId == documentId &&
+		                                           selection->PrimaryEntry()->objectId == renameClickCandidate &&
+		                                           !selection->PrimaryEntry()->IsMissing()
+		                                     : selected == renameClickCandidate;
+		auto target = scene.GameObjectById(renameClickCandidate);
+		if (stillSelected && target)
+		{
+			auto name = target.value->Name();
+			if (name)
+			{
+				renameTarget = renameClickCandidate;
+				std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
+				std::copy_n(name.value.data(), std::min(name.value.size(), renameBuffer.size() - 1),
+				            renameBuffer.data());
+				renamePopupRequested = true;
+			}
+		}
+		renameClickCandidate = {};
+		renameClickReleasedAt = -1.0;
 	}
 	if (renamePopupRequested)
 	{

@@ -173,6 +173,9 @@ private:
 	double dragHoverStartedAt = 0.0;
 	ResourceId renameTarget;
 	bool renamePopupRequested = false;
+	ResourceId renameClickCandidate;
+	double renameClickReleasedAt = -1.0;
+	bool renameClickDragged = false;
 	bool renameNewObjects = true;
 	bool hierarchyAlphabeticalSort = false;
 	bool hierarchySettingsLoaded = false;
