@@ -61,6 +61,10 @@ public sealed class MeshRendererComponentInspector : Inspector
 [CanEditMultipleObjects]
 public sealed class SkinnedMeshRendererComponentInspector : Inspector
 {
+	private string meshAssetPath = "prj:Meshes/NewMesh.ursamesh";
+	private string meshDiagnostic = string.Empty;
+	private bool replaceMeshBinding = true;
+
 	public override void OnInspectorGUI()
 	{
 		EditorGui.PropertyField(SerializedObject.FindProperty("mesh"), "Mesh");
@@ -71,6 +75,27 @@ public sealed class SkinnedMeshRendererComponentInspector : Inspector
 		SerializedObject.ApplyModifiedProperties();
 		if (SerializedObject.IsEditingMultipleObjects || Target is not RendererComponent renderer) return;
 		MeshRendererComponentInspector.DrawMaterials(renderer);
+		if (Target is not SkinnedMeshRendererComponent skinned || skinned.SharedMesh is not { IsValid: true } mesh) return;
+		MeshData data = mesh.GetData();
+		EditorGui.Text("Vertices: " + data.Positions.Length + "  Indices: " + data.Indices.Length +
+		               "  Submeshes: " + data.SubMeshes.Length);
+		EditorGui.Text("Version: " + mesh.Version);
+		EditorGui.Text("Bounds: " + data.Bounds.Minimum + " / " + data.Bounds.Maximum);
+		meshAssetPath = EditorGui.TextField("Asset path", meshAssetPath);
+		replaceMeshBinding = EditorGui.Toggle("Replace this binding", replaceMeshBinding);
+		if (EditorGui.Button("Save Mesh As..."))
+		{
+			try
+			{
+				EditorContext.SaveSkinnedMeshAs(meshAssetPath, replaceMeshBinding);
+				meshDiagnostic = string.Empty;
+			}
+			catch (Exception error)
+			{
+				meshDiagnostic = error.Message;
+			}
+		}
+		if (!string.IsNullOrEmpty(meshDiagnostic)) EditorGui.Text(meshDiagnostic);
 	}
 }
 

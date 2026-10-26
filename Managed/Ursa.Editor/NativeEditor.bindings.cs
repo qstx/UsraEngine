@@ -76,6 +76,8 @@ internal static partial class NativeEditorBindings
 	internal static partial void OpenAsset(string path);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetActiveCamera")]
 	internal static partial void SetActiveCamera();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SaveSkinnedMeshAs")]
+	internal static partial void SaveSkinnedMeshAs(string path, bool replaceBinding);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Text")]
 	internal static partial void Text(string text);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Button")]

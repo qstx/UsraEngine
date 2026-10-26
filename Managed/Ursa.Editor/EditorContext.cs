@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 
 namespace Ursa.Editor;
@@ -22,4 +23,10 @@ public static class EditorContext
 	public static void MarkDirty() { _ = EditorApi.Generation; InspectorTargetScope.SynchronizeCurrent(); NativeEditorBindings.MarkDirty(); }
 	public static void OpenAsset(string virtualPath) { _ = EditorApi.Generation; NativeEditorBindings.OpenAsset(virtualPath); }
 	public static void SetActiveCamera() { _ = EditorApi.Generation; NativeEditorBindings.SetActiveCamera(); }
+	internal static void SaveSkinnedMeshAs(string path, bool replaceBinding)
+	{
+		_ = EditorApi.Generation;
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		NativeEditorBindings.SaveSkinnedMeshAs(path, replaceBinding);
+	}
 }

@@ -16,7 +16,7 @@ struct Module
 	bool callScoped;
 };
 inline constexpr std::array<Module, 5> modules{{
-	{0x054b31391c166a93ull, "Editor", "f57c2b9c1be61faf804b10bba9bb7d2508f54bc0cd2429b4cddb1a95d56f58e2", 72, false, true},
+	{0x054b31391c166a93ull, "Editor", "a0f37635264ec55d1f5fc4a52fd8745bf9512b45daa3adefc8644513bc840ffc", 73, false, true},
 	{0x00ca56bfaa9bff2cull, "Import", "2e814cf85b9b3aa4d4e0d655031c2d97378d3a9eb6137fc1367e66db5f854d37", 24, false, true},
 	{0xc63346392600d9f5ull, "ManagedHost", "7f3e79617db2f014a516faf1879a2d5dd7766cdbbd7a1a139656f03dab0f279d", 35, true, false},
 	{0x1a11e6863935fee2ull, "Rendering", "4ea661d2bfddf6bc2636c6bf84ab9930a837440385c7610793dd6c45c1068693", 19, true, false},

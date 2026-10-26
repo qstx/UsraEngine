@@ -1,5 +1,6 @@
 #include <Scripting/Bindings/EditorServices.hpp>
 #include <Assets/AssetImporterInspector.hpp>
+#include <Assets/MeshAssetEditor.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/ProjectBrowserModel.hpp>
 #include <Assets/AssetPreviewExtension.hpp>
@@ -8,6 +9,7 @@
 #include <Scripting/Bindings/BindingAssets.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
 #include <Serialization/RenderResourceReferences.hpp>
+#include <Scene/SkinnedMeshRendererComponent.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <imgui.h>
 #include <algorithm>
@@ -1142,6 +1144,63 @@ Result<void> EditorServices::SetActiveCamera(B::BindingCall& call)
 	}
 	scope.changed = true;
 	if (scope.source.document)
+	{
+		scope.source.document->MarkDirty();
+	}
+	return {};
+}
+
+Result<void> EditorServices::SaveSkinnedMeshAs(B::BindingCall& call, const B::Utf8View& path, bool replaceBinding)
+{
+	RequireGui(call);
+	auto& scope = Scope(call);
+	if (!scope.source.canEditTarget || !scope.source.target || !scope.source.workspace)
+	{
+		return Result<void>::Failure("The current Inspector target cannot save a Mesh asset");
+	}
+	auto* renderer = dynamic_cast<SkinnedMeshRendererComponent*>(scope.source.target);
+	if (!renderer)
+	{
+		return Result<void>::Failure("The current Inspector target is not a Skinned Mesh Renderer");
+	}
+	const MeshPtr mesh = renderer->SharedMesh();
+	if (!mesh || !mesh->IsValid())
+	{
+		return Result<void>::Failure("Assign a valid skinned Mesh before saving it as an asset");
+	}
+	const auto destination = VirtualPath::Parse(B::ReadString(path));
+	if (!destination)
+	{
+		return Result<void>::Failure(destination.error);
+	}
+	AssetDatabase* database = scope.source.workspace->Database();
+	if (!database)
+	{
+		return Result<void>::Failure("Project AssetDatabase is unavailable");
+	}
+	auto saved = SaveMeshAs(*database, scope.Resources(), destination.value, mesh);
+	if (!saved)
+	{
+		return Result<void>::Failure(saved.error);
+	}
+	if (replaceBinding)
+	{
+		auto assigned = renderer->SetSharedMesh(std::move(saved.value));
+		if (!assigned)
+		{
+			return assigned;
+		}
+	}
+	if (!replaceBinding)
+	{
+		return {};
+	}
+	scope.changed = true;
+	if (scope.source.markTargetDirty)
+	{
+		scope.source.markTargetDirty();
+	}
+	else if (scope.source.document)
 	{
 		scope.source.document->MarkDirty();
 	}
