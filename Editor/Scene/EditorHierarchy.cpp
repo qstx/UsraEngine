@@ -243,15 +243,17 @@ Result<EditorDragPayload> BeginHierarchyDragSession(const EditorSelectionContext
                                                     const EditorSelectionEntry& clicked,
                                                     const Vector<EditorSelectionEntry>& visibleRows)
 {
-	if (!selection.Contains(clicked))
+	const bool clickedSelected = selection.Contains(clicked);
+	const bool addToExistingSelection = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper;
+	if (!clickedSelected && !addToExistingSelection)
 	{
 		return BeginEditorDragSession({clicked}, selection.revision);
 	}
 	Vector<EditorSelectionEntry> sources;
-	sources.reserve(selection.entries.size());
+	sources.reserve(selection.entries.size() + (clickedSelected ? 0 : 1));
 	for (const auto& row : visibleRows)
 	{
-		if (selection.Contains(row))
+		if (selection.Contains(row) || row.SameIdentity(clicked))
 		{
 			sources.push_back(row);
 		}
@@ -263,6 +265,11 @@ Result<EditorDragPayload> BeginHierarchyDragSession(const EditorSelectionContext
 		{
 			sources.push_back(entry);
 		}
+	}
+	if (std::none_of(sources.begin(), sources.end(),
+	                 [&](const auto& source) { return source.SameIdentity(clicked); }))
+	{
+		sources.push_back(clicked);
 	}
 	return BeginEditorDragSession(sources, selection.revision);
 }
