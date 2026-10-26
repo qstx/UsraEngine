@@ -1840,7 +1840,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			hierarchy.ClearSelection();
 		}
 	}
-	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput &&
+	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput && !ImGui::IsAnyItemActive() &&
+	    ImGui::IsAnyItemFocused() &&
 	    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
 	    selection.entries.size() == 1 && actions.openAsset)
 	{
