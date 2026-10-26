@@ -127,40 +127,47 @@ public abstract class Inspector
 		int selectedTag = Array.IndexOf(tags, tag.StringValue ?? string.Empty);
 		EditorGui.NewLine();
 		EditorGui.Indent(34);
-		double tagLayerWidth = Math.Max(60, (EditorGui.ContentRegionAvailableWidth - 72) * 0.5);
-		EditorGui.SetNextItemWidth(tagLayerWidth);
-		int editedTag = EditorGui.Popup("Tag", selectedTag, tagOptions, tag.HasMultipleDifferentValues);
-		if (editedTag == tags.Length)
+		try
 		{
-			EditorContext.OpenTagLayerSettings(false);
-		}
-		else if (editedTag >= 0 && editedTag < tags.Length &&
-		         (editedTag != selectedTag || tag.HasMultipleDifferentValues && EditorGui.IsLastControlEdited))
-		{
-			tag.StringValue = tags[editedTag];
-			changed = true;
-		}
+			double tagLayerWidth = Math.Max(60, (EditorGui.ContentRegionAvailableWidth - 72) * 0.5);
+			EditorGui.SetNextItemWidth(tagLayerWidth);
+			int editedTag = EditorGui.Popup("Tag", selectedTag, tagOptions, tag.HasMultipleDifferentValues);
+			if (editedTag == tags.Length)
+			{
+				EditorContext.OpenTagLayerSettings(false);
+			}
+			else if (editedTag >= 0 && editedTag < tags.Length &&
+			         (editedTag != selectedTag || tag.HasMultipleDifferentValues && EditorGui.IsLastControlEdited))
+			{
+				tag.StringValue = tags[editedTag];
+				changed = true;
+			}
 
-		SerializedProperty layer = SerializedObject.FindProperty("layer");
-		string[] layerNames = EditorContext.ProjectLayers;
-		string[] layers = layerNames.Select((value, index) => string.IsNullOrEmpty(value) ? $"Layer {index}" : value).ToArray();
-		Array.Resize(ref layers, layers.Length + 1);
-		layers[^1] = "Add Layer...";
-		int selectedLayer = layer.ULongValue < (ulong)layerNames.Length ? (int)layer.ULongValue : -1;
-		EditorGui.SameLine();
-		EditorGui.SetNextItemWidth(tagLayerWidth);
-		int editedLayer = EditorGui.Popup("Layer", selectedLayer, layers, layer.HasMultipleDifferentValues);
-		if (editedLayer == layerNames.Length)
-		{
-			EditorContext.OpenTagLayerSettings(true);
+			SerializedProperty layer = SerializedObject.FindProperty("layer");
+			string[] layerNames = EditorContext.ProjectLayers;
+			string[] layers = layerNames.Select((value, index) =>
+				string.IsNullOrEmpty(value) ? $"Layer {index}" : value).ToArray();
+			Array.Resize(ref layers, layers.Length + 1);
+			layers[^1] = "Add Layer...";
+			int selectedLayer = layer.ULongValue < (ulong)layerNames.Length ? (int)layer.ULongValue : -1;
+			EditorGui.SameLine();
+			EditorGui.SetNextItemWidth(tagLayerWidth);
+			int editedLayer = EditorGui.Popup("Layer", selectedLayer, layers, layer.HasMultipleDifferentValues);
+			if (editedLayer == layerNames.Length)
+			{
+				EditorContext.OpenTagLayerSettings(true);
+			}
+			else if (editedLayer >= 0 && editedLayer < layerNames.Length &&
+			         (editedLayer != selectedLayer || layer.HasMultipleDifferentValues && EditorGui.IsLastControlEdited))
+			{
+				layer.ULongValue = (ulong)editedLayer;
+				changed = true;
+			}
 		}
-		else if (editedLayer >= 0 && editedLayer < layerNames.Length &&
-		         (editedLayer != selectedLayer || layer.HasMultipleDifferentValues && EditorGui.IsLastControlEdited))
+		finally
 		{
-			layer.ULongValue = (ulong)editedLayer;
-			changed = true;
+			EditorGui.Unindent(34);
 		}
-		EditorGui.Unindent(34);
 
 		if (changed) SerializedObject.ApplyModifiedProperties();
 	}
