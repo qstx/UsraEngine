@@ -1512,6 +1512,35 @@ Result<bool> DrawNativeComponentGroup(const ComponentTargetGroup& componentGroup
 		}
 		return Result<bool>::Success(edited.value);
 	}
+	if (componentGroup.stableType.rfind("native:", 0) == 0)
+	{
+		const String type = componentGroup.stableType.substr(String("native:").size());
+		const auto* editor = componentEditors.Find(type);
+		if (editor && componentEditors.SupportsMultipleObjects(type))
+		{
+			if (primaryIndex >= componentGroup.targets.size())
+			{
+				return Result<bool>::Failure("The registered multi-object Inspector target group is unavailable");
+			}
+			const auto* descriptor = componentEditors.FindType(type);
+			String title = descriptor ? descriptor->displayName : type;
+			if (componentGroup.sameTypeIndex > 0)
+			{
+				title += " [" + ToUrsaString(std::to_string(componentGroup.sameTypeIndex + 1)) + "]";
+			}
+			ImGui::SeparatorText(title.c_str());
+			ImGui::TextDisabled("%zu matching components", componentGroup.targets.size());
+			inspectorContext.targets = componentGroup.targets;
+			inspectorContext.primaryIndex = primaryIndex;
+			ImGuiInspectorUI ui;
+			auto edited = (*editor)(*componentGroup.targets[primaryIndex], inspectorContext, ui);
+			if (!edited)
+			{
+				return Result<bool>::Failure(edited.error);
+			}
+			return Result<bool>::Success(edited.value);
+		}
+	}
 	const bool supported = componentGroup.stableType == "native:ursa.Camera" ||
 	                       componentGroup.stableType == "native:ursa.DirectionalLight" ||
 	                       componentGroup.stableType == "native:ursa.PointLight" ||
