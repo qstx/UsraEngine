@@ -5,6 +5,7 @@
 #include <Serialization/RenderResourceReferences.hpp>
 #include <Scene/MeshFilterComponent.hpp>
 #include <Scene/RendererComponent.hpp>
+#include <Scene/SkinnedMeshRendererComponent.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <algorithm>
 #include <cmath>
@@ -183,6 +184,11 @@ Json DescribeNativeComponentPayload(const Component& component, const Json& data
 	{
 		payload["FieldTypes"]["materials"] = {
 		    {"Kind", "Array"}, {"ElementKind", "NativeMaterialBinding"}, {"ElementTypeName", "Ursa.MaterialBinding"}};
+	}
+	if (dynamic_cast<const SkinnedMeshRendererComponent*>(&component) && payload["FieldTypes"].contains("mesh"))
+	{
+		payload["FieldTypes"]["mesh"] = {
+		    {"Kind", "NativeMeshBinding"}, {"ElementKind", "Unsupported"}, {"TypeName", "Ursa.Mesh"}};
 	}
 	return payload;
 }

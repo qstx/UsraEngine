@@ -20,15 +20,8 @@ public sealed class MeshFilterComponentInspector : Inspector
 [CanEditMultipleObjects]
 public sealed class MeshRendererComponentInspector : Inspector
 {
-	public override void OnInspectorGUI()
+	internal static void DrawMaterials(RendererComponent renderer)
 	{
-		EditorGui.PropertyField(SerializedObject.FindProperty("castShadows"), "Cast Shadows");
-		EditorGui.PropertyField(SerializedObject.FindProperty("receiveShadows"), "Receive Shadows");
-		EditorGui.Separator();
-		EditorGui.PropertyField(SerializedObject.FindProperty("materials"), "Materials");
-		SerializedObject.ApplyModifiedProperties();
-		if (SerializedObject.IsEditingMultipleObjects) return;
-		if (Target is not RendererComponent renderer) return;
 		Material?[] materials = renderer.SharedMaterials;
 		for (int index = 0; index < materials.Length; ++index)
 		{
@@ -48,6 +41,36 @@ public sealed class MeshRendererComponentInspector : Inspector
 			if (material.AssetIdentity == null)
 				EditorGui.DrawMaterialProperties(material, "Material " + index);
 		}
+	}
+
+	public override void OnInspectorGUI()
+	{
+		EditorGui.PropertyField(SerializedObject.FindProperty("castShadows"), "Cast Shadows");
+		EditorGui.PropertyField(SerializedObject.FindProperty("receiveShadows"), "Receive Shadows");
+		EditorGui.Separator();
+		EditorGui.PropertyField(SerializedObject.FindProperty("materials"), "Materials");
+		SerializedObject.ApplyModifiedProperties();
+		if (SerializedObject.IsEditingMultipleObjects) return;
+		if (Target is not RendererComponent renderer) return;
+		DrawMaterials(renderer);
+	}
+}
+
+[BuiltinEditor]
+[CustomEditor(typeof(SkinnedMeshRendererComponent))]
+[CanEditMultipleObjects]
+public sealed class SkinnedMeshRendererComponentInspector : Inspector
+{
+	public override void OnInspectorGUI()
+	{
+		EditorGui.PropertyField(SerializedObject.FindProperty("mesh"), "Mesh");
+		EditorGui.PropertyField(SerializedObject.FindProperty("castShadows"), "Cast Shadows");
+		EditorGui.PropertyField(SerializedObject.FindProperty("receiveShadows"), "Receive Shadows");
+		EditorGui.Separator();
+		EditorGui.PropertyField(SerializedObject.FindProperty("materials"), "Materials");
+		SerializedObject.ApplyModifiedProperties();
+		if (SerializedObject.IsEditingMultipleObjects || Target is not RendererComponent renderer) return;
+		MeshRendererComponentInspector.DrawMaterials(renderer);
 	}
 }
 
