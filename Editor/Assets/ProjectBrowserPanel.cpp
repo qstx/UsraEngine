@@ -542,6 +542,119 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		model.ReconcileSelection(selection);
 		return Result<void>{};
 	};
+	auto setAssetClipboard = [&](const Vector<EditorSelectionEntry>& entries, bool cut) -> Result<void>
+	{
+		Vector<VirtualPath> sources;
+		if (entries.empty() || !workspace.Database())
+		{
+			return Result<void>::Failure("Project Copy and Cut require selected source assets");
+		}
+		Set<String> seen;
+		for (const EditorSelectionEntry& entry : entries)
+		{
+			if (entry.kind != EditorSelectionKind::Asset || entry.assetRole != EditorAssetSelectionRole::Source ||
+			    entry.assetLocalFileId || !entry.assetGuid || entry.IsMissing())
+			{
+				return Result<void>::Failure("Project Copy and Cut accept only source assets and folders");
+			}
+			auto source = workspace.Database()->SourcePath(entry.assetGuid);
+			if (!source || source.value != entry.assetPath || source.value.scheme != workspace.Database()->SourceScheme())
+			{
+				return Result<void>::Failure("A selected source changed or disappeared before copying");
+			}
+			if (seen.insert(source.value.ToString()).second)
+			{
+				sources.push_back(source.value);
+			}
+		}
+		for (Size index = 0; index < sources.size();)
+		{
+			bool nested = false;
+			for (const VirtualPath& candidate : sources)
+			{
+				if (candidate == sources[index])
+				{
+					continue;
+				}
+				auto metadata = workspace.Database()->Metadata(candidate);
+				if (metadata && metadata.value.folder &&
+				    sources[index].relative.size() > candidate.relative.size() &&
+				    sources[index].relative.compare(0, candidate.relative.size(), candidate.relative) == 0 &&
+				    sources[index].relative[candidate.relative.size()] == '/')
+				{
+					nested = true;
+					break;
+				}
+			}
+			if (nested)
+			{
+				sources.erase(sources.begin() + index);
+			}
+			else
+			{
+				++index;
+			}
+		}
+		assetClipboard = std::move(sources);
+		assetClipboardProject = projectKey;
+		assetClipboardCut = cut;
+		return {};
+	};
+	auto pasteAssetClipboard = [&](const String& destinationFolder) -> Result<void>
+	{
+		if (assetClipboard.empty() || assetClipboardProject != projectKey)
+		{
+			return Result<void>::Failure("The Project clipboard is empty");
+		}
+		if (readOnly || !actions.pasteAssets)
+		{
+			return Result<void>::Failure("Project Paste is unavailable while the project is read-only");
+		}
+		auto pasted = actions.pasteAssets(assetClipboard, destinationFolder, assetClipboardCut);
+		if (!pasted)
+		{
+			return Result<void>::Failure(pasted.error);
+		}
+		auto refreshed = model.Refresh(workspace);
+		if (!refreshed)
+		{
+			return refreshed;
+		}
+		Vector<EditorSelectionEntry> pastedEntries;
+		for (const VirtualPath& path : pasted.value)
+		{
+			if (const auto* asset = model.Find(path))
+			{
+				pastedEntries.push_back(AssetSelection(*asset));
+			}
+		}
+		if (!pastedEntries.empty())
+		{
+			model.SelectAsset(pastedEntries.front().assetPath);
+			selection.SelectEntries(std::move(pastedEntries), 0);
+			hierarchy.ClearSelection();
+		}
+		model.ReconcileSelection(selection);
+		if (assetClipboardCut)
+		{
+			assetClipboard.clear();
+			assetClipboardCut = false;
+		}
+		return {};
+	};
+	auto canCopyCutSelection = [&]()
+	{
+		return !selection.entries.empty() &&
+		       std::all_of(selection.entries.begin(), selection.entries.end(),
+		                   [](const EditorSelectionEntry& entry)
+	                   {
+		                   return entry.kind == EditorSelectionKind::Asset &&
+		                          entry.assetRole == EditorAssetSelectionRole::Source && !entry.assetLocalFileId &&
+		                          entry.assetGuid && !entry.IsMissing();
+	                   });
+	};
+	bool pasteRequestedFromMenu = false;
+	String pasteMenuDestination;
 	auto navigateHistory = [&](bool backward)
 	{
 		if (!selection.Clear())
@@ -834,108 +947,14 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	if (projectClipboardFocused &&
 	    (ImGui::IsKeyPressed(ImGuiKey_C, false) || ImGui::IsKeyPressed(ImGuiKey_X, false)))
 	{
-		Vector<VirtualPath> sources;
-		bool valid = !selection.entries.empty() && workspace.Database();
-		Set<String> seen;
-		for (const EditorSelectionEntry& entry : selection.entries)
-		{
-			if (entry.kind != EditorSelectionKind::Asset || entry.assetRole != EditorAssetSelectionRole::Source ||
-			    entry.assetLocalFileId || !entry.assetGuid || entry.IsMissing())
-			{
-				valid = false;
-				break;
-			}
-			auto source = workspace.Database()->SourcePath(entry.assetGuid);
-			if (!source || source.value != entry.assetPath || source.value.scheme != workspace.Database()->SourceScheme())
-			{
-				valid = false;
-				break;
-			}
-			if (seen.insert(source.value.ToString()).second)
-			{
-				sources.push_back(source.value);
-			}
-		}
-		if (valid)
-		{
-			for (Size index = 0; index < sources.size();)
-			{
-				bool nested = false;
-				for (const VirtualPath& candidate : sources)
-				{
-					if (candidate == sources[index])
-					{
-						continue;
-					}
-					auto metadata = workspace.Database()->Metadata(candidate);
-					if (metadata && metadata.value.folder &&
-					    sources[index].relative.size() > candidate.relative.size() &&
-					    sources[index].relative.compare(0, candidate.relative.size(), candidate.relative) == 0 &&
-					    sources[index].relative[candidate.relative.size()] == '/')
-					{
-						nested = true;
-						break;
-					}
-				}
-				if (nested)
-				{
-					sources.erase(sources.begin() + index);
-				}
-				else
-				{
-					++index;
-				}
-			}
-			assetClipboard = std::move(sources);
-			assetClipboardProject = projectKey;
-			assetClipboardCut = ImGui::IsKeyPressed(ImGuiKey_X, false);
-			diagnostic.clear();
-		}
-		else
-		{
-			diagnostic = "Project Copy and Cut require writable source assets";
-		}
+		auto copied = setAssetClipboard(selection.entries, ImGui::IsKeyPressed(ImGuiKey_X, false));
+		diagnostic = copied ? String{} : copied.error;
 	}
 	if (projectClipboardFocused && ImGui::IsKeyPressed(ImGuiKey_V, false) &&
 	    !assetClipboard.empty() && assetClipboardProject == projectKey)
 	{
-		if (readOnly || !actions.pasteAssets)
-		{
-			diagnostic = "Project Paste is unavailable while the project is read-only";
-		}
-		else
-		{
-			auto pasted = actions.pasteAssets(assetClipboard,
-			                                  model.CurrentFolder(), assetClipboardCut);
-			diagnostic = pasted ? String{} : pasted.error;
-			if (pasted)
-			{
-				auto refreshed = model.Refresh(workspace);
-				diagnostic = refreshed ? String{} : refreshed.error;
-				if (refreshed)
-				{
-					Vector<EditorSelectionEntry> pastedEntries;
-					for (const VirtualPath& path : pasted.value)
-					{
-						if (const auto* asset = model.Find(path))
-						{
-							pastedEntries.push_back(AssetSelection(*asset));
-						}
-					}
-					if (!pastedEntries.empty())
-					{
-						model.SelectAsset(pastedEntries.front().assetPath);
-						selection.SelectEntries(std::move(pastedEntries), 0);
-					}
-					model.ReconcileSelection(selection);
-					if (assetClipboardCut)
-					{
-						assetClipboard.clear();
-						assetClipboardCut = false;
-					}
-				}
-			}
-		}
+		auto pasted = pasteAssetClipboard(model.CurrentFolder());
+		diagnostic = pasted ? String{} : pasted.error;
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    !selection.entries.empty() && ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&
@@ -1866,6 +1885,25 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					{
 						toggleFavoriteAsset(folder.path.relative);
 					}
+					if (Icons::MenuItem("Cut", "Ctrl+X", false, canCopyCutSelection()))
+					{
+						auto cut = setAssetClipboard(selection.entries, true);
+						diagnostic = cut ? String{} : cut.error;
+					}
+					if (Icons::MenuItem("Copy", "Ctrl+C", false, canCopyCutSelection()))
+					{
+						auto copied = setAssetClipboard(selection.entries, false);
+						diagnostic = copied ? String{} : copied.error;
+					}
+					ImGui::BeginDisabled(readOnly || assetClipboard.empty() || assetClipboardProject != projectKey ||
+					                     !actions.pasteAssets);
+					if (Icons::MenuItem("Paste", "Ctrl+V"))
+					{
+						pasteRequestedFromMenu = true;
+						pasteMenuDestination = folder.path.relative;
+					}
+					ImGui::EndDisabled();
+					ImGui::Separator();
 					if (Icons::MenuItem("Open"))
 					{
 						selectFolder(folder.path.relative);
@@ -2118,6 +2156,25 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				{
 					toggleFavoriteAsset(asset.path.relative);
 				}
+				if (Icons::MenuItem("Cut", "Ctrl+X", false, canCopyCutSelection()))
+				{
+					auto cut = setAssetClipboard(selection.entries, true);
+					diagnostic = cut ? String{} : cut.error;
+				}
+				if (Icons::MenuItem("Copy", "Ctrl+C", false, canCopyCutSelection()))
+				{
+					auto copied = setAssetClipboard(selection.entries, false);
+					diagnostic = copied ? String{} : copied.error;
+				}
+				ImGui::BeginDisabled(readOnly || assetClipboard.empty() || assetClipboardProject != projectKey ||
+				                     !actions.pasteAssets);
+				if (Icons::MenuItem("Paste", "Ctrl+V"))
+				{
+					pasteRequestedFromMenu = true;
+					pasteMenuDestination = model.CurrentFolder();
+				}
+				ImGui::EndDisabled();
+				ImGui::Separator();
 				const String commandKey = "asset:" + asset.guid.ToString();
 				const auto canOpen = CanExecuteMenuCommand(
 				    commandKey, "project.open", "Open", selection,
@@ -2433,6 +2490,15 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			                   requestCreateFolder();
 			                   return Result<void>{};
 		                   }});
+		ImGui::BeginDisabled(readOnly || assetClipboard.empty() || assetClipboardProject != projectKey ||
+		                     !actions.pasteAssets);
+		if (Icons::MenuItem("Paste", "Ctrl+V"))
+		{
+			pasteRequestedFromMenu = true;
+			pasteMenuDestination = targetFolder;
+		}
+		ImGui::EndDisabled();
+		ImGui::Separator();
 		const auto canCreateFolder = commands.CanExecute("project.background.create-folder", captured, current);
 		if (Icons::MenuItem("Create Folder", nullptr, false, static_cast<bool>(canCreateFolder)))
 		{
@@ -2498,6 +2564,11 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		ImGui::EndPopup();
 	}
 	ImGui::EndChild();
+	if (pasteRequestedFromMenu)
+	{
+		auto pasted = pasteAssetClipboard(pasteMenuDestination);
+		diagnostic = pasted ? String{} : pasted.error;
+	}
 	ImGui::Separator();
 	String footerPath = currentFolder.empty() ? String("Assets") : String("Assets/") + currentFolder;
 	if (const auto* primary = selection.PrimaryEntry(); primary && primary->kind == EditorSelectionKind::Asset &&
