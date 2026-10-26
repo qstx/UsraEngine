@@ -7,7 +7,7 @@ namespace Ursa::Editor
 {
 namespace
 {
-constexpr Float32 OrbitRadiansPerPixel = 0.01f;
+constexpr Float32 OrbitRadiansPerPixel = 0.003f;
 constexpr Float32 MinimumDistance = 0.05f;
 constexpr Float32 MaximumDistance = 1'000'000.f;
 constexpr Float32 Pi = 3.14159265358979323846f;
