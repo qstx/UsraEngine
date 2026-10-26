@@ -20,5 +20,5 @@ void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint
 void MoveSceneView(Camera& camera, ViewportPoint movement, Float32 deltaTime, Float32 speed, bool fast,
                    bool panVerticalInOrthographic = false);
 
-void FocusSceneView(Camera& camera, Vec3 target, Float32 radius);
+void FocusSceneView(Camera& camera, Vec3 target, Float32 radius, Float32 aspect);
 } // namespace Ursa::Editor

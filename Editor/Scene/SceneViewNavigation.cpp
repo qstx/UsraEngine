@@ -252,10 +252,11 @@ void MoveSceneView(Camera& camera, ViewportPoint movement, Float32 deltaTime, Fl
 	camera.target = Add(camera.target, shift);
 }
 
-void FocusSceneView(Camera& camera, Vec3 target, Float32 radius)
+void FocusSceneView(Camera& camera, Vec3 target, Float32 radius, Float32 aspect)
 {
 	if (!std::isfinite(target.x) || !std::isfinite(target.y) || !std::isfinite(target.z) || !std::isfinite(radius) ||
-	    !std::isfinite(camera.verticalFovRadians) || camera.verticalFovRadians <= 0.f ||
+	    !std::isfinite(aspect) || aspect <= 0.f || !std::isfinite(camera.verticalFovRadians) ||
+	    camera.verticalFovRadians <= 0.f ||
 	    camera.verticalFovRadians >= Pi)
 	{
 		return;
@@ -265,13 +266,14 @@ void FocusSceneView(Camera& camera, Vec3 target, Float32 radius)
 	const Vec3 direction = distance > 1.0e-5f ? Scale(currentOffset, 1.f / distance) : Vec3{0.f, 0.5f, 0.8660254f};
 	if (camera.orthographic)
 	{
-		camera.orthographicSize = std::clamp(std::max(std::abs(radius), 0.1f) * 1.2f, MinimumDistance, MaximumDistance);
+		const Float32 verticalRadius = std::abs(radius) / std::min(aspect, 1.f);
+		camera.orthographicSize = std::clamp(verticalRadius, MinimumDistance, MaximumDistance);
 		distance = std::max(distance, 1.f);
 		camera.target = target;
 		camera.position = Add(target, Scale(direction, distance));
 		return;
 	}
-	distance = std::max(std::abs(radius), 0.1f) / std::sin(camera.verticalFovRadians * 0.5f) * 1.2f;
+	distance = std::max(std::abs(radius), MinimumDistance) / std::sin(camera.verticalFovRadians * 0.5f);
 	distance = std::clamp(distance, MinimumDistance, MaximumDistance);
 	camera.target = target;
 	camera.position = Add(target, Scale(direction, distance));

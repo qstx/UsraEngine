@@ -737,9 +737,12 @@ void FocusSceneSelection(Scene& scene, const Vector<GameObject::Ptr>& selected, 
 	}
 	const Vec3 center{(minimum.x + maximum.x) * 0.5f, (minimum.y + maximum.y) * 0.5f, (minimum.z + maximum.z) * 0.5f};
 	const Vec3 extent = maximum - minimum;
-	const Float32 radius =
-	    hasBounds ? std::sqrt(Dot(extent, extent)) * 0.5f : std::max(std::sqrt(Dot(extent, extent)) * 0.5f, 0.5f);
-	FocusSceneView(camera, center, radius);
+	Float32 radius = std::sqrt(Dot(extent, extent)) * 0.5f;
+	if (radius <= std::numeric_limits<Float32>::epsilon())
+	{
+		radius = 10.f;
+	}
+	FocusSceneView(camera, center, radius, aspect);
 }
 
 bool SetSceneView2DMode(Camera& camera, bool& twoDMode, bool enabled)
