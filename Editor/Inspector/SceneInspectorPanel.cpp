@@ -4691,7 +4691,28 @@ Result<bool> DrawSceneInspector(
 						                              : scriptHeader ? scriptHeader->TypeName()
 						                              : codec        ? codec.value->type
 						                                             : String("Component");
-						if (component->SupportsEnabled())
+						const String headerEditorType = scriptHeader ? scriptHeader->TypeName()
+						                                : codec      ? codec.value->type
+						                                             : String{};
+						bool managedComponentHeader = false;
+						if (const auto* headerEditor = componentEditors.FindHeader(headerEditorType))
+						{
+							ComponentInspectorContext componentContext = inspectorContext;
+							componentContext.targets = {component};
+							componentContext.primaryIndex = 0;
+							ImGuiInspectorUI ui;
+							auto header = (*headerEditor)(*component, componentContext, ui);
+							if (header)
+							{
+								changed |= header.value;
+								managedComponentHeader = scriptHeader != nullptr;
+							}
+							else
+							{
+								diagnostic = header.error;
+							}
+						}
+						if (component->SupportsEnabled() && !managedComponentHeader)
 						{
 							bool componentEnabled = component->IsEnabled();
 							if (ImGui::Checkbox("##ComponentEnabled", &componentEnabled))
@@ -4704,6 +4725,10 @@ Result<bool> DrawSceneInspector(
 							{
 								ImGui::SetTooltip("Enabled");
 							}
+							ImGui::SameLine();
+						}
+						else if (managedComponentHeader && component->SupportsEnabled())
+						{
 							ImGui::SameLine();
 						}
 						const bool componentOpen = DrawInspectorComponentFoldout(
@@ -5381,9 +5406,29 @@ Result<bool> DrawSceneInspector(
 						const String componentLabel = scriptHeader ? scriptHeader->TypeName()
 						                              : descriptor ? descriptor->displayName
 						                                           : codec.value->type;
+						const String headerEditorType = scriptHeader ? scriptHeader->TypeName() : codec.value->type;
+						bool managedComponentHeader = false;
+						if (const auto* headerEditor = componentEditors.FindHeader(headerEditorType))
+						{
+							ComponentInspectorContext componentContext = inspectorContext;
+							componentContext.object = node;
+							componentContext.targets = {object};
+							componentContext.primaryIndex = 0;
+							ImGuiInspectorUI ui;
+							auto header = (*headerEditor)(*object, componentContext, ui);
+							if (header)
+							{
+								changed |= header.value;
+								managedComponentHeader = scriptHeader != nullptr;
+							}
+							else
+							{
+								diagnostic = header.error;
+							}
+						}
 						auto enabled = scene.IsComponentEnabled(componentId);
 						const bool canEnable = enabled && object->SupportsEnabled();
-						if (canEnable)
+						if (canEnable && !managedComponentHeader)
 						{
 							bool value = enabled.value;
 							if (ImGui::Checkbox("##ComponentEnabled", &value))
@@ -5396,6 +5441,10 @@ Result<bool> DrawSceneInspector(
 							{
 								ImGui::SetTooltip("Enabled");
 							}
+							ImGui::SameLine();
+						}
+						else if (managedComponentHeader && canEnable)
+						{
 							ImGui::SameLine();
 						}
 						const bool componentOpen = DrawInspectorComponentFoldout(

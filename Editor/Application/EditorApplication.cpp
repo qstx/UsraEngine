@@ -6486,6 +6486,38 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 				    return InvokeManagedEditorExtension(*managedHost, sessionId, extensionId, context);
 			    },
 			    supportsMultipleObjects);
+			candidateEditors.ReplaceHeaderEditor(
+			    target,
+			    [this, extensionId, sessionId](Component& component, ComponentInspectorContext& selection,
+			                                   InspectorUI&) -> Result<bool>
+			    {
+				    if (!managedHost || managedHost->IsSessionFaulted())
+				    {
+					    return Result<bool>::Failure("Managed Editor environment is unavailable");
+				    }
+				    ManagedEditorContext context;
+				    context.document = documents ? documents->Current() : nullptr;
+				    context.documents = documents.get();
+				    context.workspace = workspace.get();
+				    context.registry = &project->components;
+				    context.target = &component;
+				    context.componentTargets = selection.targets;
+				    context.componentPrimaryIndex = selection.primaryIndex;
+				    context.selection = selection;
+				    context.saveContext.scene = selection.scene;
+				    const bool wasEnabled = component.IsEnabled();
+				    auto invoked = InvokeManagedEditorExtension(
+				        *managedHost, sessionId, "inspector-component-header:" + extensionId.substr(10), context);
+				    if (!invoked)
+				    {
+					    return Result<bool>::Failure(invoked.error);
+				    }
+				    if (!invoked.value)
+				    {
+					    return Result<bool>::Failure("Managed Component Inspector header is unavailable");
+				    }
+				    return Result<bool>::Success(wasEnabled != component.IsEnabled());
+			    });
 		}
 	}
 	managedEditorFallbacks = std::move(candidateFallbacks);

@@ -99,6 +99,12 @@ const ComponentEditor* ComponentEditors::Find(const String& type) const
 	return found == editors.end() ? nullptr : &found->second;
 }
 
+const ComponentHeaderEditor* ComponentEditors::FindHeader(const String& type) const
+{
+	auto found = headerEditors.find(type);
+	return found == headerEditors.end() ? nullptr : &found->second;
+}
+
 bool ComponentEditors::SupportsMultipleObjects(const String& type) const
 {
 	const auto found = multipleObjectEditors.find(type);
@@ -135,7 +141,20 @@ void ComponentEditors::ReplaceEditor(const String& type, ComponentEditor editor,
 	else
 	{
 		editors.erase(type);
+		headerEditors.erase(type);
 		multipleObjectEditors.erase(type);
+	}
+}
+
+void ComponentEditors::ReplaceHeaderEditor(const String& type, ComponentHeaderEditor editor)
+{
+	if (editor)
+	{
+		headerEditors[type] = std::move(editor);
+	}
+	else
+	{
+		headerEditors.erase(type);
 	}
 }
 
@@ -143,6 +162,7 @@ void ComponentEditors::UnregisterType(const String& type)
 {
 	types.erase(type);
 	editors.erase(type);
+	headerEditors.erase(type);
 	multipleObjectEditors.erase(type);
 }
 

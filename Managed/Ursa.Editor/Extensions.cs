@@ -63,6 +63,13 @@ public abstract class Inspector
 	internal void ReleaseTarget() { targetScope?.Dispose(); targetScope = null; }
 
 	public virtual void OnInspectorGUI() => DrawDefaultInspector();
+	public virtual void OnComponentHeaderGUI()
+	{
+		if (Target is not Behaviour behaviour) return;
+		bool enabled = behaviour.Enabled;
+		bool edited = EditorGui.Toggle("##ComponentEnabled", enabled);
+		if (edited != enabled || EditorGui.IsLastControlEdited) behaviour.Enabled = edited;
+	}
 	public virtual void OnGameObjectHeaderGUI()
 	{
 		SerializedProperty active = SerializedObject.FindProperty("active");
@@ -312,6 +319,12 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 			{
 				inspector.SerializedObject = CreateSerializedObject(inspector);
 				try { inspector.OnGameObjectHeaderGUI(); inspector.SynchronizeTarget(); }
+				finally { inspector.ReleaseTarget(); }
+			});
+			callbacks.Add("inspector-component-header:" + target, () =>
+			{
+				inspector.SerializedObject = CreateSerializedObject(inspector);
+				try { inspector.OnComponentHeaderGUI(); inspector.SynchronizeTarget(); }
 				finally { inspector.ReleaseTarget(); }
 			});
 		}

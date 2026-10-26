@@ -64,6 +64,7 @@ public:
 };
 
 using ComponentEditor = std::function<Result<bool>(Component&, ComponentInspectorContext&, InspectorUI&)>;
+using ComponentHeaderEditor = std::function<Result<bool>(Component&, ComponentInspectorContext&, InspectorUI&)>;
 
 using ComponentFactory = std::function<Result<Component*>(ComponentInspectorContext&)>;
 
@@ -88,10 +89,12 @@ public:
 	Result<void> RegisterType(ComponentTypeDescriptor descriptor, ComponentEditor editor = {});
 
 	void ReplaceEditor(const String& type, ComponentEditor editor, bool supportsMultipleObjects = false);
+	void ReplaceHeaderEditor(const String& type, ComponentHeaderEditor editor);
 
 	void UnregisterType(const String& type);
 
 	const ComponentEditor* Find(const String& type) const;
+	const ComponentHeaderEditor* FindHeader(const String& type) const;
 	bool SupportsMultipleObjects(const String& type) const;
 
 	const ComponentTypeDescriptor* FindType(const String& type) const;
@@ -104,6 +107,7 @@ public:
 
 private:
 	Map<String, ComponentEditor> editors;
+	Map<String, ComponentHeaderEditor> headerEditors;
 	Map<String, bool> multipleObjectEditors;
 	Map<String, ComponentTypeDescriptor> types;
 };
