@@ -529,6 +529,109 @@ bool IsHierarchyAssetDropSession(const EditorDragSession& session)
 	                   });
 }
 
+std::pair<ResourceId, HierarchyDropZone>
+ResolveHierarchyDropAtCursor(const Vector<EditorSelectionEntry>& visibleRows, ResourceId documentId, bool playSession,
+                             const std::function<ResourceId(ResourceId)>& parentOf, const EditorDragSession& session,
+                             ResourceId targetId, HierarchyDropZone zone, float cursorX, float contentStartX,
+                             float indentWidth)
+{
+	if (zone == HierarchyDropZone::Into || !targetId || visibleRows.empty() || indentWidth <= 0.0f)
+	{
+		return {targetId, zone};
+	}
+	const auto target = std::find_if(visibleRows.begin(), visibleRows.end(),
+	                                 [&](const EditorSelectionEntry& entry) { return entry.objectId == targetId; });
+	if (target == visibleRows.end())
+	{
+		return {targetId, zone};
+	}
+	Vector<ResourceId> draggedIds;
+	if (auto normalized = NormalizeHierarchyDragSources(session, documentId, playSession, parentOf))
+	{
+		for (const auto& entry : normalized.value)
+		{
+			draggedIds.push_back(entry.objectId);
+		}
+	}
+	const Size targetIndex = static_cast<Size>(std::distance(visibleRows.begin(), target));
+	Size previousIndex = zone == HierarchyDropZone::Above ? targetIndex : targetIndex + 1;
+	Size nextIndex = zone == HierarchyDropZone::Above ? targetIndex : targetIndex + 1;
+	std::optional<Size> previous;
+	std::optional<Size> next;
+	while (previousIndex > 0)
+	{
+		--previousIndex;
+		if (std::find(draggedIds.begin(), draggedIds.end(), visibleRows[previousIndex].objectId) == draggedIds.end())
+		{
+			previous = previousIndex;
+			break;
+		}
+	}
+	while (nextIndex < visibleRows.size())
+	{
+		if (std::find(draggedIds.begin(), draggedIds.end(), visibleRows[nextIndex].objectId) == draggedIds.end())
+		{
+			next = nextIndex;
+			break;
+		}
+		++nextIndex;
+	}
+	if (!previous)
+	{
+		return {targetId, zone};
+	}
+	auto depthOf = [&](ResourceId objectId)
+	{
+		Size depth = 0;
+		ResourceId ancestor = parentOf(objectId);
+		while (ancestor && depth <= visibleRows.size())
+		{
+			++depth;
+			const ResourceId parent = parentOf(ancestor);
+			if (parent == ancestor)
+			{
+				break;
+			}
+			ancestor = parent;
+		}
+		return depth;
+	};
+	const ResourceId previousId = visibleRows[*previous].objectId;
+	const Size previousDepth = depthOf(previousId);
+	const Size nextDepth = next ? depthOf(visibleRows[*next].objectId) : 0;
+	const bool previousExpanded =
+	    std::any_of(visibleRows.begin(), visibleRows.end(),
+	                [&](const EditorSelectionEntry& entry) { return parentOf(entry.objectId) == previousId; });
+	const bool betweenParentAndFirstChild =
+	    previousExpanded && next && parentOf(visibleRows[*next].objectId) == previousId;
+	const Size minimumDepth = next ? nextDepth : 0;
+	const Size maximumDepth = previousDepth + (betweenParentAndFirstChild ? 1 : 0);
+	ResourceId resolvedTarget = previousId;
+	HierarchyDropZone resolvedZone = HierarchyDropZone::Below;
+	const float requestedDepth = std::floor((cursorX - contentStartX) / indentWidth);
+	if (maximumDepth <= minimumDepth || requestedDepth >= static_cast<float>(maximumDepth))
+	{
+		if (betweenParentAndFirstChild)
+		{
+			resolvedTarget = visibleRows[*next].objectId;
+			resolvedZone = HierarchyDropZone::Above;
+		}
+		return {resolvedTarget, resolvedZone};
+	}
+	ResourceId ancestor = previousId;
+	Size ancestorDepth = previousDepth;
+	while (ancestorDepth > minimumDepth && static_cast<float>(ancestorDepth) != requestedDepth)
+	{
+		ancestor = parentOf(ancestor);
+		if (!ancestor)
+		{
+			break;
+		}
+		--ancestorDepth;
+	}
+	return {ancestor ? ancestor : previousId, resolvedZone};
+}
+
 float VectorLength3(float x, float y, float z)
 {
 	return std::sqrt(x * x + y * y + z * z);
@@ -2223,11 +2326,14 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	    !playSession && (editableScene || targetPrefabInstance != prefabInstanceByObject.end());
 	const auto dropZone = DrawHierarchyRowDropFeedback(
 	    rowRect, documentId, playSession, parentOf, allowHierarchyDrop,
-	    [this, &scene, documentId, targetId = id.value, &changed, editableScene,
+	    [this, &scene, &visibleRows, &parentOf, rowRect, documentId, targetId = id.value, &changed, editableScene,
 	     targetInstance = targetPrefabInstance == prefabInstanceByObject.end()
 	                          ? String{}
 	                          : targetPrefabInstance->second](const EditorDragSession& drag, HierarchyDropZone zone)
 	    {
+		    const auto [dropTargetId, dropZone] = ResolveHierarchyDropAtCursor(
+		        visibleRows, documentId, false, parentOf, drag, targetId, zone, ImGui::GetIO().MousePos.x,
+		        rowRect.Min.x + ImGui::GetTreeNodeToLabelSpacing(), ImGui::GetStyle().IndentSpacing);
 		    if (!editableScene)
 		    {
 			    if (targetInstance.empty() ||
@@ -2246,11 +2352,12 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		        std::any_of(drag.sources.begin(), drag.sources.end(), [](const EditorDragSource& source)
 		                    { return source.identity.kind == EditorSelectionKind::Asset; });
 		    auto result = containsAsset && assetDropAction
-		                      ? assetDropAction(scene, drag, targetId, zone, documentId)
-		                      : ApplyHierarchyDrop(scene, drag, targetId, zone, documentId);
+		                      ? assetDropAction(scene, drag, dropTargetId, dropZone, documentId)
+		                      : ApplyHierarchyDrop(scene, drag, dropTargetId, dropZone, documentId);
 		    changed |= static_cast<bool>(result);
 		    commandDiagnostic = result ? String{} : result.error;
-	    }, !hierarchyAlphabeticalSort);
+	    },
+	    !hierarchyAlphabeticalSort);
 	if (dropZone == HierarchyDropZone::Into && hasChildren && ImGui::GetDragDropPayload())
 	{
 		if (dragHoverTarget != id.value)
