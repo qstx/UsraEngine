@@ -872,7 +872,9 @@ bool SetSceneView2DMode(Camera& camera, bool& twoDMode, bool enabled)
 	return true;
 }
 
-bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& twoDMode, bool& rotationLocked,
+bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMinimum, ImVec2 viewportMaximum,
+                               Float32& offsetX, Float32& offsetY, bool& dragging,
+                               bool& twoDMode, bool& rotationLocked,
                                bool& showBackground, bool& settingsChanged, bool& hovered)
 {
 	const Float32 radius = 30.f;
@@ -880,7 +882,10 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 	const Float32 centerHitRadius = 7.f;
 	const Float32 positiveAxisMarkerRadius = 7.f;
 	const Float32 negativeAxisMarkerRadius = 6.f;
-	const ImVec2 center{viewportMaximum.x - 42.f, viewportMaximum.y + 42.f};
+	const Float32 defaultCenterX = viewportMaximum.x - 50.f;
+	const Float32 defaultCenterY = viewportMinimum.y + 50.f;
+	ImVec2 center{std::clamp(defaultCenterX + offsetX, viewportMinimum.x + 42.f, viewportMaximum.x - 42.f),
+	              std::clamp(defaultCenterY + offsetY, viewportMinimum.y + 42.f, viewportMaximum.y - 42.f)};
 	hovered = false;
 	if (twoDMode)
 	{
@@ -891,6 +896,26 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 	const Vec3 forward = Normalized(camera.target - camera.position);
 	const Vec3 right = Normalized(Cross(forward, camera.up));
 	const Vec3 screenUp = Normalized(Cross(right, forward));
+	const ImRect dragHandleRect({center.x - 38.f, center.y - 38.f}, {center.x - 20.f, center.y - 26.f});
+	const bool dragHandleHovered = dragHandleRect.Contains(ImGui::GetIO().MousePos);
+	if (dragHandleHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+	{
+		dragging = true;
+	}
+	if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+	{
+		dragging = false;
+	}
+	if (dragging && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+	{
+		const ImVec2 delta = ImGui::GetIO().MouseDelta;
+		center.x = std::clamp(center.x + delta.x, viewportMinimum.x + 42.f, viewportMaximum.x - 42.f);
+		center.y = std::clamp(center.y + delta.y, viewportMinimum.y + 42.f, viewportMaximum.y - 42.f);
+		offsetX = std::clamp(center.x - defaultCenterX, -10000.f, 10000.f);
+		offsetY = std::clamp(center.y - defaultCenterY, -10000.f, 10000.f);
+		settingsChanged = true;
+	}
+	hovered |= dragHandleHovered || dragging;
 
 	struct AxisEnd
 	{
@@ -1050,6 +1075,12 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 			drawList->AddRectFilled(gizmoMinimum, gizmoMaximum, ImGui::GetColorU32(ImGuiCol_WindowBg, 0.28f), 5.f);
 			drawList->AddRect(gizmoMinimum, gizmoMaximum, ImGui::GetColorU32(ImGuiCol_Border, 0.5f), 5.f);
 		}
+		const ImU32 handleColor = ImGui::GetColorU32(dragHandleHovered || dragging ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+		for (Float32 line = 0.f; line < 3.f; ++line)
+		{
+			const Float32 y = center.y - 36.f + line * 4.f;
+			drawList->AddLine({center.x - 35.f, y}, {center.x - 23.f, y}, handleColor, 1.5f);
+		}
 		Vector<const AxisEnd*> depthSortedEnds;
 		depthSortedEnds.reserve(std::size(ends));
 		for (const AxisEnd& end : ends)
@@ -1189,7 +1220,8 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 	}
 	if (hovered)
 	{
-		ImGui::SetTooltip("Click an axis to align the Scene view");
+		ImGui::SetTooltip(dragHandleHovered || dragging ? "Drag to move the orientation gizmo"
+		                                               : "Click an axis to align the Scene view");
 	}
 	return clicked;
 }
@@ -1475,6 +1507,8 @@ void SceneViewPanel::SaveProjectSettings(VirtualFileSystem& userFiles, const Str
 	settings.sceneGizmo3DIcons = sceneGizmo3DIcons;
 	settings.sceneGizmoIconSize = sceneGizmoIconSize;
 	settings.showSceneOrientationBackground = showSceneOrientationBackground;
+	settings.sceneOrientationGizmoOffsetX = sceneOrientationGizmoOffsetX;
+	settings.sceneOrientationGizmoOffsetY = sceneOrientationGizmoOffsetY;
 	const String text = SerializeGameViewSettings(settings);
 	auto written = userFiles.WriteAtomic(path.value, ToBytes(text));
 	diagnostic = written ? String{} : written.error;
@@ -1574,6 +1608,8 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 		sceneGridSize = 1.f;
 		showSceneGizmos = true;
 		showSceneOrientationBackground = true;
+		sceneOrientationGizmoOffsetX = 0.f;
+		sceneOrientationGizmoOffsetY = 0.f;
 		diagnostic = settings.error;
 	}
 	else
@@ -1609,6 +1645,8 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			sceneGridSize = 1.f;
 			showSceneGizmos = true;
 			showSceneOrientationBackground = true;
+			sceneOrientationGizmoOffsetX = 0.f;
+			sceneOrientationGizmoOffsetY = 0.f;
 			diagnostic = "Saved Game resolution exceeds supported limits; restored defaults.";
 		}
 		else
@@ -1648,6 +1686,8 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			sceneGizmo3DIcons = saved.sceneGizmo3DIcons;
 			sceneGizmoIconSize = saved.sceneGizmoIconSize;
 			showSceneOrientationBackground = saved.showSceneOrientationBackground;
+			sceneOrientationGizmoOffsetX = saved.sceneOrientationGizmoOffsetX;
+			sceneOrientationGizmoOffsetY = saved.sceneOrientationGizmoOffsetY;
 		}
 		if (!selectedCustomPreset.empty() &&
 		    std::none_of(customPresets.begin(), customPresets.end(),
@@ -2561,7 +2601,11 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				if (layout.displayRect.width >= 100.f && layout.displayRect.height >= 100.f &&
 				    DrawSceneOrientationGizmo(
 				        sceneTarget.preview->GetCamera(),
-				        {layout.displayRect.x + layout.displayRect.width - 8.f, layout.displayRect.y + 8.f},
+				        {layout.displayRect.x, layout.displayRect.y},
+				        {layout.displayRect.x + layout.displayRect.width, layout.displayRect.y + layout.displayRect.height},
+				        sceneOrientationGizmoOffsetX,
+				        sceneOrientationGizmoOffsetY,
+				        sceneOrientationGizmoDragging,
 				        sceneView2DMode,
 				        sceneViewRotationLocked,
 				        showSceneOrientationBackground,

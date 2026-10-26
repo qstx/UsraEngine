@@ -50,6 +50,8 @@ struct GameViewSettingsState
 	bool sceneGizmo3DIcons = true;
 	Float32 sceneGizmoIconSize = 1.f;
 	bool showSceneOrientationBackground = true;
+	Float32 sceneOrientationGizmoOffsetX = 0.f;
+	Float32 sceneOrientationGizmoOffsetY = 0.f;
 };
 
 Result<Vector<GameViewPreset>> DeserializeGameViewPresets(const String& json, UInt32 maxTextureSize,

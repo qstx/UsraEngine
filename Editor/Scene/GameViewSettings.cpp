@@ -156,6 +156,8 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 		settings.sceneGizmo3DIcons = json.value("sceneGizmo3DIcons", true);
 		settings.sceneGizmoIconSize = json.value("sceneGizmoIconSize", 1.f);
 		settings.showSceneOrientationBackground = json.value("showSceneOrientationBackground", true);
+		settings.sceneOrientationGizmoOffsetX = json.value("sceneOrientationGizmoOffsetX", 0.f);
+		settings.sceneOrientationGizmoOffsetY = json.value("sceneOrientationGizmoOffsetY", 0.f);
 		if (!settings.width || !settings.height || !std::isfinite(settings.scale) || settings.scale <= 0 ||
 		    !std::isfinite(settings.pan.x) || !std::isfinite(settings.pan.y) || !std::isfinite(settings.snapMoveX) ||
 		    settings.snapMoveX <= 0.f || !std::isfinite(settings.snapMoveY) || settings.snapMoveY <= 0.f ||
@@ -172,6 +174,8 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 		    !std::isfinite(settings.sceneGridSize) || settings.sceneGridSize < 0.0001f ||
 		    settings.sceneGridSize > 10000.f ||
 		    !std::isfinite(settings.sceneGizmoIconSize) || settings.sceneGizmoIconSize < 0.1f ||
+		    !std::isfinite(settings.sceneOrientationGizmoOffsetX) ||
+		    !std::isfinite(settings.sceneOrientationGizmoOffsetY) ||
 		    settings.sceneGizmoIconSize > 3.f)
 		{
 			return Result<GameViewSettingsState>::Failure("Game view settings contain invalid values");
@@ -226,6 +230,8 @@ String SerializeGameViewSettings(const GameViewSettingsState& settings)
 	json["sceneGizmo3DIcons"] = settings.sceneGizmo3DIcons;
 	json["sceneGizmoIconSize"] = settings.sceneGizmoIconSize;
 	json["showSceneOrientationBackground"] = settings.showSceneOrientationBackground;
+	json["sceneOrientationGizmoOffsetX"] = settings.sceneOrientationGizmoOffsetX;
+	json["sceneOrientationGizmoOffsetY"] = settings.sceneOrientationGizmoOffsetY;
 	return ToUrsaString(json.dump(2));
 }
 } // namespace Ursa::Editor
