@@ -171,6 +171,8 @@ struct EditorServices
 	static Result<bool> ToggleLeft(B::BindingCall& call, const B::Utf8View& label, bool value, bool mixedValue);
 	static Result<void> SetNextItemWidth(B::BindingCall& call, Float64 width);
 	static Result<Float64> GetContentRegionAvailableWidth(B::BindingCall& call);
+	static Result<void> Indent(B::BindingCall& call, Float64 width);
+	static Result<void> Unindent(B::BindingCall& call, Float64 width);
 	static Result<Int64> IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value, bool mixedValue = false);
 	static Result<UInt64> ULongField(B::BindingCall& call, const B::Utf8View& label, UInt64 value,
 	                                 bool mixedValue = false);

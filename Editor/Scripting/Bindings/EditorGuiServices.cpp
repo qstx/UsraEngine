@@ -422,6 +422,28 @@ Result<Float64> EditorServices::GetContentRegionAvailableWidth(B::BindingCall& c
 	return Result<Float64>::Success(ImGui::GetContentRegionAvail().x);
 }
 
+Result<void> EditorServices::Indent(B::BindingCall& call, Float64 width)
+{
+	RequireGui(call);
+	if (!std::isfinite(width) || width < 0.0 || width > std::numeric_limits<Float32>::max())
+	{
+		throw std::runtime_error("Editor indentation must be finite, non-negative, and representable");
+	}
+	ImGui::Indent(static_cast<Float32>(width));
+	return {};
+}
+
+Result<void> EditorServices::Unindent(B::BindingCall& call, Float64 width)
+{
+	RequireGui(call);
+	if (!std::isfinite(width) || width < 0.0 || width > std::numeric_limits<Float32>::max())
+	{
+		throw std::runtime_error("Editor indentation must be finite, non-negative, and representable");
+	}
+	ImGui::Unindent(static_cast<Float32>(width));
+	return {};
+}
+
 Result<Int64> EditorServices::IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value, bool mixedValue)
 {
 	RequireGui(call);

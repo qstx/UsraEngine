@@ -72,6 +72,18 @@ public static class EditorGui
 	{
 		get { _ = EditorApi.Generation; return NativeEditorBindings.GetContentRegionAvailableWidth(); }
 	}
+	public static void Indent(double width)
+	{
+		_ = EditorApi.Generation;
+		if (!double.IsFinite(width) || width < 0) throw new ArgumentOutOfRangeException(nameof(width));
+		NativeEditorBindings.Indent(width);
+	}
+	public static void Unindent(double width)
+	{
+		_ = EditorApi.Generation;
+		if (!double.IsFinite(width) || width < 0) throw new ArgumentOutOfRangeException(nameof(width));
+		NativeEditorBindings.Unindent(width);
+	}
 	public static long IntField(string label, long value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.IntField(label, value, mixedValue); }
 	public static ulong ULongField(string label, ulong value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.ULongField(label, value, mixedValue); }
 	public static double FloatField(string label, double value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.FloatField(label, value, mixedValue); }

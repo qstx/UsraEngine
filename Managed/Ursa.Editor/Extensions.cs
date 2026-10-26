@@ -125,8 +125,9 @@ public abstract class Inspector
 		Array.Copy(tags, tagOptions, tags.Length);
 		tagOptions[^1] = "Add Tag...";
 		int selectedTag = Array.IndexOf(tags, tag.StringValue ?? string.Empty);
-		double tagLayerWidth = Math.Max(60, (EditorGui.ContentRegionAvailableWidth - 72) * 0.5);
 		EditorGui.NewLine();
+		EditorGui.Indent(34);
+		double tagLayerWidth = Math.Max(60, (EditorGui.ContentRegionAvailableWidth - 72) * 0.5);
 		EditorGui.SetNextItemWidth(tagLayerWidth);
 		int editedTag = EditorGui.Popup("Tag", selectedTag, tagOptions, tag.HasMultipleDifferentValues);
 		if (editedTag == tags.Length)
@@ -159,6 +160,7 @@ public abstract class Inspector
 			layer.ULongValue = (ulong)editedLayer;
 			changed = true;
 		}
+		EditorGui.Unindent(34);
 
 		if (changed) SerializedObject.ApplyModifiedProperties();
 	}

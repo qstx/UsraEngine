@@ -128,6 +128,10 @@ internal static partial class NativeEditorBindings
 	internal static partial void SetNextItemWidth(double width);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetContentRegionAvailableWidth")]
 	internal static partial double GetContentRegionAvailableWidth();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Indent")]
+	internal static partial void Indent(double width);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Unindent")]
+	internal static partial void Unindent(double width);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IntField")]
 	internal static partial long IntField(string label, long value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ULongField")]
