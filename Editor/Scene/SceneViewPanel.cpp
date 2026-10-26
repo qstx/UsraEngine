@@ -900,9 +900,12 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 	};
 
 	const AxisEnd ends[]{
-	    {{1.f, 0.f, 0.f}, "X", IM_COL32(218, 72, 72, 255)},  {{-1.f, 0.f, 0.f}, "-X", IM_COL32(150, 48, 48, 255)},
-	    {{0.f, 1.f, 0.f}, "Y", IM_COL32(88, 190, 88, 255)},  {{0.f, -1.f, 0.f}, "-Y", IM_COL32(58, 132, 58, 255)},
-	    {{0.f, 0.f, 1.f}, "Z", IM_COL32(80, 132, 230, 255)}, {{0.f, 0.f, -1.f}, "-Z", IM_COL32(52, 91, 166, 255)}};
+	    {{1.f, 0.f, 0.f}, "X", IM_COL32(218, 72, 72, 255)},
+	    {{0.f, 1.f, 0.f}, "Y", IM_COL32(88, 190, 88, 255)},
+	    {{0.f, 0.f, 1.f}, "Z", IM_COL32(80, 132, 230, 255)},
+	    {{-1.f, 0.f, 0.f}, "-X", IM_COL32(218, 72, 72, 255)},
+	    {{0.f, -1.f, 0.f}, "-Y", IM_COL32(88, 190, 88, 255)},
+	    {{0.f, 0.f, -1.f}, "-Z", IM_COL32(80, 132, 230, 255)}};
 	auto* drawList = ImGui::GetWindowDrawList();
 	const ImVec2 mouse = ImGui::GetIO().MousePos;
 	bool clicked = false;
@@ -1037,117 +1040,69 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 		twoDMode = false;
 		clicked = true;
 	};
+	const Float32 centerDistance = distanceToMouse(center);
 	if (!twoDMode)
 	{
-		struct CubeFace
-		{
-			Vec3 normal;
-			Vec3 center;
-			Vec3 right;
-			Vec3 up;
-			const char* label;
-			ImU32 color;
-			Float32 depth;
-		};
-		Vector<CubeFace> visibleFaces;
-		const Float32 cubeHalfSize = 12.f;
+		Vector<const AxisEnd*> depthSortedEnds;
+		depthSortedEnds.reserve(std::size(ends));
 		for (const AxisEnd& end : ends)
 		{
-			if (Dot(end.direction, forward) >= 0.f)
-			{
-				continue;
-			}
-			Vec3 faceRight;
-			Vec3 faceUp;
-			if (std::abs(end.direction.x) > 0.5f)
-			{
-				faceRight = {0.f, 1.f, 0.f};
-				faceUp = {0.f, 0.f, 1.f};
-			}
-			else if (std::abs(end.direction.y) > 0.5f)
-			{
-				faceRight = {1.f, 0.f, 0.f};
-				faceUp = {0.f, 0.f, 1.f};
-			}
-			else
-			{
-				faceRight = {1.f, 0.f, 0.f};
-				faceUp = {0.f, 1.f, 0.f};
-			}
-			const bool positiveAxis = end.label[0] != '-';
-			ImU32 faceColor = end.color;
-			if (!positiveAxis)
-			{
-				const auto channel = [faceColor](Int32 shift)
-				{ return static_cast<Int32>((faceColor >> shift) & 0xff); };
-				faceColor = IM_COL32(channel(0) * 2 / 3, channel(8) * 2 / 3, channel(16) * 2 / 3, 255);
-			}
-			const Vec3 faceCenter = Scale(end.direction, cubeHalfSize);
-			visibleFaces.push_back({end.direction, faceCenter, faceRight, faceUp, end.label, faceColor,
-			                        Dot(faceCenter, forward)});
+			depthSortedEnds.push_back(&end);
 		}
-		std::sort(visibleFaces.begin(), visibleFaces.end(),
-		          [](const CubeFace& left, const CubeFace& rightFace) { return left.depth > rightFace.depth; });
-		for (const CubeFace& face : visibleFaces)
+		std::sort(depthSortedEnds.begin(), depthSortedEnds.end(), [&](const AxisEnd* leftEnd, const AxisEnd* rightEnd)
+		          { return Dot(leftEnd->direction, forward) > Dot(rightEnd->direction, forward); });
+		const Float32 lockedAlpha = rotationLocked ? 0.4f : 1.f;
+		for (const AxisEnd* end : depthSortedEnds)
 		{
-			const Vec3 vertices[] = {Add(face.center, Add(Scale(face.right, -cubeHalfSize), Scale(face.up, -cubeHalfSize))),
-			                         Add(face.center, Add(Scale(face.right, cubeHalfSize), Scale(face.up, -cubeHalfSize))),
-			                         Add(face.center, Add(Scale(face.right, cubeHalfSize), Scale(face.up, cubeHalfSize))),
-			                         Add(face.center, Add(Scale(face.right, -cubeHalfSize), Scale(face.up, cubeHalfSize)))};
-			ImVec2 projected[4];
-			for (Size index = 0; index < 4; ++index)
-			{
-				projected[index] = {center.x + Dot(vertices[index], right) * 0.78f + Dot(vertices[index], forward) * 0.22f,
-				                    center.y - Dot(vertices[index], screenUp) * 0.78f -
-				                        Dot(vertices[index], forward) * 0.22f};
-			}
-			drawList->AddConvexPolyFilled(projected, 4, face.color);
-			drawList->AddPolyline(projected, 4, IM_COL32(32, 36, 42, 255), ImDrawFlags_Closed, 1.5f);
-			const ImVec2 labelSize = ImGui::CalcTextSize(face.label);
-			const Vec3 faceLabelPosition = Add(face.center, Scale(face.normal, 0.25f));
-			const ImVec2 labelPosition{center.x + Dot(faceLabelPosition, right) * 0.78f - labelSize.x * 0.5f,
-			                           center.y - Dot(faceLabelPosition, screenUp) * 0.78f - labelSize.y * 0.5f};
-			drawList->AddText(labelPosition, IM_COL32(255, 255, 255, 255), face.label);
-		}
-		for (const AxisEnd& end : ends)
-		{
-			const Float32 projectedX = Dot(end.direction, right);
-			const Float32 projectedY = -Dot(end.direction, screenUp);
-			const Float32 depth = Dot(end.direction, forward);
+			const Float32 projectedX = Dot(end->direction, right);
+			const Float32 projectedY = -Dot(end->direction, screenUp);
+			const Float32 depth = Dot(end->direction, forward);
 			const ImVec2 point{center.x + projectedX * 29.f, center.y + projectedY * 29.f};
 			const Float32 projectedLength = std::sqrt(projectedX * projectedX + projectedY * projectedY);
-			const bool positiveAxis = end.label[0] != '-';
+			const bool positiveAxis = end->label[0] != '-';
 			const Float32 markerRadius = positiveAxis ? positiveAxisMarkerRadius : negativeAxisMarkerRadius;
-			const ImVec2 lineStart = projectedLength > 1.0e-4f
-			                             ? ImVec2{center.x + projectedX / projectedLength * cubeHalfSize,
-			                                      center.y + projectedY / projectedLength * cubeHalfSize}
-			                             : center;
+			const ImVec2 lineEnd = projectedLength > 1.0e-4f
+			                           ? ImVec2{point.x - projectedX / projectedLength * markerRadius,
+			                                    point.y - projectedY / projectedLength * markerRadius}
+			                           : point;
 			const bool axisHovered = distanceToMouse(point) <= axisHitRadius;
 			hovered |= axisHovered;
-			const Float32 fade = depth <= 0.3f ? 1.f : std::clamp((1.f - depth) / 0.7f, 0.f, 1.f);
+			const Float32 fade = (depth <= 0.3f ? 1.f : std::clamp((1.f - depth) / 0.7f, 0.f, 1.f)) *
+			                     lockedAlpha;
 			const auto fadedColor = [fade](ImU32 color, Float32 alpha = 1.f)
 			{
 				return IM_COL32(color & 0xff, (color >> 8) & 0xff, (color >> 16) & 0xff,
 				                 static_cast<Int32>(std::round(255.f * fade * alpha)));
 			};
-			drawList->AddLine(lineStart, point, fadedColor(end.color, positiveAxis ? 0.7f : 0.5f), 1.5f);
+			drawList->AddLine(center, lineEnd, fadedColor(end->color, positiveAxis ? 0.7f : 0.5f), 1.5f);
 			if (positiveAxis)
 			{
-				drawList->AddCircleFilled(point, markerRadius, fadedColor(end.color), 20);
+				drawList->AddCircleFilled(point, markerRadius, fadedColor(end->color), 20);
+				const ImVec2 labelSize = ImGui::CalcTextSize(end->label);
+				drawList->AddText({point.x - labelSize.x * 0.5f, point.y - labelSize.y * 0.5f},
+				                  fadedColor(axisHovered ? end->color : IM_COL32(255, 255, 255, 255)), end->label);
 			}
 			else
 			{
-				drawList->AddCircle(point, markerRadius, fadedColor(end.color, 0.85f), 20, 2.f);
+				drawList->AddCircle(point, markerRadius, fadedColor(end->color, 0.85f), 20, 2.f);
 			}
-			const ImVec2 labelSize = ImGui::CalcTextSize(end.label);
-			drawList->AddText({point.x - labelSize.x * 0.5f, point.y - labelSize.y * 0.5f},
-			                  fadedColor(axisHovered ? end.color : IM_COL32(255, 255, 255, 255)), end.label);
 			if (axisHovered && !rotationLocked &&
 			    (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
 			     ImGui::IsMouseClicked(ImGuiMouseButton_Middle)))
 			{
-				snapToDirection(end.direction);
+				snapToDirection(end->direction);
 			}
+		}
+		const bool centerHovered = centerDistance <= centerHitRadius;
+		const ImU32 centerColor = ImGui::GetColorU32(centerHovered ? ImGuiCol_ButtonActive : ImGuiCol_Text,
+		                                            lockedAlpha);
+		if (camera.orthographic)
+		{
+			drawList->AddRectFilled({center.x - 3.f, center.y - 3.f}, {center.x + 3.f, center.y + 3.f}, centerColor);
+		}
+		else
+		{
+			drawList->AddCircleFilled(center, 3.f, centerColor, 20);
 		}
 	}
 	const ImRect orientationRect({center.x - radius - 10.f, center.y - radius - 10.f},
@@ -1180,19 +1135,19 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 		{
 			snapToDirection({1.f, 0.f, 0.f});
 		}
-		if (ImGui::MenuItem("Top", nullptr, alignedAxis == 2))
+		if (ImGui::MenuItem("Top", nullptr, alignedAxis == 1))
 		{
 			snapToDirection({0.f, 1.f, 0.f});
 		}
-		if (ImGui::MenuItem("Front", nullptr, alignedAxis == 4))
+		if (ImGui::MenuItem("Front", nullptr, alignedAxis == 2))
 		{
 			snapToDirection({0.f, 0.f, 1.f});
 		}
-		if (ImGui::MenuItem("Left", nullptr, alignedAxis == 1))
+		if (ImGui::MenuItem("Left", nullptr, alignedAxis == 3))
 		{
 			snapToDirection({-1.f, 0.f, 0.f});
 		}
-		if (ImGui::MenuItem("Bottom", nullptr, alignedAxis == 3))
+		if (ImGui::MenuItem("Bottom", nullptr, alignedAxis == 4))
 		{
 			snapToDirection({0.f, -1.f, 0.f});
 		}
@@ -1208,7 +1163,6 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 		ImGui::EndDisabled();
 		ImGui::EndPopup();
 	}
-	const Float32 centerDistance = distanceToMouse(center);
 	if (!rotationLocked && orientationRect.Contains(mouse) && centerDistance <= centerHitRadius)
 	{
 		if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
