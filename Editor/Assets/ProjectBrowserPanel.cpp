@@ -1066,6 +1066,21 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			hierarchy.ClearSelection();
 		}
 	};
+	if (twoColumnLayout && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	    !navigationInput.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Backspace, false))
+	{
+		String parentFolder = model.CurrentFolder();
+		const Size separator = parentFolder.rfind('/');
+		if (separator != String::npos)
+		{
+			parentFolder.resize(separator);
+			selectFolder(parentFolder);
+		}
+		else if (!parentFolder.empty())
+		{
+			selectFolder({});
+		}
+	}
 	auto openFavoriteAsset = [&](const String& path)
 	{
 		const ProjectBrowserEntry* asset = model.Find(path);
