@@ -3358,6 +3358,12 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						const ViewportScaleLimits limits = GetViewportScaleLimits(content, dpi.x, gameTarget.size);
 						const Float32 snappedScale = SnapViewportScale(gameScale, limits.minimum, limits.maximum);
 						settingsChanged |= snappedScale != gameScale;
+						if (gameScale > 0.f)
+						{
+							const Float32 panScale = snappedScale / gameScale;
+							gamePan.x *= panScale;
+							gamePan.y *= panScale;
+						}
 						gameScale = snappedScale;
 						gameScaleSnapPending = false;
 					}
@@ -3368,7 +3374,10 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					                    true);
 					ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 					ImGui::Image(gameTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
-					const bool imageHovered = ImGui::IsItemHovered();
+					const bool viewportHovered = ImGui::IsWindowHovered() &&
+					                             ImGui::IsMouseHoveringRect({content.x, content.y},
+					                                                         {content.x + content.width,
+					                                                          content.y + content.height}, false);
 					if (warnIfNoGameCamera)
 					{
 						const char* warning = "The current scene has no active game camera.";
@@ -3382,7 +3391,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						drawList->AddText(warningPosition, IM_COL32(245, 205, 120, 255), warning);
 					}
 					const ImGuiIO& gameInput = ImGui::GetIO();
-					if (imageHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
+					if (viewportHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
 					{
 						const Float32 requestedScale = layout.scale * std::exp(gameInput.MouseWheel * 0.15f);
 						const auto zoomedLayout =
@@ -3398,7 +3407,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						gameFit = false;
 						settingsChanged = true;
 					}
-					if (imageHovered && (!play.Active() || play.Paused()) &&
+					if (viewportHovered && (!play.Active() || play.Paused()) &&
 					    ImGui::IsMouseDragging(ImGuiMouseButton_Middle))
 					{
 						const ImVec2 delta = gameInput.MouseDelta;
@@ -3429,6 +3438,12 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						const ViewportScaleLimits limits = GetViewportScaleLimits(content, dpi.x, gameTarget.size);
 						const Float32 snappedScale = SnapViewportScale(gameScale, limits.minimum, limits.maximum);
 						settingsChanged |= snappedScale != gameScale;
+						if (gameScale > 0.f)
+						{
+							const Float32 panScale = snappedScale / gameScale;
+							gamePan.x *= panScale;
+							gamePan.y *= panScale;
+						}
 						gameScale = snappedScale;
 						gameScaleSnapPending = false;
 					}
@@ -3460,9 +3475,12 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					                    true);
 					ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 					ImGui::Image(gameTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
-					const bool imageHovered = ImGui::IsItemHovered();
+					const bool viewportHovered = ImGui::IsWindowHovered() &&
+					                             ImGui::IsMouseHoveringRect({content.x, content.y},
+					                                                         {content.x + content.width,
+					                                                          content.y + content.height}, false);
 					const ImGuiIO& gameInput = ImGui::GetIO();
-					if (imageHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
+					if (viewportHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
 					{
 						const Float32 requestedScale = layout.scale * std::exp(gameInput.MouseWheel * 0.15f);
 						const auto zoomedLayout =
@@ -3569,7 +3587,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							}
 						}
 					}
-					const bool panning = imageHovered && (!play.Active() || play.Paused()) &&
+					const bool panning = viewportHovered && (!play.Active() || play.Paused()) &&
 					                     ImGui::IsMouseDragging(ImGuiMouseButton_Middle);
 					if (panning)
 					{
