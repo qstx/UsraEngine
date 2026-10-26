@@ -662,7 +662,10 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 	switch (state.F_Type)
 	{
 		case P::V_Boolean:
-			value.F_Boolean = B::TakeBindingResult(Toggle(call, caption, value.F_Boolean != 0)) ? 1u : 0u;
+			value.F_Boolean = B::TakeBindingResult(
+			                      Toggle(call, caption, value.F_Boolean != 0, state.F_HasMultipleDifferentValues != 0))
+			                      ? 1u
+			                      : 0u;
 			break;
 		case P::V_Integer:
 			value.F_Integer = B::TakeBindingResult(IntField(call, caption, value.F_Integer));
@@ -765,7 +768,8 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			else
 			{
 				const auto edited = B::TakeBindingResult(ColorField(
-				    call, caption, {value.F_Vector.F_X, value.F_Vector.F_Y, value.F_Vector.F_Z, value.F_Vector.F_W}));
+				    call, caption, {value.F_Vector.F_X, value.F_Vector.F_Y, value.F_Vector.F_Z, value.F_Vector.F_W},
+				    state.F_HasMultipleDifferentValues != 0));
 				value.F_Vector = {edited.F_R, edited.F_G, edited.F_B, edited.F_A};
 			}
 			break;

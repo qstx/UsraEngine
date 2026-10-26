@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "ca4fe795dfa4d9a75a3a9d0af28ce0818ad19bcc28269704cfee5f78fc9b6852",
+      "Hash": "31631c34d7aaa9a134942030913ba423db00eaecee0885a581c9c0f6f0a8ea7f",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -161,6 +161,12 @@
               "Type": "global::Ursa.Color",
               "HandleKind": 0,
               "Session": false
+            },
+            {
+              "Name": "mixedValue",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
             }
           ],
           "Thread": 0,
@@ -227,6 +233,12 @@
             {
               "Name": "format",
               "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mixedValue",
+              "Type": "bool",
               "HandleKind": 0,
               "Session": false
             }
@@ -985,6 +997,12 @@
             },
             {
               "Name": "value",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mixedValue",
               "Type": "bool",
               "HandleKind": 0,
               "Session": false

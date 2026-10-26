@@ -34,6 +34,25 @@ struct IdScope
 	}
 };
 
+struct MixedValueScope
+{
+	explicit MixedValueScope(bool mixed) : mixed(mixed)
+	{
+		if (mixed)
+		{
+			ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+		}
+	}
+	~MixedValueScope()
+	{
+		if (mixed)
+		{
+			ImGui::PopItemFlag();
+		}
+	}
+	bool mixed;
+};
+
 struct PickerCandidate
 {
 	EditorReferenceData reference;
@@ -226,9 +245,10 @@ Result<void> EditorServices::EndGroup(B::BindingCall& call)
 	return {};
 }
 
-Result<bool> EditorServices::Toggle(B::BindingCall& call, const B::Utf8View& label, bool value)
+Result<bool> EditorServices::Toggle(B::BindingCall& call, const B::Utf8View& label, bool value, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Edited(call, ImGui::Checkbox(GuiString(label).c_str(), &value));
 	return Result<bool>::Success(value);
 }
@@ -250,9 +270,10 @@ Result<Float64> EditorServices::FloatField(B::BindingCall& call, const B::Utf8Vi
 }
 
 Result<Float64> EditorServices::DragFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value, Float64 speed,
-                                          Float64 minimum, Float64 maximum, const B::Utf8View& format)
+                                          Float64 minimum, Float64 maximum, const B::Utf8View& format, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Finite(value);
 	Finite(speed);
 	Finite(minimum);
@@ -351,9 +372,10 @@ Result<EditorServices::QuaternionValue> EditorServices::QuaternionField(B::Bindi
 }
 
 Result<EditorServices::ColorValue> EditorServices::ColorField(B::BindingCall& call, const B::Utf8View& label,
-                                                              const ColorValue& value)
+                                                              const ColorValue& value, bool mixedValue)
 {
 	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
 	Finite(value.F_R);
 	Finite(value.F_G);
 	Finite(value.F_B);

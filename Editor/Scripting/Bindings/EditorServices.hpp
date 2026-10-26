@@ -147,11 +147,11 @@ struct EditorServices
 	static Result<void> Separator(B::BindingCall& call);
 	static Result<void> BeginGroup(B::BindingCall& call);
 	static Result<void> EndGroup(B::BindingCall& call);
-	static Result<bool> Toggle(B::BindingCall& call, const B::Utf8View& label, bool value);
+	static Result<bool> Toggle(B::BindingCall& call, const B::Utf8View& label, bool value, bool mixedValue);
 	static Result<Int64> IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value);
 	static Result<Float64> FloatField(B::BindingCall& call, const B::Utf8View& label, Float64 value);
 	static Result<Float64> DragFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value, Float64 speed,
-	                                 Float64 minimum, Float64 maximum, const B::Utf8View& format);
+	                                 Float64 minimum, Float64 maximum, const B::Utf8View& format, bool mixedValue);
 	static Result<B::Utf8View> TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value);
 	static Result<Int32> Popup(B::BindingCall& call, const B::Utf8View& label, Int32 selected,
 	                           const B::DataView& options);
@@ -160,7 +160,8 @@ struct EditorServices
 	static Result<Vector4Value> Vector4Field(B::BindingCall& call, const B::Utf8View& label, const Vector4Value& value);
 	static Result<QuaternionValue> QuaternionField(B::BindingCall& call, const B::Utf8View& label,
 	                                               const QuaternionValue& value);
-	static Result<ColorValue> ColorField(B::BindingCall& call, const B::Utf8View& label, const ColorValue& value);
+	static Result<ColorValue> ColorField(B::BindingCall& call, const B::Utf8View& label, const ColorValue& value,
+	                                     bool mixedValue);
 	static Result<OptionalReference> ObjectField(B::BindingCall& call, const B::Utf8View& label,
 	                                             const OptionalReference& value, UInt32 kind);
 	static Result<OptionalReference> AssetField(B::BindingCall& call, const B::Utf8View& label,
