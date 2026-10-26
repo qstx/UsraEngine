@@ -239,6 +239,34 @@ void SetLegacySelected(EditorSelectionContext* selection, ResourceId& selected)
 	selected = primary && primary->kind == EditorSelectionKind::GameObject ? primary->objectId : ResourceId{};
 }
 
+Result<EditorDragPayload> BeginHierarchyDragSession(const EditorSelectionContext& selection,
+                                                    const EditorSelectionEntry& clicked,
+                                                    const Vector<EditorSelectionEntry>& visibleRows)
+{
+	if (!selection.Contains(clicked))
+	{
+		return BeginEditorDragSession({clicked}, selection.revision);
+	}
+	Vector<EditorSelectionEntry> sources;
+	sources.reserve(selection.entries.size());
+	for (const auto& row : visibleRows)
+	{
+		if (selection.Contains(row))
+		{
+			sources.push_back(row);
+		}
+	}
+	for (const auto& entry : selection.entries)
+	{
+		if (std::none_of(sources.begin(), sources.end(),
+		                 [&](const auto& source) { return source.SameIdentity(entry); }))
+		{
+			sources.push_back(entry);
+		}
+	}
+	return BeginEditorDragSession(sources, selection.revision);
+}
+
 bool SelectHierarchyEntry(const EditorSelectionEntry& entry, const Vector<EditorSelectionEntry>& visibleRows,
                           EditorSelectionContext* selection, ResourceId& selected, bool extend,
                           ResourceId& keyboardFocusTarget)
@@ -1870,8 +1898,8 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		}
 		if (ImGui::BeginDragDropSource())
 		{
-			const auto drag =
-			    selection ? BeginEditorDragSession(*selection, entry) : BeginEditorDragSession({entry}, 0);
+			const auto drag = selection ? BeginHierarchyDragSession(*selection, entry, visibleRows)
+			                            : BeginEditorDragSession({entry}, 0);
 			if (drag)
 			{
 				ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value, sizeof(drag.value));
@@ -2165,7 +2193,8 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	}
 	if (!sceneControlHovered && ImGui::BeginDragDropSource())
 	{
-		const auto drag = selection ? BeginEditorDragSession(*selection, entry) : BeginEditorDragSession({entry}, 0);
+		const auto drag =
+		    selection ? BeginHierarchyDragSession(*selection, entry, visibleRows) : BeginEditorDragSession({entry}, 0);
 		if (drag)
 		{
 			ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value, sizeof(drag.value));
