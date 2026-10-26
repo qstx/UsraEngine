@@ -16,10 +16,10 @@ struct Module
 	bool callScoped;
 };
 inline constexpr std::array<Module, 5> modules{{
-	{0x054b31391c166a93ull, "Editor", "a0f37635264ec55d1f5fc4a52fd8745bf9512b45daa3adefc8644513bc840ffc", 73, false, true},
+	{0x054b31391c166a93ull, "Editor", "44a741211ab3a8abcb4896c5d2626c463a386983fa5465452f729bd7e4896732", 73, false, true},
 	{0x00ca56bfaa9bff2cull, "Import", "2e814cf85b9b3aa4d4e0d655031c2d97378d3a9eb6137fc1367e66db5f854d37", 24, false, true},
 	{0xc63346392600d9f5ull, "ManagedHost", "7f3e79617db2f014a516faf1879a2d5dd7766cdbbd7a1a139656f03dab0f279d", 35, true, false},
 	{0x1a11e6863935fee2ull, "Rendering", "4ea661d2bfddf6bc2636c6bf84ab9930a837440385c7610793dd6c45c1068693", 19, true, false},
-	{0xa39a879758119310ull, "Runtime", "df920adfe59571e5f23f2e6e1432de8672d2d239a73375d8fee79bd62eba491e", 114, true, false},
+	{0xa39a879758119310ull, "Runtime", "1e8dcfba67a87373d3806e630dca5ae5afcd2d1686258326765a72be6bc3cef6", 115, true, false},
 }};
 } // namespace Ursa::Scripting::Bindings::Manifest

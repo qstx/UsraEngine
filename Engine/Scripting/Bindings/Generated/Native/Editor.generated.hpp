@@ -65,7 +65,7 @@ struct Table
 	Int32 (*NativeEditorBindings_RevertImporterSettings)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_SameLine)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_Save)(void*, BindingOutcome*) = nullptr;
-	Int32 (*NativeEditorBindings_SaveSkinnedMeshAs)(void*, const Utf8View*, UInt32, BindingOutcome*) = nullptr;
+	Int32 (*NativeEditorBindings_SaveMeshComponentAs)(void*, const Utf8View*, UInt32, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_Separator)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_SetActiveCamera)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_SetPreviewCamera)(void*, UInt64, const Wire::Value_Ursa_Editor_PreviewCamera*, BindingOutcome*) = nullptr;
@@ -985,7 +985,7 @@ inline Int32 NativeEditorBindings_Save(void* context, BindingOutcome* outcome) n
 #line 1 "Editor.generated.hpp"
 // Contract: Ursa.Editor/NativeEditor.bindings.cs:80
 #line 80 "Ursa.Editor/NativeEditor.bindings.cs"
-inline Int32 NativeEditorBindings_SaveSkinnedMeshAs(void* context, const Utf8View* p_path, UInt32 p_replaceBinding, BindingOutcome* outcome) noexcept
+inline Int32 NativeEditorBindings_SaveMeshComponentAs(void* context, const Utf8View* p_path, UInt32 p_replaceBinding, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
 	{
@@ -993,8 +993,8 @@ inline Int32 NativeEditorBindings_SaveSkinnedMeshAs(void* context, const Utf8Vie
 		Check_Wire_473287f8298dba71(*p_path);
 		Check_Wire_b760f44fa5965c24(p_replaceBinding);
 		using TargetSignature = Result<void> (*)(BindingCall&, const Utf8View&, bool);
-		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::SaveSkinnedMeshAs), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.SaveSkinnedMeshAs");
-		CompleteBindingResult(::Ursa::Editor::Bindings::EditorServices::SaveSkinnedMeshAs(call, *p_path, (p_replaceBinding != 0)));
+		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::SaveMeshComponentAs), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.SaveMeshComponentAs");
+		CompleteBindingResult(::Ursa::Editor::Bindings::EditorServices::SaveMeshComponentAs(call, *p_path, (p_replaceBinding != 0)));
 	});
 }
 #line 1 "Editor.generated.hpp"
@@ -1313,7 +1313,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_RevertImporterSettings,
 		&NativeEditorBindings_SameLine,
 		&NativeEditorBindings_Save,
-		&NativeEditorBindings_SaveSkinnedMeshAs,
+		&NativeEditorBindings_SaveMeshComponentAs,
 		&NativeEditorBindings_Separator,
 		&NativeEditorBindings_SetActiveCamera,
 		&NativeEditorBindings_SetPreviewCamera,
@@ -1330,7 +1330,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_Vector3Field,
 		&NativeEditorBindings_Vector4Field,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 73, &table, &ValidateBindingContext, {0xa0, 0xf3, 0x76, 0x35, 0x26, 0x4e, 0xc5, 0x5d, 0x1f, 0x5f, 0xc4, 0xa5, 0x2f, 0xd8, 0x74, 0x5b, 0xf9, 0x51, 0x2b, 0x45, 0xda, 0xa3, 0xad, 0xef, 0xc8, 0x64, 0x45, 0x13, 0xbc, 0x84, 0x0f, 0xfc}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 73, &table, &ValidateBindingContext, {0x44, 0xa7, 0x41, 0x21, 0x1a, 0xb3, 0xa8, 0xab, 0xcb, 0x48, 0x96, 0xc5, 0xd2, 0x62, 0x6c, 0x46, 0x3a, 0x38, 0x69, 0x83, 0xfa, 0x54, 0x65, 0x45, 0x2f, 0x72, 0x9b, 0xd7, 0xe4, 0x89, 0x67, 0x32}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Editor

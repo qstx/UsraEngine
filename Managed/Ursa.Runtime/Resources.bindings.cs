@@ -92,6 +92,8 @@ internal static partial class NativeResourceBindings
 	internal static partial bool IsValid(NativeHandle resource);
 	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::GetMeshBinding")]
 	internal static partial NativeHandle? GetMeshBinding([HandleKind(2)] NativeHandle component, bool instance);
+	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::GetMeshAssetIdentity")]
+	internal static partial NativeAssetReference? GetMeshAssetIdentity([HandleKind(4)] NativeHandle mesh);
 	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::SetMeshBinding")]
 	internal static partial void SetMeshBinding([HandleKind(2)] NativeHandle component, NativeHandle? mesh, bool instance);
 	[NativeMethod("Ursa::Scripting::Bindings::ResourceServices::GetMaterialBindings")]

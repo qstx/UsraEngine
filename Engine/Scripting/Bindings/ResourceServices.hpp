@@ -9,11 +9,13 @@ struct ResourceServices
 	using Handle = Wire::Value_Ursa_NativeHandle;
 	using OptionalHandle = Wire::Value_Ursa_NativeHandle_;
 	using Asset = Wire::Value_Ursa_NativeAssetReference;
+	using OptionalAsset = Wire::Value_Ursa_NativeAssetReference_;
 	static Result<Handle> LoadTexture(BindingCall& call, const Asset& reference);
 	static Result<Wire::Value_Ursa_Texture2DInfo> GetTextureInfo(BindingCall& call, const Handle& texture);
 	static Result<DataView> GetTexturePixels(BindingCall& call, const Handle& texture);
 	static Result<bool> IsValid(BindingCall& call, const Handle& resource);
 	static Result<OptionalHandle> GetMeshBinding(BindingCall& call, const Handle& component, bool instance);
+	static Result<OptionalAsset> GetMeshAssetIdentity(BindingCall& call, const Handle& mesh);
 	static Result<void> SetMeshBinding(BindingCall& call, const Handle& component, const OptionalHandle& mesh,
 	                                   bool instance);
 	static Result<DataView> GetMaterialBindings(BindingCall& call, const Handle& component, bool instance, bool first);

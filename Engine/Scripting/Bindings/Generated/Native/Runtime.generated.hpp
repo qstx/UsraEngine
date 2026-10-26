@@ -70,6 +70,7 @@ struct Table
 	Int32 (*NativeResourceBindings_FindComputeKernel)(void*, const Wire::Value_Ursa_NativeAssetReference*, const Utf8View*, Int32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_GetComputeThreadGroupSize)(void*, const Wire::Value_Ursa_NativeAssetReference*, Int32, Wire::Value_Ursa_ComputeThreadGroupSize*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_GetMaterialBindings)(void*, const Wire::Value_Ursa_NativeHandle*, UInt32, UInt32, DataView*, BindingOutcome*) = nullptr;
+	Int32 (*NativeResourceBindings_GetMeshAssetIdentity)(void*, const Wire::Value_Ursa_NativeHandle*, Wire::Value_Ursa_NativeAssetReference_*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_GetMeshBinding)(void*, const Wire::Value_Ursa_NativeHandle*, UInt32, Wire::Value_Ursa_NativeHandle_*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_GetTextureInfo)(void*, const Wire::Value_Ursa_NativeHandle*, Wire::Value_Ursa_Texture2DInfo*, BindingOutcome*) = nullptr;
 	Int32 (*NativeResourceBindings_GetTexturePixels)(void*, const Wire::Value_Ursa_NativeHandle*, DataView*, BindingOutcome*) = nullptr;
@@ -1070,8 +1071,8 @@ inline Int32 NativeMeshBindings_SetVertices(void* context, const Wire::Value_Urs
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:102
-#line 102 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:104
+#line 104 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_FindComputeKernel(void* context, const Wire::Value_Ursa_NativeAssetReference* p_reference, const Utf8View* p_name, Int32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1088,8 +1089,8 @@ inline Int32 NativeResourceBindings_FindComputeKernel(void* context, const Wire:
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:104
-#line 104 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:106
+#line 106 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_GetComputeThreadGroupSize(void* context, const Wire::Value_Ursa_NativeAssetReference* p_reference, Int32 p_kernel, Wire::Value_Ursa_ComputeThreadGroupSize* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1105,8 +1106,8 @@ inline Int32 NativeResourceBindings_GetComputeThreadGroupSize(void* context, con
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:98
-#line 98 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:100
+#line 100 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_GetMaterialBindings(void* context, const Wire::Value_Ursa_NativeHandle* p_component, UInt32 p_instance, UInt32 p_first, DataView* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1122,6 +1123,24 @@ inline Int32 NativeResourceBindings_GetMaterialBindings(void* context, const Wir
 		*result = TakeBindingResult(::Ursa::Scripting::Bindings::ResourceServices::GetMaterialBindings(call, *p_component, (p_instance != 0), (p_first != 0)));
 		CheckOwned_Wire_b8d00e5f3089a3fd(*result, call.arena);
 		Check_Wire_b8d00e5f3089a3fd(*result);
+	});
+}
+#line 1 "Runtime.generated.hpp"
+// Contract: Ursa.Runtime/Resources.bindings.cs:96
+#line 96 "Ursa.Runtime/Resources.bindings.cs"
+inline Int32 NativeResourceBindings_GetMeshAssetIdentity(void* context, const Wire::Value_Ursa_NativeHandle* p_mesh, Wire::Value_Ursa_NativeAssetReference_* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!p_mesh) throw std::runtime_error("Null binding parameter: mesh");
+		Check_Wire_72d28399c87ede76(*p_mesh);
+		call.context.CheckHandle(p_mesh, sizeof(*p_mesh), 4);
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<Wire::Value_Ursa_NativeAssetReference_> (*)(BindingCall&, const Wire::Value_Ursa_NativeHandle&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Scripting::Bindings::ResourceServices::GetMeshAssetIdentity), TargetSignature>, "Native binding target signature mismatch: Ursa.NativeResourceBindings.GetMeshAssetIdentity");
+		*result = TakeBindingResult(::Ursa::Scripting::Bindings::ResourceServices::GetMeshAssetIdentity(call, *p_mesh));
+		CheckOwned_Wire_074d79e13dad2cae(*result, call.arena);
+		Check_Wire_074d79e13dad2cae(*result);
 	});
 }
 #line 1 "Runtime.generated.hpp"
@@ -1210,8 +1229,8 @@ inline Int32 NativeResourceBindings_LoadTexture(void* context, const Wire::Value
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:100
-#line 100 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:102
+#line 102 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_SetMaterialBindings(void* context, const Wire::Value_Ursa_NativeHandle* p_component, const DataView* p_materials, UInt32 p_shared, UInt32 p_first, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -1229,8 +1248,8 @@ inline Int32 NativeResourceBindings_SetMaterialBindings(void* context, const Wir
 	});
 }
 #line 1 "Runtime.generated.hpp"
-// Contract: Ursa.Runtime/Resources.bindings.cs:96
-#line 96 "Ursa.Runtime/Resources.bindings.cs"
+// Contract: Ursa.Runtime/Resources.bindings.cs:98
+#line 98 "Ursa.Runtime/Resources.bindings.cs"
 inline Int32 NativeResourceBindings_SetMeshBinding(void* context, const Wire::Value_Ursa_NativeHandle* p_component, const Wire::Value_Ursa_NativeHandle_* p_mesh, UInt32 p_instance, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -2129,6 +2148,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeResourceBindings_FindComputeKernel,
 		&NativeResourceBindings_GetComputeThreadGroupSize,
 		&NativeResourceBindings_GetMaterialBindings,
+		&NativeResourceBindings_GetMeshAssetIdentity,
 		&NativeResourceBindings_GetMeshBinding,
 		&NativeResourceBindings_GetTextureInfo,
 		&NativeResourceBindings_GetTexturePixels,
@@ -2186,7 +2206,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeSerializationBindings_SnapshotMaterial,
 		&NativeSerializationBindings_SnapshotMesh,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 114, &table, &ValidateBindingContext, {0xdf, 0x92, 0x0a, 0xdf, 0xe5, 0x95, 0x71, 0xe5, 0xf2, 0x3f, 0x2e, 0x6e, 0x14, 0x32, 0xde, 0x86, 0x72, 0xd2, 0xd2, 0x39, 0xa7, 0x33, 0x75, 0xd8, 0xfe, 0xe7, 0x9b, 0xd6, 0x2e, 0xba, 0x49, 0x1e}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 115, &table, &ValidateBindingContext, {0x1e, 0x8d, 0xcf, 0xba, 0x67, 0xa8, 0x73, 0x73, 0xd3, 0x80, 0x6e, 0x63, 0x0d, 0xca, 0x5a, 0xe5, 0xaf, 0xcd, 0x2d, 0x16, 0x86, 0x25, 0x83, 0x26, 0x76, 0x5a, 0x72, 0xbe, 0x6b, 0xc3, 0xce, 0xf6}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Runtime

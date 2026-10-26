@@ -9,6 +9,7 @@
 #include <Scripting/Bindings/BindingAssets.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
 #include <Serialization/RenderResourceReferences.hpp>
+#include <Scene/MeshFilterComponent.hpp>
 #include <Scene/SkinnedMeshRendererComponent.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <imgui.h>
@@ -1150,7 +1151,7 @@ Result<void> EditorServices::SetActiveCamera(B::BindingCall& call)
 	return {};
 }
 
-Result<void> EditorServices::SaveSkinnedMeshAs(B::BindingCall& call, const B::Utf8View& path, bool replaceBinding)
+Result<void> EditorServices::SaveMeshComponentAs(B::BindingCall& call, const B::Utf8View& path, bool replaceBinding)
 {
 	RequireGui(call);
 	auto& scope = Scope(call);
@@ -1158,12 +1159,13 @@ Result<void> EditorServices::SaveSkinnedMeshAs(B::BindingCall& call, const B::Ut
 	{
 		return Result<void>::Failure("The current Inspector target cannot save a Mesh asset");
 	}
+	auto* filter = dynamic_cast<MeshFilterComponent*>(scope.source.target);
 	auto* renderer = dynamic_cast<SkinnedMeshRendererComponent*>(scope.source.target);
-	if (!renderer)
+	if (!filter && !renderer)
 	{
-		return Result<void>::Failure("The current Inspector target is not a Skinned Mesh Renderer");
+		return Result<void>::Failure("The current Inspector target has no Mesh binding");
 	}
-	const MeshPtr mesh = renderer->SharedMesh();
+	const MeshPtr mesh = filter ? filter->SharedMesh() : renderer->SharedMesh();
 	if (!mesh || !mesh->IsValid())
 	{
 		return Result<void>::Failure("Assign a valid skinned Mesh before saving it as an asset");
@@ -1185,7 +1187,8 @@ Result<void> EditorServices::SaveSkinnedMeshAs(B::BindingCall& call, const B::Ut
 	}
 	if (replaceBinding)
 	{
-		auto assigned = renderer->SetSharedMesh(std::move(saved.value));
+		auto assigned =
+		    filter ? filter->SetSharedMesh(std::move(saved.value)) : renderer->SetSharedMesh(std::move(saved.value));
 		if (!assigned)
 		{
 			return assigned;

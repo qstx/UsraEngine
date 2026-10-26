@@ -44,6 +44,7 @@ public sealed class Mesh : RenderResource
 	public static Mesh Create() => FromHandle(NativeMeshBindings.Create())!;
 
 	public static Mesh Load(AssetReference reference) => FromHandle(NativeMeshBindings.Load(reference.Guid, reference.LocalFileId))!;
+	public AssetReference? AssetIdentity => NativeResourceBindings.GetMeshAssetIdentity(Handle)?.ToManaged();
 
 	public Mesh Clone() => FromHandle(NativeMeshBindings.Clone(Handle))!;
 

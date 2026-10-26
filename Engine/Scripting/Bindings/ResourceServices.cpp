@@ -112,6 +112,18 @@ Result<ResourceServices::OptionalHandle> ResourceServices::GetMeshBinding(Bindin
 	return Result<OptionalHandle>::Success(result);
 }
 
+Result<ResourceServices::OptionalAsset> ResourceServices::GetMeshAssetIdentity(BindingCall& call, const Handle& mesh)
+{
+	auto& api = RuntimeServices::SceneApi(call);
+	auto resolved = api.ResolveMesh(ReadManagedHandle(mesh));
+	if (!resolved)
+	{
+		return Result<OptionalAsset>::Failure(resolved.error);
+	}
+	return Result<OptionalAsset>::Success(
+	    WriteOptionalAssetValue<OptionalAsset>(call.arena, resolved.value->AssetIdentity()));
+}
+
 Result<void> ResourceServices::SetMeshBinding(BindingCall& call, const Handle& component, const OptionalHandle& mesh,
                                               bool instance)
 {

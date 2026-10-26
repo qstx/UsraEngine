@@ -3,6 +3,38 @@ using Ursa;
 
 namespace Ursa.Editor;
 
+internal static class BuiltinMeshInspectorGui
+{
+	private static string assetPath = "prj:Meshes/NewMesh.ursamesh";
+	private static string diagnostic = string.Empty;
+	private static bool replaceBinding = true;
+
+	internal static void DrawDetails(Mesh? mesh)
+	{
+		if (mesh is not { IsValid: true }) return;
+		MeshData data = mesh.GetData();
+		EditorGui.Text("Vertices: " + data.Positions.Length + "  Indices: " + data.Indices.Length +
+		               "  Submeshes: " + data.SubMeshes.Length);
+		EditorGui.Text("Version: " + mesh.Version + "  " + (mesh.AssetIdentity.HasValue ? "Asset" : "Local instance"));
+		EditorGui.Text("Bounds: " + data.Bounds.Minimum + " / " + data.Bounds.Maximum);
+		assetPath = EditorGui.TextField("Asset path", assetPath);
+		replaceBinding = EditorGui.Toggle("Replace this binding", replaceBinding);
+		if (EditorGui.Button("Save Mesh As..."))
+		{
+			try
+			{
+				EditorContext.SaveMeshComponentAs(assetPath, replaceBinding);
+				diagnostic = string.Empty;
+			}
+			catch (Exception error)
+			{
+				diagnostic = error.Message;
+			}
+		}
+		if (!string.IsNullOrEmpty(diagnostic)) EditorGui.Text(diagnostic);
+	}
+}
+
 [BuiltinEditor]
 [CustomEditor(typeof(MeshFilterComponent))]
 [CanEditMultipleObjects]
@@ -12,6 +44,8 @@ public sealed class MeshFilterComponentInspector : Inspector
 	{
 		EditorGui.PropertyField(SerializedObject.FindProperty("mesh"), "Mesh");
 		SerializedObject.ApplyModifiedProperties();
+		if (!SerializedObject.IsEditingMultipleObjects && Target is MeshFilterComponent filter)
+			BuiltinMeshInspectorGui.DrawDetails(filter.SharedMesh);
 	}
 }
 
@@ -61,10 +95,6 @@ public sealed class MeshRendererComponentInspector : Inspector
 [CanEditMultipleObjects]
 public sealed class SkinnedMeshRendererComponentInspector : Inspector
 {
-	private string meshAssetPath = "prj:Meshes/NewMesh.ursamesh";
-	private string meshDiagnostic = string.Empty;
-	private bool replaceMeshBinding = true;
-
 	public override void OnInspectorGUI()
 	{
 		EditorGui.PropertyField(SerializedObject.FindProperty("mesh"), "Mesh");
@@ -75,27 +105,8 @@ public sealed class SkinnedMeshRendererComponentInspector : Inspector
 		SerializedObject.ApplyModifiedProperties();
 		if (SerializedObject.IsEditingMultipleObjects || Target is not RendererComponent renderer) return;
 		MeshRendererComponentInspector.DrawMaterials(renderer);
-		if (Target is not SkinnedMeshRendererComponent skinned || skinned.SharedMesh is not { IsValid: true } mesh) return;
-		MeshData data = mesh.GetData();
-		EditorGui.Text("Vertices: " + data.Positions.Length + "  Indices: " + data.Indices.Length +
-		               "  Submeshes: " + data.SubMeshes.Length);
-		EditorGui.Text("Version: " + mesh.Version);
-		EditorGui.Text("Bounds: " + data.Bounds.Minimum + " / " + data.Bounds.Maximum);
-		meshAssetPath = EditorGui.TextField("Asset path", meshAssetPath);
-		replaceMeshBinding = EditorGui.Toggle("Replace this binding", replaceMeshBinding);
-		if (EditorGui.Button("Save Mesh As..."))
-		{
-			try
-			{
-				EditorContext.SaveSkinnedMeshAs(meshAssetPath, replaceMeshBinding);
-				meshDiagnostic = string.Empty;
-			}
-			catch (Exception error)
-			{
-				meshDiagnostic = error.Message;
-			}
-		}
-		if (!string.IsNullOrEmpty(meshDiagnostic)) EditorGui.Text(meshDiagnostic);
+		if (Target is SkinnedMeshRendererComponent skinned)
+			BuiltinMeshInspectorGui.DrawDetails(skinned.SharedMesh);
 	}
 }
 
