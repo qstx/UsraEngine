@@ -844,6 +844,33 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 	const ImVec2 projectionLabelMaximum{center.x + projectionLabelSize.x * 0.5f + 5.f,
 	                                    projectionLabelMinimum.y + ImGui::GetTextLineHeight() + 4.f};
 	const bool projectionHovered = ImGui::IsMouseHoveringRect(projectionLabelMinimum, projectionLabelMaximum, true);
+	auto toggleProjection = [&]()
+	{
+		if (rotationLocked)
+		{
+			return;
+		}
+		const Vec3 offset = camera.position - camera.target;
+		const Float32 distance = std::sqrt(Dot(offset, offset));
+		if (!std::isfinite(distance) || distance <= 0.f || !std::isfinite(camera.verticalFovRadians) ||
+		    camera.verticalFovRadians <= 0.f || camera.verticalFovRadians >= 3.14159265f)
+		{
+			return;
+		}
+		if (camera.orthographic)
+		{
+			camera.orthographic = false;
+			camera.position = Add(camera.target, Scale(Normalized(offset), std::max(camera.orthographicSize, 0.05f) /
+			                                                               std::tan(camera.verticalFovRadians * 0.5f)));
+		}
+		else
+		{
+			camera.orthographicSize = std::max(distance * std::tan(camera.verticalFovRadians * 0.5f), 0.05f);
+			camera.orthographic = true;
+		}
+		twoDMode = false;
+		clicked = true;
+	};
 	hovered |= projectionHovered;
 	drawList->AddRectFilled(projectionLabelMinimum, projectionLabelMaximum,
 	                        ImGui::GetColorU32(projectionHovered ? ImGuiCol_ButtonHovered : ImGuiCol_WindowBg), 3.f);
@@ -856,27 +883,7 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 	}
 	if (projectionHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 	{
-		const Vec3 offset = camera.position - camera.target;
-		const Float32 distance = std::sqrt(Dot(offset, offset));
-		if (std::isfinite(distance) && distance > 0.f && std::isfinite(camera.verticalFovRadians) &&
-		    camera.verticalFovRadians > 0.f && camera.verticalFovRadians < 3.14159265f)
-		{
-			if (camera.orthographic)
-			{
-				camera.orthographic = false;
-				camera.position = Add(camera.target,
-				                      Scale(Normalized(offset), std::max(camera.orthographicSize, 0.05f) /
-				                                                               std::tan(camera.verticalFovRadians * 0.5f)));
-			}
-			else
-			{
-				camera.orthographicSize =
-				    std::max(distance * std::tan(camera.verticalFovRadians * 0.5f), 0.05f);
-				camera.orthographic = true;
-			}
-			twoDMode = false;
-			clicked = true;
-		}
+		toggleProjection();
 	}
 	const auto distanceToMouse = [&](ImVec2 point)
 	{
@@ -898,18 +905,38 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 			clicked = true;
 		}
 	};
-	const auto restoreFreeView = [&]
+	const auto snapToNiceAngle = [&](bool forcePerspective)
 	{
-		const Vec3 offset = camera.position - camera.target;
-		const Float32 distance = std::sqrt(Dot(offset, offset));
-		if (std::isfinite(distance) && distance > 0.f)
+		const Vec3 view = camera.target - camera.position;
+		Float32 distance = std::sqrt(Dot(view, view));
+		if (!std::isfinite(distance) || distance <= 0.f)
+		{
+			return;
+		}
+		if (forcePerspective && camera.orthographic &&
+		    (!std::isfinite(camera.verticalFovRadians) || camera.verticalFovRadians <= 0.f ||
+		     camera.verticalFovRadians >= 3.14159265f))
+		{
+			return;
+		}
+		Vec3 forward{view.x, 0.f, view.z};
+		if (Dot(forward, forward) <= 1.0e-6f)
+		{
+			forward = {0.f, 0.f, 1.f};
+		}
+		forward = Normalized(forward);
+		forward.y = -0.5f;
+		forward = Normalized(forward);
+		if (forcePerspective && camera.orthographic)
 		{
 			camera.orthographic = false;
-			camera.up = {0.f, 1.f, 0.f};
-			camera.position = Add(camera.target, Scale(Normalized(Vec3{1.f, 0.7f, 1.f}), distance));
-			twoDMode = false;
-			clicked = true;
+			distance = std::max(camera.orthographicSize, 0.05f) /
+			           std::tan(camera.verticalFovRadians * 0.5f);
 		}
+		camera.up = {0.f, 1.f, 0.f};
+		camera.position = Add(camera.target, Scale(forward, -distance));
+		twoDMode = false;
+		clicked = true;
 	};
 	if (!twoDMode)
 	{
@@ -1002,7 +1029,9 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 			const ImVec2 labelSize = ImGui::CalcTextSize(end.label);
 			drawList->AddText({point.x - labelSize.x * 0.5f, point.y - labelSize.y * 0.5f},
 			                  axisHovered ? end.color : IM_COL32(255, 255, 255, 255), end.label);
-			if (axisHovered && !rotationLocked && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+			if (axisHovered && !rotationLocked &&
+			    (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+			     ImGui::IsMouseClicked(ImGuiMouseButton_Middle)))
 			{
 				snapToDirection(end.direction);
 			}
@@ -1021,7 +1050,7 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 		ImGui::BeginDisabled(rotationLocked);
 		if (ImGui::MenuItem("Free"))
 		{
-			restoreFreeView();
+			snapToNiceAngle(false);
 		}
 		ImGui::Separator();
 		if (ImGui::MenuItem("Front"))
@@ -1052,10 +1081,17 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 		ImGui::EndPopup();
 	}
 	const Float32 centerDistance = distanceToMouse(center);
-	if (!rotationLocked && orientationRect.Contains(mouse) && centerDistance <= hitRadius &&
-	    ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::GetIO().KeyShift)
+	if (!rotationLocked && orientationRect.Contains(mouse) && centerDistance <= hitRadius)
 	{
-		restoreFreeView();
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
+		    (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::GetIO().KeyShift))
+		{
+			snapToNiceAngle(true);
+		}
+		else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		{
+			toggleProjection();
+		}
 	}
 	if (hovered)
 	{
