@@ -188,14 +188,27 @@ void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint
 	Vec3 forward = Scale(view, 1.f / distance);
 	if (camera.orthographic)
 	{
-		if (!std::isfinite(camera.orthographicSize) || !std::isfinite(camera.verticalFovRadians) ||
-		    camera.verticalFovRadians <= 0.f || camera.verticalFovRadians >= Pi)
+		OrbitSceneView(camera, mouseDelta);
+		forward = Normalized(camera.target - camera.position);
+		const Vec3 rightVector = Cross(forward, camera.up);
+		const Float32 rightLength = Length(rightVector);
+		if (!std::isfinite(rightLength) || rightLength <= 1.0e-5f)
 		{
 			return;
 		}
-		distance = std::max(camera.orthographicSize / std::tan(camera.verticalFovRadians * 0.5f), MinimumDistance);
-		camera.position = Add(camera.target, Scale(forward, -distance));
-		camera.orthographic = false;
+		const Vec3 right = Scale(rightVector, 1.f / rightLength);
+		const Vec3 screenUp = Normalized(Cross(right, forward));
+		Vec3 direction = Add(Add(Scale(right, movement.x), Scale(forward, movement.y)), Scale(screenUp, verticalMovement));
+		const Float32 directionLength = Length(direction);
+		if (directionLength > 1.f)
+		{
+			direction = Scale(direction, 1.f / directionLength);
+		}
+		const Float32 moveScale = speed * deltaTime * (fast ? 5.f : 1.f);
+		const Vec3 shift = Scale(direction, moveScale);
+		camera.position = Add(camera.position, shift);
+		camera.target = Add(camera.target, shift);
+		return;
 	}
 	Float32 yaw = std::atan2(forward.x, forward.z) - mouseDelta.x * OrbitRadiansPerPixel;
 	Float32 pitch = std::clamp(std::asin(std::clamp(forward.y, -1.f, 1.f)) - mouseDelta.y * OrbitRadiansPerPixel,
