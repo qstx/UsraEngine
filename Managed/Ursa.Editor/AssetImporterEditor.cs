@@ -34,7 +34,13 @@ public class AssetImporterEditor : Inspector
 	{
 		SynchronizeTarget();
 		SerializedObject.ApplyModifiedProperties();
-		NativeEditorBindings.DrawImporterApplyRevert();
+		if (HasModified())
+		{
+			if (EditorGui.Button("Revert")) Revert();
+			EditorGui.SameLine();
+			if (NativeEditorBindings.CanApplyImporterSettings() && EditorGui.Button("Apply")) Apply();
+		}
+		NativeEditorBindings.MarkImporterControlsDrawn();
 		SerializedObject.Update();
 		target = null; generation = 0;
 	}

@@ -128,9 +128,10 @@ struct EditorServices
 	static Result<bool> ApplyTargetFields(B::BindingCall& call, const B::Utf8View& fields);
 	static Result<B::Wire::Value_Ursa_Editor_EditorImporterInfo_> GetImporterInfo(B::BindingCall& call);
 	static Result<bool> HasModifiedImporterSettings(B::BindingCall& call);
+	static Result<bool> CanApplyImporterSettings(B::BindingCall& call);
 	static Result<bool> ApplyImporterSettings(B::BindingCall& call);
 	static Result<void> RevertImporterSettings(B::BindingCall& call);
-	static Result<void> DrawImporterApplyRevert(B::BindingCall& call);
+	static Result<void> MarkImporterControlsDrawn(B::BindingCall& call);
 	static Result<B::DataView> GetSelection(B::BindingCall& call);
 	static Result<OptionalReference> GetTarget(B::BindingCall& call);
 	static Result<B::Wire::Value_Ursa_Editor_EditorDocumentValue_> GetDocument(B::BindingCall& call);

@@ -48,12 +48,14 @@ internal static partial class NativeEditorBindings
 	internal static partial EditorImporterInfo? GetImporterInfo();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::HasModifiedImporterSettings")]
 	internal static partial bool HasModifiedImporterSettings();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::CanApplyImporterSettings")]
+	internal static partial bool CanApplyImporterSettings();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ApplyImporterSettings")]
 	internal static partial bool ApplyImporterSettings();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::RevertImporterSettings")]
 	internal static partial void RevertImporterSettings();
-	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DrawImporterApplyRevert")]
-	internal static partial void DrawImporterApplyRevert();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::MarkImporterControlsDrawn")]
+	internal static partial void MarkImporterControlsDrawn();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetScope")]
 	internal static partial EditorScopeValue GetScope();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetSelection")]

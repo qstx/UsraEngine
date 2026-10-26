@@ -895,6 +895,13 @@ Result<bool> EditorServices::HasModifiedImporterSettings(B::BindingCall& call)
 	              : Result<bool>::Failure("No importer Inspector target is active");
 }
 
+Result<bool> EditorServices::CanApplyImporterSettings(B::BindingCall& call)
+{
+	const auto& scope = Scope(call);
+	return scope.source.importerInspector ? Result<bool>::Success(scope.source.canApplyImporter)
+	                                     : Result<bool>::Failure("No importer Inspector target is active");
+}
+
 Result<bool> EditorServices::ApplyImporterSettings(B::BindingCall& call)
 {
 	auto& scope = Scope(call);
@@ -922,7 +929,7 @@ Result<void> EditorServices::RevertImporterSettings(B::BindingCall& call)
 	return target ? target->Revert() : Result<void>::Failure("No importer Inspector target is active");
 }
 
-Result<void> EditorServices::DrawImporterApplyRevert(B::BindingCall& call)
+Result<void> EditorServices::MarkImporterControlsDrawn(B::BindingCall& call)
 {
 	RequireGui(call);
 	auto& context = Scope(call).source;
@@ -930,7 +937,6 @@ Result<void> EditorServices::DrawImporterApplyRevert(B::BindingCall& call)
 	{
 		return Result<void>::Failure("No importer Inspector target is active");
 	}
-	context.importerInspector->DrawApplyRevert(context.requestImport, context.canApplyImporter);
 	context.importerControlsDrawn = true;
 	return {};
 }
