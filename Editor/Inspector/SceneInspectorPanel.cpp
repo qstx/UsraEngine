@@ -1173,9 +1173,31 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 		});
 		if (largeWorldPosition)
 		{
-			ImGui::TextWrapped(
+			constexpr const char* warning =
 			    "Due to floating-point precision limitations, it is recommended to bring the world coordinates of the "
-			    "GameObject within a smaller range.");
+			    "GameObject within a smaller range.";
+			const ImVec2 minimum = ImGui::GetCursorScreenPos();
+			const Float32 width = ImGui::GetContentRegionAvail().x;
+			const Float32 padding = ImGui::GetStyle().FramePadding.x;
+			const Float32 iconSize = ImGui::GetTextLineHeight();
+			const Float32 textWidth = std::max(1.f, width - padding * 3.f - iconSize);
+			const Float32 textHeight = ImGui::CalcTextSize(warning, nullptr, false, textWidth).y;
+			const Float32 height = std::max(iconSize, textHeight) + ImGui::GetStyle().FramePadding.y * 2.f;
+			const ImVec2 maximum{minimum.x + width, minimum.y + height};
+			auto* drawList = ImGui::GetWindowDrawList();
+			drawList->AddRectFilled(minimum, maximum, ImGui::GetColorU32(ImGuiCol_FrameBg),
+			                       ImGui::GetStyle().FrameRounding);
+			drawList->AddRect(minimum, maximum, ImGui::GetColorU32(ImGuiCol_Border),
+			                  ImGui::GetStyle().FrameRounding);
+			Icons::Draw(Icons::Icon::Warning,
+			            {minimum.x + padding, minimum.y + (height - iconSize) * 0.5f}, iconSize,
+			            Icons::Color(Icons::Icon::Warning));
+			ImGui::SetCursorScreenPos({minimum.x + padding * 2.f + iconSize, minimum.y + ImGui::GetStyle().FramePadding.y});
+			ImGui::PushTextWrapPos(minimum.x + width - padding);
+			ImGui::TextUnformatted(warning);
+			ImGui::PopTextWrapPos();
+			ImGui::SetCursorScreenPos(minimum);
+			ImGui::Dummy({width, height});
 		}
 	}
 	diagnostic.clear();
