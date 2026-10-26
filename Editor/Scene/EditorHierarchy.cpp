@@ -318,6 +318,19 @@ bool NavigateHierarchySelection(const Vector<EditorSelectionEntry>& visibleRows,
 	                            keyboardFocusTarget);
 }
 
+bool NavigateHierarchySelectionToEdge(const Vector<EditorSelectionEntry>& visibleRows,
+                                      EditorSelectionContext* selection, ResourceId& selected, bool last, bool extend,
+                                      ResourceId& keyboardFocusTarget)
+{
+	if (visibleRows.empty())
+	{
+		return false;
+	}
+	const Size targetIndex = last ? visibleRows.size() - 1 : 0;
+	return SelectHierarchyEntry(visibleRows[targetIndex], visibleRows, selection, selected, extend,
+	                            keyboardFocusTarget);
+}
+
 bool IsHierarchyNodeOpen(const String& key, const char* nodeId)
 {
 	ImGui::PushID(key.c_str());
@@ -1891,6 +1904,12 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 			NavigateHierarchySelection(visibleRows, selection, selected, -1, hierarchyInput.KeyShift,
 			                           keyboardFocusTarget);
 		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_Home, false) || ImGui::IsKeyPressed(ImGuiKey_End, false))
+		{
+			const bool last = ImGui::IsKeyPressed(ImGuiKey_End, false);
+			NavigateHierarchySelectionToEdge(visibleRows, selection, selected, last, hierarchyInput.KeyShift,
+			                                 keyboardFocusTarget);
+		}
 		else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false))
 		{
 			const bool expand = ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
@@ -3181,6 +3200,12 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		{
 			NavigateHierarchySelection(visibleRows, selection, selected, -1, hierarchyInput.KeyShift,
 			                           keyboardFocusTarget);
+		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_Home, false) || ImGui::IsKeyPressed(ImGuiKey_End, false))
+		{
+			const bool last = ImGui::IsKeyPressed(ImGuiKey_End, false);
+			NavigateHierarchySelectionToEdge(visibleRows, selection, selected, last, hierarchyInput.KeyShift,
+			                                 keyboardFocusTarget);
 		}
 		else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false))
 		{
