@@ -1831,7 +1831,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			projectKeyboardFocusTarget.reset();
 		}
 	};
-	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput && projectInput.KeyCtrl &&
+	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput && !ImGui::IsAnyItemActive() &&
+	    ImGui::IsAnyItemFocused() && projectInput.KeyCtrl &&
 	    ImGui::IsKeyPressed(ImGuiKey_A, false) && !visibleRows.empty())
 	{
 		if (selection.SelectEntries(visibleRows, visibleRows.size() - 1, visibleRows.back()))
