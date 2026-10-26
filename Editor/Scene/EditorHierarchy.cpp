@@ -27,6 +27,47 @@ EditorSelectionEntry GameObjectSelection(ResourceId documentId, ResourceId objec
 	return entry;
 }
 
+Vector<EditorSelectionEntry> OutermostPrefabRoots(const Scene& scene,
+	                                              const Vector<EditorSelectionEntry>& selection,
+	                                              const Map<String, bool>& prefabObjects, ResourceId documentId)
+{
+	Vector<EditorSelectionEntry> roots;
+	for (const EditorSelectionEntry& entry : selection)
+	{
+		if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId || entry.playSession ||
+		    entry.IsMissing() || prefabObjects.find(entry.objectId.ToString()) == prefabObjects.end())
+		{
+			continue;
+		}
+		auto object = scene.GameObjectById(entry.objectId);
+		if (!object)
+		{
+			continue;
+		}
+		GameObject::Ptr root = object.value;
+		while (auto parent = root->Parent())
+		{
+			auto parentId = scene.PersistentId(parent);
+			if (!parentId || prefabObjects.find(parentId.value.ToString()) == prefabObjects.end())
+			{
+				break;
+			}
+			root = std::move(parent);
+		}
+		const auto rootId = scene.PersistentId(root);
+		if (rootId)
+		{
+			EditorSelectionEntry rootEntry = GameObjectSelection(documentId, rootId.value);
+			if (std::none_of(roots.begin(), roots.end(), [&](const auto& existing)
+			                 { return existing.SameIdentity(rootEntry); }))
+			{
+				roots.push_back(std::move(rootEntry));
+			}
+		}
+	}
+	return roots;
+}
+
 Vector<GameObject::Ptr> OrderedGameObjects(const Vector<GameObject::Ptr>& objects, bool alphabetical)
 {
 	if (!alphabetical)
@@ -2947,6 +2988,34 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			                   }
 			                   return selectedChildren;
 		                   }});
+		commands.Register({"hierarchy.select-prefab-root",
+		                   "Prefab/Select Root",
+		                   "Ctrl+Shift+R",
+		                   [this, &scene, documentId](const EditorCommandContext& context)
+		                   {
+			                   return OutermostPrefabRoots(scene, context.selection.entries, prefabObjects, documentId).empty()
+			                              ? Result<void>::Failure("Select an object inside a Prefab instance")
+			                              : Result<void>{};
+		                   },
+		                   [this, &scene, selection, documentId](const EditorCommandContext& context)
+		                   {
+			                   if (!selection)
+			                   {
+				                   return Result<void>::Failure("Hierarchy selection is unavailable");
+			                   }
+			                   auto roots =
+			                       OutermostPrefabRoots(scene, context.selection.entries, prefabObjects, documentId);
+			                   if (roots.empty())
+			                   {
+				                   return Result<void>::Failure("The selection has no Prefab instance roots");
+			                   }
+			                   if (!selection->SelectEntries(std::move(roots)))
+			                   {
+				                   return Result<void>::Failure("The current selection cannot be changed yet");
+			                   }
+			                   SetLegacySelected(selection, selected);
+			                   return Result<void>{};
+		                   }});
 		const EditorCommandContext current =
 		    selection ? EditorCommandContext::Capture(*selection, documentId, documentRevision)
 		              : EditorCommandContext{};
@@ -3036,6 +3105,19 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		{
 			auto selectedChildren = commands.Execute("hierarchy.select-children", *contextMenuTarget, current);
 			commandDiagnostic = selectedChildren ? String{} : selectedChildren.error;
+		}
+		const auto canSelectPrefabRoot = contextMenuTarget
+		                                    ? commands.CanExecute("hierarchy.select-prefab-root", *contextMenuTarget,
+		                                                          current)
+		                                    : Result<void>::Failure("The hierarchy menu target is unavailable");
+		if (Icons::BeginMenu("Prefab", static_cast<bool>(canSelectPrefabRoot)))
+		{
+			if (Icons::MenuItem("Select Root", "Ctrl+Shift+R"))
+			{
+				auto selectedRoot = commands.Execute("hierarchy.select-prefab-root", *contextMenuTarget, current);
+				commandDiagnostic = selectedRoot ? String{} : selectedRoot.error;
+			}
+			ImGui::EndMenu();
 		}
 		commands.Register({"hierarchy.create-empty-parent",
 		                   "Create Empty Parent",
@@ -3801,6 +3883,16 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		{
 			auto duplicated = duplicateObjectsAction(scene, ids, primary ? primary->objectId : ResourceId{});
 			changed |= static_cast<bool>(duplicated);
+		}
+	}
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::GetIO().KeyShift &&
+	    ImGui::IsKeyPressed(ImGuiKey_R, false) && selection && !selection->entries.empty())
+	{
+		auto roots = OutermostPrefabRoots(scene, selection->entries, prefabObjects, documentId);
+		if (!roots.empty() && selection->SelectEntries(std::move(roots)))
+		{
+			SetLegacySelected(selection, selected);
 		}
 	}
 	if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !ImGui::IsAnyItemHovered())
