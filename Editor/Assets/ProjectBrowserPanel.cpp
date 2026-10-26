@@ -351,24 +351,6 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		ImGui::End();
 		return {};
 	}
-	if (!readOnly && actions.importExternalFiles)
-	{
-		const ImVec2 windowPosition = ImGui::GetWindowPos();
-		const ImVec2 windowSize = ImGui::GetWindowSize();
-		for (const ProjectBrowserFileDrop& drop : externalDrops)
-		{
-			if (drop.x < windowPosition.x || drop.y < windowPosition.y || drop.x >= windowPosition.x + windowSize.x ||
-			    drop.y >= windowPosition.y + windowSize.y)
-			{
-				continue;
-			}
-			auto imported = actions.importExternalFiles(drop.paths, model.CurrentFolder());
-			if (!imported)
-			{
-				diagnostic = imported.error;
-			}
-		}
-	}
 	if (model.NeedsRefresh(workspace))
 	{
 		auto refreshed = model.Refresh(workspace);
@@ -1061,6 +1043,35 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	const float maximumTreeWidth =
 	    std::max(minimumTreeWidth, availableWidth - ImGui::GetStyle().ItemSpacing.x - minimumContentsWidth);
 	const String currentFolder = model.CurrentFolder();
+	Vector<ImVec2> externalDropPositions;
+	Vector<String> externalDropDestinations;
+	Vector<bool> externalDropAccepted;
+	externalDropPositions.reserve(externalDrops.size());
+	externalDropDestinations.reserve(externalDrops.size());
+	externalDropAccepted.reserve(externalDrops.size());
+	const ImVec2 viewportPosition = ImGui::GetMainViewport()->Pos;
+	const ImVec2 projectWindowPosition = ImGui::GetWindowPos();
+	const ImVec2 projectWindowSize = ImGui::GetWindowSize();
+	const ImRect projectWindowRect(projectWindowPosition, {projectWindowPosition.x + projectWindowSize.x,
+	                                                       projectWindowPosition.y + projectWindowSize.y});
+	for (const ProjectBrowserFileDrop& drop : externalDrops)
+	{
+		const ImVec2 position{viewportPosition.x + static_cast<Float32>(drop.x),
+		                      viewportPosition.y + static_cast<Float32>(drop.y)};
+		externalDropPositions.push_back(position);
+		externalDropAccepted.push_back(projectWindowRect.Contains(position));
+		externalDropDestinations.push_back(projectWindowRect.Contains(position) ? currentFolder : String{});
+	}
+	auto recordExternalDropFolder = [&](const ImRect& rect, const String& destination)
+	{
+		for (Size index = 0; index < externalDropPositions.size(); ++index)
+		{
+			if (externalDropAccepted[index] && rect.Contains(externalDropPositions[index]))
+			{
+				externalDropDestinations[index] = destination;
+			}
+		}
+	};
 	auto selectFolder = [&](const String& path)
 	{
 		if (!selection.Clear())
@@ -1282,6 +1293,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			selectFolder({});
 		}
 		const ImRect rootFolderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+		recordExternalDropFolder(rootFolderRect, {});
 		DrawProjectMoveDropTarget(rootFolderRect, workspace, model, selection, {}, readOnly, diagnostic, actions);
 		std::function<void(const ProjectBrowserEntry&)> drawFolder = [&](const ProjectBrowserEntry& folder)
 		{
@@ -1299,6 +1311,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				selectFolder(folder.path.relative);
 			}
 			const ImRect folderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+			recordExternalDropFolder(folderRect, folder.path.relative);
 			DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name);
 			DrawProjectMoveDropTarget(folderRect, workspace, model, selection, folder.path.relative, readOnly,
 			                          diagnostic, actions);
@@ -1844,6 +1857,10 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			                                       ImGuiSelectableFlags_AllowDoubleClick, {tileWidth, tileHeight});
 			const ImVec2 minimum = ImGui::GetItemRectMin();
 			const ImVec2 maximum = ImGui::GetItemRectMax();
+			if (asset->folder && !entry.assetLocalFileId)
+			{
+				recordExternalDropFolder(ImRect(minimum, maximum), asset->path.relative);
+			}
 			UInt32 thumbnailWidth = 0;
 			UInt32 thumbnailHeight = 0;
 			const ImTextureID thumbnailId =
@@ -1980,6 +1997,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				const ImVec2 folderMinimum = ImGui::GetItemRectMin();
 				const ImVec2 folderMaximum = ImGui::GetItemRectMax();
 				const ImRect folderRect(folderMinimum, folderMaximum);
+				recordExternalDropFolder(folderRect, folder.path.relative);
 				if (editingName)
 				{
 					drawInlineRename(folder, folderMinimum, folderMaximum, false);
@@ -2592,6 +2610,21 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	if (renameCommitRequested)
 	{
 		commitInlineRename();
+	}
+	if (!readOnly && actions.importExternalFiles)
+	{
+		for (Size index = 0; index < externalDropPositions.size(); ++index)
+		{
+			if (!externalDropAccepted[index])
+			{
+				continue;
+			}
+			auto imported = actions.importExternalFiles(externalDrops[index].paths, externalDropDestinations[index]);
+			if (!imported)
+			{
+				diagnostic = imported.error;
+			}
+		}
 	}
 	const ImVec2 blankDropMin = ImGui::GetCursorScreenPos();
 	const ImRect contentWork = ImGui::GetCurrentWindow()->WorkRect;
