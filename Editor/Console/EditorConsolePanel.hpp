@@ -1,9 +1,11 @@
 #pragma once
 
 #include <Core/Log.hpp>
+#include <Scripting/ScriptDiagnostic.hpp>
 #include <functional>
 #include <imgui.h>
 #include <memory>
+#include <optional>
 
 namespace Ursa::Editor
 {
@@ -35,20 +37,33 @@ public:
 	Vector<LogRecord> Records() const;
 
 	void Clear();
+	void AddCompilerDiagnostics(const Vector<ScriptDiagnostic>& diagnostics);
+	void NotifyBuildStarted();
+	void NotifyRecompileStarted();
 
-	static Array<Size, 5> Counts(const Vector<LogRecord>& records);
+	static Array<Size, 3> Counts(const Vector<LogRecord>& records);
 
 	void Draw(bool& open, String& diagnostic, const ContextHandler& contextHandler = {},
-	          ContextActionProbe* contextProbe = nullptr);
+	          ContextActionProbe* contextProbe = nullptr, const std::function<void()>& pauseOnError = {},
+	          bool isPlaying = false);
 
 private:
 	struct State;
+	void ClearAll();
 	std::shared_ptr<State> state;
 	Ursa::UInt64 listenerId = 0;
-	bool showTrace = false;
-	bool showDebug = true;
-	bool showInfo = true;
+	bool showMessages = true;
 	bool showWarnings = true;
 	bool showErrors = true;
+	bool collapse = false;
+	bool errorPause = false;
+	bool clearOnPlay = true;
+	bool clearOnBuild = false;
+	bool clearOnRecompile = false;
+	Int32 messageLineCount = 1;
+	bool wasPlaying = false;
+	std::optional<LogRecord> selectedRecord;
+	std::chrono::system_clock::time_point observedLatestError{};
+	Array<char, 256> searchText{};
 };
 } // namespace Ursa::Editor

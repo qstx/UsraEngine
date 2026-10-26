@@ -2,6 +2,7 @@
 #include <Core/Types.hpp>
 #include <Core/Memory/MemoryContainers.hpp>
 #include <Ui/ImGuiBridge.hpp>
+#include <imgui_internal.h>
 #include <Inspector/ReferencePicker.hpp>
 #include <Ui/EditorIcons.hpp>
 #include <stb_image.h>
@@ -375,7 +376,7 @@ Result<void> ImGuiBridge::Initialize()
 				return Result<void>::Failure(bytes.error);
 			}
 			ImGui::LoadIniSettingsFromMemory(reinterpret_cast<const char*>(bytes.value.data()), bytes.value.size());
-			savedLayout = true;
+			savedLayout = ImGui::GetCurrentContext()->DockContext.NodesSettings.Size > 0;
 		}
 	}
 	if (window)

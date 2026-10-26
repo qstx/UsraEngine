@@ -1,5 +1,8 @@
 #include <Ui/EditorIcons.hpp>
 #include <Scene/SceneViewPanel.hpp>
+#include <Scene/SceneViewNavigation.hpp>
+#include <Scene/EditorHierarchy.hpp>
+#include <Workspace/EditorSelectionContext.hpp>
 
 #include <Scene/EditorScenePreview.hpp>
 #include <Scene/RenderingComponents.hpp>
@@ -11,8 +14,10 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <string>
 
@@ -50,6 +55,47 @@ bool HasEffectiveGameCamera(const Scene& scene)
 	return active && active.value;
 }
 
+Result<void> ClearViewportColor(const Rhi::DevicePtr& device,
+                                const std::shared_ptr<Rendering::RenderTextureResource>& target, Color color)
+{
+	if (!device || !target)
+	{
+		return Result<void>::Failure("Cannot clear an unavailable viewport target");
+	}
+	auto executor = Rendering::RenderCommandExecutor::Create(device);
+	if (!executor)
+	{
+		return Result<void>::Failure(executor.error);
+	}
+	auto begun = executor.value->Begin(target, Rhi::ResourceState::ShaderRead);
+	if (!begun)
+	{
+		return begun;
+	}
+	Rendering::RenderCommand clear;
+	clear.opcode = Rendering::RenderCommandOpcode::ClearTarget;
+	clear.clearFlags = 1;
+	clear.color = color;
+	auto executed = executor.value->Execute({clear});
+	if (!executed)
+	{
+		return executed;
+	}
+	auto submitted = executor.value->Submit();
+	if (!submitted)
+	{
+		return Result<void>::Failure(submitted.error);
+	}
+	auto ended = executor.value->End();
+	return ended ? Result<void>{} : Result<void>::Failure(ended.error);
+}
+
+bool ManagedRenderServicesUnavailable(const String& error)
+{
+	return error == "Editing render services are unavailable" ||
+	       error == "Project pipeline viewports require the .NET rendering host";
+}
+
 Vec4 Transform(const Mat4& matrix, Vec4 vector)
 {
 	const Float32 input[] = {vector.x, vector.y, vector.z, vector.w};
@@ -62,6 +108,54 @@ Vec4 Transform(const Mat4& matrix, Vec4 vector)
 		}
 	}
 	return {output[0], output[1], output[2], output[3]};
+}
+
+struct SceneViewRay
+{
+	Vec3 origin;
+	Vec3 direction;
+};
+
+Result<SceneViewRay> CreateSceneViewRay(const Camera& camera, Float32 aspect, const ViewportLayout& layout,
+                                        ViewportPoint screenPosition)
+{
+	const auto pixel = ScreenToViewportPixel(screenPosition, layout);
+	if (!pixel || !layout.targetPixels.width || !layout.targetPixels.height || !std::isfinite(aspect) || aspect <= 0.f)
+	{
+		return Result<SceneViewRay>::Failure("The pointer is outside the Scene image viewport");
+	}
+	try
+	{
+		const Float32 x = 2.f * pixel->x / static_cast<Float32>(layout.targetPixels.width) - 1.f;
+		const Float32 y = 1.f - 2.f * pixel->y / static_cast<Float32>(layout.targetPixels.height);
+		const Mat4 inverse = camera.ViewProjection(aspect).Inverse();
+		auto unproject = [&](Float32 depth) -> Result<Vec3>
+		{
+			const Vec4 homogeneous = Transform(inverse, {x, y, depth, 1.f});
+			if (!std::isfinite(homogeneous.w) || std::abs(homogeneous.w) < 1.0e-7f)
+			{
+				return Result<Vec3>::Failure("The Scene camera ray has an invalid homogeneous coordinate");
+			}
+			return Result<Vec3>::Success(
+			    {homogeneous.x / homogeneous.w, homogeneous.y / homogeneous.w, homogeneous.z / homogeneous.w});
+		};
+		auto nearPoint = unproject(0.f);
+		auto farPoint = unproject(1.f);
+		if (!nearPoint || !farPoint)
+		{
+			return Result<SceneViewRay>::Failure(!nearPoint ? nearPoint.error : farPoint.error);
+		}
+		const Vec3 direction = Normalized(farPoint.value - nearPoint.value);
+		if (Dot(direction, direction) < 0.99f)
+		{
+			return Result<SceneViewRay>::Failure("The Scene camera ray is degenerate");
+		}
+		return Result<SceneViewRay>::Success({nearPoint.value, direction});
+	}
+	catch (const std::exception& error)
+	{
+		return Result<SceneViewRay>::Failure(ToUrsaString(error.what()));
+	}
 }
 
 bool IntersectBounds(Vec3 origin, Vec3 direction, const Bounds& bounds, Float32& distance)
@@ -103,6 +197,438 @@ bool IntersectBounds(Vec3 origin, Vec3 direction, const Bounds& bounds, Float32&
 	return maximum >= 0.f && std::isfinite(distance);
 }
 
+bool IntersectTriangle(Vec3 origin, Vec3 direction, Vec3 first, Vec3 second, Vec3 third, Float32& distance)
+{
+	const Vec3 edgeOne = second - first;
+	const Vec3 edgeTwo = third - first;
+	const Vec3 p = Cross(direction, edgeTwo);
+	const Float32 determinant = Dot(edgeOne, p);
+	if (!std::isfinite(determinant) || std::abs(determinant) < 1.0e-7f)
+	{
+		return false;
+	}
+	const Float32 inverse = 1.f / determinant;
+	const Vec3 offset = origin - first;
+	const Float32 u = Dot(offset, p) * inverse;
+	if (u < 0.f || u > 1.f)
+	{
+		return false;
+	}
+	const Vec3 q = Cross(offset, edgeOne);
+	const Float32 v = Dot(direction, q) * inverse;
+	if (v < 0.f || u + v > 1.f)
+	{
+		return false;
+	}
+	distance = Dot(edgeTwo, q) * inverse;
+	return std::isfinite(distance) && distance >= 0.f;
+}
+
+void FilterSceneViewRenderObjects(Vector<Rendering::RenderObject>& objects, const EditorHierarchy& hierarchy,
+                                  bool requirePickable)
+{
+	objects.erase(std::remove_if(objects.begin(), objects.end(),
+	                             [&](const Rendering::RenderObject& object)
+	                             {
+		                             return !hierarchy.SceneObjectVisible(object.objectId) ||
+		                                    (requirePickable && !hierarchy.SceneObjectPickable(object.objectId));
+	                             }),
+	              objects.end());
+}
+
+Vec3 TransformSceneVertex(const Mat4& world, Vec3 position)
+{
+	const Vec4 transformed = Transform(world, {position.x, position.y, position.z, 1.f});
+	if (!std::isfinite(transformed.w) || std::abs(transformed.w) < 1.0e-7f)
+	{
+		return {std::numeric_limits<Float32>::quiet_NaN(), 0.f, 0.f};
+	}
+	return {transformed.x / transformed.w, transformed.y / transformed.w, transformed.z / transformed.w};
+}
+
+Result<ResourceId> PickSceneObject(const Camera& camera, Float32 aspect, const ViewportLayout& layout,
+                                   ViewportPoint screenPosition, const Vector<Rendering::RenderObject>& renderObjects,
+                                   Scene& scene, const EditorHierarchy& hierarchy,
+                                   Vector<ResourceId>* overlapping = nullptr)
+{
+	auto ray = CreateSceneViewRay(camera, aspect, layout, screenPosition);
+	if (!ray)
+	{
+		return Result<ResourceId>::Failure(ray.error);
+	}
+	Vector<std::pair<Float32, ResourceId>> candidates;
+	for (const auto& object : renderObjects)
+	{
+		Float32 boundsDistance = 0.f;
+		const bool boundsHit =
+		    IntersectBounds(ray.value.origin, ray.value.direction, object.worldBounds, boundsDistance);
+		Float32 objectDistance = std::numeric_limits<Float32>::max();
+		if (object.meshSnapshot && object.jointPalette.empty() &&
+		    object.subMesh < object.meshSnapshot->data.subMeshes.size())
+		{
+			const auto& data = object.meshSnapshot->data;
+			const auto& subMesh = data.subMeshes[object.subMesh];
+			const Size first = subMesh.firstIndex;
+			if (first >= data.indices.size())
+			{
+				continue;
+			}
+			const Size end = first + std::min<Size>(data.indices.size() - first, subMesh.indexCount);
+			for (Size index = first; index + 2 < end; index += 3)
+			{
+				const Int64 firstIndex = static_cast<Int64>(data.indices[index]) + subMesh.baseVertex;
+				const Int64 secondIndex = static_cast<Int64>(data.indices[index + 1]) + subMesh.baseVertex;
+				const Int64 thirdIndex = static_cast<Int64>(data.indices[index + 2]) + subMesh.baseVertex;
+				if (firstIndex < 0 || secondIndex < 0 || thirdIndex < 0 ||
+				    firstIndex >= static_cast<Int64>(data.positions.size()) ||
+				    secondIndex >= static_cast<Int64>(data.positions.size()) ||
+				    thirdIndex >= static_cast<Int64>(data.positions.size()))
+				{
+					continue;
+				}
+				const Vec3 firstVertex =
+				    TransformSceneVertex(object.world, data.positions[static_cast<Size>(firstIndex)]);
+				const Vec3 secondVertex =
+				    TransformSceneVertex(object.world, data.positions[static_cast<Size>(secondIndex)]);
+				const Vec3 thirdVertex =
+				    TransformSceneVertex(object.world, data.positions[static_cast<Size>(thirdIndex)]);
+				Float32 triangleDistance = 0.f;
+				if (IntersectTriangle(ray.value.origin, ray.value.direction, firstVertex, secondVertex, thirdVertex,
+				                      triangleDistance) &&
+				    triangleDistance < objectDistance)
+				{
+					objectDistance = triangleDistance;
+				}
+			}
+		}
+		else if (boundsHit)
+		{
+			objectDistance = boundsDistance;
+		}
+		if (object.objectId && std::isfinite(objectDistance))
+		{
+			const auto existing = std::find_if(candidates.begin(), candidates.end(), [&](const auto& candidate)
+			                                   { return candidate.second == object.objectId; });
+			if (existing == candidates.end())
+			{
+				candidates.emplace_back(objectDistance, object.objectId);
+			}
+			else
+			{
+				existing->first = std::min(existing->first, objectDistance);
+			}
+		}
+	}
+	std::function<void(const GameObject::Ptr&)> considerTransform = [&](const GameObject::Ptr& object)
+	{
+		if (!object)
+		{
+			return;
+		}
+		auto active = scene.ActiveInHierarchy(object);
+		if (!active || !active.value)
+		{
+			return;
+		}
+		auto id = scene.PersistentId(object);
+		const bool hasRenderedBounds =
+		    id && std::any_of(renderObjects.begin(), renderObjects.end(), [&](const auto& rendered)
+		                      { return rendered.objectId == id.value && !rendered.worldBounds.empty; });
+		if (id && hierarchy.SceneObjectVisible(id.value) && hierarchy.SceneObjectPickable(id.value) &&
+		    !hasRenderedBounds)
+		{
+			auto world = scene.WorldTransform(object);
+			if (world)
+			{
+				const Vec3 position{world.value.At(0, 3), world.value.At(1, 3), world.value.At(2, 3)};
+				const Vec4 clip = Transform(camera.ViewProjection(aspect), {position.x, position.y, position.z, 1.f});
+				if (std::isfinite(clip.w) && clip.w > 1.0e-7f && clip.z >= 0.f && clip.z <= clip.w)
+				{
+					const Float32 x = layout.displayRect.x + (clip.x / clip.w + 1.f) * layout.displayRect.width * 0.5f;
+					const Float32 y = layout.displayRect.y + (1.f - clip.y / clip.w) * layout.displayRect.height * 0.5f;
+					const Float32 deltaX = x - screenPosition.x;
+					const Float32 deltaY = y - screenPosition.y;
+					const Float32 distanceSquared = deltaX * deltaX + deltaY * deltaY;
+					const Float32 rayDistance = Dot(position - ray.value.origin, ray.value.direction);
+					if (distanceSquared <= 8.f * 8.f && rayDistance >= 0.f)
+					{
+						const auto existing =
+						    std::find_if(candidates.begin(), candidates.end(),
+						                 [&](const auto& candidate) { return candidate.second == id.value; });
+						if (existing == candidates.end())
+						{
+							candidates.emplace_back(rayDistance, id.value);
+						}
+						else
+						{
+							existing->first = std::min(existing->first, rayDistance);
+						}
+					}
+				}
+			}
+		}
+		for (const auto& child : object->Children())
+		{
+			considerTransform(child);
+		}
+	};
+	for (const auto& root : scene.RootGameObjects())
+	{
+		considerTransform(root);
+	}
+	std::stable_sort(candidates.begin(), candidates.end(),
+	                 [](const auto& first, const auto& second) { return first.first < second.first; });
+	if (overlapping)
+	{
+		overlapping->clear();
+		overlapping->reserve(candidates.size());
+		for (const auto& candidate : candidates)
+		{
+			overlapping->push_back(candidate.second);
+		}
+	}
+	return !candidates.empty() ? Result<ResourceId>::Success(candidates.front().second)
+	                           : Result<ResourceId>::Failure("No scene object is under the pointer");
+}
+
+bool ProjectObjectOrigin(const Camera& camera, Float32 aspect, const ViewportLayout& layout, const Scene& scene,
+                         const GameObject::Ptr& object, ViewportPoint& screen)
+{
+	if (!object || !std::isfinite(aspect) || aspect <= 0.f)
+	{
+		return false;
+	}
+	auto world = scene.WorldTransform(object);
+	if (!world)
+	{
+		return false;
+	}
+	const Vec4 clip = Transform(camera.ViewProjection(aspect),
+	                            {world.value.At(0, 3), world.value.At(1, 3), world.value.At(2, 3), 1.f});
+	if (!std::isfinite(clip.w) || clip.w <= 1.0e-7f || clip.z < 0.f || clip.z > clip.w)
+	{
+		return false;
+	}
+	screen = {layout.displayRect.x + (clip.x / clip.w + 1.f) * layout.displayRect.width * 0.5f,
+	          layout.displayRect.y + (1.f - clip.y / clip.w) * layout.displayRect.height * 0.5f};
+	return screen.x >= layout.displayRect.x && screen.x <= layout.displayRect.x + layout.displayRect.width &&
+	       screen.y >= layout.displayRect.y && screen.y <= layout.displayRect.y + layout.displayRect.height;
+}
+
+bool SceneGizmoOccluded(Vec3 cameraPosition, Vec3 objectPosition, ResourceId objectId,
+                        const Vector<Rendering::RenderObject>& occluders)
+{
+	const Float32 directionX = objectPosition.x - cameraPosition.x;
+	const Float32 directionY = objectPosition.y - cameraPosition.y;
+	const Float32 directionZ = objectPosition.z - cameraPosition.z;
+	const Float32 distance = std::sqrt(directionX * directionX + directionY * directionY + directionZ * directionZ);
+	const Float32 maximumDistance = distance - 0.03f;
+	if (maximumDistance <= 0.f)
+	{
+		return false;
+	}
+	const Float32 direction[3]{directionX / distance, directionY / distance, directionZ / distance};
+	const Float32 origin[3]{cameraPosition.x, cameraPosition.y, cameraPosition.z};
+	for (const Rendering::RenderObject& candidate : occluders)
+	{
+		if (candidate.objectId == objectId || candidate.worldBounds.empty)
+		{
+			continue;
+		}
+		const Float32 minimum[3]{candidate.worldBounds.minimum.x, candidate.worldBounds.minimum.y,
+		                         candidate.worldBounds.minimum.z};
+		const Float32 maximum[3]{candidate.worldBounds.maximum.x, candidate.worldBounds.maximum.y,
+		                         candidate.worldBounds.maximum.z};
+		Float32 nearDistance = 0.f;
+		Float32 farDistance = maximumDistance;
+		bool intersects = true;
+		for (Size axis = 0; axis < 3; ++axis)
+		{
+			if (std::abs(direction[axis]) < 1.0e-7f)
+			{
+				if (origin[axis] < minimum[axis] || origin[axis] > maximum[axis])
+				{
+					intersects = false;
+					break;
+				}
+				continue;
+			}
+			Float32 first = (minimum[axis] - origin[axis]) / direction[axis];
+			Float32 last = (maximum[axis] - origin[axis]) / direction[axis];
+			if (first > last)
+			{
+				std::swap(first, last);
+			}
+			nearDistance = std::max(nearDistance, first);
+			farDistance = std::min(farDistance, last);
+			if (nearDistance > farDistance)
+			{
+				intersects = false;
+				break;
+			}
+		}
+		if (intersects && farDistance > 0.f && nearDistance < maximumDistance)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool ProjectSelectionBounds(const Mat4& viewProjection, const ViewportLayout& layout, const Bounds& bounds,
+                            ViewportRect& projected)
+{
+	if (bounds.empty)
+	{
+		return false;
+	}
+	Float32 minimumX = std::numeric_limits<Float32>::max();
+	Float32 minimumY = std::numeric_limits<Float32>::max();
+	Float32 maximumX = std::numeric_limits<Float32>::lowest();
+	Float32 maximumY = std::numeric_limits<Float32>::lowest();
+	bool hasVisibleCorner = false;
+	for (UInt32 corner = 0; corner < 8; ++corner)
+	{
+		const Vec4 clip = Transform(viewProjection, {(corner & 1) ? bounds.maximum.x : bounds.minimum.x,
+		                                             (corner & 2) ? bounds.maximum.y : bounds.minimum.y,
+		                                             (corner & 4) ? bounds.maximum.z : bounds.minimum.z, 1.f});
+		if (!std::isfinite(clip.w) || clip.w <= 1.0e-7f || clip.z < 0.f || clip.z > clip.w)
+		{
+			continue;
+		}
+		const Float32 x = layout.displayRect.x + (clip.x / clip.w + 1.f) * layout.displayRect.width * 0.5f;
+		const Float32 y = layout.displayRect.y + (1.f - clip.y / clip.w) * layout.displayRect.height * 0.5f;
+		minimumX = std::min(minimumX, x);
+		minimumY = std::min(minimumY, y);
+		maximumX = std::max(maximumX, x);
+		maximumY = std::max(maximumY, y);
+		hasVisibleCorner = true;
+	}
+	if (!hasVisibleCorner)
+	{
+		return false;
+	}
+	projected = {minimumX, minimumY, maximumX - minimumX, maximumY - minimumY};
+	return projected.x <= layout.displayRect.x + layout.displayRect.width &&
+	       projected.y <= layout.displayRect.y + layout.displayRect.height &&
+	       projected.x + projected.width >= layout.displayRect.x &&
+	       projected.y + projected.height >= layout.displayRect.y;
+}
+
+bool ProjectSelectionBounds(const Camera& camera, Float32 aspect, const ViewportLayout& layout, const Bounds& bounds,
+                            ViewportRect& projected)
+{
+	return std::isfinite(aspect) && aspect > 0.f &&
+	       ProjectSelectionBounds(camera.ViewProjection(aspect), layout, bounds, projected);
+}
+
+void DrawProjectedBounds(ImDrawList* drawList, const Mat4& viewProjection, const ViewportLayout& layout,
+                         const Bounds& bounds, ImU32 color)
+{
+	if (!drawList || bounds.empty)
+	{
+		return;
+	}
+	std::array<ImVec2, 8> projected{};
+	std::array<bool, 8> visible{};
+	for (UInt32 corner = 0; corner < 8; ++corner)
+	{
+		const Vec4 clip = Transform(viewProjection, {(corner & 1) ? bounds.maximum.x : bounds.minimum.x,
+		                                             (corner & 2) ? bounds.maximum.y : bounds.minimum.y,
+		                                             (corner & 4) ? bounds.maximum.z : bounds.minimum.z, 1.f});
+		if (!std::isfinite(clip.w) || clip.w <= 1.0e-7f || clip.z < 0.f || clip.z > clip.w)
+		{
+			continue;
+		}
+		projected[corner] = {layout.displayRect.x + (clip.x / clip.w + 1.f) * layout.displayRect.width * 0.5f,
+		                     layout.displayRect.y + (1.f - clip.y / clip.w) * layout.displayRect.height * 0.5f};
+		visible[corner] = true;
+	}
+	for (UInt32 corner = 0; corner < 8; ++corner)
+	{
+		for (UInt32 axis = 0; axis < 3; ++axis)
+		{
+			if ((corner & (1u << axis)) || !visible[corner] || !visible[corner | (1u << axis)])
+			{
+				continue;
+			}
+			drawList->AddLine(projected[corner], projected[corner | (1u << axis)], color, 1.5f);
+		}
+	}
+}
+
+Vector<ResourceId> PickSceneObjectsInRectangle(const Camera& camera, Float32 aspect, const ViewportLayout& layout,
+                                               ViewportPoint first, ViewportPoint second,
+                                               const Vector<Rendering::RenderObject>& renderObjects, Scene& scene,
+                                               const EditorHierarchy& hierarchy)
+{
+	const Float32 left = std::min(first.x, second.x);
+	const Float32 top = std::min(first.y, second.y);
+	const Float32 right = std::max(first.x, second.x);
+	const Float32 bottom = std::max(first.y, second.y);
+	const bool crossing = second.x < first.x;
+	Vector<ResourceId> picked;
+	for (const auto& object : renderObjects)
+	{
+		ViewportRect boundsRect;
+		if (!object.objectId || !ProjectSelectionBounds(camera, aspect, layout, object.worldBounds, boundsRect))
+		{
+			continue;
+		}
+		if (!hierarchy.SceneObjectVisible(object.objectId) || !hierarchy.SceneObjectPickable(object.objectId))
+		{
+			continue;
+		}
+		const bool selected = crossing ? boundsRect.x <= right && boundsRect.x + boundsRect.width >= left &&
+		                                     boundsRect.y <= bottom && boundsRect.y + boundsRect.height >= top
+		                               : boundsRect.x >= left && boundsRect.x + boundsRect.width <= right &&
+		                                     boundsRect.y >= top && boundsRect.y + boundsRect.height <= bottom;
+		if (!selected || std::find(picked.begin(), picked.end(), object.objectId) != picked.end())
+		{
+			continue;
+		}
+		picked.push_back(object.objectId);
+	}
+	std::function<void(const GameObject::Ptr&)> collectTransforms = [&](const GameObject::Ptr& object)
+	{
+		if (!object)
+		{
+			return;
+		}
+		auto active = scene.ActiveInHierarchy(object);
+		if (!active || !active.value)
+		{
+			return;
+		}
+		auto id = scene.PersistentId(object);
+		const bool hasRenderedBounds =
+		    id && std::any_of(renderObjects.begin(), renderObjects.end(), [&](const auto& rendered)
+		                      { return rendered.objectId == id.value && !rendered.worldBounds.empty; });
+		if (id && hierarchy.SceneObjectVisible(id.value) && hierarchy.SceneObjectPickable(id.value) &&
+		    !hasRenderedBounds)
+		{
+			ViewportPoint origin;
+			if (ProjectObjectOrigin(camera, aspect, layout, scene, object, origin))
+			{
+				const bool inside = origin.x >= left && origin.x <= right && origin.y >= top && origin.y <= bottom;
+				if (inside && std::find(picked.begin(), picked.end(), id.value) == picked.end())
+				{
+					picked.push_back(id.value);
+				}
+			}
+		}
+		for (const auto& child : object->Children())
+		{
+			collectTransforms(child);
+		}
+	};
+	for (const auto& root : scene.RootGameObjects())
+	{
+		collectTransforms(root);
+	}
+	return picked;
+}
+
 Vec3 Add(Vec3 left, Vec3 right)
 {
 	return {left.x + right.x, left.y + right.y, left.z + right.z};
@@ -111,6 +637,421 @@ Vec3 Add(Vec3 left, Vec3 right)
 Vec3 Scale(Vec3 value, Float32 scalar)
 {
 	return {value.x * scalar, value.y * scalar, value.z * scalar};
+}
+
+void FocusSceneSelection(Scene& scene, const Vector<GameObject::Ptr>& selected, Camera& camera, Float32 aspect)
+{
+	if (selected.empty())
+	{
+		return;
+	}
+	auto selectedWorld = scene.WorldTransform(selected.front());
+	if (!selectedWorld)
+	{
+		return;
+	}
+	const Vec3 pivot{selectedWorld.value.At(0, 3), selectedWorld.value.At(1, 3), selectedWorld.value.At(2, 3)};
+	Vector<ResourceId> subtreeIds;
+	std::function<void(const GameObject::Ptr&)> collectIds = [&](const GameObject::Ptr& object)
+	{
+		auto id = scene.PersistentId(object);
+		if (!id || std::find(subtreeIds.begin(), subtreeIds.end(), id.value) != subtreeIds.end())
+		{
+			return;
+		}
+		subtreeIds.push_back(id.value);
+		auto children = scene.ChildrenOf(object);
+		if (children)
+		{
+			for (const auto& child : children.value)
+			{
+				collectIds(child);
+			}
+		}
+	};
+	for (const auto& object : selected)
+	{
+		collectIds(object);
+	}
+
+	Vec3 minimum{};
+	Vec3 maximum{};
+	bool hasBounds = false;
+	auto renderData = scene.CollectPreviewRenderData(camera, aspect);
+	if (renderData)
+	{
+		for (const auto& object : renderData.value.objects)
+		{
+			if (object.worldBounds.empty ||
+			    std::find(subtreeIds.begin(), subtreeIds.end(), object.objectId) == subtreeIds.end())
+			{
+				continue;
+			}
+			if (!hasBounds)
+			{
+				minimum = object.worldBounds.minimum;
+				maximum = object.worldBounds.maximum;
+				hasBounds = true;
+				continue;
+			}
+			minimum = {std::min(minimum.x, object.worldBounds.minimum.x),
+			           std::min(minimum.y, object.worldBounds.minimum.y),
+			           std::min(minimum.z, object.worldBounds.minimum.z)};
+			maximum = {std::max(maximum.x, object.worldBounds.maximum.x),
+			           std::max(maximum.y, object.worldBounds.maximum.y),
+			           std::max(maximum.z, object.worldBounds.maximum.z)};
+		}
+	}
+	if (!hasBounds)
+	{
+		minimum = pivot;
+		maximum = pivot;
+		for (const ResourceId id : subtreeIds)
+		{
+			auto object = scene.GameObjectById(id);
+			if (!object)
+			{
+				continue;
+			}
+			auto world = scene.WorldTransform(object.value);
+			if (!world)
+			{
+				continue;
+			}
+			const Vec3 position{world.value.At(0, 3), world.value.At(1, 3), world.value.At(2, 3)};
+			minimum = {std::min(minimum.x, position.x), std::min(minimum.y, position.y),
+			           std::min(minimum.z, position.z)};
+			maximum = {std::max(maximum.x, position.x), std::max(maximum.y, position.y),
+			           std::max(maximum.z, position.z)};
+		}
+	}
+	const Vec3 center{(minimum.x + maximum.x) * 0.5f, (minimum.y + maximum.y) * 0.5f, (minimum.z + maximum.z) * 0.5f};
+	const Vec3 extent = maximum - minimum;
+	const Float32 radius =
+	    hasBounds ? std::sqrt(Dot(extent, extent)) * 0.5f : std::max(std::sqrt(Dot(extent, extent)) * 0.5f, 0.5f);
+	FocusSceneView(camera, center, radius);
+}
+
+bool SetSceneView2DMode(Camera& camera, bool& twoDMode, bool enabled)
+{
+	if (twoDMode == enabled || !std::isfinite(camera.verticalFovRadians) || camera.verticalFovRadians <= 0.f ||
+	    camera.verticalFovRadians >= 3.14159265f)
+	{
+		return false;
+	}
+	const Vec3 offset = camera.position - camera.target;
+	Float32 distance = std::sqrt(Dot(offset, offset));
+	if (!std::isfinite(distance) || distance <= 0.f)
+	{
+		return false;
+	}
+	if (enabled)
+	{
+		if (!camera.orthographic)
+		{
+			camera.orthographicSize = std::max(distance * std::tan(camera.verticalFovRadians * 0.5f), 0.05f);
+		}
+		camera.orthographic = true;
+		camera.position = Add(camera.target, {0.f, 0.f, distance});
+		camera.up = {0.f, 1.f, 0.f};
+	}
+	else
+	{
+		camera.orthographic = false;
+		camera.up = {0.f, 1.f, 0.f};
+		distance = std::max(camera.orthographicSize, 0.05f) / std::tan(camera.verticalFovRadians * 0.5f);
+		camera.position = Add(camera.target, Scale(Normalized(Vec3{1.f, 1.f, 1.f}), distance));
+	}
+	twoDMode = enabled;
+	return true;
+}
+
+bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& twoDMode, bool& rotationLocked,
+                               bool& hovered)
+{
+	const Float32 radius = 30.f;
+	const Float32 hitRadius = 10.f;
+	const ImVec2 center{viewportMaximum.x - 42.f, viewportMaximum.y + 42.f};
+	hovered = false;
+	if (twoDMode)
+	{
+		return false;
+	}
+	const ImVec2 lockCenter{center.x + 21.f, center.y - radius - 7.f};
+	const ImRect lockRect({lockCenter.x - 9.f, lockCenter.y - 9.f}, {lockCenter.x + 9.f, lockCenter.y + 9.f});
+	const Vec3 forward = Normalized(camera.target - camera.position);
+	const Vec3 right = Normalized(Cross(forward, camera.up));
+	const Vec3 screenUp = Normalized(Cross(right, forward));
+
+	struct AxisEnd
+	{
+		Vec3 direction;
+		const char* label;
+		ImU32 color;
+	};
+
+	const AxisEnd ends[]{
+	    {{1.f, 0.f, 0.f}, "X", IM_COL32(218, 72, 72, 255)},  {{-1.f, 0.f, 0.f}, "-X", IM_COL32(150, 48, 48, 255)},
+	    {{0.f, 1.f, 0.f}, "Y", IM_COL32(88, 190, 88, 255)},  {{0.f, -1.f, 0.f}, "-Y", IM_COL32(58, 132, 58, 255)},
+	    {{0.f, 0.f, 1.f}, "Z", IM_COL32(80, 132, 230, 255)}, {{0.f, 0.f, -1.f}, "-Z", IM_COL32(52, 91, 166, 255)}};
+	auto* drawList = ImGui::GetWindowDrawList();
+	const ImVec2 mouse = ImGui::GetIO().MousePos;
+	bool clicked = false;
+	const bool lockHovered = ImGui::IsMouseHoveringRect(lockRect.Min, lockRect.Max, true);
+	hovered |= lockHovered;
+	drawList->AddRectFilled(lockRect.Min, lockRect.Max,
+	                        ImGui::GetColorU32(rotationLocked ? ImGuiCol_ButtonActive
+	                                           : lockHovered    ? ImGuiCol_ButtonHovered
+	                                                            : ImGuiCol_FrameBg),
+	                        3.f);
+	drawList->AddRect(lockRect.Min, lockRect.Max, ImGui::GetColorU32(ImGuiCol_Border), 3.f);
+	const ImU32 lockColor = ImGui::GetColorU32(ImGuiCol_Text);
+	const ImVec2 lockBodyMinimum{lockCenter.x - 4.f, lockCenter.y};
+	const ImVec2 lockBodyMaximum{lockCenter.x + 4.f, lockCenter.y + 6.f};
+	drawList->AddRectFilled(lockBodyMinimum, lockBodyMaximum, lockColor, 1.f);
+	if (rotationLocked)
+	{
+		drawList->PathArcTo({lockCenter.x, lockCenter.y + 1.f}, 3.f, 3.14159f, 6.28318f, 12);
+	}
+	else
+	{
+		drawList->PathLineTo({lockCenter.x - 3.f, lockCenter.y + 1.f});
+		drawList->PathArcTo({lockCenter.x, lockCenter.y + 1.f}, 3.f, 3.14159f, 5.25f, 8);
+	}
+	drawList->PathStroke(lockColor, false, 1.5f);
+	if (lockHovered)
+	{
+		ImGui::SetTooltip(rotationLocked ? "Unlock Scene rotation" : "Lock Scene rotation");
+	}
+	if (lockHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+	{
+		rotationLocked = !rotationLocked;
+	}
+	const char* projectionLabel = camera.orthographic ? "<Iso>" : "<Persp>";
+	const ImVec2 projectionLabelSize = ImGui::CalcTextSize(projectionLabel);
+	const ImVec2 projectionLabelMinimum{center.x - projectionLabelSize.x * 0.5f - 5.f,
+	                                    center.y + radius + 4.f};
+	const ImVec2 projectionLabelMaximum{center.x + projectionLabelSize.x * 0.5f + 5.f,
+	                                    projectionLabelMinimum.y + ImGui::GetTextLineHeight() + 4.f};
+	const bool projectionHovered = ImGui::IsMouseHoveringRect(projectionLabelMinimum, projectionLabelMaximum, true);
+	hovered |= projectionHovered;
+	drawList->AddRectFilled(projectionLabelMinimum, projectionLabelMaximum,
+	                        ImGui::GetColorU32(projectionHovered ? ImGuiCol_ButtonHovered : ImGuiCol_WindowBg), 3.f);
+	drawList->AddText({center.x - projectionLabelSize.x * 0.5f,
+	                   projectionLabelMinimum.y + 2.f},
+	                  ImGui::GetColorU32(ImGuiCol_Text), projectionLabel);
+	if (projectionHovered)
+	{
+		ImGui::SetTooltip("Toggle Perspective / Orthographic");
+	}
+	if (projectionHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+	{
+		const Vec3 offset = camera.position - camera.target;
+		const Float32 distance = std::sqrt(Dot(offset, offset));
+		if (std::isfinite(distance) && distance > 0.f && std::isfinite(camera.verticalFovRadians) &&
+		    camera.verticalFovRadians > 0.f && camera.verticalFovRadians < 3.14159265f)
+		{
+			if (camera.orthographic)
+			{
+				camera.orthographic = false;
+				camera.position = Add(camera.target,
+				                      Scale(Normalized(offset), std::max(camera.orthographicSize, 0.05f) /
+				                                                               std::tan(camera.verticalFovRadians * 0.5f)));
+			}
+			else
+			{
+				camera.orthographicSize =
+				    std::max(distance * std::tan(camera.verticalFovRadians * 0.5f), 0.05f);
+				camera.orthographic = true;
+			}
+			twoDMode = false;
+			clicked = true;
+		}
+	}
+	const auto distanceToMouse = [&](ImVec2 point)
+	{
+		const Float32 dx = point.x - mouse.x;
+		const Float32 dy = point.y - mouse.y;
+		return std::sqrt(dx * dx + dy * dy);
+	};
+	const auto snapToDirection = [&](Vec3 direction)
+	{
+		const Vec3 offset = camera.position - camera.target;
+		const Float32 distance = std::sqrt(Dot(offset, offset));
+		if (std::isfinite(distance) && distance > 0.f)
+		{
+			twoDMode = false;
+			camera.position = Add(camera.target, Scale(direction, distance));
+			camera.up = std::abs(direction.y) > 0.5f
+			                ? Vec3{0.f, 0.f, direction.y > 0.f ? -1.f : 1.f}
+			                : Vec3{0.f, 1.f, 0.f};
+			clicked = true;
+		}
+	};
+	const auto restoreFreeView = [&]
+	{
+		const Vec3 offset = camera.position - camera.target;
+		const Float32 distance = std::sqrt(Dot(offset, offset));
+		if (std::isfinite(distance) && distance > 0.f)
+		{
+			camera.orthographic = false;
+			camera.up = {0.f, 1.f, 0.f};
+			camera.position = Add(camera.target, Scale(Normalized(Vec3{1.f, 0.7f, 1.f}), distance));
+			twoDMode = false;
+			clicked = true;
+		}
+	};
+	if (!twoDMode)
+	{
+		struct CubeFace
+		{
+			Vec3 normal;
+			Vec3 center;
+			Vec3 right;
+			Vec3 up;
+			const char* label;
+			ImU32 color;
+			Float32 depth;
+		};
+		Vector<CubeFace> visibleFaces;
+		const Float32 cubeHalfSize = 12.f;
+		for (const AxisEnd& end : ends)
+		{
+			if (Dot(end.direction, forward) >= 0.f)
+			{
+				continue;
+			}
+			Vec3 faceRight;
+			Vec3 faceUp;
+			if (std::abs(end.direction.x) > 0.5f)
+			{
+				faceRight = {0.f, 1.f, 0.f};
+				faceUp = {0.f, 0.f, 1.f};
+			}
+			else if (std::abs(end.direction.y) > 0.5f)
+			{
+				faceRight = {1.f, 0.f, 0.f};
+				faceUp = {0.f, 0.f, 1.f};
+			}
+			else
+			{
+				faceRight = {1.f, 0.f, 0.f};
+				faceUp = {0.f, 1.f, 0.f};
+			}
+			const bool positiveAxis = end.label[0] != '-';
+			ImU32 faceColor = end.color;
+			if (!positiveAxis)
+			{
+				const auto channel = [faceColor](Int32 shift)
+				{ return static_cast<Int32>((faceColor >> shift) & 0xff); };
+				faceColor = IM_COL32(channel(0) * 2 / 3, channel(8) * 2 / 3, channel(16) * 2 / 3, 255);
+			}
+			const Vec3 faceCenter = Scale(end.direction, cubeHalfSize);
+			visibleFaces.push_back({end.direction, faceCenter, faceRight, faceUp, end.label, faceColor,
+			                        Dot(faceCenter, forward)});
+		}
+		std::sort(visibleFaces.begin(), visibleFaces.end(),
+		          [](const CubeFace& left, const CubeFace& rightFace) { return left.depth > rightFace.depth; });
+		for (const CubeFace& face : visibleFaces)
+		{
+			const Vec3 vertices[] = {Add(face.center, Add(Scale(face.right, -cubeHalfSize), Scale(face.up, -cubeHalfSize))),
+			                         Add(face.center, Add(Scale(face.right, cubeHalfSize), Scale(face.up, -cubeHalfSize))),
+			                         Add(face.center, Add(Scale(face.right, cubeHalfSize), Scale(face.up, cubeHalfSize))),
+			                         Add(face.center, Add(Scale(face.right, -cubeHalfSize), Scale(face.up, cubeHalfSize)))};
+			ImVec2 projected[4];
+			for (Size index = 0; index < 4; ++index)
+			{
+				projected[index] = {center.x + Dot(vertices[index], right) * 0.78f + Dot(vertices[index], forward) * 0.22f,
+				                    center.y - Dot(vertices[index], screenUp) * 0.78f -
+				                        Dot(vertices[index], forward) * 0.22f};
+			}
+			drawList->AddConvexPolyFilled(projected, 4, face.color);
+			drawList->AddPolyline(projected, 4, IM_COL32(32, 36, 42, 255), ImDrawFlags_Closed, 1.5f);
+			const ImVec2 labelSize = ImGui::CalcTextSize(face.label);
+			const Vec3 faceLabelPosition = Add(face.center, Scale(face.normal, 0.25f));
+			const ImVec2 labelPosition{center.x + Dot(faceLabelPosition, right) * 0.78f - labelSize.x * 0.5f,
+			                           center.y - Dot(faceLabelPosition, screenUp) * 0.78f - labelSize.y * 0.5f};
+			drawList->AddText(labelPosition, IM_COL32(255, 255, 255, 255), face.label);
+		}
+		for (const AxisEnd& end : ends)
+		{
+			const Float32 projectedX = Dot(end.direction, right);
+			const Float32 projectedY = -Dot(end.direction, screenUp);
+			const Float32 depth = Dot(end.direction, forward);
+			const ImVec2 point{center.x + projectedX * radius + depth * 6.f,
+			                   center.y + projectedY * radius + depth * 6.f};
+			const Float32 projectedLength = std::sqrt(projectedX * projectedX + projectedY * projectedY);
+			const ImVec2 lineStart = projectedLength > 1.0e-4f
+			                             ? ImVec2{center.x + projectedX / projectedLength * cubeHalfSize,
+			                                      center.y + projectedY / projectedLength * cubeHalfSize}
+			                             : center;
+			const bool axisHovered = distanceToMouse(point) <= hitRadius;
+			hovered |= axisHovered;
+			drawList->AddLine(lineStart, point, end.color, 3.f);
+			drawList->AddCircleFilled(point, hitRadius, axisHovered ? IM_COL32(245, 245, 245, 255) : end.color, 20);
+			const ImVec2 labelSize = ImGui::CalcTextSize(end.label);
+			drawList->AddText({point.x - labelSize.x * 0.5f, point.y - labelSize.y * 0.5f},
+			                  axisHovered ? end.color : IM_COL32(255, 255, 255, 255), end.label);
+			if (axisHovered && !rotationLocked && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+			{
+				snapToDirection(end.direction);
+			}
+		}
+	}
+	const ImRect orientationRect({center.x - radius - 10.f, center.y - radius - 10.f},
+	                              {center.x + radius + 10.f, center.y + radius + 10.f});
+	hovered |= orientationRect.Contains(mouse);
+	if (!twoDMode && orientationRect.Contains(mouse) && !lockRect.Contains(mouse) &&
+	    ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+	{
+		ImGui::OpenPopup("SceneViewAngles");
+	}
+	if (ImGui::BeginPopup("SceneViewAngles"))
+	{
+		ImGui::BeginDisabled(rotationLocked);
+		if (ImGui::MenuItem("Free"))
+		{
+			restoreFreeView();
+		}
+		ImGui::Separator();
+		if (ImGui::MenuItem("Front"))
+		{
+			snapToDirection({0.f, 0.f, 1.f});
+		}
+		if (ImGui::MenuItem("Back"))
+		{
+			snapToDirection({0.f, 0.f, -1.f});
+		}
+		if (ImGui::MenuItem("Left"))
+		{
+			snapToDirection({-1.f, 0.f, 0.f});
+		}
+		if (ImGui::MenuItem("Right"))
+		{
+			snapToDirection({1.f, 0.f, 0.f});
+		}
+		if (ImGui::MenuItem("Top"))
+		{
+			snapToDirection({0.f, 1.f, 0.f});
+		}
+		if (ImGui::MenuItem("Bottom"))
+		{
+			snapToDirection({0.f, -1.f, 0.f});
+		}
+		ImGui::EndDisabled();
+		ImGui::EndPopup();
+	}
+	const Float32 centerDistance = distanceToMouse(center);
+	if (!rotationLocked && orientationRect.Contains(mouse) && centerDistance <= hitRadius &&
+	    ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::GetIO().KeyShift)
+	{
+		restoreFreeView();
+	}
+	if (hovered)
+	{
+		ImGui::SetTooltip("Click an axis to align the Scene view");
+	}
+	return clicked;
 }
 } // namespace
 
@@ -200,6 +1141,7 @@ Result<std::unique_ptr<SceneViewPanel>> SceneViewPanel::Create(Rhi::DevicePtr se
 
 SceneViewPanel::~SceneViewPanel()
 {
+	SetSceneCursorCaptured(false);
 	if (gui)
 	{
 		if (sceneTarget.imageId != ImTextureID_Invalid)
@@ -211,6 +1153,30 @@ SceneViewPanel::~SceneViewPanel()
 			gui->UnregisterTexture(gameTarget.imageId);
 		}
 	}
+}
+
+void SceneViewPanel::SetSceneCursorCaptured(bool captured)
+{
+	if (sceneCursorCaptured == captured)
+	{
+		return;
+	}
+	if (captured)
+	{
+		sceneNavigationWindow = gui ? gui->InputWindowForViewport(ImGui::GetWindowViewport()) : nullptr;
+		if (sceneNavigationWindow)
+		{
+			sceneNavigationWindow->SetCursorCaptured(true);
+			sceneCursorCaptured = true;
+		}
+		return;
+	}
+	if (sceneNavigationWindow)
+	{
+		sceneNavigationWindow->SetCursorCaptured(false);
+	}
+	sceneNavigationWindow.reset();
+	sceneCursorCaptured = false;
 }
 
 Result<void> SceneViewPanel::Initialize()
@@ -341,6 +1307,30 @@ void SceneViewPanel::SaveProjectSettings(VirtualFileSystem& userFiles, const Str
 	settings.fit = gameFit;
 	settings.pan = gamePan;
 	settings.presetId = selectedCustomPreset;
+	settings.showStats = showGameStats;
+	settings.showGizmos = showGameGizmos;
+	settings.focusGameViewOnPlay = focusGameViewOnPlay;
+	settings.disableEditorShortcutsInPlay = disableEditorShortcutsInPlay;
+	settings.maximizeOnPlay = maximizeGameViewOnPlay;
+	settings.warnIfNoGameCamera = warnIfNoGameCamera;
+	settings.clearEveryFrameInEditMode = clearEveryFrameInEditMode;
+	settings.gridSnapEnabled = gizmoSnapSettings.enabled;
+	settings.snapMoveX = gizmoSnapSettings.moveX;
+	settings.snapMoveY = gizmoSnapSettings.moveY;
+	settings.snapMoveZ = gizmoSnapSettings.moveZ;
+	settings.snapRotation = gizmoSnapSettings.rotation;
+	settings.snapScale = gizmoSnapSettings.scale;
+	settings.sceneCameraSpeed = sceneFlythroughSpeed;
+	settings.sceneCameraSpeedMin = sceneFlythroughMinSpeed;
+	settings.sceneCameraSpeedMax = sceneFlythroughMaxSpeed;
+	settings.sceneCameraFieldOfView = sceneCameraFieldOfView;
+	settings.sceneCameraNearClip = sceneCameraNearClip;
+	settings.sceneCameraFarClip = sceneCameraFarClip;
+	settings.showSceneCameraGizmos = showSceneCameraGizmos;
+	settings.showSceneLightGizmos = showSceneLightGizmos;
+	settings.showSceneGizmoLabels = showSceneGizmoLabels;
+	settings.sceneGizmo3DIcons = sceneGizmo3DIcons;
+	settings.sceneGizmoIconSize = sceneGizmoIconSize;
 	const String text = SerializeGameViewSettings(settings);
 	auto written = userFiles.WriteAtomic(path.value, ToBytes(text));
 	diagnostic = written ? String{} : written.error;
@@ -384,6 +1374,20 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 	gameFit = true;
 	gamePan = {};
 	selectedCustomPreset.clear();
+	showGameStats = false;
+	showGameGizmos = true;
+	focusGameViewOnPlay = true;
+	disableEditorShortcutsInPlay = false;
+	maximizeGameViewOnPlay = false;
+	warnIfNoGameCamera = true;
+	clearEveryFrameInEditMode = true;
+	gizmoSnapSettings = {};
+	sceneFlythroughSpeed = 10.f;
+	sceneFlythroughMinSpeed = 0.01f;
+	sceneFlythroughMaxSpeed = 99.f;
+	sceneCameraFieldOfView = 45.f;
+	sceneCameraNearClip = 0.1f;
+	sceneCameraFarClip = 100.f;
 	auto path = VirtualPath::Parse("user:Settings/GameViewProjects/" + projectKey + ".json");
 	if (!path)
 	{
@@ -405,6 +1409,20 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 		gameFit = true;
 		gamePan = {};
 		selectedCustomPreset.clear();
+		showGameStats = false;
+		showGameGizmos = true;
+		focusGameViewOnPlay = true;
+		disableEditorShortcutsInPlay = false;
+		maximizeGameViewOnPlay = false;
+		warnIfNoGameCamera = true;
+		clearEveryFrameInEditMode = true;
+		gizmoSnapSettings = {};
+		sceneFlythroughSpeed = 10.f;
+		sceneFlythroughMinSpeed = 0.01f;
+		sceneFlythroughMaxSpeed = 99.f;
+		sceneCameraFieldOfView = 45.f;
+		sceneCameraNearClip = 0.1f;
+		sceneCameraFarClip = 100.f;
 		diagnostic = settings.error;
 	}
 	else
@@ -422,6 +1440,20 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			gameFit = true;
 			gamePan = {};
 			selectedCustomPreset.clear();
+			showGameStats = false;
+			showGameGizmos = true;
+			focusGameViewOnPlay = true;
+			disableEditorShortcutsInPlay = false;
+			maximizeGameViewOnPlay = false;
+			warnIfNoGameCamera = true;
+			clearEveryFrameInEditMode = true;
+			gizmoSnapSettings = {};
+			sceneFlythroughSpeed = 10.f;
+			sceneFlythroughMinSpeed = 0.01f;
+			sceneFlythroughMaxSpeed = 99.f;
+			sceneCameraFieldOfView = 45.f;
+			sceneCameraNearClip = 0.1f;
+			sceneCameraFarClip = 100.f;
 			diagnostic = "Saved Game resolution exceeds supported limits; restored defaults.";
 		}
 		else
@@ -433,6 +1465,30 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			gameFit = saved.fit;
 			gamePan = saved.pan;
 			selectedCustomPreset = saved.presetId;
+			showGameStats = saved.showStats;
+			showGameGizmos = saved.showGizmos;
+			focusGameViewOnPlay = saved.focusGameViewOnPlay;
+			disableEditorShortcutsInPlay = saved.disableEditorShortcutsInPlay;
+			maximizeGameViewOnPlay = saved.maximizeOnPlay;
+			warnIfNoGameCamera = saved.warnIfNoGameCamera;
+			clearEveryFrameInEditMode = saved.clearEveryFrameInEditMode;
+			gizmoSnapSettings.enabled = saved.gridSnapEnabled;
+			gizmoSnapSettings.moveX = saved.snapMoveX;
+			gizmoSnapSettings.moveY = saved.snapMoveY;
+			gizmoSnapSettings.moveZ = saved.snapMoveZ;
+			gizmoSnapSettings.rotation = saved.snapRotation;
+			gizmoSnapSettings.scale = saved.snapScale;
+			sceneFlythroughSpeed = saved.sceneCameraSpeed;
+			sceneFlythroughMinSpeed = saved.sceneCameraSpeedMin;
+			sceneFlythroughMaxSpeed = saved.sceneCameraSpeedMax;
+			sceneCameraFieldOfView = saved.sceneCameraFieldOfView;
+			sceneCameraNearClip = saved.sceneCameraNearClip;
+			sceneCameraFarClip = saved.sceneCameraFarClip;
+			showSceneCameraGizmos = saved.showSceneCameraGizmos;
+			showSceneLightGizmos = saved.showSceneLightGizmos;
+			showSceneGizmoLabels = saved.showSceneGizmoLabels;
+			sceneGizmo3DIcons = saved.sceneGizmo3DIcons;
+			sceneGizmoIconSize = saved.sceneGizmoIconSize;
 		}
 		if (!selectedCustomPreset.empty() &&
 		    std::none_of(customPresets.begin(), customPresets.end(),
@@ -453,8 +1509,6 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	{
 		LoadSettings(*userFiles, projectKey, diagnostic);
 	}
-	settingsChanged = false;
-	presetsChanged = false;
 	bool requestOpenCustomPreset = false;
 	const String fixedLabel =
 	    ToUrsaString(std::to_string(gamePresetWidth)) + "x" + ToUrsaString(std::to_string(gamePresetHeight));
@@ -469,9 +1523,19 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	                                   : gamePresetWidth == 4 && gamePresetHeight == 3   ? "4:3"
 	                                                                                     : "9:16")
 	                                : fixedLabel.c_str();
-	const Float32 resolutionLabelWidth = ImGui::CalcTextSize("Resolution").x + ImGui::GetStyle().ItemInnerSpacing.x;
-	ImGui::SetNextItemWidth(std::max(1.f, std::min(220.f, ImGui::GetContentRegionAvail().x - resolutionLabelWidth)));
-	if (ImGui::BeginCombo("Resolution", selectedLabel))
+	const Float32 toolbarSpacing = ImGui::GetStyle().ItemSpacing.x;
+	const Float32 compactButtonWidth = ImGui::GetFrameHeight();
+	const bool hasCustomSelection = selectedCustom != customPresets.end();
+	const Float32 postScaleControlsWidth = compactButtonWidth * 4.f + toolbarSpacing * 4.f;
+	const Float32 customActionsWidth = hasCustomSelection ? compactButtonWidth * 2.f + toolbarSpacing * 2.f : 0.f;
+	const Float32 availableToolbarWidth = ImGui::GetContentRegionAvail().x;
+	const Float32 selectedValueWidth = ImGui::CalcTextSize(selectedLabel).x +
+	                                   ImGui::GetStyle().FramePadding.x * 2.f + compactButtonWidth;
+	const Float32 availableResolutionWidth =
+	    availableToolbarWidth - 80.f - postScaleControlsWidth - customActionsWidth;
+	const Float32 resolutionWidth = std::max(selectedValueWidth, std::min(220.f, availableResolutionWidth));
+	ImGui::SetNextItemWidth(resolutionWidth);
+	if (ImGui::BeginCombo("##GameResolution", selectedLabel))
 	{
 		if (ImGui::Selectable("Free Aspect", gameSizeMode == GameViewSizeMode::FreeAspect))
 		{
@@ -551,7 +1615,7 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	if (!selectedCustomPreset.empty())
 	{
 		Icons::SameLine();
-		if (Icons::SmallButton("Edit"))
+		if (Icons::Button("EditGamePreset", Icons::Icon::Rename, "Edit custom resolution"))
 		{
 			auto found = std::find_if(customPresets.begin(), customPresets.end(), [this](const GameViewPreset& preset)
 			                          { return preset.id == selectedCustomPreset; });
@@ -568,7 +1632,7 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 			}
 		}
 		Icons::SameLine();
-		if (Icons::SmallButton("Delete"))
+		if (Icons::Button("DeleteGamePreset", Icons::Icon::Delete, "Delete custom resolution"))
 		{
 			customPresets.erase(std::remove_if(customPresets.begin(), customPresets.end(),
 			                                   [this](const GameViewPreset& preset)
@@ -662,24 +1726,15 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 		}
 		ImGui::EndPopup();
 	}
-	const Float32 scaleLabelWidth = ImGui::CalcTextSize("Scale").x + ImGui::GetStyle().ItemInnerSpacing.x;
-	Icons::SameLine(150.f + scaleLabelWidth);
-	ImGui::SetNextItemWidth(std::max(1.f, std::min(150.f, ImGui::GetContentRegionAvail().x - scaleLabelWidth)));
-	Float32 sliderValue = std::log2(std::max(gameScale, 0.1f));
-	if (ImGui::SliderFloat("Scale", &sliderValue, -3.321928f, 2.32f, "%.2f"))
+	Icons::SameLine();
+	const Float32 scaleWidth = std::max(
+	    70.f, std::min(150.f, ImGui::GetContentRegionAvail().x - postScaleControlsWidth));
+	ImGui::SetNextItemWidth(scaleWidth);
+	if (ImGui::SliderFloat("##GameScale", &gameScale, 0.1f, 5.f, "%.2fx", ImGuiSliderFlags_Logarithmic))
 	{
-		gameScale = SnapViewportScale(std::exp2(sliderValue));
+		gameScale = SnapViewportScale(gameScale);
 		gameFit = false;
 		settingsChanged = true;
-	}
-	Icons::SameLine(50.f);
-	if (gameFit)
-	{
-		ImGui::TextUnformatted("Fit");
-	}
-	else
-	{
-		ImGui::Text("%.2fx", gameScale);
 	}
 	Icons::SameLine();
 	if (Icons::Button("Fit", Icons::Icon::Fit, "Fit game view"))
@@ -688,14 +1743,61 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 		gamePan = {};
 		settingsChanged = true;
 	}
+	Icons::SameLine();
+	if (Icons::Button("GameStats", Icons::Icon::Info, "Statistics", showGameStats))
+	{
+		showGameStats = !showGameStats;
+	}
+	Icons::SameLine();
+	if (Icons::Button("GameGizmos", Icons::Icon::Debug, "Gizmos", showGameGizmos))
+	{
+		showGameGizmos = !showGameGizmos;
+		settingsChanged = true;
+	}
+	Icons::SameLine();
+	if (Icons::Button("GamePlayMode", Icons::Icon::Settings, "Play Mode behavior"))
+	{
+		ImGui::OpenPopup("Game Play Mode");
+	}
+	if (ImGui::BeginPopup("Game Play Mode"))
+	{
+		if (ImGui::MenuItem("Focused", nullptr, &focusGameViewOnPlay))
+		{
+			settingsChanged = true;
+		}
+		if (ImGui::MenuItem("Unity Shortcuts", nullptr, &disableEditorShortcutsInPlay))
+		{
+			settingsChanged = true;
+		}
+		ImGui::Separator();
+		ImGui::TextDisabled("Enter Play Mode");
+		if (ImGui::MenuItem("Normally", nullptr, !maximizeGameViewOnPlay))
+		{
+			maximizeGameViewOnPlay = false;
+			settingsChanged = true;
+		}
+		if (ImGui::MenuItem("Maximized", nullptr, &maximizeGameViewOnPlay))
+		{
+			settingsChanged = true;
+		}
+		ImGui::EndPopup();
+	}
 }
 
 Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, EditorHierarchy& hierarchy,
                                   PlaySession& play, VirtualFileSystem* userFiles, const String& projectKey,
                                   bool& showScene, bool& showGame, bool& viewportFocused, String& diagnostic,
                                   const std::function<Result<void>(const EditorDragSession&, Vec3)>& placeAssets,
-                                  ImGuiViewport** focusedGameViewport)
+                                  ImGuiViewport** focusedGameViewport, EditorSelectionContext* selection)
 {
+	settingsChanged = false;
+	presetsChanged = false;
+	bool sceneGizmoSelectionHandled = false;
+	const bool focusGameOnThisPlayStart = play.Active() && !gameWasPlaying && focusGameViewOnPlay && showGame;
+	if (userFiles && userFiles->IsMounted("user"))
+	{
+		LoadSettings(*userFiles, projectKey, diagnostic);
+	}
 	viewportFocused = false;
 	if (focusedGameViewport)
 	{
@@ -703,7 +1805,53 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 	}
 	sceneTarget.visible = false;
 	gameTarget.visible = false;
+	if (!showScene)
+	{
+		sceneNavigationGesture = SceneNavigationGesture::None;
+		SetSceneCursorCaptured(false);
+	}
+	if (sceneCursorCaptured && (!sceneNavigationWindow || !sceneNavigationWindow->Focused()))
+	{
+		SetSceneCursorCaptured(false);
+		sceneNavigationGesture = SceneNavigationGesture::None;
+	}
 	Scene& scene = play.Active() ? *play.GetScene() : draft.GetScene();
+	if (sceneTarget.preview)
+	{
+		Camera& camera = sceneTarget.preview->GetCamera();
+		camera.verticalFovRadians = sceneCameraFieldOfView * (3.14159265358979323846f / 180.f);
+		camera.nearPlane = sceneCameraNearClip;
+		camera.farPlane = sceneCameraFarClip;
+	}
+	const String sceneViewStateKey = projectKey + "/" + document.Id().ToString();
+	if (loadedSceneViewStateKey != sceneViewStateKey)
+	{
+		loadedSceneViewStateKey = sceneViewStateKey;
+		const String statePath = "user:Settings/SceneView/" + sceneViewStateKey + ".json";
+		auto path = VirtualPath::Parse(statePath);
+		if (!path)
+		{
+			diagnostic = path.error;
+		}
+		else
+		{
+			String stateText = "{\"version\":1,\"visibility\":[],\"pickability\":[]}";
+			if (userFiles && userFiles->IsMounted("user"))
+			{
+				auto text = userFiles->ReadText(path.value);
+				if (text)
+				{
+					stateText = std::move(text.value);
+				}
+			}
+			auto restored = hierarchy.RestoreSceneViewOverrides(scene, stateText);
+			if (!restored)
+			{
+				diagnostic = restored.error;
+			}
+		}
+		savedSceneViewOverridesRevision = hierarchy.SceneViewOverridesRevision();
+	}
 	if (showScene)
 	{
 		if (ImGui::Begin("Scene", &showScene))
@@ -717,19 +1865,238 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				}
 				ImGui::EndPopup();
 			}
-			if (Icons::Button("Translate", Icons::Icon::Move, "Translate", gizmoOperation == GizmoOperation::Translate))
+			ImGui::BeginChild("SceneToolRail", ImVec2(40.f, 0.f), true,
+			                  ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+			if (Icons::Button("Hand", Icons::Icon::Move, "Hand tool (Q)", sceneHandTool))
 			{
+				sceneHandTool = true;
+			}
+			if (Icons::Button("Translate", Icons::Icon::Move, "Move (W)",
+			                  !sceneHandTool && gizmoOperation == GizmoOperation::Translate))
+			{
+				sceneHandTool = false;
 				gizmoOperation = GizmoOperation::Translate;
 			}
-			Icons::SameLine();
-			if (Icons::Button("Rotate", Icons::Icon::Rotate, "Rotate", gizmoOperation == GizmoOperation::Rotate))
+			if (Icons::Button("Rotate", Icons::Icon::Rotate, "Rotate (E)",
+			                  !sceneHandTool && gizmoOperation == GizmoOperation::Rotate))
 			{
+				sceneHandTool = false;
 				gizmoOperation = GizmoOperation::Rotate;
 			}
-			Icons::SameLine();
-			if (Icons::Button("Scale", Icons::Icon::Scale, "Scale", gizmoOperation == GizmoOperation::Scale))
+			if (Icons::Button("Scale", Icons::Icon::Scale, "Scale (R)",
+			                  !sceneHandTool && gizmoOperation == GizmoOperation::Scale))
 			{
+				sceneHandTool = false;
 				gizmoOperation = GizmoOperation::Scale;
+			}
+			ImGui::EndChild();
+			Icons::SameLine();
+			ImGui::BeginChild("SceneViewportArea", ImVec2(0.f, 0.f), false,
+			                  ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+			const ImGuiIO& sceneSearchInput = ImGui::GetIO();
+			if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !sceneSearchInput.WantTextInput &&
+			    sceneSearchInput.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
+			{
+				ImGui::SetKeyboardFocusHere();
+			}
+			ImGui::SetNextItemWidth(std::min(180.f, std::max(110.f, ImGui::GetContentRegionAvail().x * 0.34f)));
+			ImGui::InputTextWithHint("##SceneSearch", "Search (name or type)", hierarchy.SearchText().data(),
+			                         hierarchy.SearchText().size(), ImGuiInputTextFlags_EscapeClearsAll);
+			if (draft.Kind() == ResourceKind::Scene)
+			{
+				hierarchy.RefreshSceneSearchMatches(scene, document.Id());
+			}
+			Icons::SameLine();
+			bool requestedTwoDMode = sceneView2DMode;
+			if (ImGui::Checkbox("2D", &requestedTwoDMode))
+			{
+				sceneView2DModePending = true;
+				sceneView2DModePendingTarget = requestedTwoDMode;
+			}
+			Icons::SameLine();
+			if (Icons::SmallButton(gizmoPivotMode == GizmoPivotMode::Pivot ? "Pivot" : "Center"))
+			{
+				gizmoPivotMode =
+				    gizmoPivotMode == GizmoPivotMode::Pivot ? GizmoPivotMode::Center : GizmoPivotMode::Pivot;
+			}
+			Icons::SameLine();
+			if (Icons::SmallButton(gizmoSpace == GizmoSpace::Global ? "Global" : "Local"))
+			{
+				gizmoSpace = gizmoSpace == GizmoSpace::Global ? GizmoSpace::Local : GizmoSpace::Global;
+			}
+			Icons::SameLine();
+			if (Icons::Button("GridSnap", Icons::Icon::Trace, "Toggle grid snapping (Ctrl temporarily snaps)",
+			                  gizmoSnapSettings.enabled, true))
+			{
+				gizmoSnapSettings.enabled = !gizmoSnapSettings.enabled;
+				settingsChanged = true;
+			}
+			Icons::SameLine();
+			if (Icons::SmallButton("Snap Settings"))
+			{
+				ImGui::OpenPopup("Scene Snap Settings");
+			}
+			if (ImGui::BeginPopup("Scene Snap Settings"))
+			{
+				Float32 moveSnap[3]{gizmoSnapSettings.moveX, gizmoSnapSettings.moveY, gizmoSnapSettings.moveZ};
+				if (ImGui::DragFloat3("Move Increment", moveSnap, 0.1f, 0.001f, 10000.f, "%.3f"))
+				{
+					gizmoSnapSettings.moveX = moveSnap[0];
+					gizmoSnapSettings.moveY = moveSnap[1];
+					gizmoSnapSettings.moveZ = moveSnap[2];
+					settingsChanged = true;
+				}
+				if (ImGui::DragFloat("Rotate Increment", &gizmoSnapSettings.rotation, 0.5f, 0.1f, 180.f, "%.2f°"))
+				{
+					settingsChanged = true;
+				}
+				if (ImGui::DragFloat("Scale Increment", &gizmoSnapSettings.scale, 0.01f, 0.001f, 100.f, "%.3f"))
+				{
+					settingsChanged = true;
+				}
+				if (Icons::Button("Reset Snap Values"))
+				{
+					gizmoSnapSettings.moveX = 1.f;
+					gizmoSnapSettings.moveY = 1.f;
+					gizmoSnapSettings.moveZ = 1.f;
+					gizmoSnapSettings.rotation = 15.f;
+					gizmoSnapSettings.scale = 0.1f;
+					settingsChanged = true;
+				}
+				ImGui::EndPopup();
+			}
+			Icons::SameLine();
+			if (Icons::SmallButton("Gizmos"))
+			{
+				ImGui::OpenPopup("Scene Gizmo Settings");
+			}
+			if (ImGui::BeginPopup("Scene Gizmo Settings"))
+			{
+				settingsChanged = ImGui::Checkbox("Cameras", &showSceneCameraGizmos) || settingsChanged;
+				settingsChanged = ImGui::Checkbox("Lights", &showSceneLightGizmos) || settingsChanged;
+				settingsChanged = ImGui::Checkbox("Labels", &showSceneGizmoLabels) || settingsChanged;
+				settingsChanged = ImGui::Checkbox("3D Icons", &sceneGizmo3DIcons) || settingsChanged;
+				if (sceneGizmo3DIcons)
+				{
+					settingsChanged = ImGui::SliderFloat("Icon Size", &sceneGizmoIconSize, 0.1f, 3.f, "%.1fx") ||
+					                   settingsChanged;
+				}
+				ImGui::EndPopup();
+			}
+			Icons::SameLine();
+			if (Icons::SmallButton("Camera"))
+			{
+				ImGui::OpenPopup("Scene Camera Settings");
+			}
+			if (ImGui::BeginPopup("Scene Camera Settings"))
+			{
+				ImGui::TextUnformatted("Scene Camera");
+				Float32 fieldOfView = sceneCameraFieldOfView;
+				if (ImGui::SliderFloat("Field of View", &fieldOfView, 1.f, 179.f, "%.1f°"))
+				{
+					sceneCameraFieldOfView = fieldOfView;
+					sceneTarget.preview->GetCamera().verticalFovRadians =
+					    fieldOfView * (3.14159265358979323846f / 180.f);
+					settingsChanged = true;
+				}
+				Float32 nearClip = sceneCameraNearClip;
+				if (ImGui::DragFloat("Near", &nearClip, 0.01f, 0.01f, 99999.f, "%.2f"))
+				{
+					sceneCameraNearClip = nearClip;
+					if (sceneCameraFarClip <= sceneCameraNearClip)
+					{
+						sceneCameraFarClip = sceneCameraNearClip + 0.01f;
+					}
+					sceneTarget.preview->GetCamera().nearPlane = sceneCameraNearClip;
+					sceneTarget.preview->GetCamera().farPlane = sceneCameraFarClip;
+					settingsChanged = true;
+				}
+				Float32 farClip = sceneCameraFarClip;
+				if (ImGui::DragFloat("Far", &farClip, 1.f, sceneCameraNearClip + 0.01f, 1000000.f, "%.2f"))
+				{
+					sceneCameraFarClip = farClip;
+					sceneTarget.preview->GetCamera().farPlane = sceneCameraFarClip;
+					settingsChanged = true;
+				}
+				ImGui::Separator();
+				ImGui::SetNextItemWidth(190.f);
+				if (ImGui::SliderFloat("Camera Speed", &sceneFlythroughSpeed, sceneFlythroughMinSpeed,
+				                      sceneFlythroughMaxSpeed, "%.2f", ImGuiSliderFlags_Logarithmic))
+				{
+					settingsChanged = true;
+				}
+				Float32 minimumSpeed = sceneFlythroughMinSpeed;
+				if (ImGui::DragFloat("Min", &minimumSpeed, 0.01f, 0.01f, 98.f, "%.2f"))
+				{
+					sceneFlythroughMinSpeed = minimumSpeed;
+					if (sceneFlythroughMinSpeed >= sceneFlythroughMaxSpeed)
+					{
+						sceneFlythroughMaxSpeed = std::min(99.f, sceneFlythroughMinSpeed + 0.01f);
+					}
+					sceneFlythroughSpeed = std::clamp(sceneFlythroughSpeed, sceneFlythroughMinSpeed,
+					                                 sceneFlythroughMaxSpeed);
+					settingsChanged = true;
+				}
+				Float32 maximumSpeed = sceneFlythroughMaxSpeed;
+				if (ImGui::DragFloat("Max", &maximumSpeed, 0.01f, 0.02f, 99.f, "%.2f"))
+				{
+					sceneFlythroughMaxSpeed = maximumSpeed;
+					if (sceneFlythroughMaxSpeed <= sceneFlythroughMinSpeed)
+					{
+						sceneFlythroughMinSpeed = std::max(0.01f, sceneFlythroughMaxSpeed - 0.01f);
+					}
+					sceneFlythroughSpeed = std::clamp(sceneFlythroughSpeed, sceneFlythroughMinSpeed,
+					                                 sceneFlythroughMaxSpeed);
+					settingsChanged = true;
+				}
+				if (Icons::Button("Reset Camera Settings"))
+				{
+					sceneFlythroughSpeed = 10.f;
+					sceneFlythroughMinSpeed = 0.01f;
+					sceneFlythroughMaxSpeed = 99.f;
+					sceneCameraFieldOfView = 45.f;
+					sceneCameraNearClip = 0.1f;
+					sceneCameraFarClip = 100.f;
+					sceneTarget.preview->GetCamera().verticalFovRadians = 45.f * (3.14159265358979323846f / 180.f);
+					sceneTarget.preview->GetCamera().nearPlane = sceneCameraNearClip;
+					sceneTarget.preview->GetCamera().farPlane = sceneCameraFarClip;
+					settingsChanged = true;
+				}
+				ImGui::EndPopup();
+			}
+			const ImGuiIO& sceneInput = ImGui::GetIO();
+			if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !sceneInput.WantTextInput &&
+			    !sceneInput.KeyCtrl && !sceneInput.KeyAlt && !sceneInput.KeyShift &&
+			    !sceneInput.MouseDown[ImGuiMouseButton_Right])
+			{
+				if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+				{
+					sceneHandTool = true;
+				}
+				else if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+				{
+					sceneHandTool = false;
+					gizmoOperation = GizmoOperation::Translate;
+				}
+				else if (ImGui::IsKeyPressed(ImGuiKey_E, false))
+				{
+					sceneHandTool = false;
+					gizmoOperation = GizmoOperation::Rotate;
+				}
+				else if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+				{
+					sceneHandTool = false;
+					gizmoOperation = GizmoOperation::Scale;
+				}
+				else if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
+				{
+					gizmoPivotMode =
+					    gizmoPivotMode == GizmoPivotMode::Pivot ? GizmoPivotMode::Center : GizmoPivotMode::Pivot;
+				}
+				else if (ImGui::IsKeyPressed(ImGuiKey_X, false))
+				{
+					gizmoSpace = gizmoSpace == GizmoSpace::Global ? GizmoSpace::Local : GizmoSpace::Global;
+				}
 			}
 			const ImVec2 available = ImGui::GetContentRegionAvail();
 			const ImVec2 position = ImGui::GetCursorScreenPos();
@@ -744,6 +2111,17 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				{
 					diagnostic = target.error;
 				}
+				else if (sceneView2DModePending && sceneTarget.preview &&
+				         SetSceneView2DMode(sceneTarget.preview->GetCamera(), sceneView2DMode,
+				                           sceneView2DModePendingTarget))
+				{
+					sceneView2DModePending = false;
+					sceneViewLockedTarget = {};
+					sceneViewLockedDocument = {};
+					sceneViewLockedPositionOffset = {};
+					sceneViewLockedTargetOffset = {};
+					sceneViewLockedPlaySession = false;
+				}
 			}
 			if (sceneTarget.color && width && height)
 			{
@@ -757,6 +2135,236 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				                    true);
 				ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 				ImGui::Image(sceneTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
+				if (draft.Kind() == ResourceKind::Scene && layout.visible &&
+				    (showSceneCameraGizmos || showSceneLightGizmos))
+				{
+					struct SceneGizmoHit
+					{
+					ResourceId id;
+					GameObject::Ptr object;
+					ViewportPoint screen;
+					String label;
+					bool camera = false;
+						Int32 iconIndex = 0;
+						Int32 iconCount = 1;
+						bool occluded = false;
+				};
+					Vector<SceneGizmoHit> gizmos;
+					const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
+					                       static_cast<Float32>(sceneTarget.size.height);
+					auto* drawList = ImGui::GetWindowDrawList();
+					Vector<Rendering::RenderObject> sceneGizmoOccluders;
+					if (sceneGizmo3DIcons)
+					{
+						auto renderData = scene.CollectPreviewRenderData(sceneTarget.preview->GetCamera(), aspect);
+						if (renderData)
+						{
+							FilterSceneViewRenderObjects(renderData.value.objects, hierarchy, false);
+						sceneGizmoOccluders = std::move(renderData.value.objects);
+						}
+					}
+					std::function<void(const GameObject::Ptr&)> drawObjectGizmos = [&](const GameObject::Ptr& object)
+					{
+						const auto identity = scene.PersistentId(object);
+						if (identity && hierarchy.SceneObjectVisible(identity.value))
+						{
+							ViewportPoint screen;
+							if (ProjectObjectOrigin(sceneTarget.preview->GetCamera(), aspect, layout, scene, object, screen))
+							{
+								auto name = scene.GameObjectName(object);
+								const String objectName = name ? name.value : String("GameObject");
+									auto world = scene.WorldTransform(object);
+									const Camera& editorCamera = sceneTarget.preview->GetCamera();
+									const bool occluded = sceneGizmo3DIcons && world &&
+									                     SceneGizmoOccluded(
+									                         editorCamera.position,
+									                         {world.value.At(0, 3), world.value.At(1, 3), world.value.At(2, 3)},
+									                         identity.value, sceneGizmoOccluders);
+								Vector<SceneGizmoHit> objectGizmos;
+								for (Component* component : object->Components())
+								{
+									if (showSceneCameraGizmos && dynamic_cast<CameraComponent*>(component))
+									{
+										objectGizmos.push_back({identity.value, object, screen, "Camera: " + objectName, true});
+									}
+									else if (showSceneLightGizmos &&
+									         (dynamic_cast<DirectionalLightComponent*>(component) ||
+									          dynamic_cast<PointLightComponent*>(component)))
+									{
+										objectGizmos.push_back({identity.value, object, screen, "Light: " + objectName, false});
+									}
+								}
+								for (Size index = 0; index < objectGizmos.size(); ++index)
+								{
+									objectGizmos[index].iconIndex = static_cast<Int32>(index);
+									objectGizmos[index].iconCount = static_cast<Int32>(objectGizmos.size());
+									objectGizmos[index].occluded = occluded;
+									gizmos.push_back(std::move(objectGizmos[index]));
+								}
+							}
+						}
+						const auto children = scene.ChildrenOf(object);
+						if (children)
+						{
+							for (const GameObject::Ptr& child : children.value)
+							{
+								drawObjectGizmos(child);
+							}
+						}
+					};
+					for (const GameObject::Ptr& root : scene.RootGameObjects())
+					{
+						drawObjectGizmos(root);
+					}
+					for (const SceneGizmoHit& gizmo : gizmos)
+					{
+						if (gizmo.occluded)
+						{
+							continue;
+						}
+						const Float32 iconOffset =
+						    (static_cast<Float32>(gizmo.iconIndex) - static_cast<Float32>(gizmo.iconCount - 1) * 0.5f) * 14.f;
+						const ImVec2 center{gizmo.screen.x + iconOffset, gizmo.screen.y};
+						Float32 iconScale = sceneGizmoIconSize;
+						if (sceneGizmo3DIcons)
+						{
+							auto world = scene.WorldTransform(gizmo.object);
+							if (world)
+							{
+								const Camera& editorCamera = sceneTarget.preview->GetCamera();
+								const Float32 dx = world.value.At(0, 3) - editorCamera.position.x;
+								const Float32 dy = world.value.At(1, 3) - editorCamera.position.y;
+								const Float32 dz = world.value.At(2, 3) - editorCamera.position.z;
+								const Float32 distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+								iconScale *= std::clamp(10.f / std::max(distance, 0.1f), 0.4f, 2.2f);
+							}
+						}
+						const Float32 iconRadius = 7.f * iconScale;
+						const bool hovered = ImGui::IsMouseHoveringRect(
+						    {center.x - 11.f * iconScale, center.y - 11.f * iconScale},
+						    {center.x + 11.f * iconScale, center.y + 11.f * iconScale});
+						const ImU32 color = gizmo.camera ? IM_COL32(90, 190, 255, 255) : IM_COL32(255, 205, 80, 255);
+						drawList->AddCircleFilled(center, iconRadius, IM_COL32(25, 31, 40, 235), 16);
+						if (gizmo.camera)
+						{
+							drawList->AddRect({center.x - 5.f * iconScale, center.y - 3.5f * iconScale},
+							                  {center.x + 2.f * iconScale, center.y + 3.5f * iconScale}, color,
+							                  iconScale, 0, 1.5f * iconScale);
+							drawList->AddTriangle({center.x + 2.f * iconScale, center.y - 2.5f * iconScale},
+							                     {center.x + 6.f * iconScale, center.y - 5.f * iconScale},
+							                     {center.x + 6.f * iconScale, center.y + 5.f * iconScale}, color,
+							                     1.4f * iconScale);
+						}
+						else
+						{
+							drawList->AddCircle(center, 3.f * iconScale, color, 12, 1.5f * iconScale);
+							for (int ray = 0; ray < 8; ++ray)
+							{
+								const Float32 angle = ray * 0.78539816f;
+								const ImVec2 a{center.x + std::cos(angle) * 4.5f * iconScale,
+								               center.y + std::sin(angle) * 4.5f * iconScale};
+								const ImVec2 b{center.x + std::cos(angle) * 6.5f * iconScale,
+								               center.y + std::sin(angle) * 6.5f * iconScale};
+								drawList->AddLine(a, b, color, 1.3f * iconScale);
+							}
+						}
+						if (showSceneGizmoLabels && hovered)
+						{
+							const ImVec2 textSize = ImGui::CalcTextSize(gizmo.label.c_str());
+							const ImVec2 textPos{center.x + 9.f, center.y - textSize.y * 0.5f};
+							drawList->AddRectFilled({textPos.x - 3.f, textPos.y - 2.f},
+							                        {textPos.x + textSize.x + 3.f, textPos.y + textSize.y + 2.f},
+							                        IM_COL32(24, 28, 35, 225), 2.f);
+							drawList->AddText(textPos, IM_COL32_WHITE, gizmo.label.c_str());
+						}
+						if (hovered)
+						{
+							ImGui::SetTooltip("%s\nClick to select", gizmo.label.c_str());
+							if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+							{
+								sceneGizmoSelectionHandled = true;
+								bool accepted = selection ? selection->SelectGameObject(document.Id(), gizmo.id, play.Active())
+								                          : true;
+								if (accepted)
+								{
+									auto selected = hierarchy.Select(scene, gizmo.object);
+									if (!selected) diagnostic = selected.error;
+								}
+								else diagnostic = "Scene selection could not be updated";
+							}
+						}
+					}
+				}
+				const auto& hierarchySearch = hierarchy.SearchText();
+				if (draft.Kind() == ResourceKind::Scene && hierarchySearch[0] != '\0' &&
+				    hierarchy.HasDirectSearchMatches() && layout.visible)
+				{
+					const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
+					                       static_cast<Float32>(sceneTarget.size.height);
+					auto searchRenderData = scene.CollectPreviewRenderData(sceneTarget.preview->GetCamera(), aspect);
+					Vector<ResourceId> highlightedObjects;
+					auto* drawList = ImGui::GetWindowDrawList();
+					if (searchRenderData)
+					{
+						FilterSceneViewRenderObjects(searchRenderData.value.objects, hierarchy, false);
+						for (const Rendering::RenderObject& object : searchRenderData.value.objects)
+						{
+							if (!hierarchy.IsDirectSearchMatch(object.objectId) ||
+							    std::find(highlightedObjects.begin(), highlightedObjects.end(), object.objectId) !=
+							        highlightedObjects.end())
+							{
+								continue;
+							}
+							highlightedObjects.push_back(object.objectId);
+							DrawProjectedBounds(drawList, searchRenderData.value.viewProjection, layout, object.worldBounds,
+							                   IM_COL32(255, 166, 48, 235));
+						}
+					}
+					std::function<void(const GameObject::Ptr&)> drawSearchMarker = [&](const GameObject::Ptr& object)
+					{
+						const auto identity = scene.PersistentId(object);
+						if (identity && hierarchy.IsDirectSearchMatch(identity.value) &&
+						    hierarchy.SceneObjectVisible(identity.value) &&
+						    std::find(highlightedObjects.begin(), highlightedObjects.end(), identity.value) ==
+						        highlightedObjects.end())
+						{
+							ViewportPoint screen;
+							if (ProjectObjectOrigin(sceneTarget.preview->GetCamera(), aspect, layout, scene, object, screen))
+							{
+								drawList->AddCircleFilled({screen.x, screen.y}, 7.f, IM_COL32(255, 166, 48, 90), 16);
+								drawList->AddCircle({screen.x, screen.y}, 7.f, IM_COL32(255, 190, 92, 245), 16, 2.f);
+							}
+						}
+						const auto children = scene.ChildrenOf(object);
+						if (children)
+						{
+							for (const GameObject::Ptr& child : children.value)
+							{
+								drawSearchMarker(child);
+							}
+						}
+					};
+					for (const GameObject::Ptr& root : scene.RootGameObjects())
+					{
+						drawSearchMarker(root);
+					}
+				}
+				const bool imageHovered = ImGui::IsItemHovered();
+				bool sceneOrientationHovered = false;
+				if (layout.displayRect.width >= 100.f && layout.displayRect.height >= 100.f &&
+				    DrawSceneOrientationGizmo(
+				        sceneTarget.preview->GetCamera(),
+				        {layout.displayRect.x + layout.displayRect.width - 8.f, layout.displayRect.y + 8.f},
+				        sceneView2DMode,
+				        sceneViewRotationLocked,
+				        sceneOrientationHovered))
+				{
+					sceneViewLockedTarget = {};
+					sceneViewLockedDocument = {};
+					sceneViewLockedPositionOffset = {};
+					sceneViewLockedTargetOffset = {};
+					sceneViewLockedPlaySession = false;
+				}
 				if (ImGui::BeginDragDropTarget())
 				{
 					if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
@@ -778,6 +2386,10 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
 							                       static_cast<Float32>(sceneTarget.size.height);
 							auto renderData = scene.CollectPreviewRenderData(sceneTarget.preview->GetCamera(), aspect);
+							if (renderData)
+							{
+								FilterSceneViewRenderObjects(renderData.value.objects, hierarchy, false);
+							}
 							auto dropPoint =
 							    renderData ? ResolveSceneDropPoint(sceneTarget.preview->GetCamera(), aspect, layout,
 							                                       {mouse.x, mouse.y}, renderData.value.objects)
@@ -813,22 +2425,38 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					}
 					ImGui::EndDragDropTarget();
 				}
-				if (ImGui::BeginPopupContextItem("SceneViewportActions"))
+				const ImGuiIO& scenePointerInput = ImGui::GetIO();
+				if (imageHovered && scenePointerInput.KeyCtrl && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
+				    !gizmoWasOver && !gizmoWasUsing)
+				{
+					const Float32 aspect =
+					    static_cast<Float32>(sceneTarget.size.width) / static_cast<Float32>(sceneTarget.size.height);
+					auto renderData = scene.CollectPreviewRenderData(sceneTarget.preview->GetCamera(), aspect);
+					if (renderData)
+					{
+						FilterSceneViewRenderObjects(renderData.value.objects, hierarchy, true);
+					}
+					Vector<ResourceId> overlapping;
+					auto picked = renderData
+					                  ? PickSceneObject(sceneTarget.preview->GetCamera(), aspect, layout,
+					                                    {scenePointerInput.MousePos.x, scenePointerInput.MousePos.y},
+					                                    renderData.value.objects, scene, hierarchy, &overlapping)
+					                  : Result<ResourceId>::Failure(renderData.error);
+					scenePiercingCandidates = picked ? std::move(overlapping) : Vector<ResourceId>{};
+					scenePiercingAddSelection = scenePointerInput.KeyShift;
+					if (scenePiercingCandidates.size() > 1)
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+						ImGui::OpenPopup("Scene Selection Piercing");
+					}
+				}
+				if (!sceneOrientationHovered && !scenePointerInput.KeyCtrl &&
+				    ImGui::BeginPopupContextItem("SceneViewportActions"))
 				{
 					const bool canCreate = !play.Active() && draft.Kind() == ResourceKind::Scene;
 					if (ImGui::MenuItem("Create Empty", nullptr, false, canCreate))
 					{
-						GameObject::Ptr parent;
-						auto selected = hierarchy.SelectedGameObject(scene);
-						if (selected)
-						{
-							parent = selected.value;
-						}
-						else if (!scene.RootGameObjects().empty())
-						{
-							parent = scene.RootGameObjects().front();
-						}
-						auto created = scene.CreateGameObject("GameObject", parent);
+						auto created = scene.CreateGameObject("GameObject");
 						if (created)
 						{
 							auto selectedCreated = hierarchy.Select(scene, created.value);
@@ -842,8 +2470,86 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					}
 					ImGui::EndPopup();
 				}
+				if (ImGui::IsPopupOpen("Scene Selection Piercing"))
+				{
+					ImGui::SetNextWindowPos(scenePointerInput.MousePos, ImGuiCond_Appearing);
+				}
+				if (ImGui::BeginPopup("Scene Selection Piercing"))
+				{
+					for (const ResourceId id : scenePiercingCandidates)
+					{
+						auto object = scene.GameObjectById(id);
+						if (!object)
+						{
+							continue;
+						}
+						auto name = scene.GameObjectName(object.value);
+						std::string label = name ? ToStdString(name.value) : "GameObject";
+						label += "##" + ToStdString(id.ToString());
+						if (ImGui::MenuItem(label.c_str()))
+						{
+							bool accepted = true;
+							if (selection)
+							{
+								EditorSelectionEntry target;
+								target.kind = EditorSelectionKind::GameObject;
+								target.documentId = document.Id();
+								target.objectId = id;
+								target.playSession = play.Active();
+								if (scenePiercingAddSelection)
+								{
+									Vector<EditorSelectionEntry> next;
+									for (const auto& entry : selection->entries)
+									{
+										if (entry.kind == EditorSelectionKind::GameObject &&
+										    entry.documentId == document.Id() && entry.playSession == play.Active() &&
+										    !entry.IsMissing())
+										{
+											next.push_back(entry);
+										}
+									}
+									if (std::none_of(next.begin(), next.end(),
+									                 [&](const auto& entry) { return entry.SameIdentity(target); }))
+									{
+										next.push_back(target);
+									}
+									const auto primary = std::find_if(next.begin(), next.end(), [&](const auto& entry)
+									                                  { return entry.SameIdentity(target); });
+									const Size primaryIndex = static_cast<Size>(std::distance(next.begin(), primary));
+									accepted = selection->SelectEntries(std::move(next), primaryIndex, target);
+								}
+								else
+								{
+									accepted = selection->SelectGameObject(document.Id(), id, play.Active());
+								}
+								const auto* primary = selection->PrimaryEntry();
+								if (accepted && primary && primary->kind == EditorSelectionKind::GameObject &&
+								    primary->documentId == document.Id() && primary->playSession == play.Active())
+								{
+									auto primaryObject = scene.GameObjectById(primary->objectId);
+									if (primaryObject)
+									{
+										auto synced = hierarchy.Select(scene, primaryObject.value);
+										accepted = static_cast<bool>(synced);
+									}
+								}
+							}
+							else
+							{
+								auto synced = hierarchy.Select(scene, object.value);
+								accepted = static_cast<bool>(synced);
+							}
+							if (!accepted)
+							{
+								diagnostic = "Scene selection could not be updated";
+							}
+						}
+					}
+					ImGui::EndPopup();
+				}
 				ImGui::PopClipRect();
 				GameObject::Ptr gizmoTarget;
+				Vector<GameObject::Ptr> gizmoTargets;
 				ResourceId prefabObjectId;
 				if (!play.Active() && draft.Kind() == ResourceKind::Prefab && draft.GetPrefabAsset())
 				{
@@ -855,6 +2561,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						if (selectedPreviewObject)
 						{
 							gizmoTarget = selectedPreviewObject.value;
+							gizmoTargets.push_back(gizmoTarget);
 						}
 					}
 				}
@@ -864,15 +2571,39 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					if (selected)
 					{
 						gizmoTarget = selected.value;
+						if (selection && selection->kind == EditorSelectionKind::GameObject)
+						{
+							for (const auto& entry : selection->entries)
+							{
+								if (entry.kind != EditorSelectionKind::GameObject || entry.IsMissing() ||
+								    entry.documentId != document.Id() || entry.playSession != play.Active())
+								{
+									continue;
+								}
+								auto object = scene.GameObjectById(entry.objectId);
+								if (object && std::none_of(gizmoTargets.begin(), gizmoTargets.end(),
+								                           [&](const GameObject::Ptr& item)
+								                           { return item->Id() == object.value->Id(); }))
+								{
+									gizmoTargets.push_back(object.value);
+								}
+							}
+						}
+						if (std::none_of(gizmoTargets.begin(), gizmoTargets.end(),
+						                 [&](const GameObject::Ptr& item) { return item->Id() == gizmoTarget->Id(); }))
+						{
+							gizmoTargets.push_back(gizmoTarget);
+						}
 					}
 				}
-				if (gizmoTarget && layout.visible)
+				if (gizmoTarget && layout.visible && !sceneHandTool)
 				{
 					GizmoInteractionReport interaction;
-					auto manipulated = DrawGizmo(scene, gizmoTarget, sceneTarget.preview->GetCamera(),
-					                             {layout.displayRect.x, layout.displayRect.y, layout.displayRect.width,
-					                              layout.displayRect.height},
-					                             gizmoOperation, &interaction);
+					auto manipulated =
+					    DrawGizmo(scene, gizmoTargets, gizmoTarget, sceneTarget.preview->GetCamera(),
+					              {layout.displayRect.x, layout.displayRect.y, layout.displayRect.width,
+					               layout.displayRect.height},
+					              gizmoOperation, gizmoPivotMode, gizmoSpace, gizmoSnapSettings, &interaction);
 					if (interaction.isOver != gizmoWasOver || interaction.isUsing != gizmoWasUsing ||
 					    interaction.matrixChanged)
 					{
@@ -915,17 +2646,528 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						diagnostic = manipulated.error;
 					}
 				}
+				else if (sceneHandTool)
+				{
+					gizmoWasOver = false;
+					gizmoWasUsing = false;
+				}
+				{
+					auto& camera = sceneTarget.preview->GetCamera();
+					const auto& io = ImGui::GetIO();
+					auto clearSceneViewLock = [&]()
+					{
+						sceneViewLockedTarget = {};
+						sceneViewLockedDocument = {};
+						sceneViewLockedPositionOffset = {};
+						sceneViewLockedTargetOffset = {};
+						sceneViewLockedPlaySession = false;
+					};
+					if (sceneViewLockedTarget)
+					{
+						if (sceneViewLockedDocument != document.Id() || sceneViewLockedPlaySession != play.Active())
+						{
+							clearSceneViewLock();
+						}
+						else
+						{
+							auto selected = hierarchy.SelectedGameObject(scene);
+							auto selectedId = selected ? scene.PersistentId(selected.value)
+							                           : Result<ResourceId>::Failure("No selected object");
+							if (!selectedId || selectedId.value != sceneViewLockedTarget)
+							{
+								clearSceneViewLock();
+							}
+							else
+							{
+								auto world = scene.WorldTransform(selected.value);
+								if (world)
+								{
+									const Vec3 objectPosition{world.value.At(0, 3), world.value.At(1, 3),
+									                          world.value.At(2, 3)};
+									camera.position = Add(objectPosition, sceneViewLockedPositionOffset);
+									camera.target = Add(objectPosition, sceneViewLockedTargetOffset);
+								}
+								else
+								{
+									clearSceneViewLock();
+								}
+							}
+						}
+					}
+					if (!sceneGizmoSelectionHandled && sceneNavigationGesture == SceneNavigationGesture::None && imageHovered &&
+					    !sceneOrientationHovered && !sceneHandTool && !io.KeyAlt &&
+					    ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !gizmoWasOver && !gizmoWasUsing)
+					{
+						sceneSelectionPending = true;
+						sceneSelectionStart = {io.MousePos.x, io.MousePos.y};
+						sceneSelectionControl = io.KeyCtrl;
+						sceneSelectionShift = io.KeyShift;
+					}
+					if (sceneSelectionPending)
+					{
+						const ViewportPoint mouse{io.MousePos.x, io.MousePos.y};
+						const Float32 deltaX = mouse.x - sceneSelectionStart.x;
+						const Float32 deltaY = mouse.y - sceneSelectionStart.y;
+						const bool marquee = deltaX * deltaX + deltaY * deltaY >= 25.f;
+						if (marquee && io.MouseDown[ImGuiMouseButton_Left])
+						{
+							auto* drawList = ImGui::GetWindowDrawList();
+							const ImVec2 first(sceneSelectionStart.x, sceneSelectionStart.y);
+							const ImVec2 last(mouse.x, mouse.y);
+							drawList->AddRectFilled(first, last, IM_COL32(80, 145, 230, 42));
+							drawList->AddRect(first, last, IM_COL32(120, 180, 255, 220), 0.f, 0, 1.f);
+						}
+						if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+						{
+							const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
+							                       static_cast<Float32>(sceneTarget.size.height);
+							auto renderData = scene.CollectPreviewRenderData(camera, aspect);
+							if (renderData)
+							{
+								FilterSceneViewRenderObjects(renderData.value.objects, hierarchy, true);
+							}
+							if (!renderData)
+							{
+								diagnostic = renderData.error;
+							}
+							else if (marquee)
+							{
+								const auto picked =
+								    PickSceneObjectsInRectangle(camera, aspect, layout, sceneSelectionStart, mouse,
+								                                renderData.value.objects, scene, hierarchy);
+								Vector<EditorSelectionEntry> next;
+								Size primaryIndex = static_cast<Size>(-1);
+								if (selection && (sceneSelectionControl || sceneSelectionShift))
+								{
+									for (const auto& entry : selection->entries)
+									{
+										if (entry.kind == EditorSelectionKind::GameObject &&
+										    entry.documentId == document.Id() && entry.playSession == play.Active() &&
+										    !entry.IsMissing())
+										{
+											next.push_back(entry);
+											if (const auto* currentPrimary = selection->PrimaryEntry();
+											    currentPrimary && currentPrimary->SameIdentity(entry))
+											{
+												primaryIndex = next.size() - 1;
+											}
+										}
+									}
+								}
+								for (const ResourceId id : picked)
+								{
+									EditorSelectionEntry entry;
+									entry.kind = EditorSelectionKind::GameObject;
+									entry.documentId = document.Id();
+									entry.objectId = id;
+									entry.playSession = play.Active();
+									if (std::none_of(next.begin(), next.end(),
+									                 [&](const auto& current) { return current.SameIdentity(entry); }))
+									{
+										next.push_back(entry);
+										primaryIndex = next.size() - 1;
+									}
+									else
+									{
+										primaryIndex = static_cast<Size>(std::distance(
+										    next.begin(),
+										    std::find_if(next.begin(), next.end(), [&](const auto& current)
+										                 { return current.SameIdentity(entry); })));
+									}
+								}
+								bool accepted = true;
+								if (selection)
+								{
+									accepted = selection->SelectEntries(std::move(next), primaryIndex);
+									const auto* primary = selection->PrimaryEntry();
+									if (accepted && primary && primary->kind == EditorSelectionKind::GameObject &&
+									    primary->documentId == document.Id() && primary->playSession == play.Active())
+									{
+										auto primaryObject = scene.GameObjectById(primary->objectId);
+										if (primaryObject)
+										{
+											auto synced = hierarchy.Select(scene, primaryObject.value);
+											accepted = static_cast<bool>(synced);
+										}
+									}
+									else if (accepted)
+									{
+										hierarchy.ClearSelection();
+									}
+								}
+								else if (!picked.empty())
+								{
+									auto primaryObject = scene.GameObjectById(picked.back());
+									accepted = primaryObject &&
+									           static_cast<bool>(hierarchy.Select(scene, primaryObject.value));
+								}
+								else
+								{
+									hierarchy.ClearSelection();
+								}
+								if (!accepted)
+								{
+									diagnostic = "Scene selection could not be updated";
+								}
+							}
+							else
+							{
+								Vector<ResourceId> overlapping;
+								auto pickedObject =
+								    PickSceneObject(camera, aspect, layout, mouse, renderData.value.objects, scene,
+								                    hierarchy, &overlapping);
+								if (pickedObject)
+								{
+									ResourceId pickedObjectId = pickedObject.value;
+									if (!sceneSelectionControl && !sceneSelectionShift && overlapping.size() > 1)
+									{
+										const Float32 repeatDeltaX = mouse.x - scenePickCyclePosition.x;
+										const Float32 repeatDeltaY = mouse.y - scenePickCyclePosition.y;
+										const bool repeated =
+										    scenePickCycleDocument == document.Id() &&
+										    scenePickCyclePlaySession == play.Active() &&
+										    ImGui::GetTime() - scenePickCycleTime <= 0.8 &&
+										    repeatDeltaX * repeatDeltaX + repeatDeltaY * repeatDeltaY <= 25.f &&
+										    scenePickCycleCandidates.size() == overlapping.size() &&
+										    std::equal(scenePickCycleCandidates.begin(), scenePickCycleCandidates.end(),
+										               overlapping.begin());
+										if (repeated)
+										{
+											scenePickCycleIndex = (scenePickCycleIndex + 1) % overlapping.size();
+										}
+										else
+										{
+											scenePickCycleCandidates = overlapping;
+											scenePickCycleIndex = 0;
+										}
+										scenePickCyclePosition = mouse;
+										scenePickCycleTime = ImGui::GetTime();
+										scenePickCycleDocument = document.Id();
+										scenePickCyclePlaySession = play.Active();
+										pickedObjectId = overlapping[scenePickCycleIndex];
+									}
+									else
+									{
+										scenePickCycleCandidates.clear();
+										scenePickCycleTime = -1.0;
+									}
+									auto object = scene.GameObjectById(pickedObjectId);
+									if (object)
+									{
+										bool accepted = true;
+										if (selection)
+										{
+											EditorSelectionEntry entry;
+											entry.kind = EditorSelectionKind::GameObject;
+											entry.documentId = document.Id();
+											entry.objectId = pickedObjectId;
+											entry.playSession = play.Active();
+											accepted =
+											    selection->SelectClicked(entry, hierarchy.VisibleSelectionRows(),
+											                             sceneSelectionControl, sceneSelectionShift);
+											if (!accepted && sceneSelectionShift)
+											{
+												accepted = selection->SelectGameObject(document.Id(), pickedObjectId,
+												                                       play.Active());
+											}
+											const auto* primary = selection->PrimaryEntry();
+											if (accepted && primary &&
+											    primary->kind == EditorSelectionKind::GameObject &&
+											    primary->documentId == document.Id() &&
+											    primary->playSession == play.Active())
+											{
+												auto selectedObject = scene.GameObjectById(primary->objectId);
+												if (selectedObject)
+												{
+													accepted = static_cast<bool>(
+													    hierarchy.Select(scene, selectedObject.value));
+												}
+											}
+											else if (accepted)
+											{
+												hierarchy.ClearSelection();
+											}
+										}
+										else
+										{
+											auto selected = hierarchy.Select(scene, object.value);
+											accepted = static_cast<bool>(selected);
+										}
+										if (!accepted)
+										{
+											diagnostic = "Scene selection could not be updated";
+										}
+									}
+								}
+								else if (!sceneSelectionControl && !sceneSelectionShift)
+								{
+									scenePickCycleCandidates.clear();
+									scenePickCycleTime = -1.0;
+									const bool cleared = !selection || selection->Clear();
+									if (cleared)
+									{
+										hierarchy.ClearSelection();
+									}
+								}
+							}
+							sceneSelectionPending = false;
+						}
+					}
+					if (sceneNavigationGesture == SceneNavigationGesture::Pan && !io.MouseDown[ImGuiMouseButton_Middle])
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::RightPan &&
+					         !io.MouseDown[ImGuiMouseButton_Right])
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::HandPan &&
+					         !io.MouseDown[ImGuiMouseButton_Left])
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::Orbit &&
+					         (!io.MouseDown[ImGuiMouseButton_Left] || !io.KeyAlt))
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::RightOrbit &&
+					         !io.MouseDown[ImGuiMouseButton_Right])
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::DragZoom &&
+					         (!io.MouseDown[ImGuiMouseButton_Right] || !io.KeyAlt))
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::Flythrough &&
+					         !io.MouseDown[ImGuiMouseButton_Right])
+					{
+						sceneNavigationGesture = SceneNavigationGesture::None;
+					}
+					if (sceneNavigationGesture == SceneNavigationGesture::None && imageHovered &&
+					    !sceneOrientationHovered)
+					{
+						if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && io.KeyCtrl)
+						{
+							// Ctrl+right-click is reserved for selecting overlapping objects.
+						}
+						else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+						{
+							if (io.KeyAlt)
+							{
+								sceneNavigationGesture = SceneNavigationGesture::DragZoom;
+							}
+							else if (sceneView2DMode || sceneViewRotationLocked)
+							{
+								sceneNavigationGesture = SceneNavigationGesture::RightPan;
+							}
+							else if (camera.orthographic)
+							{
+								sceneNavigationGesture = SceneNavigationGesture::RightOrbit;
+							}
+							else
+							{
+								sceneNavigationGesture = SceneNavigationGesture::Flythrough;
+							}
+						}
+						else if (sceneHandTool && !io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+						{
+							sceneNavigationGesture = SceneNavigationGesture::HandPan;
+						}
+						else if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+						{
+							sceneNavigationGesture = SceneNavigationGesture::Pan;
+						}
+						else if (io.KeyAlt && !sceneView2DMode && !sceneViewRotationLocked && !gizmoWasOver && !gizmoWasUsing &&
+						         ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+						{
+							sceneNavigationGesture = SceneNavigationGesture::Orbit;
+						}
+					}
+					SetSceneCursorCaptured(sceneNavigationGesture == SceneNavigationGesture::Flythrough);
+					if (sceneNavigationGesture != SceneNavigationGesture::None)
+					{
+						clearSceneViewLock();
+					}
+					if (sceneNavigationGesture == SceneNavigationGesture::Pan ||
+					    sceneNavigationGesture == SceneNavigationGesture::RightPan ||
+					    sceneNavigationGesture == SceneNavigationGesture::HandPan)
+					{
+						PanSceneView(camera, {io.MouseDelta.x, io.MouseDelta.y}, layout.displayRect.height);
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::Orbit ||
+					         sceneNavigationGesture == SceneNavigationGesture::RightOrbit)
+					{
+						OrbitSceneView(camera, {io.MouseDelta.x, io.MouseDelta.y});
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::DragZoom)
+					{
+						const Float32 speed = io.KeyShift ? 3.f : 1.f;
+						ZoomSceneView(camera, -io.MouseDelta.y * 0.1f * speed,
+						              {layout.displayRect.width * 0.5f, layout.displayRect.height * 0.5f},
+						              {layout.displayRect.width, layout.displayRect.height});
+					}
+					else if (sceneNavigationGesture == SceneNavigationGesture::Flythrough)
+					{
+						if (io.MouseWheel != 0.f)
+						{
+							sceneFlythroughSpeed =
+				    std::clamp(sceneFlythroughSpeed * std::exp(io.MouseWheel * 0.15f), sceneFlythroughMinSpeed,
+				               sceneFlythroughMaxSpeed);
+							settingsChanged = true;
+						}
+						const ViewportPoint movement{
+						    (ImGui::IsKeyDown(ImGuiKey_D) ? 1.f : 0.f) - (ImGui::IsKeyDown(ImGuiKey_A) ? 1.f : 0.f),
+						    (ImGui::IsKeyDown(ImGuiKey_W) ? 1.f : 0.f) - (ImGui::IsKeyDown(ImGuiKey_S) ? 1.f : 0.f)};
+						const Float32 verticalMovement =
+						    (ImGui::IsKeyDown(ImGuiKey_E) ? 1.f : 0.f) - (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.f : 0.f);
+						FlythroughSceneView(camera, {io.MouseDelta.x, io.MouseDelta.y}, movement, verticalMovement,
+						                    io.DeltaTime, sceneFlythroughSpeed, io.KeyShift);
+					}
+					if (sceneNavigationGesture == SceneNavigationGesture::None && imageHovered &&
+					    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput &&
+					    !io.KeyAlt && !io.KeyCtrl)
+					{
+						const ViewportPoint arrowMovement{(ImGui::IsKeyDown(ImGuiKey_RightArrow) ? 1.f : 0.f) -
+						                                      (ImGui::IsKeyDown(ImGuiKey_LeftArrow) ? 1.f : 0.f),
+						                                  (ImGui::IsKeyDown(ImGuiKey_UpArrow) ? 1.f : 0.f) -
+						                                      (ImGui::IsKeyDown(ImGuiKey_DownArrow) ? 1.f : 0.f)};
+						if (arrowMovement.x != 0.f || arrowMovement.y != 0.f)
+						{
+							clearSceneViewLock();
+							MoveSceneView(camera, arrowMovement, io.DeltaTime, sceneFlythroughSpeed * 0.5f, io.KeyShift,
+							             sceneView2DMode);
+						}
+					}
+					if (imageHovered && io.MouseWheel != 0.f &&
+					    sceneNavigationGesture != SceneNavigationGesture::Flythrough &&
+					    sceneNavigationGesture != SceneNavigationGesture::DragZoom)
+					{
+						clearSceneViewLock();
+						ZoomSceneView(camera, io.MouseWheel,
+						              {io.MousePos.x - layout.displayRect.x, io.MousePos.y - layout.displayRect.y},
+						              {layout.displayRect.width, layout.displayRect.height});
+					}
+					const bool hierarchyFocusRequested = hierarchy.ConsumeFocusSelectionRequest();
+					if (hierarchyFocusRequested ||
+					    (imageHovered && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+					     !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_F, false)))
+					{
+						const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
+						                       static_cast<Float32>(sceneTarget.size.height);
+						auto selected = hierarchy.SelectedGameObject(scene);
+						if (selected)
+						{
+							auto selectedId = scene.PersistentId(selected.value);
+							Vector<GameObject::Ptr> focusTargets;
+							if (selection)
+							{
+								const auto* activeEntry = selection->PrimaryEntry();
+								if (activeEntry && activeEntry->kind == EditorSelectionKind::GameObject &&
+								    activeEntry->documentId == document.Id() &&
+								    activeEntry->playSession == play.Active() && !activeEntry->IsMissing())
+								{
+									auto activeObject = scene.GameObjectById(activeEntry->objectId);
+									if (activeObject)
+									{
+										focusTargets.push_back(activeObject.value);
+									}
+								}
+								for (const auto& entry : selection->entries)
+								{
+									if (entry.kind != EditorSelectionKind::GameObject ||
+									    entry.documentId != document.Id() || entry.playSession != play.Active() ||
+									    entry.IsMissing() ||
+									    (activeEntry && entry.SameIdentity(*activeEntry)))
+									{
+										continue;
+									}
+									auto object = scene.GameObjectById(entry.objectId);
+									if (object)
+									{
+										focusTargets.push_back(object.value);
+									}
+								}
+							}
+							if (focusTargets.empty())
+							{
+								focusTargets.push_back(selected.value);
+							}
+							if (!io.KeyShift)
+							{
+								clearSceneViewLock();
+								FocusSceneSelection(scene, focusTargets, camera, aspect);
+							}
+							else
+							{
+								if (selectedId && selectedId.value == sceneViewLockedTarget &&
+								    sceneViewLockedDocument == document.Id() &&
+								    sceneViewLockedPlaySession == play.Active())
+								{
+									clearSceneViewLock();
+								}
+								else
+								{
+									FocusSceneSelection(scene, focusTargets, camera, aspect);
+									auto world = scene.WorldTransform(selected.value);
+									if (selectedId && world)
+									{
+										const Vec3 objectPosition{world.value.At(0, 3), world.value.At(1, 3),
+										                          world.value.At(2, 3)};
+										sceneViewLockedTarget = selectedId.value;
+										sceneViewLockedDocument = document.Id();
+										sceneViewLockedPlaySession = play.Active();
+										sceneViewLockedPositionOffset =
+										    Add(camera.position, Scale(objectPosition, -1.f));
+										sceneViewLockedTargetOffset = Add(camera.target, Scale(objectPosition, -1.f));
+									}
+								}
+							}
+						}
+					}
+				}
 			}
+			ImGui::EndChild();
 		}
 		ImGui::End();
 	}
 	if (showGame)
 	{
-		if (ImGui::Begin("Game", &showGame))
+		const bool maximizedForPlay = play.Active() && maximizeGameViewOnPlay;
+		const char* gameWindowName = maximizedForPlay ? "Game###GameMaximized" : "Game";
+		if (focusGameOnThisPlayStart || (maximizedForPlay && !gameWasPlaying))
+		{
+			ImGui::SetNextWindowFocus();
+		}
+		ImGuiWindowFlags gameWindowFlags = ImGuiWindowFlags_None;
+		if (maximizedForPlay)
+		{
+			const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+			ImGui::SetNextWindowPos(mainViewport->WorkPos, ImGuiCond_Always);
+			ImGui::SetNextWindowSize(mainViewport->WorkSize, ImGuiCond_Always);
+			ImGui::SetNextWindowViewport(mainViewport->ID);
+			gameWindowFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+			                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
+		}
+		if (ImGui::Begin(gameWindowName, &showGame, gameWindowFlags))
 		{
 			const ImVec2 dpi = CurrentViewportFramebufferScale();
 			if (ImGui::BeginPopupContextWindow("GamePanelActions", ImGuiPopupFlags_NoOpenOverItems))
 			{
+				if (ImGui::MenuItem("Warn if No Cameras Rendering", nullptr, warnIfNoGameCamera))
+				{
+					warnIfNoGameCamera = !warnIfNoGameCamera;
+					settingsChanged = true;
+				}
+				if (ImGui::MenuItem("Clear Every Frame in Edit Mode", nullptr, clearEveryFrameInEditMode))
+				{
+					clearEveryFrameInEditMode = !clearEveryFrameInEditMode;
+					settingsChanged = true;
+				}
+				ImGui::Separator();
 				if (ImGui::MenuItem("Close Panel"))
 				{
 					showGame = false;
@@ -954,7 +3196,64 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 			}
 			else if (!HasEffectiveGameCamera(scene))
 			{
-				ImGui::TextDisabled("The current scene has no active game camera.");
+				if (size)
+				{
+					auto target = EnsureTarget(gameTarget, size.value);
+					if (!target)
+					{
+						diagnostic = target.error;
+					}
+				}
+				if (gameTarget.color)
+				{
+					gameTarget.visible = true;
+					const ViewportRect content{position.x, position.y, available.x, available.y};
+					const auto layout = ComputeViewportLayout(content, dpi.x, gameTarget.size, gameScale, gamePan, gameFit);
+					const Float32 clipX = std::max(content.x, layout.displayRect.x);
+					const Float32 clipY = std::max(content.y, layout.displayRect.y);
+					ImGui::PushClipRect({clipX, clipY}, {clipX + layout.clipRect.width, clipY + layout.clipRect.height},
+					                    true);
+					ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
+					ImGui::Image(gameTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
+					const bool imageHovered = ImGui::IsItemHovered();
+					if (warnIfNoGameCamera)
+					{
+						const char* warning = "The current scene has no active game camera.";
+						const ImVec2 textSize = ImGui::CalcTextSize(warning);
+						const ImVec2 warningPosition{layout.displayRect.x + (layout.displayRect.width - textSize.x) * 0.5f,
+						                             layout.displayRect.y + 12.f};
+						auto* drawList = ImGui::GetWindowDrawList();
+						drawList->AddRectFilled({warningPosition.x - 8.f, warningPosition.y - 4.f},
+						                        {warningPosition.x + textSize.x + 8.f, warningPosition.y + textSize.y + 4.f},
+						                        IM_COL32(20, 22, 26, 224), 4.f);
+						drawList->AddText(warningPosition, IM_COL32(245, 205, 120, 255), warning);
+					}
+					const ImGuiIO& gameInput = ImGui::GetIO();
+					if (imageHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
+					{
+						const Float32 requestedScale = SnapViewportScale(layout.scale * std::exp(gameInput.MouseWheel * 0.15f));
+						const auto zoomedLayout =
+						    ComputeViewportLayout(content, dpi.x, gameTarget.size, requestedScale, gamePan, false);
+						const ImVec2 mouse = gameInput.MousePos;
+						const Float32 anchorX = (mouse.x - layout.displayRect.x) / layout.displayRect.width;
+						const Float32 anchorY = (mouse.y - layout.displayRect.y) / layout.displayRect.height;
+						gamePan.x += (anchorX - 0.5f) * (layout.displayRect.width - zoomedLayout.displayRect.width);
+						gamePan.y += (anchorY - 0.5f) * (layout.displayRect.height - zoomedLayout.displayRect.height);
+						gameScale = zoomedLayout.scale;
+						gameFit = false;
+						settingsChanged = true;
+					}
+					if (imageHovered && (!play.Active() || play.Paused()) &&
+					    ImGui::IsMouseDragging(ImGuiMouseButton_Middle))
+					{
+						const ImVec2 delta = gameInput.MouseDelta;
+						gamePan.x += delta.x;
+						gamePan.y += delta.y;
+						gameFit = false;
+						settingsChanged = true;
+					}
+					ImGui::PopClipRect();
+				}
 			}
 			else
 			{
@@ -980,10 +3279,12 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							settingsChanged = true;
 						}
 					}
+					const auto panLayout =
+					    ComputeViewportLayout(content, dpi.x, gameTarget.size, gameScale, gamePan, gameFit);
 					const ViewportPoint clampedPan = ClampViewportPan(
 					    gamePan,
-					    {static_cast<UInt32>(std::ceil(layout.displayRect.width)),
-					     static_cast<UInt32>(std::ceil(layout.displayRect.height))},
+					    {static_cast<UInt32>(std::ceil(panLayout.displayRect.width)),
+					     static_cast<UInt32>(std::ceil(panLayout.displayRect.height))},
 					    {static_cast<UInt32>(std::floor(available.x)), static_cast<UInt32>(std::floor(available.y))});
 					if (clampedPan.x != gamePan.x || clampedPan.y != gamePan.y)
 					{
@@ -997,7 +3298,114 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 					ImGui::Image(gameTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
 					const bool imageHovered = ImGui::IsItemHovered();
-					const bool panning = imageHovered && ImGui::IsMouseDragging(ImGuiMouseButton_Middle);
+					const ImGuiIO& gameInput = ImGui::GetIO();
+					if (imageHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
+					{
+						const Float32 requestedScale = SnapViewportScale(layout.scale * std::exp(gameInput.MouseWheel * 0.15f));
+						const auto zoomedLayout =
+						    ComputeViewportLayout(content, dpi.x, gameTarget.size, requestedScale, gamePan, false);
+						const ImVec2 mouse = gameInput.MousePos;
+						const Float32 anchorX = (mouse.x - layout.displayRect.x) / layout.displayRect.width;
+						const Float32 anchorY = (mouse.y - layout.displayRect.y) / layout.displayRect.height;
+						gamePan.x += (anchorX - 0.5f) * (layout.displayRect.width - zoomedLayout.displayRect.width);
+						gamePan.y += (anchorY - 0.5f) * (layout.displayRect.height - zoomedLayout.displayRect.height);
+						gameScale = zoomedLayout.scale;
+						gameFit = false;
+						settingsChanged = true;
+					}
+					if (showGameStats || showGameGizmos)
+					{
+						const Float32 aspect =
+						    static_cast<Float32>(gameTarget.size.width) / static_cast<Float32>(gameTarget.size.height);
+						auto renderData = scene.CollectRenderData(aspect);
+						if (showGameGizmos && renderData && selection)
+						{
+							std::vector<ResourceId> selectedObjects;
+							for (const EditorSelectionEntry& entry : selection->entries)
+							{
+								if (entry.kind == EditorSelectionKind::GameObject && !entry.IsMissing() &&
+								    entry.documentId == document.Id() && entry.playSession == play.Active())
+								{
+									selectedObjects.push_back(entry.objectId);
+								}
+							}
+							const EditorSelectionEntry* primarySelection = selection->PrimaryEntry();
+							if (selectedObjects.empty() && primarySelection &&
+							    primarySelection->kind == EditorSelectionKind::GameObject &&
+							    !primarySelection->IsMissing() && primarySelection->documentId == document.Id() &&
+							    primarySelection->playSession == play.Active() && primarySelection->objectId)
+							{
+								selectedObjects.push_back(primarySelection->objectId);
+							}
+							auto* drawList = ImGui::GetWindowDrawList();
+							for (const Rendering::RenderObject& object : renderData.value.objects)
+							{
+								if (std::find(selectedObjects.begin(), selectedObjects.end(), object.objectId) ==
+								        selectedObjects.end())
+								{
+									continue;
+								}
+								DrawProjectedBounds(drawList, renderData.value.viewProjection, layout, object.worldBounds,
+								                   IM_COL32(112, 176, 255, 235));
+							}
+						}
+						if (showGameStats)
+						{
+							UInt64 triangleCount = 0;
+							UInt64 vertexCount = 0;
+							Size renderObjectCount = 0;
+							if (renderData)
+							{
+								renderObjectCount = renderData.value.objects.size();
+								for (const auto& object : renderData.value.objects)
+								{
+									if (!object.meshSnapshot ||
+									    object.subMesh >= object.meshSnapshot->data.subMeshes.size())
+									{
+										continue;
+									}
+									const auto& data = object.meshSnapshot->data;
+									const auto& subMesh = data.subMeshes[object.subMesh];
+									triangleCount += subMesh.indexCount / 3;
+									vertexCount += data.positions.size();
+								}
+							}
+							const auto& io = ImGui::GetIO();
+							const Float32 frameTimeMs = io.Framerate > 0.f ? 1000.f / io.Framerate : 0.f;
+							const std::array<std::string, 6> rows{
+							    "FPS " + std::to_string(static_cast<Int32>(std::round(io.Framerate))),
+							    "Main " +
+							        std::to_string(static_cast<Int32>(std::round(frameTimeMs))) + " ms",
+							    "Screen " + std::to_string(gameTarget.size.width) + " x " +
+							        std::to_string(gameTarget.size.height),
+							    "Draw Entries " + std::to_string(renderObjectCount),
+							    "Tris " + std::to_string(triangleCount),
+							    "Verts " + std::to_string(vertexCount)};
+							Float32 textWidth = 0.f;
+							for (const auto& row : rows)
+							{
+								textWidth = std::max(textWidth, ImGui::CalcTextSize(row.c_str()).x);
+							}
+							const Float32 rowHeight = ImGui::GetTextLineHeight();
+							const ImVec2 overlaySize{textWidth + 16.f, rowHeight * rows.size() + 14.f};
+							const ImVec2 overlayPosition{
+							    std::max(layout.displayRect.x + 4.f,
+							             layout.displayRect.x + layout.displayRect.width - overlaySize.x - 8.f),
+							    layout.displayRect.y + 8.f};
+							auto* drawList = ImGui::GetWindowDrawList();
+							drawList->AddRectFilled(overlayPosition,
+							                        {overlayPosition.x + overlaySize.x, overlayPosition.y + overlaySize.y},
+							                        IM_COL32(20, 22, 26, 224), 4.f);
+							for (Size row = 0; row < rows.size(); ++row)
+							{
+								drawList->AddText({overlayPosition.x + 8.f,
+								                   overlayPosition.y + 7.f + rowHeight * static_cast<Float32>(row)},
+								                  IM_COL32(235, 235, 235, 255), rows[row].c_str());
+							}
+						}
+					}
+					const bool panning = imageHovered && (!play.Active() || play.Paused()) &&
+					                     ImGui::IsMouseDragging(ImGuiMouseButton_Middle);
 					if (panning)
 					{
 						const ImVec2 delta = ImGui::GetIO().MouseDelta;
@@ -1007,8 +3415,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						settingsChanged = true;
 					}
 					ImGui::PopClipRect();
-					viewportFocused = play.Active() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-					                  imageHovered && !panning;
+				viewportFocused = play.Active() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+								  (focusGameViewOnPlay || maximizedForPlay || imageHovered) && !panning;
 					if (viewportFocused && focusedGameViewport)
 					{
 						*focusedGameViewport = ImGui::GetWindowViewport();
@@ -1018,8 +3426,32 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 		}
 		ImGui::End();
 	}
+	gameWasPlaying = play.Active();
 	if (userFiles && userFiles->IsMounted("user"))
 	{
+		const UInt64 overrideRevision = hierarchy.SceneViewOverridesRevision();
+		if (overrideRevision != savedSceneViewOverridesRevision)
+		{
+			const String statePath = "user:Settings/SceneView/" + sceneViewStateKey + ".json";
+			auto path = VirtualPath::Parse(statePath);
+			if (!path)
+			{
+				diagnostic = path.error;
+			}
+			else
+			{
+				const String stateText = hierarchy.SerializeSceneViewOverrides(scene);
+				auto written = userFiles->WriteAtomic(path.value, ToBytes(stateText));
+				if (!written)
+				{
+					diagnostic = written.error;
+				}
+				else
+				{
+					savedSceneViewOverridesRevision = overrideRevision;
+				}
+			}
+		}
 		if (presetsChanged)
 		{
 			SaveCustomPresets(*userFiles, diagnostic);
@@ -1027,6 +3459,76 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 		if (settingsChanged)
 		{
 			SaveProjectSettings(*userFiles, projectKey, diagnostic);
+		}
+	}
+	return {};
+}
+
+Result<void> SceneViewPanel::TransformSelectionToView(Scene& scene, const EditorSelectionContext& selection,
+                                                     ResourceId documentId, bool playSession, bool alignRotation)
+{
+	if (!sceneTarget.preview || selection.entries.empty())
+	{
+		return Result<void>::Failure("Open the Scene view and select one or more GameObjects");
+	}
+	struct TransformSnapshot
+	{
+		GameObject::Ptr object;
+		Mat4 original;
+		Mat4 target;
+	};
+	Vector<TransformSnapshot> snapshots;
+	snapshots.reserve(selection.entries.size());
+	const Camera& camera = sceneTarget.preview->GetCamera();
+	const Mat4 cameraTransform = camera.View().Inverse();
+	for (const auto& entry : selection.entries)
+	{
+		if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId ||
+		    entry.playSession != playSession || entry.IsMissing())
+		{
+			return Result<void>::Failure("Select GameObjects in the active Hierarchy first");
+		}
+		auto object = scene.GameObjectById(entry.objectId);
+		if (!object)
+		{
+			return Result<void>::Failure(object.error);
+		}
+		auto world = scene.WorldTransform(object.value);
+		if (!world)
+		{
+			return Result<void>::Failure(world.error);
+		}
+		Mat4 target = world.value;
+		if (alignRotation)
+		{
+			for (int column = 0; column < 3; ++column)
+			{
+				const Float32 scale = std::sqrt(world.value.At(0, column) * world.value.At(0, column) +
+				                                world.value.At(1, column) * world.value.At(1, column) +
+				                                world.value.At(2, column) * world.value.At(2, column));
+				for (int row = 0; row < 3; ++row)
+				{
+					target.At(row, column) = cameraTransform.At(row, column) * scale;
+				}
+			}
+		}
+		target.At(0, 3) = camera.position.x;
+		target.At(1, 3) = camera.position.y;
+		target.At(2, 3) = camera.position.z;
+		snapshots.push_back({object.value, world.value, target});
+	}
+	Size applied = 0;
+	for (; applied < snapshots.size(); ++applied)
+	{
+		auto transformed = ApplyGizmoWorldTransform(scene, snapshots[applied].object, snapshots[applied].target);
+		if (!transformed)
+		{
+			while (applied > 0)
+			{
+				--applied;
+				ApplyGizmoWorldTransform(scene, snapshots[applied].object, snapshots[applied].original);
+			}
+			return transformed;
 		}
 	}
 	return {};
@@ -1056,21 +3558,48 @@ Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play,
 		camera.inverseViewProjection = camera.viewProjection.Inverse();
 		camera.nearPlane = editorCamera.nearPlane;
 		camera.farPlane = editorCamera.farPlane;
+		camera.orthographic = editorCamera.orthographic;
 		camera.debugName = "Scene View";
 		auto rendered = renderViewport(scene, sceneTarget.output, Rendering::CameraType::SceneView,
 		                               std::optional<Rendering::CameraData>{std::move(camera)});
+		if (!rendered && ManagedRenderServicesUnavailable(rendered.error))
+		{
+			rendered = sceneTarget.preview->Render(scene, sceneTarget.output);
+		}
 		if (!rendered)
 		{
 			return Result<void>::Failure("Scene viewport render failed: " + rendered.error);
 		}
 	}
-	if (gameTarget.visible && HasEffectiveGameCamera(scene))
+	const bool hasGameCamera = HasEffectiveGameCamera(scene);
+	if (gameTarget.visible && clearEveryFrameInEditMode && !play.Active())
+	{
+		bool needsClear = !hasGameCamera;
+		if (hasGameCamera)
+		{
+			const auto* camera = dynamic_cast<const CameraComponent*>(scene.GetComponent(scene.ActiveCamera()));
+			needsClear = camera && camera->rendering.clearFlags != Rendering::CameraClearFlags::ColorAndDepth;
+		}
+		if (needsClear)
+		{
+			auto cleared = ClearViewportColor(device, gameTarget.output, {0.f, 0.f, 0.f, 1.f});
+			if (!cleared)
+			{
+				return Result<void>::Failure("Game viewport clear failed: " + cleared.error);
+			}
+		}
+	}
+	if (gameTarget.visible && hasGameCamera)
 	{
 		if (!renderViewport || !gameTarget.output)
 		{
 			return Result<void>::Failure("Game viewport has no active render pipeline or target");
 		}
 		auto rendered = renderViewport(scene, gameTarget.output, Rendering::CameraType::Game, {});
+		if (!rendered && ManagedRenderServicesUnavailable(rendered.error))
+		{
+			rendered = gameTarget.preview->RenderGame(scene, gameTarget.output);
+		}
 		if (!rendered)
 		{
 			return Result<void>::Failure("Game viewport render failed: " + rendered.error);
@@ -1081,6 +3610,8 @@ Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play,
 
 void SceneViewPanel::DrawEmpty(bool& showScene, bool& showGame)
 {
+	sceneNavigationGesture = SceneNavigationGesture::None;
+	SetSceneCursorCaptured(false);
 	if (showScene)
 	{
 		ImGui::Begin("Scene", &showScene);

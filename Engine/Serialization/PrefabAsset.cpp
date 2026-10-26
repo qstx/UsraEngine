@@ -603,7 +603,9 @@ PrefabAsset::Instantiate(Scene& scene, const ComponentRegistry& registry, Compon
 		auto name = source->Name();
 		auto local = source->GetLocalTransform();
 		auto enabled = source->ActiveSelf();
-		if (!name || !local || !enabled)
+		auto tag = source->Tag();
+		auto isStatic = source->IsStatic();
+		if (!name || !local || !enabled || !tag || !isStatic)
 		{
 			return Result<GameObject::Ptr>::Failure("Cannot inspect PrefabAsset GameObject");
 		}
@@ -611,11 +613,15 @@ PrefabAsset::Instantiate(Scene& scene, const ComponentRegistry& registry, Compon
 		auto setTransform = object->SetLocalTransform(local.value);
 		auto setEnabled = object->SetActive(enabled.value);
 		auto setLayer = object->SetLayer(source->Layer().value);
-		if (!setTransform || !setEnabled || !setLayer)
+		auto setTag = object->SetTag(tag.value);
+		auto setStatic = object->SetStatic(isStatic.value);
+		if (!setTransform || !setEnabled || !setLayer || !setTag || !setStatic)
 		{
 			return Result<GameObject::Ptr>::Failure(!setTransform ? setTransform.error
 			                                        : !setEnabled ? setEnabled.error
-			                                                      : setLayer.error);
+			                                        : !setLayer   ? setLayer.error
+			                                        : !setTag     ? setTag.error
+			                                                      : setStatic.error);
 		}
 		auto mappedObject = context.MapGameObject(source->Id(), object);
 		if (!mappedObject)

@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <ImGuizmo.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <exception>
 
@@ -10,6 +11,16 @@ namespace Ursa::Editor
 {
 namespace
 {
+Vec3 Add(Vec3 left, Vec3 right)
+{
+	return {left.x + right.x, left.y + right.y, left.z + right.z};
+}
+
+Vec3 Scale(Vec3 value, Ursa::Float32 scalar)
+{
+	return {value.x * scalar, value.y * scalar, value.z * scalar};
+}
+
 Ursa::Float32 Length3(Ursa::Float32 x, Ursa::Float32 y, Ursa::Float32 z)
 {
 	return std::sqrt(x * x + y * y + z * z);
@@ -153,12 +164,13 @@ Result<void> ApplyGizmoWorldTransform(Scene& scene, GameObject::Ptr node, const 
 	}
 }
 
-Result<bool> DrawGizmo(Scene& scene, GameObject::Ptr node, const Camera& camera, ViewportRect rect,
-                       GizmoOperation operation, GizmoInteractionReport* interaction)
+Result<bool> DrawGizmo(Scene& scene, const Vector<GameObject::Ptr>& nodes, GameObject::Ptr primary,
+                       const Camera& camera, ViewportRect rect, GizmoOperation operation, GizmoPivotMode pivotMode,
+                       GizmoSpace space, const GizmoSnapSettings& snapSettings, GizmoInteractionReport* interaction)
 {
-	if (!scene.Contains(node))
+	if (nodes.empty() || !primary || !scene.Contains(primary))
 	{
-		return Result<bool>::Failure("Cannot draw gizmo for an invalid node");
+		return Result<bool>::Failure("Cannot draw gizmo without a valid selection");
 	}
 	if (!std::isfinite(rect.x) || !std::isfinite(rect.y) || !std::isfinite(rect.width) || !std::isfinite(rect.height) ||
 	    rect.width <= 0.f || rect.height <= 0.f)
@@ -167,11 +179,119 @@ Result<bool> DrawGizmo(Scene& scene, GameObject::Ptr node, const Camera& camera,
 	}
 	try
 	{
-		auto world = scene.WorldTransform(node);
-		if (!world)
+		struct SelectedTransform
 		{
-			return Result<bool>::Failure(world.error);
+			GameObject::Ptr node;
+			Mat4 world;
+			LocalTransform local;
+			Mat4 desiredWorld;
+			Size depth = 0;
+		};
+
+		Vector<SelectedTransform> selectedTransforms;
+		selectedTransforms.reserve(nodes.size());
+		Mat4 primaryWorld;
+		Vec3 fallbackCenter{};
+		for (const auto& node : nodes)
+		{
+			if (!node || !scene.Contains(node))
+			{
+				continue;
+			}
+			auto world = scene.WorldTransform(node);
+			auto local = scene.GetLocalTransform(node);
+			if (!world || !local)
+			{
+				return Result<bool>::Failure(!world ? world.error : local.error);
+			}
+			SelectedTransform item;
+			item.node = node;
+			item.world = world.value;
+			item.local = local.value;
+			item.desiredWorld = world.value;
+			auto parent = scene.ParentOf(node);
+			if (!parent)
+			{
+				return Result<bool>::Failure(parent.error);
+			}
+			for (auto ancestor = parent.value; ancestor;)
+			{
+				++item.depth;
+				auto next = scene.ParentOf(ancestor);
+				if (!next)
+				{
+					return Result<bool>::Failure(next.error);
+				}
+				ancestor = next.value;
+			}
+			fallbackCenter = Add(fallbackCenter, {world.value.At(0, 3), world.value.At(1, 3), world.value.At(2, 3)});
+			if (node == primary)
+			{
+				primaryWorld = world.value;
+			}
+			selectedTransforms.push_back(std::move(item));
 		}
+		if (selectedTransforms.empty())
+		{
+			return Result<bool>::Failure("The selected objects are no longer available in the scene");
+		}
+		if (std::none_of(selectedTransforms.begin(), selectedTransforms.end(),
+		                 [&](const SelectedTransform& item) { return item.node == primary; }))
+		{
+			return Result<bool>::Failure("The active object is not part of the gizmo selection");
+		}
+		fallbackCenter = Scale(fallbackCenter, 1.f / static_cast<Float32>(selectedTransforms.size()));
+
+		Mat4 manipulatedWorld = primaryWorld;
+		if (pivotMode == GizmoPivotMode::Center)
+		{
+			auto renderData = scene.CollectPreviewRenderData(camera, rect.width / rect.height);
+			if (renderData)
+			{
+				Bounds bounds;
+				for (const auto& item : selectedTransforms)
+				{
+					const auto id = scene.PersistentId(item.node);
+					if (!id)
+					{
+						continue;
+					}
+					for (const auto& object : renderData.value.objects)
+					{
+						if (object.objectId != id.value || object.worldBounds.empty)
+						{
+							continue;
+						}
+						if (bounds.empty)
+						{
+							bounds = object.worldBounds;
+						}
+						else
+						{
+							bounds.minimum = {std::min(bounds.minimum.x, object.worldBounds.minimum.x),
+							                  std::min(bounds.minimum.y, object.worldBounds.minimum.y),
+							                  std::min(bounds.minimum.z, object.worldBounds.minimum.z)};
+							bounds.maximum = {std::max(bounds.maximum.x, object.worldBounds.maximum.x),
+							                  std::max(bounds.maximum.y, object.worldBounds.maximum.y),
+							                  std::max(bounds.maximum.z, object.worldBounds.maximum.z)};
+						}
+					}
+				}
+				if (bounds.empty)
+				{
+					manipulatedWorld.At(0, 3) = fallbackCenter.x;
+					manipulatedWorld.At(1, 3) = fallbackCenter.y;
+					manipulatedWorld.At(2, 3) = fallbackCenter.z;
+				}
+				else
+				{
+					manipulatedWorld.At(0, 3) = (bounds.minimum.x + bounds.maximum.x) * 0.5f;
+					manipulatedWorld.At(1, 3) = (bounds.minimum.y + bounds.maximum.y) * 0.5f;
+					manipulatedWorld.At(2, 3) = (bounds.minimum.z + bounds.maximum.z) * 0.5f;
+				}
+			}
+		}
+		const Mat4 pivotWorld = manipulatedWorld;
 		const Mat4 view = camera.View();
 		const Mat4 projection = camera.Projection(rect.width / rect.height);
 		ImGuizmo::SetOrthographic(false);
@@ -186,8 +306,25 @@ Result<bool> DrawGizmo(Scene& scene, GameObject::Ptr node, const Camera& camera,
 		{
 			selected = ImGuizmo::SCALE;
 		}
-		const bool matrixChanged = ImGuizmo::Manipulate(view.values.data(), projection.values.data(), selected,
-		                                                ImGuizmo::WORLD, world.value.values.data());
+		const ImGuizmo::MODE mode = space == GizmoSpace::Local ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
+		std::array<Float32, 3> snapValues{};
+		const Float32* snap = nullptr;
+		if (snapSettings.enabled || ImGui::GetIO().KeyCtrl)
+		{
+			if (operation == GizmoOperation::Translate)
+			{
+				snapValues = {snapSettings.moveX, snapSettings.moveY, snapSettings.moveZ};
+			}
+			else
+			{
+				const Float32 increment =
+				    operation == GizmoOperation::Rotate ? snapSettings.rotation : snapSettings.scale;
+				snapValues = {increment, increment, increment};
+			}
+			snap = snapValues.data();
+		}
+		const bool matrixChanged = ImGuizmo::Manipulate(view.values.data(), projection.values.data(), selected, mode,
+		                                                manipulatedWorld.values.data(), nullptr, snap);
 		if (interaction)
 		{
 			interaction->isOver = ImGuizmo::IsOver();
@@ -198,10 +335,29 @@ Result<bool> DrawGizmo(Scene& scene, GameObject::Ptr node, const Camera& camera,
 		{
 			return Result<bool>::Success(false);
 		}
-		auto applied = ApplyGizmoWorldTransform(scene, node, world.value);
-		if (!applied)
+		const Mat4 delta = manipulatedWorld * pivotWorld.InverseAffine();
+		for (auto& item : selectedTransforms)
 		{
-			return Result<bool>::Failure(applied.error);
+			item.desiredWorld = delta * item.world;
+		}
+		std::sort(selectedTransforms.begin(), selectedTransforms.end(),
+		          [](const SelectedTransform& left, const SelectedTransform& right)
+		          { return left.depth < right.depth; });
+		Size appliedCount = 0;
+		for (; appliedCount < selectedTransforms.size(); ++appliedCount)
+		{
+			auto applied = ApplyGizmoWorldTransform(scene, selectedTransforms[appliedCount].node,
+			                                        selectedTransforms[appliedCount].desiredWorld);
+			if (!applied)
+			{
+				while (appliedCount > 0)
+				{
+					--appliedCount;
+					scene.SetLocalTransform(selectedTransforms[appliedCount].node,
+					                        selectedTransforms[appliedCount].local);
+				}
+				return Result<bool>::Failure(applied.error);
+			}
 		}
 		return Result<bool>::Success(true);
 	}

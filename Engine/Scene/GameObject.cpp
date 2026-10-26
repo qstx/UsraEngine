@@ -79,6 +79,37 @@ Result<void> GameObject::SetName(String value)
 	return {};
 }
 
+Result<String> GameObject::Tag() const
+{
+	return alive ? Result<String>::Success(tag) : Result<String>::Failure("Cannot query a destroyed GameObject tag");
+}
+
+Result<void> GameObject::SetTag(String value)
+{
+	if (!alive || value.empty() || value.size() > 256 || value.find('\0') != String::npos)
+	{
+		return Result<void>::Failure("GameObject tag must be between 1 and 256 bytes and contain no NUL");
+	}
+	tag = std::move(value);
+	return {};
+}
+
+Result<bool> GameObject::IsStatic() const
+{
+	return alive ? Result<bool>::Success(isStatic)
+	             : Result<bool>::Failure("Cannot query the static state of a destroyed GameObject");
+}
+
+Result<void> GameObject::SetStatic(bool value)
+{
+	if (!alive)
+	{
+		return Result<void>::Failure("Cannot change the static state of a destroyed GameObject");
+	}
+	isStatic = value;
+	return {};
+}
+
 GameObject::Ptr GameObject::Parent() const
 {
 	return parent ? parent->shared_from_this() : Ptr{};
@@ -282,6 +313,39 @@ Result<void> GameObject::RemoveComponent(Component* component)
 		return scene->RemoveComponent(component->Id());
 	}
 	return RemoveComponentOwned(component);
+}
+
+Result<void> GameObject::ReorderDetachedComponent(Component* component, Ursa::Size index)
+{
+	if (!alive || scene || !component || component->gameObject != this)
+	{
+		return Result<void>::Failure("Only components on a detached GameObject can be reordered");
+	}
+	if (index >= components.size())
+	{
+		return Result<void>::Failure("Component reorder index is out of range");
+	}
+	const auto found = std::find_if(components.begin(), components.end(),
+	                                [component](const std::unique_ptr<Component>& item)
+	                                { return item.get() == component; });
+	if (found == components.end())
+	{
+		return Result<void>::Failure("Component does not belong to this GameObject");
+	}
+	const Ursa::Size current = static_cast<Ursa::Size>(found - components.begin());
+	if (current == index)
+	{
+		return {};
+	}
+	if (current < index)
+	{
+		std::rotate(components.begin() + current, components.begin() + current + 1, components.begin() + index + 1);
+	}
+	else
+	{
+		std::rotate(components.begin() + index, components.begin() + current, components.begin() + current + 1);
+	}
+	return {};
 }
 
 Result<std::unique_ptr<Component>> GameObject::ReleaseDetachedComponent(Component* component)

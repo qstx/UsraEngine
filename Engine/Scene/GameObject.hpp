@@ -70,6 +70,14 @@ public:
 
 	Result<void> SetName(String value);
 
+	Result<String> Tag() const;
+
+	Result<void> SetTag(String value);
+
+	Result<bool> IsStatic() const;
+
+	Result<void> SetStatic(bool value);
+
 	Result<UInt32> Layer() const;
 
 	Result<void> SetLayer(UInt32 value);
@@ -142,6 +150,7 @@ public:
 	}
 
 	Result<void> RemoveComponent(Component* component);
+	Result<void> ReorderDetachedComponent(Component* component, Ursa::Size index);
 
 	// Transfers a component out of a detached staging object without invoking removal callbacks.
 	Result<std::unique_ptr<Component>> ReleaseDetachedComponent(Component* component);
@@ -171,12 +180,14 @@ private:
 	ResourceId id;
 	ResourceId assetTemplate;
 	String name;
+	String tag = "Untagged";
 	GameObject* parent = nullptr;
 	Vector<Ptr> children;
 	Vector<std::unique_ptr<Component>> components;
 	LocalTransform localTransform;
 	bool activeSelf = true;
 	UInt32 layer = 0;
+	bool isStatic = false;
 	bool alive = true;
 	Scene* scene = nullptr;
 	Ursa::UInt32 sceneNodeIndex = std::numeric_limits<Ursa::UInt32>::max();

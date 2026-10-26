@@ -479,6 +479,17 @@ std::pair<Ursa::Float64, Ursa::Float64> Window::CursorPosition() const
 	return {x, y};
 }
 
+void Window::SetCursorCaptured(bool captured)
+{
+	if (cursorCaptured == captured)
+	{
+		return;
+	}
+	glfwSetInputMode(static_cast<GLFWwindow*>(handle), GLFW_CURSOR,
+	                 captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+	cursorCaptured = captured;
+}
+
 std::pair<Ursa::Float64, Ursa::Float64> Window::DesktopCursorPosition() const
 {
 	const auto cursor = CursorPosition();

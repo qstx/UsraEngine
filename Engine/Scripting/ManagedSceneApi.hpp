@@ -144,6 +144,7 @@ public:
 	void SetRenderCameraSelection(std::optional<Rendering::CameraType> filter,
 	                              std::optional<Rendering::CameraData> cameraOverride = {});
 	void SetRenderSceneOverride(Scene* source);
+	void SetRenderObjectExclusions(Vector<ResourceId> objectIds);
 	void SetRenderWindow(Rhi::SwapchainPtr output);
 	void SetFrameCapture(Rendering::FrameCapture* capture);
 
@@ -185,6 +186,7 @@ private:
 	UnorderedMap<UInt32, std::shared_ptr<ManagedGraphicsBuffer>> ownedGraphicsBuffers;
 	Scene& scene;
 	Scene* renderSceneOverride = nullptr;
+	Vector<ResourceId> renderObjectExclusions;
 	std::unique_ptr<ManagedHandleRegistry> handles;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> objects;
 	UnorderedMap<UInt32, std::weak_ptr<GameObject>> componentOwners;

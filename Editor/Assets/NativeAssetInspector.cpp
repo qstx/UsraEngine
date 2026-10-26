@@ -26,6 +26,8 @@ Json CaptureRoot(const GameObject::Ptr& root)
 	         {{"name", ToStdString(B::TakeBindingResult(root->Name()))},
 	          {"active", B::TakeBindingResult(root->ActiveSelf())},
 	          {"layer", B::TakeBindingResult(root->Layer())},
+	          {"tag", ToStdString(B::TakeBindingResult(root->Tag()))},
+	          {"static", B::TakeBindingResult(root->IsStatic())},
 	          {"position", {transform.position.x, transform.position.y, transform.position.z}},
 	          {"rotation", {transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w}},
 	          {"scale", {transform.scale.x, transform.scale.y, transform.scale.z}}}},
@@ -33,6 +35,8 @@ Json CaptureRoot(const GameObject::Ptr& root)
 	         {{"name", {{"Kind", "String"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.String"}}},
 	          {"active", {{"Kind", "Boolean"}, {"ElementKind", "Unsupported"}}},
 	          {"layer", {{"Kind", "UnsignedInteger"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.UInt32"}}},
+	          {"tag", {{"Kind", "String"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.String"}}},
+	          {"static", {{"Kind", "Boolean"}, {"ElementKind", "Unsupported"}}},
 	          {"position", {{"Kind", "Vector3"}, {"ElementKind", "Unsupported"}}},
 	          {"rotation", {{"Kind", "Quaternion"}, {"ElementKind", "Unsupported"}}},
 	          {"scale", {{"Kind", "Vector3"}, {"ElementKind", "Unsupported"}}}}}};
@@ -43,9 +47,10 @@ Result<void> ApplyRoot(const GameObject::Ptr& root, const Json& payload)
 	const auto& fields = payload.at("Fields");
 	const auto name = ToUrsaString(fields.at("name").get<std::string>());
 	const auto layer = fields.at("layer").get<UInt32>();
-	if (name.size() > 256 || layer > 31)
+	const auto tag = ToUrsaString(fields.at("tag").get<std::string>());
+	if (name.size() > 256 || tag.empty() || tag.size() > 256 || layer > 31)
 	{
-		return Result<void>::Failure("Prefab name or layer is invalid");
+		return Result<void>::Failure("Prefab name, tag, or layer is invalid");
 	}
 	const auto vector = [](const Json& value)
 	{ return Vec3{value.at(0).get<Float32>(), value.at(1).get<Float32>(), value.at(2).get<Float32>()}; };
@@ -59,6 +64,8 @@ Result<void> ApplyRoot(const GameObject::Ptr& root, const Json& payload)
 	B::CompleteBindingResult(root->SetLocalTransform(transform));
 	B::CompleteBindingResult(root->SetName(name));
 	B::CompleteBindingResult(root->SetLayer(layer));
+	B::CompleteBindingResult(root->SetTag(tag));
+	B::CompleteBindingResult(root->SetStatic(fields.at("static").get<bool>()));
 	return root->SetActive(fields.at("active").get<bool>());
 }
 } // namespace

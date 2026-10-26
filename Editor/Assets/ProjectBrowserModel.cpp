@@ -7,6 +7,8 @@ namespace Ursa::Editor
 {
 namespace
 {
+constexpr Size MaximumNavigationHistory = 64;
+
 String ParentPath(const String& path)
 {
 	const Ursa::Size separator = path.rfind('/');
@@ -24,6 +26,160 @@ String FoldCase(String value)
 	std::transform(value.begin(), value.end(), value.begin(),
 	               [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
 	return value;
+}
+
+struct ProjectSearchQuery
+{
+	Vector<String> terms;
+	Vector<String> types;
+	Vector<String> labels;
+	bool HasFilter() const
+	{
+		return !terms.empty() || !types.empty() || !labels.empty();
+	}
+};
+
+ProjectSearchQuery ParseProjectSearch(const String& search)
+{
+	ProjectSearchQuery query;
+	String token;
+	const auto finishToken = [&]
+	{
+		if (token.empty())
+		{
+			return;
+		}
+		const String folded = FoldCase(token);
+		if (folded.size() > 2 && folded.compare(0, 2, "t:") == 0)
+		{
+			query.types.push_back(folded.substr(2));
+		}
+		else if (folded.size() > 2 && folded.compare(0, 2, "l:") == 0)
+		{
+			query.labels.push_back(folded.substr(2));
+		}
+		else
+		{
+			query.terms.push_back(folded);
+		}
+		token.clear();
+	};
+	for (const unsigned char character : search)
+	{
+		if (std::isspace(character))
+		{
+			finishToken();
+		}
+		else
+		{
+			token.push_back(static_cast<char>(character));
+		}
+	}
+	finishToken();
+	return query;
+}
+
+bool MatchesTerms(const String& value, const ProjectSearchQuery& query)
+{
+	const String folded = FoldCase(value);
+	return std::all_of(query.terms.begin(), query.terms.end(),
+	                   [&](const String& term) { return folded.find(term) != String::npos; });
+}
+
+bool MatchesTypeName(const String& kind, const String& filter)
+{
+	const String folded = FoldCase(kind);
+	if (folded == filter)
+	{
+		return true;
+	}
+	if (filter == "texture2d" || filter == "texture3d")
+	{
+		return folded == "texture";
+	}
+	if (filter == "model")
+	{
+		return folded == "mesh" || folded == "model";
+	}
+	if (filter == "gameobject")
+	{
+		return folded == "prefab" || folded == "gameobject";
+	}
+	return false;
+}
+
+bool MatchesResourceKind(std::optional<ResourceKind> kind, const String& filter)
+{
+	if (!kind)
+	{
+		return false;
+	}
+	switch (*kind)
+	{
+		case ResourceKind::Texture:
+			return MatchesTypeName("Texture", filter);
+		case ResourceKind::Material:
+			return MatchesTypeName("Material", filter);
+		case ResourceKind::Scene:
+			return MatchesTypeName("Scene", filter);
+		case ResourceKind::Prefab:
+			return MatchesTypeName("Prefab", filter);
+		case ResourceKind::Shader:
+			return MatchesTypeName("Shader", filter);
+		case ResourceKind::Mesh:
+			return MatchesTypeName("Mesh", filter);
+	}
+	return false;
+}
+
+bool MatchesImportedType(const ImportedArtifactRecord& object, const String& filter)
+{
+	return object.visibleInProject && MatchesTypeName(object.kind, filter);
+}
+
+bool MatchesEntryText(const ProjectBrowserEntry& entry, const ProjectSearchQuery& query)
+{
+	if (!query.terms.empty() && !MatchesTerms(entry.path.relative, query) &&
+	    !std::any_of(entry.importedObjects.begin(), entry.importedObjects.end(), [&](const ImportedArtifactRecord& object)
+	                 { return object.visibleInProject && !object.isMainObject && MatchesTerms(object.Label(), query); }))
+	{
+		return false;
+	}
+	if (!query.labels.empty() &&
+	    !std::any_of(query.labels.begin(), query.labels.end(), [&](const String& filter)
+	                 {
+		                 return std::any_of(entry.labels.begin(), entry.labels.end(), [&](const String& label)
+	                                    { return FoldCase(label) == filter; });
+	                 }))
+	{
+		return false;
+	}
+	return true;
+}
+
+bool MatchesEntryType(const ProjectBrowserEntry& entry, const ProjectSearchQuery& query)
+{
+	if (query.types.empty())
+	{
+		return true;
+	}
+	return std::any_of(query.types.begin(), query.types.end(),
+	                   [&](const String& type)
+	                   {
+		                   if (MatchesResourceKind(entry.kind, type))
+		                   {
+			                   return true;
+		                   }
+			                   const Size dot = entry.name.rfind('.');
+			                   const String extension = dot == String::npos ? String{} : FoldCase(entry.name.substr(dot));
+		                   if (type == "script" && extension == ".cs")
+			                   return true;
+		                   if (type == "folder" && entry.folder)
+			                   return true;
+		                   return std::any_of(entry.importedObjects.begin(), entry.importedObjects.end(),
+			                                      [&](const ImportedArtifactRecord& object)
+			                                      { return MatchesImportedType(object, type); });
+	                   });
 }
 
 bool IsPathWithin(const String& path, const String& directory)
@@ -391,12 +547,17 @@ QueryAssetObjectChoices(const ProjectWorkspace& workspace,
 	return result;
 }
 
-Vector<ImportedArtifactRecord> ProjectBrowserEntry::VisibleChildren() const
+Vector<ImportedArtifactRecord> ProjectBrowserEntry::VisibleChildren(const String& search) const
 {
 	Vector<ImportedArtifactRecord> children;
+	const ProjectSearchQuery query = ParseProjectSearch(search);
 	for (const auto& object : importedObjects)
 	{
-		if (!object.isMainObject && object.visibleInProject)
+		const bool matchesType = query.types.empty() ||
+		                         std::any_of(query.types.begin(), query.types.end(),
+		                                     [&](const String& type) { return MatchesImportedType(object, type); });
+		const bool matchesText = MatchesTerms(object.Label(), query);
+		if (!object.isMainObject && object.visibleInProject && matchesType && matchesText)
 		{
 			children.push_back(object);
 		}
@@ -452,6 +613,7 @@ Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 		entry.name = FileName(asset.path.relative);
 		entry.folder = asset.metadata.folder;
 		entry.importer = asset.metadata.importer;
+		entry.labels = asset.metadata.labels;
 		const auto objects = importedObjects.find(entry.guid.ToString());
 		if (objects != importedObjects.end())
 		{
@@ -496,11 +658,34 @@ Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 		          });
 	}
 	String folderCandidate = previousFolder;
-	auto navigated = NavigateTo(folderCandidate);
+	auto navigated = NavigateTo(folderCandidate, false);
 	while (!navigated && !folderCandidate.empty())
 	{
 		folderCandidate = ParentPath(folderCandidate);
-		navigated = NavigateTo(folderCandidate);
+		navigated = NavigateTo(folderCandidate, false);
+	}
+	navigationHistory.erase(std::remove_if(navigationHistory.begin(), navigationHistory.end(),
+	                                       [&](const String& path)
+	                                       {
+		                                       const auto found = entries.find(path);
+		                                       return !path.empty() &&
+		                                              (found == entries.end() || !found->second.folder);
+	                                       }),
+	                        navigationHistory.end());
+	if (navigationHistory.empty())
+	{
+		navigationHistory.push_back(currentFolder);
+	}
+	const auto currentHistory = std::find(navigationHistory.rbegin(), navigationHistory.rend(), currentFolder);
+	if (currentHistory == navigationHistory.rend())
+	{
+		navigationHistory.push_back(currentFolder);
+		navigationHistoryIndex = navigationHistory.size() - 1;
+	}
+	else
+	{
+		navigationHistoryIndex =
+		    navigationHistory.size() - 1 - static_cast<Size>(std::distance(navigationHistory.rbegin(), currentHistory));
 	}
 	if (selectedGuid && Find(selectedGuid))
 	{
@@ -518,20 +703,75 @@ Result<void> ProjectBrowserModel::Refresh(const ProjectWorkspace& workspace)
 	return {};
 }
 
-Result<void> ProjectBrowserModel::NavigateTo(const String& relativePath)
+Result<void> ProjectBrowserModel::NavigateTo(const String& relativePath, bool recordHistory)
 {
-	if (relativePath.empty())
+	if (!relativePath.empty())
 	{
-		currentFolder.clear();
+		const auto found = entries.find(relativePath);
+		if (found == entries.end() || !found->second.folder)
+		{
+			return Result<void>::Failure("Project folder does not exist: " + relativePath);
+		}
+	}
+	if (!recordHistory)
+	{
+		currentFolder = relativePath;
 		return {};
 	}
-	const auto found = entries.find(relativePath);
-	if (found == entries.end() || !found->second.folder)
+	if (navigationHistory.empty())
 	{
-		return Result<void>::Failure("Project folder does not exist: " + relativePath);
+		navigationHistory.push_back(currentFolder);
+		navigationHistoryIndex = 0;
+	}
+	if (relativePath == currentFolder)
+	{
+		return {};
+	}
+	if (navigationHistoryIndex + 1 < navigationHistory.size())
+	{
+		navigationHistory.erase(navigationHistory.begin() + static_cast<std::ptrdiff_t>(navigationHistoryIndex + 1),
+		                        navigationHistory.end());
 	}
 	currentFolder = relativePath;
+	navigationHistory.push_back(currentFolder);
+	if (navigationHistory.size() > MaximumNavigationHistory)
+	{
+		navigationHistory.erase(navigationHistory.begin());
+	}
+	navigationHistoryIndex = navigationHistory.size() - 1;
 	return {};
+}
+
+Result<void> ProjectBrowserModel::NavigateBack()
+{
+	if (!CanNavigateBack())
+	{
+		return Result<void>::Failure("Project navigation history has no previous folder");
+	}
+	--navigationHistoryIndex;
+	currentFolder = navigationHistory[navigationHistoryIndex];
+	return {};
+}
+
+Result<void> ProjectBrowserModel::NavigateForward()
+{
+	if (!CanNavigateForward())
+	{
+		return Result<void>::Failure("Project navigation history has no next folder");
+	}
+	++navigationHistoryIndex;
+	currentFolder = navigationHistory[navigationHistoryIndex];
+	return {};
+}
+
+bool ProjectBrowserModel::CanNavigateBack() const
+{
+	return !navigationHistory.empty() && navigationHistoryIndex > 0;
+}
+
+bool ProjectBrowserModel::CanNavigateForward() const
+{
+	return !navigationHistory.empty() && navigationHistoryIndex + 1 < navigationHistory.size();
 }
 
 void ProjectBrowserModel::SelectAsset(const VirtualPath& path)
@@ -569,8 +809,8 @@ Vector<ProjectBrowserEntry> ProjectBrowserModel::ChildFolders(const String& fold
 Vector<ProjectBrowserEntry> ProjectBrowserModel::ChildAssets(const String& folder, const String& search) const
 {
 	Vector<ProjectBrowserEntry> result;
-	const String foldedSearch = FoldCase(search);
-	if (!foldedSearch.empty())
+	const ProjectSearchQuery query = ParseProjectSearch(search);
+	if (query.HasFilter())
 	{
 		for (const auto& item : entries)
 		{
@@ -578,15 +818,7 @@ Vector<ProjectBrowserEntry> ProjectBrowserModel::ChildAssets(const String& folde
 			{
 				continue;
 			}
-			const String foldedPath = FoldCase(item.first);
-			const bool childMatches =
-			    std::any_of(item.second.importedObjects.begin(), item.second.importedObjects.end(),
-			                [&](const auto& object)
-			                {
-				                return object.visibleInProject && !object.isMainObject &&
-				                       FoldCase(object.Label()).find(foldedSearch) != String::npos;
-			                });
-			if (foldedPath.find(foldedSearch) != String::npos || childMatches)
+			if (MatchesEntryType(item.second, query) && MatchesEntryText(item.second, query))
 			{
 				result.push_back(item.second);
 			}
@@ -624,6 +856,12 @@ const ProjectBrowserEntry* ProjectBrowserModel::Find(const VirtualPath& path) co
 bool ProjectBrowserModel::NeedsRefresh(const ProjectWorkspace& workspace) const
 {
 	return workspace.Database() && assetDatabaseRevision != workspace.Database()->Revision();
+}
+
+const ProjectBrowserEntry* ProjectBrowserModel::Find(const String& relativePath) const
+{
+	const auto found = entries.find(relativePath);
+	return found == entries.end() ? nullptr : &found->second;
 }
 
 const ProjectBrowserEntry* ProjectBrowserModel::Find(ResourceId guid) const

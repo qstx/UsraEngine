@@ -15,6 +15,7 @@ public:
 	Result<void> Capture(const Scene& scene, Float32 aspect, std::optional<CameraType> cameraFilter = {},
 	                     std::optional<CameraData> cameraOverride = {},
 	                     const BuiltinShaderResolver& resolveBuiltin = {});
+	void ExcludeObjects(const Vector<ResourceId>& objectIds);
 
 	const Vector<RenderObject>& Objects() const
 	{

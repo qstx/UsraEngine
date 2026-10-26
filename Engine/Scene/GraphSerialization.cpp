@@ -29,6 +29,14 @@ Result<void> GameObject::Serialize(ArchiveWriter& writer) const
 	{
 		result = writer.Write("layer", UInt64(layer));
 	}
+	if (result)
+	{
+		result = writer.Write("tag", tag);
+	}
+	if (result)
+	{
+		result = writer.Write("static", isStatic);
+	}
 	auto local = writer.Object("localTransform");
 	if (!result || !local)
 	{
@@ -58,9 +66,12 @@ Result<void> GameObject::Deserialize(const ArchiveReader& reader, SerializationC
 	auto objectName = reader.Text("name");
 	auto active = reader.Boolean("enabled");
 	auto loadedLayer = reader.Contains("layer") ? reader.Unsigned("layer") : Result<UInt64>::Success(0);
+	auto loadedTag = reader.Contains("tag") ? reader.Text("tag") : Result<String>::Success("Untagged");
+	auto loadedStatic = reader.Contains("static") ? reader.Boolean("static") : Result<bool>::Success(false);
 	auto local = reader.Object("localTransform");
-	if (!idText || !objectName || !active || !loadedLayer || loadedLayer.value > 31 || !local ||
-	    objectName.value.size() > 256 || objectName.value.find('\0') != String::npos)
+	if (!idText || !objectName || !active || !loadedLayer || loadedLayer.value > 31 || !loadedTag ||
+	    loadedTag.value.empty() || loadedTag.value.size() > 256 || loadedTag.value.find('\0') != String::npos ||
+	    !loadedStatic || !local || objectName.value.size() > 256 || objectName.value.find('\0') != String::npos)
 	{
 		return Result<void>::Failure("Invalid GameObject archive fields");
 	}
@@ -85,6 +96,8 @@ Result<void> GameObject::Deserialize(const ArchiveReader& reader, SerializationC
 	name = std::move(objectName.value);
 	activeSelf = active.value;
 	layer = UInt32(loadedLayer.value);
+	tag = std::move(loadedTag.value);
+	isStatic = loadedStatic.value;
 	return {};
 }
 

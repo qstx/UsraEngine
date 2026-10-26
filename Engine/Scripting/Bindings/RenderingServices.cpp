@@ -130,6 +130,7 @@ Result<RenderingServices::Token> RenderingServices::Begin(BindingCall& call, UIn
 		CompleteBindingResult(api.renderScene.Capture(api.renderSceneOverride ? *api.renderSceneOverride : api.scene,
 		                                              aspect, api.renderCameraFilter, api.renderCameraOverride,
 		                                              resolveBuiltin));
+		api.renderScene.ExcludeObjects(api.renderObjectExclusions);
 		const auto begun =
 		    TakeBindingResult(api.renderSceneContext.Begin(api.renderSessionId, frameId, api.renderScene));
 		api.activeRenderToken = begun;

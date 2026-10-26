@@ -28,8 +28,9 @@ struct ProjectBrowserEntry
 	bool folder = false;
 	std::optional<ResourceKind> kind;
 	String importer;
+	Vector<String> labels;
 	Vector<ImportedArtifactRecord> importedObjects;
-	Vector<ImportedArtifactRecord> VisibleChildren() const;
+	Vector<ImportedArtifactRecord> VisibleChildren(const String& search = {}) const;
 };
 
 class ProjectBrowserModel final
@@ -37,7 +38,11 @@ class ProjectBrowserModel final
 public:
 	Result<void> Refresh(const ProjectWorkspace& workspace);
 
-	Result<void> NavigateTo(const String& relativePath);
+	Result<void> NavigateTo(const String& relativePath, bool recordHistory = true);
+	Result<void> NavigateBack();
+	Result<void> NavigateForward();
+	bool CanNavigateBack() const;
+	bool CanNavigateForward() const;
 
 	void SelectAsset(const VirtualPath& path);
 
@@ -58,6 +63,7 @@ public:
 	Vector<ProjectBrowserEntry> ChildAssets(const String& folder, const String& search = {}) const;
 
 	const ProjectBrowserEntry* Find(const VirtualPath& path) const;
+	const ProjectBrowserEntry* Find(const String& relativePath) const;
 	const ProjectBrowserEntry* Find(ResourceId guid) const;
 	void ReconcileSelection(EditorSelectionContext& selection);
 
@@ -69,6 +75,8 @@ private:
 	Map<String, ProjectBrowserEntry> entries;
 	Map<String, Vector<String>> childrenByFolder;
 	String currentFolder;
+	Vector<String> navigationHistory;
+	Size navigationHistoryIndex = 0;
 	VirtualPath selectedAsset;
 	ResourceId selectedGuid;
 	Ursa::UInt64 assetDatabaseRevision = 0;

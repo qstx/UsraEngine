@@ -20,6 +20,7 @@ struct AssetMetadata
 	nlohmann::json importSettings = nlohmann::json::object();
 	bool folder = false;
 	nlohmann::json scriptTypes = nlohmann::json::object();
+	Vector<String> labels;
 };
 
 struct AssetRecord
@@ -114,6 +115,8 @@ public:
 	Result<void> CreateFolder(const VirtualPath& path);
 
 	Result<AssetMetadata> Metadata(const VirtualPath& path) const;
+
+	Result<void> AddLabel(const VirtualPath& path, const String& label);
 
 	Result<void> UpdateScriptIdentities(const ScriptSourceAsset& source, const nlohmann::json& identities);
 

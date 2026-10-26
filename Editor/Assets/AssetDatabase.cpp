@@ -4,6 +4,7 @@
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceFile.hpp>
 #include <algorithm>
+#include <cctype>
 #include <iomanip>
 #include <optional>
 #include <sstream>
@@ -230,6 +231,20 @@ Result<AssetMetadata> DecodeMetadata(const String& text, const VirtualPath& side
 			}
 			metadata.scriptTypes = identities;
 		}
+		if (document.contains("labels"))
+		{
+			const auto& labels = document["labels"];
+			if (!labels.is_array() || std::any_of(labels.begin(), labels.end(), [](const Json& label)
+			                                           { return !label.is_string(); }))
+			{
+				return Result<AssetMetadata>::Failure("Asset metadata labels must be an array of strings at " +
+				                                      sidecar.ToString());
+			}
+			for (const Json& label : labels)
+			{
+				metadata.labels.push_back(ToUrsaString(label.get<std::string>()));
+			}
+		}
 		return Result<AssetMetadata>::Success(std::move(metadata));
 	}
 	catch (const std::exception& error)
@@ -252,6 +267,15 @@ Result<String> EncodeMetadata(const AssetMetadata& metadata)
 		if (!metadata.scriptTypes.empty())
 		{
 			document["scriptTypes"] = metadata.scriptTypes;
+		}
+		if (!metadata.labels.empty())
+		{
+			Json labels = Json::array();
+			for (const String& label : metadata.labels)
+			{
+				labels.push_back(ToStdString(label));
+			}
+			document["labels"] = std::move(labels);
 		}
 		return Result<String>::Success(ToUrsaString(document.dump(2)));
 	}
@@ -737,6 +761,38 @@ Result<AssetMetadata> AssetDatabase::Metadata(const VirtualPath& path) const
 		return Result<AssetMetadata>::Failure("Asset is not indexed: " + path.ToString());
 	}
 	return Result<AssetMetadata>::Success(found->second.metadata);
+}
+
+Result<void> AssetDatabase::AddLabel(const VirtualPath& path, const String& label)
+{
+	const auto first = std::find_if_not(label.begin(), label.end(), [](unsigned char c) { return std::isspace(c); });
+	const auto last = std::find_if_not(label.rbegin(), label.rend(), [](unsigned char c) { return std::isspace(c); }).base();
+	if (first >= last)
+	{
+		return Result<void>::Failure("Asset labels cannot be empty");
+	}
+	const String clean(first, last);
+	if (clean.find_first_of(" \t\r\n") != String::npos || clean.find(':') != String::npos)
+	{
+		return Result<void>::Failure("Asset labels cannot contain whitespace or ':'");
+	}
+	auto metadata = Metadata(path);
+	if (!metadata)
+	{
+		return Result<void>::Failure(metadata.error);
+	}
+	if (std::find(metadata.value.labels.begin(), metadata.value.labels.end(), clean) != metadata.value.labels.end())
+	{
+		return {};
+	}
+	metadata.value.labels.push_back(clean);
+	auto written = WriteMetadata(path, metadata.value);
+	if (written)
+	{
+		assetsByPath[path.relative].metadata = std::move(metadata.value);
+		++revision;
+	}
+	return written;
 }
 
 Result<void> AssetDatabase::UpdateScriptIdentities(const ScriptSourceAsset& source, const Json& identities)

@@ -10,7 +10,8 @@ Mat4 Camera::View() const
 
 Mat4 Camera::Projection(Ursa::Float32 aspect) const
 {
-	return Mat4::Perspective(verticalFovRadians, aspect, nearPlane, farPlane);
+	return orthographic ? Mat4::Orthographic(orthographicSize * 2.0f, aspect, nearPlane, farPlane)
+	                    : Mat4::Perspective(verticalFovRadians, aspect, nearPlane, farPlane);
 }
 
 Mat4 Camera::ViewProjection(Ursa::Float32 aspect) const

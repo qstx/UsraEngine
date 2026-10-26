@@ -5,6 +5,8 @@
 #include <Workspace/EditorCommands.hpp>
 #include <Workspace/EditorDragSession.hpp>
 #include <Workspace/EditorSelectionContext.hpp>
+#include <Assets/AssetPreviewTexture.hpp>
+#include <Ui/ImGuiBridge.hpp>
 #include <functional>
 
 namespace Ursa::Editor
@@ -20,6 +22,7 @@ struct ProjectBrowserActions
 	std::function<Result<void>(const Vector<AssetMoveRequest>&)> moveAssets;
 	std::function<Result<void>(const Vector<VirtualPath>&)> deleteAssets;
 	std::function<Result<void>(const Vector<VirtualPath>&)> reimportAssets;
+	std::function<Result<Vector<VirtualPath>>(const Vector<VirtualPath>&)> duplicateAssets;
 	std::function<Result<void>(const ProjectBrowserEntry&)> openAsset;
 	std::function<Result<void>(const EditorDragSession&, const String&)> exportScenePrefabs;
 };
@@ -27,6 +30,8 @@ struct ProjectBrowserActions
 class ProjectBrowserPanel final
 {
 public:
+	~ProjectBrowserPanel();
+
 	void Reset();
 
 	void RequestRenameSelected();
@@ -37,6 +42,16 @@ public:
 	                  const ProjectBrowserActions& actions);
 
 private:
+	enum class ColumnFocusRequest
+	{
+		None,
+		FolderTree,
+		Contents
+	};
+
+	ImTextureID ResolveTextureThumbnail(ProjectWorkspace& workspace, const ProjectBrowserEntry& asset, UInt32& width,
+	                                    UInt32& height);
+	void ClearTextureThumbnails();
 	Result<void> RenameSelected(const ProjectBrowserModel& model, EditorSelectionContext& selection,
 	                            const ProjectBrowserActions& actions);
 	void CaptureMenuContext(const String& key, const EditorSelectionContext& selection);
@@ -49,15 +64,43 @@ private:
 	                                   const EditorCommandAvailability& availability) const;
 
 	Map<String, bool> expandedAssets;
+	Vector<String> favoriteSearches;
+	Vector<String> favoriteAssetPaths;
+	VirtualFileSystem* settingsFiles = nullptr;
+	VirtualPath favoritesSettingsPath;
+	String favoritesSettingsProject;
+	bool twoColumnLayout = true;
+	ColumnFocusRequest columnFocusRequest = ColumnFocusRequest::None;
+	bool gridView = true;
+	Int32 gridIconSize = 64;
 	Ursa::Array<char, 256> searchText{};
 	Ursa::Array<char, 256> destinationPath{};
 	Ursa::Array<char, 128> folderName{};
+	Ursa::Array<char, 128> labelName{};
 	bool createFolderRequested = false;
+	bool addLabelRequested = false;
+	Vector<VirtualPath> labelTargets;
+	String labelDiagnostic;
 	bool renameRequested = false;
 	bool deleteRequested = false;
 	Vector<EditorSelectionEntry> deleteTargets;
 	String deleteDiagnostic;
 	String backgroundMenuFolder;
 	Map<String, EditorCommandContext> contextMenuTargets;
+
+	struct TextureThumbnail
+	{
+		ImTextureID id = ImTextureID_Invalid;
+		Rhi::TexturePtr texture;
+		Rhi::SamplerPtr sampler;
+		UInt32 width = 0;
+		UInt32 height = 0;
+		bool attempted = false;
+	};
+
+	Map<String, TextureThumbnail> textureThumbnails;
+	ImGuiBridge* thumbnailBridge = nullptr;
+	String thumbnailProjectRoot;
+	UInt64 thumbnailDatabaseRevision = 0;
 };
 } // namespace Ursa::Editor

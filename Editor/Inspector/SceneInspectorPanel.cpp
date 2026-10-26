@@ -11,6 +11,7 @@
 #include <Serialization/PrefabCapture.hpp>
 #include <Serialization/SerializedObject.hpp>
 #include <Scene/ComponentEditors.hpp>
+#include <Scene/EditorGizmo.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
@@ -18,9 +19,11 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <tuple>
 
 namespace Ursa::Editor
@@ -28,8 +31,97 @@ namespace Ursa::Editor
 namespace
 {
 using SerializedJson = nlohmann::json;
+std::optional<SerializedJson> copiedComponentPayload;
 using GroupCommitObserver =
     std::function<Result<void>(const SerializedObjectGroup&, const String&, const Vector<bool>&)>;
+
+constexpr Float32 DegreesToRadians = 0.01745329251994329577f;
+constexpr Float32 RadiansToDegrees = 57.295779513082320876f;
+
+Float32 PositiveDegrees(Float32 radians)
+{
+	Float32 degrees = std::fmod(radians * RadiansToDegrees, 360.f);
+	return degrees < 0.f ? degrees + 360.f : degrees;
+}
+
+Vec3 UnityEulerAngles(Quat rotation)
+{
+	const Float32 lengthSquared =
+	    rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w;
+	if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-12f)
+	{
+		return {};
+	}
+	const Float32 inverseLength = 1.f / std::sqrt(lengthSquared);
+	rotation.x *= inverseLength;
+	rotation.y *= inverseLength;
+	rotation.z *= inverseLength;
+	rotation.w *= inverseLength;
+	const Float32 r13 = 2.f * (rotation.x * rotation.z + rotation.w * rotation.y);
+	const Float32 r23 = 2.f * (rotation.y * rotation.z - rotation.w * rotation.x);
+	const Float32 r21 = 2.f * (rotation.x * rotation.y + rotation.w * rotation.z);
+	const Float32 r22 = 1.f - 2.f * (rotation.x * rotation.x + rotation.z * rotation.z);
+	const Float32 r31 = 2.f * (rotation.x * rotation.z - rotation.w * rotation.y);
+	const Float32 r11 = 1.f - 2.f * (rotation.y * rotation.y + rotation.z * rotation.z);
+	const Float32 x = std::asin(std::clamp(-r23, -1.f, 1.f));
+	const Float32 cosineX = std::cos(x);
+	const Float32 y = std::abs(cosineX) > 1.0e-5f
+	                      ? std::atan2(r13, 1.f - 2.f * (rotation.x * rotation.x + rotation.y * rotation.y))
+	                      : std::atan2(-r31, r11);
+	const Float32 z = std::abs(cosineX) > 1.0e-5f ? std::atan2(r21, r22) : 0.f;
+	return {PositiveDegrees(x), PositiveDegrees(y), PositiveDegrees(z)};
+}
+
+Quat UnityEulerQuaternion(Vec3 degrees)
+{
+	const Float32 halfX = degrees.x * DegreesToRadians * 0.5f;
+	const Float32 halfY = degrees.y * DegreesToRadians * 0.5f;
+	const Float32 halfZ = degrees.z * DegreesToRadians * 0.5f;
+	const Float32 sx = std::sin(halfX);
+	const Float32 cx = std::cos(halfX);
+	const Float32 sy = std::sin(halfY);
+	const Float32 cy = std::cos(halfY);
+	const Float32 sz = std::sin(halfZ);
+	const Float32 cz = std::cos(halfZ);
+	return {cy * sx * cz + sy * cx * sz, sy * cx * cz - cy * sx * sz, cy * cx * sz - sy * sx * cz,
+	        cy * cx * cz + sy * sx * sz};
+}
+
+bool DrawInspectorComponentFoldout(Icons::Icon icon, const char* label)
+{
+	Icons::Inline(icon);
+	ImGui::SameLine();
+	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+	return ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
+}
+
+bool DrawCameraInspectorFields(CameraComponent& camera, String& diagnostic)
+{
+	Float32 fieldOfView = camera.verticalFovRadians * RadiansToDegrees;
+	Float32 nearPlane = camera.nearPlane;
+	Float32 farPlane = camera.farPlane;
+	bool edited = ImGui::DragFloat("Field of View", &fieldOfView, 0.5f, 1.f, 179.f, "%.1f°");
+	ImGui::TextUnformatted("Clipping Planes");
+	ImGui::Indent();
+	edited |= ImGui::DragFloat("Near", &nearPlane, 0.01f, 0.001f, 10000.f, "%.3f");
+	edited |= ImGui::DragFloat("Far", &farPlane, 0.1f, 0.002f, 100000.f, "%.3f");
+	ImGui::Unindent();
+	if (!edited)
+	{
+		return false;
+	}
+	if (!std::isfinite(fieldOfView) || !std::isfinite(nearPlane) || !std::isfinite(farPlane) || fieldOfView <= 0.f ||
+	    fieldOfView >= 180.f || nearPlane <= 0.f || farPlane <= nearPlane)
+	{
+		diagnostic = "Camera requires 0 < FOV < 180 and 0 < Near < Far";
+		return false;
+	}
+	camera.verticalFovRadians = fieldOfView * DegreesToRadians;
+	camera.nearPlane = nearPlane;
+	camera.farPlane = farPlane;
+	diagnostic.clear();
+	return true;
+}
 
 Result<void> RestoreReferencePickerTransaction(const ReferencePickerTransaction& transaction, bool* transactionHandled,
                                                const SerializedJson& checkpoint);
@@ -138,6 +230,7 @@ Result<GroupCommitObserver> MakePrefabOverrideCommit(SceneDraft* draft, Scene* s
 		    }
 		    const String field = rootPath.substr(String("/Fields/").size());
 		    String overridePath;
+		    const bool worldTransformEdit = field == "worldTransform";
 		    if (isComponent)
 		    {
 			    overridePath = "/data/" + field;
@@ -150,11 +243,23 @@ Result<GroupCommitObserver> MakePrefabOverrideCommit(SceneDraft* draft, Scene* s
 		    {
 			    overridePath = "/enabled";
 		    }
+		    else if (field == "layer")
+		    {
+			    overridePath = "/layer";
+		    }
+		    else if (field == "tag")
+		    {
+			    overridePath = "/tag";
+		    }
+		    else if (field == "static")
+		    {
+			    overridePath = "/static";
+		    }
 		    else if (field == "position" || field == "rotation" || field == "scale")
 		    {
 			    overridePath = "/localTransform/" + field;
 		    }
-		    else
+		    else if (!worldTransformEdit)
 		    {
 			    return Result<void>::Failure("Unsupported Prefab override field " + field);
 		    }
@@ -165,13 +270,31 @@ Result<GroupCommitObserver> MakePrefabOverrideCommit(SceneDraft* draft, Scene* s
 			    {
 				    continue;
 			    }
-			    auto value = group.TargetValue(index, rootPath);
-			    if (!value)
+			    if (worldTransformEdit)
 			    {
-				    return Result<void>::Failure(value.error);
+				    for (const auto& item : {std::pair<const char*, const char*>{"/Fields/position", "/localTransform/position"},
+				                            {"/Fields/rotation", "/localTransform/rotation"},
+				                            {"/Fields/scale", "/localTransform/scale"}})
+				    {
+					    auto value = group.TargetValue(index, item.first);
+					    if (!value)
+					    {
+						    return Result<void>::Failure(value.error);
+					    }
+					    overrides.push_back({targets[index]->instanceId, targets[index]->sourceObjectId, item.second,
+					                        std::move(value.value)});
+				    }
 			    }
-			    overrides.push_back(
-			        {targets[index]->instanceId, targets[index]->sourceObjectId, overridePath, std::move(value.value)});
+			    else
+			    {
+				    auto value = group.TargetValue(index, rootPath);
+				    if (!value)
+				    {
+						    return Result<void>::Failure(value.error);
+				    }
+				    overrides.push_back(
+					        {targets[index]->instanceId, targets[index]->sourceObjectId, overridePath, std::move(value.value)});
+			    }
 		    }
 		    return draft->SetInstanceProperties(overrides);
 	    });
@@ -185,22 +308,36 @@ Result<SerializedJson> CaptureGameObjectProperties(const GameObject::Ptr& object
 	}
 	auto name = object->Name();
 	auto active = object->ActiveSelf();
+	auto layer = object->Layer();
+	auto tag = object->Tag();
+	auto isStatic = object->IsStatic();
 	auto transform = object->GetLocalTransform();
-	if (!name || !active || !transform)
+	if (!name || !active || !layer || !tag || !isStatic || !transform)
 	{
-		return Result<SerializedJson>::Failure(!name ? name.error : !active ? active.error : transform.error);
+		return Result<SerializedJson>::Failure(!name       ? name.error
+		                                       : !active   ? active.error
+		                                       : !layer    ? layer.error
+		                                       : !tag      ? tag.error
+		                                       : !isStatic ? isStatic.error
+		                                                   : transform.error);
 	}
 	const auto& value = transform.value;
 	return Result<SerializedJson>::Success(
 	    {{"Fields",
 	      {{"name", ToStdString(name.value)},
 	       {"active", active.value},
+	       {"layer", layer.value},
+	       {"tag", ToStdString(tag.value)},
+	       {"static", isStatic.value},
 	       {"position", {value.position.x, value.position.y, value.position.z}},
 	       {"rotation", {value.rotation.x, value.rotation.y, value.rotation.z, value.rotation.w}},
 	       {"scale", {value.scale.x, value.scale.y, value.scale.z}}}},
 	     {"FieldTypes",
 	      {{"name", {{"Kind", "String"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.String"}}},
 	       {"active", {{"Kind", "Boolean"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.Boolean"}}},
+	       {"layer", {{"Kind", "UnsignedInteger"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.UInt32"}}},
+	       {"tag", {{"Kind", "String"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.String"}}},
+	       {"static", {{"Kind", "Boolean"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.Boolean"}}},
 	       {"position", {{"Kind", "Vector3"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.Numerics.Vector3"}}},
 	       {"rotation",
 	        {{"Kind", "Quaternion"}, {"ElementKind", "Unsupported"}, {"TypeName", "System.Numerics.Quaternion"}}},
@@ -217,9 +354,13 @@ Result<SerializedJson> ApplyGameObjectProperties(const GameObject::Ptr& object, 
 	try
 	{
 		const auto& fields = payload.at("Fields");
-		if (!fields.at("name").is_string() || !fields.at("active").is_boolean() || !fields.at("position").is_array() ||
-		    fields.at("position").size() != 3 || !fields.at("rotation").is_array() ||
-		    fields.at("rotation").size() != 4 || !fields.at("scale").is_array() || fields.at("scale").size() != 3)
+		if (!fields.at("name").is_string() || !fields.at("active").is_boolean() ||
+		    !fields.at("layer").is_number_unsigned() || fields.at("layer").get<UInt32>() > 31 ||
+		    !fields.at("tag").is_string() || fields.at("tag").get<std::string>().empty() ||
+		    fields.at("tag").get<std::string>().size() > 256 || !fields.at("static").is_boolean() ||
+		    !fields.at("position").is_array() || fields.at("position").size() != 3 ||
+		    !fields.at("rotation").is_array() || fields.at("rotation").size() != 4 || !fields.at("scale").is_array() ||
+		    fields.at("scale").size() != 3)
 		{
 			return Result<SerializedJson>::Failure("Prepared GameObject properties have an invalid shape");
 		}
@@ -239,6 +380,21 @@ Result<SerializedJson> ApplyGameObjectProperties(const GameObject::Ptr& object, 
 		if (!activated)
 		{
 			return Result<SerializedJson>::Failure(activated.error);
+		}
+		auto layered = object->SetLayer(fields["layer"].get<UInt32>());
+		if (!layered)
+		{
+			return Result<SerializedJson>::Failure(layered.error);
+		}
+		auto tagged = object->SetTag(ToUrsaString(fields["tag"].get<std::string>()));
+		if (!tagged)
+		{
+			return Result<SerializedJson>::Failure(tagged.error);
+		}
+		auto madeStatic = object->SetStatic(fields["static"].get<bool>());
+		if (!madeStatic)
+		{
+			return Result<SerializedJson>::Failure(madeStatic.error);
 		}
 		auto transformed = object->SetLocalTransform(transform);
 		if (!transformed)
@@ -268,9 +424,12 @@ Result<std::unique_ptr<SerializedObject>> CreateGameObjectSerializedObject(GameO
 	adapter.validate = [](const SerializedTargetCheckpoint& checkpoint)
 	{
 		const auto& fields = checkpoint.backendToken.at("candidate").at("Fields");
-		return fields.at("name").get<std::string>().size() <= 256
+		return fields.at("name").get<std::string>().size() <= 256 && fields.at("layer").is_number_unsigned() &&
+		               fields.at("layer").get<UInt32>() <= 31 && fields.at("tag").is_string() &&
+		               !fields.at("tag").get<std::string>().empty() &&
+		               fields.at("tag").get<std::string>().size() <= 256 && fields.at("static").is_boolean()
 		           ? Result<void>{}
-		           : Result<void>::Failure("GameObject name exceeds 256 bytes");
+		           : Result<void>::Failure("GameObject name, tag, or layer is invalid");
 	};
 	adapter.publish = [object](const SerializedTargetCheckpoint& checkpoint)
 	{ return ApplyGameObjectProperties(object, checkpoint.backendToken.at("candidate")); };
@@ -353,13 +512,20 @@ Result<Vector<GameObject::Ptr>> SelectedSceneObjects(Scene& scene, const GameObj
 	return Result<Vector<GameObject::Ptr>>::Success(std::move(objects));
 }
 
+Result<bool> SetAndApplyGroupValue(SerializedObjectGroup& group, const String& path, SerializedJson value,
+                                   const GroupCommitObserver& commitObserver);
+
 Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const String& primaryName, String& diagnostic,
-                                           const GroupCommitObserver& commitObserver = {})
+                                           const ProjectTagLayerSettings& tagLayerSettings,
+                                           const std::function<void(bool)>& openTagLayerSettings,
+                                           const GroupCommitObserver& commitObserver = {}, Scene* scene = nullptr,
+                                           const Vector<GameObject::Ptr>* sceneTargets = nullptr,
+                                           bool allowWorldTransform = false)
 {
 	if (group.TargetCount() > 1)
 	{
-		ImGui::Text("%zu objects selected · %s is primary", group.TargetCount(), primaryName.c_str());
-		ImGui::TextDisabled("Transform Gizmo edits the primary selection only.");
+		ImGui::Text("%zu objects selected · %s is active", group.TargetCount(), primaryName.c_str());
+		ImGui::TextDisabled("Scene Gizmo edits all selected objects; the active object sets the Pivot handle.");
 	}
 	bool changed = false;
 	const auto apply = [&](const String& path) -> Result<void>
@@ -380,8 +546,41 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 	String nameValue = ToUrsaString(name.value.at("Value").get<std::string>());
 	char nameBuffer[257]{};
 	std::memcpy(nameBuffer, nameValue.data(), std::min<Ursa::Size>(nameValue.size(), sizeof(nameBuffer) - 1));
+	const auto active = group.DescribeProperty("/Fields/active");
+	if (!active)
+	{
+		return Result<bool>::Failure(active.error);
+	}
+	const auto staticState = group.DescribeProperty("/Fields/static");
+	if (!staticState)
+	{
+		return Result<bool>::Failure(staticState.error);
+	}
+	bool activeValue = active.value.at("Value").get<bool>();
+	Icons::Inline(Icons::Icon::GameObject);
+	ImGui::SameLine();
+	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, active.value.value("HasMultipleDifferentValues", false));
+	const bool activeChanged = ImGui::Checkbox("##GameObjectActive", &activeValue);
+	ImGui::PopItemFlag();
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip("Active");
+	}
+	if (activeChanged)
+	{
+		auto set = group.SetValue("/Fields/active", activeValue);
+		auto applied = set ? apply(ToUrsaString("/Fields/active")) : Result<void>::Failure(set.error);
+		if (!applied)
+		{
+			diagnostic = applied.error;
+			return Result<bool>::Failure(diagnostic);
+		}
+		changed = true;
+	}
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - 52.0f);
 	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, name.value.value("HasMultipleDifferentValues", false));
-	const bool nameChanged = ImGui::InputText("Name", nameBuffer, sizeof(nameBuffer));
+	const bool nameChanged = ImGui::InputText("##GameObjectName", nameBuffer, sizeof(nameBuffer));
 	ImGui::PopItemFlag();
 	if (nameChanged)
 	{
@@ -394,19 +593,21 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 		}
 		changed = true;
 	}
-	const auto active = group.DescribeProperty("/Fields/active");
-	if (!active)
-	{
-		return Result<bool>::Failure(active.error);
-	}
-	bool activeValue = active.value.at("Value").get<bool>();
-	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, active.value.value("HasMultipleDifferentValues", false));
-	const bool activeChanged = ImGui::Checkbox("Active", &activeValue);
+	ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight() - 48.0f);
+	ImGui::TextUnformatted("Static");
+	ImGui::SameLine();
+	bool isStatic = staticState.value.at("Value").get<bool>();
+	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, staticState.value.value("HasMultipleDifferentValues", false));
+	const bool staticChanged = ImGui::Checkbox("##GameObjectStatic", &isStatic);
 	ImGui::PopItemFlag();
-	if (activeChanged)
+	if (ImGui::IsItemHovered())
 	{
-		auto set = group.SetValue("/Fields/active", activeValue);
-		auto applied = set ? apply(ToUrsaString("/Fields/active")) : Result<void>::Failure(set.error);
+		ImGui::SetTooltip("Static");
+	}
+	if (staticChanged)
+	{
+		auto set = group.SetValue("/Fields/static", isStatic);
+		auto applied = set ? apply(ToUrsaString("/Fields/static")) : Result<void>::Failure(set.error);
 		if (!applied)
 		{
 			diagnostic = applied.error;
@@ -414,7 +615,102 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 		}
 		changed = true;
 	}
-	Icons::Section(Icons::Icon::Move, "Transform");
+	const auto tag = group.DescribeProperty("/Fields/tag");
+	if (!tag)
+	{
+		return Result<bool>::Failure(tag.error);
+	}
+	String tagValue = ToUrsaString(tag.value.at("Value").get<std::string>());
+	const Float32 tagLayerWidth = std::max(60.f, (ImGui::GetContentRegionAvail().x - 72.f) * 0.5f);
+	ImGui::SetNextItemWidth(tagLayerWidth);
+	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, tag.value.value("HasMultipleDifferentValues", false));
+	const char* selectedTag = tag.value.value("HasMultipleDifferentValues", false) ? "<Mixed>" : tagValue.c_str();
+	bool tagChanged = false;
+	if (ImGui::BeginCombo("Tag", selectedTag))
+	{
+		for (const auto& candidate : tagLayerSettings.tags)
+		{
+			if (ImGui::Selectable(candidate.c_str(),
+			                      !tag.value.value("HasMultipleDifferentValues", false) && candidate == tagValue))
+			{
+				tagValue = candidate;
+				tagChanged = true;
+			}
+		}
+		if (openTagLayerSettings)
+		{
+			ImGui::Separator();
+			if (Icons::MenuItem("Add Tag..."))
+			{
+				openTagLayerSettings(false);
+			}
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::PopItemFlag();
+	if (tagChanged)
+	{
+		auto set = group.SetValue("/Fields/tag", ToStdString(tagValue));
+		auto applied = set ? apply(ToUrsaString("/Fields/tag")) : Result<void>::Failure(set.error);
+		if (!applied)
+		{
+			diagnostic = applied.error;
+			return Result<bool>::Failure(diagnostic);
+		}
+		changed = true;
+	}
+	Icons::SameLine();
+	const auto layer = group.DescribeProperty("/Fields/layer");
+	if (!layer)
+	{
+		return Result<bool>::Failure(layer.error);
+	}
+	const UInt32 layerValue = layer.value.at("Value").get<UInt32>();
+	const bool mixedLayer = layer.value.value("HasMultipleDifferentValues", false);
+	const auto layerLabel = [&tagLayerSettings](UInt32 value)
+	{
+		const String& name = tagLayerSettings.layers[value];
+		return name.empty() ? String("Layer ") + ToUrsaString(std::to_string(value)) : name;
+	};
+	const String selectedLayerLabel = mixedLayer ? String("<Mixed>") : layerLabel(layerValue);
+	ImGui::SetNextItemWidth(tagLayerWidth);
+	String layerError;
+	if (ImGui::BeginCombo("Layer", selectedLayerLabel.c_str()))
+	{
+		for (UInt32 candidate = 0; candidate < 32; ++candidate)
+		{
+			const String label = layerLabel(candidate);
+			ImGui::PushID(static_cast<int>(candidate));
+			if (ImGui::Selectable(label.c_str(), !mixedLayer && candidate == layerValue))
+			{
+				auto set = group.SetValue("/Fields/layer", candidate);
+				auto applied = set ? apply(ToUrsaString("/Fields/layer")) : Result<void>::Failure(set.error);
+				if (!applied)
+				{
+					layerError = applied.error;
+				}
+				else
+				{
+					changed = true;
+				}
+			}
+			ImGui::PopID();
+		}
+		if (openTagLayerSettings)
+		{
+			ImGui::Separator();
+			if (Icons::MenuItem("Add Layer..."))
+			{
+				openTagLayerSettings(true);
+			}
+		}
+		ImGui::EndCombo();
+	}
+	if (!layerError.empty())
+	{
+		diagnostic = layerError;
+		return Result<bool>::Failure(diagnostic);
+	}
 	const auto drawVector = [&](const char* label, const char* path, int componentCount, float speed, float minimum,
 	                            float maximum) -> Result<bool>
 	{
@@ -424,53 +720,355 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 			return Result<bool>::Failure(state.error);
 		}
 		const auto& current = state.value.at("Value");
-		Float32 values[4]{};
-		for (int index = 0; index < componentCount; ++index)
+		static constexpr const char* axisLabels[]{"X", "Y", "Z", "W"};
+		static constexpr ImVec4 axisColors[]{{0.92f, 0.38f, 0.35f, 1.f},
+		                                     {0.48f, 0.78f, 0.42f, 1.f},
+		                                     {0.35f, 0.62f, 0.94f, 1.f},
+		                                     {0.75f, 0.75f, 0.75f, 1.f}};
+		bool changed = false;
+		ImGui::PushID(label);
+		if (ImGui::BeginTable("##TransformVector", componentCount + 1,
+		                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings))
 		{
-			values[index] = current.at(index).get<Float32>();
+			ImGui::TableSetupColumn("##Label", ImGuiTableColumnFlags_WidthFixed, 76.f);
+			for (int index = 0; index < componentCount; ++index)
+			{
+				ImGui::TableSetupColumn(axisLabels[index], ImGuiTableColumnFlags_WidthStretch);
+			}
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(label);
+			for (int index = 0; index < componentCount; ++index)
+			{
+				ImGui::TableSetColumnIndex(index + 1);
+				ImGui::PushID(index);
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextColored(axisColors[index], "%s", axisLabels[index]);
+				ImGui::SameLine(0.f, 4.f);
+				const String componentPath = String(path) + "/" + ToUrsaString(std::to_string(index));
+				auto component = group.DescribeProperty(componentPath);
+				if (!component)
+				{
+					ImGui::PopID();
+					ImGui::EndTable();
+					ImGui::PopID();
+					return Result<bool>::Failure(component.error);
+				}
+				Float32 value = current.at(index).get<Float32>();
+				ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,
+				                    component.value.value("HasMultipleDifferentValues", false));
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				const bool edited = ImGui::DragFloat("##Value", &value, speed, minimum, maximum, "%.3f");
+				ImGui::PopItemFlag();
+				if (edited && value != current.at(index).get<Float32>())
+				{
+					auto set = group.SetValue(componentPath, value);
+					if (!set)
+					{
+						ImGui::PopID();
+						ImGui::EndTable();
+						ImGui::PopID();
+						return Result<bool>::Failure(set.error);
+					}
+					auto applied = apply(ToUrsaString(path));
+					if (!applied)
+					{
+						ImGui::PopID();
+						ImGui::EndTable();
+						ImGui::PopID();
+						return Result<bool>::Failure(applied.error);
+					}
+					changed = true;
+				}
+				ImGui::PopID();
+			}
+			ImGui::EndTable();
 		}
-		ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, state.value.value("HasMultipleDifferentValues", false));
-		const bool edited = componentCount == 3 ? ImGui::DragFloat3(label, values, speed, minimum, maximum)
-		                                        : ImGui::DragFloat4(label, values, speed, minimum, maximum);
-		ImGui::PopItemFlag();
-		if (!edited)
+		ImGui::PopID();
+		return Result<bool>::Success(changed);
+	};
+	const auto drawRotation = [&]() -> Result<bool>
+	{
+		auto state = group.DescribeProperty("/Fields/rotation");
+		if (!state)
+		{
+			return Result<bool>::Failure(state.error);
+		}
+		const auto& current = state.value.at("Value");
+		const Vec3 euler = UnityEulerAngles({current.at(0).get<Float32>(), current.at(1).get<Float32>(),
+		                                     current.at(2).get<Float32>(), current.at(3).get<Float32>()});
+		Float32 values[] = {euler.x, euler.y, euler.z};
+		static constexpr const char* axisLabels[]{"X", "Y", "Z"};
+		static constexpr ImVec4 axisColors[]{{0.92f, 0.38f, 0.35f, 1.f},
+		                                     {0.48f, 0.78f, 0.42f, 1.f},
+		                                     {0.35f, 0.62f, 0.94f, 1.f}};
+		Int32 editedAxis = -1;
+		ImGui::PushID("Rotation");
+		if (ImGui::BeginTable("##TransformRotation", 4,
+		                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings))
+		{
+			ImGui::TableSetupColumn("##Label", ImGuiTableColumnFlags_WidthFixed, 76.f);
+			for (int index = 0; index < 3; ++index)
+			{
+				ImGui::TableSetupColumn(axisLabels[index], ImGuiTableColumnFlags_WidthStretch);
+			}
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted("Rotation");
+			ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,
+			                    state.value.value("HasMultipleDifferentValues", false));
+			for (int index = 0; index < 3; ++index)
+			{
+				ImGui::TableSetColumnIndex(index + 1);
+				ImGui::PushID(index);
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextColored(axisColors[index], "%s", axisLabels[index]);
+				ImGui::SameLine(0.f, 4.f);
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				if (ImGui::DragFloat("##Value", &values[index], 0.25f, 0.f, 0.f, "%.1f°"))
+				{
+					editedAxis = index;
+				}
+				ImGui::PopID();
+			}
+			ImGui::PopItemFlag();
+			ImGui::EndTable();
+		}
+		ImGui::PopID();
+		if (editedAxis < 0 || values[editedAxis] == (editedAxis == 0 ? euler.x : editedAxis == 1 ? euler.y : euler.z))
 		{
 			return Result<bool>::Success(false);
 		}
-		for (int index = 0; index < componentCount; ++index)
+		const Quat rotation = UnityEulerQuaternion({values[0], values[1], values[2]});
+		const Float32 components[] = {rotation.x, rotation.y, rotation.z, rotation.w};
+		for (int index = 0; index < 4; ++index)
 		{
-			if (values[index] == current.at(index).get<Float32>())
-			{
-				continue;
-			}
-			const String componentPath = String(path) + "/" + ToUrsaString(std::to_string(index));
-			auto set = group.SetValue(componentPath, values[index]);
+			auto set =
+			    group.SetValue(String("/Fields/rotation/") + ToUrsaString(std::to_string(index)), components[index]);
 			if (!set)
 			{
 				return Result<bool>::Failure(set.error);
 			}
 		}
-		auto applied = apply(ToUrsaString(path));
+		auto applied = apply(ToUrsaString("/Fields/rotation"));
 		return applied ? Result<bool>::Success(true) : Result<bool>::Failure(applied.error);
 	};
-	auto position = drawVector("Position", "/Fields/position", 3, 0.05f, 0.0f, 0.0f);
-	if (!position)
+	Icons::Inline(Icons::Icon::Move);
+	ImGui::SameLine();
+	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+	const bool transformOpen = ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen);
+	ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight());
+	if (Icons::Button("TransformActions", Icons::Icon::More, "Transform actions"))
 	{
-		return position;
+		ImGui::OpenPopup("TransformActions");
 	}
-	changed |= position.value;
-	auto rotation = drawVector("Rotation", "/Fields/rotation", 4, 0.01f, 0.0f, 0.0f);
-	if (!rotation)
+	static std::optional<SerializedJson> copiedPosition;
+	static std::optional<SerializedJson> copiedRotation;
+	static std::optional<SerializedJson> copiedScale;
+	static std::optional<Mat4> copiedWorldTransform;
+	bool resetTransform = false;
+	if (ImGui::BeginPopup("TransformActions"))
 	{
-		return rotation;
+		const auto copyValue = [&](const char* path, std::optional<SerializedJson>& clipboard)
+		{
+			auto value = group.DescribeProperty(path);
+			if (value)
+			{
+				clipboard = value.value.at("Value");
+			}
+		};
+		if (Icons::BeginMenu("Copy"))
+		{
+			if (Icons::MenuItem("Position"))
+			{
+				copyValue("/Fields/position", copiedPosition);
+			}
+			if (Icons::MenuItem("Rotation"))
+			{
+				copyValue("/Fields/rotation", copiedRotation);
+			}
+			if (Icons::MenuItem("Scale"))
+			{
+				copyValue("/Fields/scale", copiedScale);
+			}
+			if (scene && sceneTargets && !sceneTargets->empty())
+			{
+				if (Icons::MenuItem("World Transform"))
+				{
+					auto world = scene->WorldTransform(sceneTargets->front());
+					if (world)
+					{
+						copiedWorldTransform = world.value;
+					}
+					else
+					{
+						diagnostic = world.error;
+					}
+				}
+			}
+			ImGui::EndMenu();
+		}
+		if (Icons::BeginMenu("Paste"))
+		{
+			const auto pasteValue = [&](const char* label, const char* path,
+			                            const std::optional<SerializedJson>& clipboard)
+			{
+				ImGui::BeginDisabled(!clipboard.has_value());
+				if (Icons::MenuItem(label))
+				{
+					auto applied = SetAndApplyGroupValue(group, path, *clipboard, commitObserver);
+					if (!applied)
+					{
+						diagnostic = applied.error;
+					}
+					else
+					{
+						changed |= applied.value;
+					}
+				}
+				ImGui::EndDisabled();
+			};
+			pasteValue("Position", "/Fields/position", copiedPosition);
+			pasteValue("Rotation", "/Fields/rotation", copiedRotation);
+			pasteValue("Scale", "/Fields/scale", copiedScale);
+			if (scene && sceneTargets && allowWorldTransform)
+			{
+				ImGui::BeginDisabled(!copiedWorldTransform.has_value());
+				if (Icons::MenuItem("World Transform"))
+				{
+					Vector<LocalTransform> originals;
+					originals.reserve(sceneTargets->size());
+					for (const auto& target : *sceneTargets)
+					{
+						auto local = scene->GetLocalTransform(target);
+						if (!local)
+						{
+							diagnostic = local.error;
+							break;
+						}
+						originals.push_back(local.value);
+					}
+					Size appliedCount = 0;
+					if (diagnostic.empty())
+					{
+						for (; appliedCount < sceneTargets->size(); ++appliedCount)
+						{
+							auto applied = ApplyGizmoWorldTransform(*scene, (*sceneTargets)[appliedCount],
+							                                       *copiedWorldTransform);
+							if (!applied)
+							{
+								diagnostic = applied.error;
+								break;
+							}
+						}
+					}
+					if (!diagnostic.empty())
+					{
+						while (appliedCount > 0)
+						{
+							--appliedCount;
+							scene->SetLocalTransform((*sceneTargets)[appliedCount], originals[appliedCount]);
+						}
+					}
+					else
+					{
+						for (Size index = 0; index < sceneTargets->size() && diagnostic.empty(); ++index)
+						{
+							auto local = scene->GetLocalTransform((*sceneTargets)[index]);
+							if (!local)
+							{
+								diagnostic = local.error;
+								break;
+							}
+							for (const auto& item : {
+							         std::pair<const char*, SerializedJson>{"/Fields/position", {local.value.position.x,
+							                                                            local.value.position.y,
+							                                                            local.value.position.z}},
+							         {"/Fields/rotation", {local.value.rotation.x, local.value.rotation.y,
+							                              local.value.rotation.z, local.value.rotation.w}},
+							         {"/Fields/scale", {local.value.scale.x, local.value.scale.y, local.value.scale.z}}})
+							{
+								auto set = group.SetValue(item.first, item.second);
+								if (!set)
+								{
+									diagnostic = set.error;
+									break;
+								}
+							}
+						}
+						if (diagnostic.empty())
+						{
+							const auto pendingChanges = group.PendingTargetChanges();
+							const bool hasChanges =
+							    std::any_of(pendingChanges.begin(), pendingChanges.end(), [](bool value) { return value; });
+							auto committed = apply(ToUrsaString("/Fields/worldTransform"));
+							if (!committed)
+							{
+								diagnostic = committed.error;
+							}
+							else
+							{
+								changed |= hasChanges;
+							}
+						}
+						if (!diagnostic.empty())
+						{
+							for (Size index = 0; index < originals.size(); ++index)
+							{
+								scene->SetLocalTransform((*sceneTargets)[index], originals[index]);
+							}
+						}
+					}
+				}
+				ImGui::EndDisabled();
+			}
+			ImGui::EndMenu();
+		}
+		ImGui::Separator();
+		resetTransform = Icons::MenuItem("Reset");
+		ImGui::EndPopup();
 	}
-	changed |= rotation.value;
-	auto scale = drawVector("Scale", "/Fields/scale", 3, 0.05f, 0.001f, 100.0f);
-	if (!scale)
+	if (!diagnostic.empty())
 	{
-		return scale;
+		return Result<bool>::Failure(diagnostic);
 	}
-	changed |= scale.value;
+	if (resetTransform)
+	{
+		for (const auto& item : {std::pair<String, SerializedJson>{"/Fields/position", {0.f, 0.f, 0.f}},
+		                         {"/Fields/rotation", {0.f, 0.f, 0.f, 1.f}},
+		                         {"/Fields/scale", {1.f, 1.f, 1.f}}})
+		{
+			auto reset = SetAndApplyGroupValue(group, item.first, item.second, commitObserver);
+			if (!reset)
+			{
+				return Result<bool>::Failure(reset.error);
+			}
+			changed |= reset.value;
+		}
+	}
+	if (transformOpen)
+	{
+		auto position = drawVector("Position", "/Fields/position", 3, 0.05f, 0.0f, 0.0f);
+		if (!position)
+		{
+			return position;
+		}
+		changed |= position.value;
+		auto rotation = drawRotation();
+		if (!rotation)
+		{
+			return rotation;
+		}
+		changed |= rotation.value;
+		auto scale = drawVector("Scale", "/Fields/scale", 3, 0.05f, 0.0f, 0.0f);
+		if (!scale)
+		{
+			return scale;
+		}
+		changed |= scale.value;
+	}
 	diagnostic.clear();
 	return Result<bool>::Success(changed);
 }
@@ -1088,6 +1686,10 @@ bool DrawAddComponentBrowser(ComponentEditors& componentEditors, ComponentInspec
 	bool changed = false;
 	if (ImGui::BeginPopup("AddComponentPopup"))
 	{
+		if (ImGui::IsWindowAppearing())
+		{
+			ImGui::SetKeyboardFocusHere();
+		}
 		filter.Draw("Search");
 		auto descriptors = componentEditors.Types();
 		std::sort(descriptors.begin(), descriptors.end(),
@@ -1142,6 +1744,215 @@ bool DrawAddComponentBrowser(ComponentEditors& componentEditors, ComponentInspec
 		ImGui::EndPopup();
 	}
 	return changed;
+}
+
+Result<Component*> PasteComponentAsNew(ComponentEditors& componentEditors, const String& type,
+                                       const SerializedJson& payload, ComponentInspectorContext& context,
+                                       ComponentRegistry& registry, ComponentLoadContext& loadContext, Scene* scene)
+{
+	if (!payload.is_object() || !payload.contains("fields") || !payload["fields"].is_object())
+	{
+		return Result<Component*>::Failure("Copied component data has no serialized fields");
+	}
+	const String factoryType = type.compare(0, 7, "native:") == 0 || type.compare(0, 7, "script:") == 0
+	                               ? type.substr(7)
+	                               : type;
+	auto created = componentEditors.Create(factoryType, context);
+	if (!created)
+	{
+		return created;
+	}
+	Component* component = created.value;
+	const auto rollback = [&]()
+	{
+		if (scene)
+		{
+			auto id = scene->ComponentByPersistentId(component->PersistentId());
+			if (id)
+			{
+				scene->RemoveComponent(id.value);
+			}
+		}
+		else if (const auto owner = component->GetGameObject())
+		{
+			owner->RemoveComponent(component);
+		}
+	};
+	ComponentSaveContext saveContext;
+	saveContext.scene = scene;
+	saveContext.serialization = &loadContext;
+	auto serialized = SerializedObject::Create(*component, registry, loadContext, saveContext);
+	if (!serialized)
+	{
+		rollback();
+		return Result<Component*>::Failure(serialized.error);
+	}
+	Vector<SerializedObject*> targets{serialized.value.get()};
+	auto group = SerializedObjectGroup::Create(std::move(targets));
+	if (!group)
+	{
+		rollback();
+		return Result<Component*>::Failure(group.error);
+	}
+	const auto current = group.value.TargetSnapshot(0);
+	if (!current || !current.value.contains("Fields") || !current.value["Fields"].is_object())
+	{
+		rollback();
+		return Result<Component*>::Failure(current ? "New component has no writable serialized fields" : current.error);
+	}
+	for (auto field = payload["fields"].begin(); field != payload["fields"].end(); ++field)
+	{
+		if (!current.value["Fields"].contains(field.key()))
+		{
+			continue;
+		}
+		String escapedField = ToUrsaString(field.key());
+		for (Size offset = 0; (offset = escapedField.find('~', offset)) != String::npos; offset += 2)
+		{
+			escapedField.replace(offset, 1, "~0");
+		}
+		for (Size offset = 0; (offset = escapedField.find('/', offset)) != String::npos; offset += 2)
+		{
+			escapedField.replace(offset, 1, "~1");
+		}
+		auto set = group.value.SetValue("/Fields/" + escapedField, field.value());
+		if (!set)
+		{
+			rollback();
+			return Result<Component*>::Failure(set.error);
+		}
+	}
+	auto applied = group.value.Apply();
+	if (!applied)
+	{
+		rollback();
+		return Result<Component*>::Failure(applied.error);
+	}
+	return Result<Component*>::Success(component);
+}
+
+Result<bool> ResetComponentToDefaults(Component& component, const String& type, ComponentEditors& componentEditors,
+                                      ComponentInspectorContext& context, ComponentRegistry& registry,
+                                      ComponentLoadContext& loadContext, SceneDraft* draft, Scene* scene)
+{
+	const auto* descriptor = componentEditors.FindType(type);
+	if (!descriptor || !component.GetGameObject())
+	{
+		return Result<bool>::Failure("This component has no registered default factory");
+	}
+
+	const auto defaultObject = GameObject::Create("Default Component Values");
+	ComponentInspectorContext defaultsContext = context;
+	defaultsContext.object = defaultObject;
+	defaultsContext.roots = {defaultObject};
+	defaultsContext.targets.clear();
+	defaultsContext.primaryIndex = 0;
+	defaultsContext.scene = nullptr;
+	defaultsContext.selection = nullptr;
+	defaultsContext.prefab = nullptr;
+	defaultsContext.documentId = {};
+	auto defaultsComponent = descriptor->create(defaultsContext);
+	if (!defaultsComponent || !defaultsComponent.value)
+	{
+		return Result<bool>::Failure(defaultsComponent ? "Component factory returned no default component"
+		                                              : defaultsComponent.error);
+	}
+
+	SerializedJson defaultFields;
+	const bool defaultEnabled = defaultsComponent.value->IsEnabled();
+	{
+		ComponentSaveContext saveContext;
+		saveContext.serialization = &loadContext;
+		auto serialized = SerializedObject::Create(*defaultsComponent.value, registry, loadContext, saveContext);
+		if (!serialized)
+		{
+			return Result<bool>::Failure(serialized.error);
+		}
+		const auto snapshot = serialized.value->Snapshot();
+		if (!snapshot.contains("Fields") || !snapshot.at("Fields").is_object())
+		{
+			return Result<bool>::Failure("Default component has no serialized fields");
+		}
+		defaultFields = snapshot.at("Fields");
+	}
+	ComponentSaveContext saveContext;
+	saveContext.scene = scene;
+	saveContext.serialization = &loadContext;
+	auto serialized = SerializedObject::Create(component, registry, loadContext, saveContext);
+	if (!serialized)
+	{
+		return Result<bool>::Failure(serialized.error);
+	}
+	Vector<SerializedObject*> targets{serialized.value.get()};
+	auto group = SerializedObjectGroup::Create(std::move(targets));
+	if (!group)
+	{
+		return Result<bool>::Failure(group.error);
+	}
+	const auto current = group.value.TargetSnapshot(0);
+	if (!current || !current.value.contains("Fields") || !current.value.at("Fields").is_object())
+	{
+		return Result<bool>::Failure(current ? "Component has no serialized fields" : current.error);
+	}
+
+	Vector<String> changedPaths;
+	for (auto field = defaultFields.begin(); field != defaultFields.end(); ++field)
+	{
+		if (!current.value.at("Fields").contains(field.key()))
+		{
+			continue;
+		}
+		String escapedField = ToUrsaString(field.key());
+		for (Size offset = 0; (offset = escapedField.find('~', offset)) != String::npos; offset += 2)
+		{
+			escapedField.replace(offset, 1, "~0");
+		}
+		for (Size offset = 0; (offset = escapedField.find('/', offset)) != String::npos; offset += 2)
+		{
+			escapedField.replace(offset, 1, "~1");
+		}
+		const String path = "/Fields/" + escapedField;
+		auto set = group.value.SetValue(path, field.value());
+		if (!set)
+		{
+			return Result<bool>::Failure(set.error);
+		}
+		changedPaths.push_back(path);
+	}
+	const auto changedTargets = group.value.PendingTargetChanges();
+	auto applied = group.value.Apply();
+	if (!applied)
+	{
+		return Result<bool>::Failure(applied.error);
+	}
+	const bool enabledChanged = component.SupportsEnabled() && component.IsEnabled() != defaultEnabled;
+	if (enabledChanged)
+	{
+		auto enabled = component.SetEnabled(defaultEnabled);
+		if (!enabled)
+		{
+			return Result<bool>::Failure(enabled.error);
+		}
+	}
+	if (!changedPaths.empty())
+	{
+		Vector<Component*> componentTargets{&component};
+		auto commit = MakePrefabOverrideCommit(draft, scene, {}, &componentTargets);
+		if (!commit)
+		{
+			return Result<bool>::Failure(commit.error);
+		}
+		for (const String& path : changedPaths)
+		{
+			auto committed = commit.value(group.value, path, changedTargets);
+			if (!committed)
+			{
+				return Result<bool>::Failure(committed.error);
+			}
+		}
+	}
+	return Result<bool>::Success(enabledChanged ||
+	                             std::any_of(changedTargets.begin(), changedTargets.end(), [](bool value) { return value; }));
 }
 
 bool DrawSerializedReference(nlohmann::json& value, const String& kind, const String& expectedType,
@@ -2924,85 +3735,161 @@ Result<void> DeleteSceneObjects(Scene& scene, const Vector<ResourceId>& selected
 
 Result<void> DuplicateSceneObjects(Scene& scene, const Vector<ResourceId>& selectedIds, ResourceId primaryId,
                                    ComponentRegistry& registry, EditorDocuments& documents, SceneDraft& draft,
-                                   EditorSelectionContext* selection)
+                                   EditorSelectionContext* selection, ResourceId parentOverride = {},
+                                   const PrefabAsset* prefabSnapshot = nullptr,
+                                   std::shared_ptr<PrefabAsset>* capturedSnapshot = nullptr, bool captureOnly = false,
+                                   Vector<Mat4>* capturedWorldTransforms = nullptr,
+                                   const Vector<Mat4>* sourceWorldTransforms = nullptr)
 {
 	struct Target
 	{
 		GameObject::Ptr object;
 		GameObject::Ptr parent;
 		Ursa::Size siblingIndex;
+		bool append = false;
 	};
 
-	Set<String> selected;
-	for (const auto& id : selectedIds)
-	{
-		if (id)
-		{
-			selected.insert(id.ToString());
-		}
-	}
 	Vector<Target> targets;
-	Set<String> unique;
-	for (const auto& id : selectedIds)
+	GameObject::Ptr pasteParent;
+	if (parentOverride)
 	{
-		if (!id || !unique.insert(id.ToString()).second)
-		{
-			continue;
-		}
-		auto object = scene.GameObjectById(id);
-		if (!object)
-		{
-			return Result<void>::Failure(object.error);
-		}
-		auto parent = scene.ParentOf(object.value);
+		auto parent = scene.GameObjectById(parentOverride);
 		if (!parent)
 		{
 			return Result<void>::Failure(parent.error);
 		}
-		bool covered = false;
-		for (auto ancestor = parent.value; ancestor;)
-		{
-			if (selected.count(ancestor->Id().ToString()))
-			{
-				covered = true;
-				break;
-			}
-			auto next = scene.ParentOf(ancestor);
-			if (!next)
-			{
-				return Result<void>::Failure(next.error);
-			}
-			ancestor = next.value;
-		}
-		if (covered)
-		{
-			continue;
-		}
-		auto siblings = parent.value ? scene.ChildrenOf(parent.value)
-		                             : Result<Vector<GameObject::Ptr>>::Success(scene.RootGameObjects());
-		if (!siblings)
-		{
-			return Result<void>::Failure(siblings.error);
-		}
-		auto position = std::find(siblings.value.begin(), siblings.value.end(), object.value);
-		if (position == siblings.value.end())
-		{
-			return Result<void>::Failure("A selected GameObject is no longer in its sibling list");
-		}
-		targets.push_back({object.value, parent.value, static_cast<Ursa::Size>(position - siblings.value.begin())});
-	}
-	if (targets.empty())
-	{
-		return Result<void>::Failure("Select at least one editable GameObject to duplicate");
+		pasteParent = parent.value;
 	}
 	Vector<GameObject::Ptr> roots;
 	Ursa::Size primaryIndex = 0;
-	for (Ursa::Size index = 0; index < targets.size(); ++index)
+	if (prefabSnapshot)
 	{
-		roots.push_back(targets[index].object);
-		if (targets[index].object->Id() == primaryId)
+		if (!prefabSnapshot->Root())
 		{
-			primaryIndex = index;
+			return Result<void>::Failure("The copied GameObject snapshot is empty");
+		}
+		roots = prefabSnapshot->Root()->Children();
+		if (roots.empty())
+		{
+			return Result<void>::Failure("The copied GameObject snapshot has no root objects");
+		}
+		GameObject::Ptr anchor;
+		if (!pasteParent && selection && !selection->entries.empty())
+		{
+			const auto* entry = selection->PrimaryEntry();
+			if (entry && entry->kind == EditorSelectionKind::GameObject && entry->documentId == selection->activeDocumentId &&
+			    !entry->playSession && !entry->IsMissing())
+			{
+				auto selectedObject = scene.GameObjectById(entry->objectId);
+				if (selectedObject)
+				{
+					anchor = selectedObject.value;
+				}
+			}
+		}
+		GameObject::Ptr anchorParent;
+		Ursa::Size anchorIndex = 0;
+		if (anchor)
+		{
+			auto parent = scene.ParentOf(anchor);
+			if (!parent)
+			{
+				return Result<void>::Failure(parent.error);
+			}
+			anchorParent = parent.value;
+			auto siblings = anchorParent ? scene.ChildrenOf(anchorParent)
+			                            : Result<Vector<GameObject::Ptr>>::Success(scene.RootGameObjects());
+			if (!siblings)
+			{
+				return Result<void>::Failure(siblings.error);
+			}
+			auto position = std::find(siblings.value.begin(), siblings.value.end(), anchor);
+			if (position == siblings.value.end())
+			{
+				return Result<void>::Failure("The paste target is no longer in its sibling list");
+			}
+			anchorIndex = static_cast<Ursa::Size>(position - siblings.value.begin());
+		}
+		for (Ursa::Size index = 0; index < roots.size(); ++index)
+		{
+			targets.push_back({{}, pasteParent ? pasteParent : anchorParent, anchorIndex, !anchor && !pasteParent});
+			if (roots[index]->Id() == primaryId)
+			{
+				primaryIndex = index;
+			}
+		}
+	}
+	else
+	{
+		Set<String> selected;
+		for (const auto& id : selectedIds)
+		{
+			if (id)
+			{
+				selected.insert(id.ToString());
+			}
+		}
+		Set<String> unique;
+		for (const auto& id : selectedIds)
+		{
+			if (!id || !unique.insert(id.ToString()).second)
+			{
+				continue;
+			}
+			auto object = scene.GameObjectById(id);
+			if (!object)
+			{
+				return Result<void>::Failure(object.error);
+			}
+			auto parent = scene.ParentOf(object.value);
+			if (!parent)
+			{
+				return Result<void>::Failure(parent.error);
+			}
+			bool covered = false;
+			for (auto ancestor = parent.value; ancestor;)
+			{
+				if (selected.count(ancestor->Id().ToString()))
+				{
+					covered = true;
+					break;
+				}
+				auto next = scene.ParentOf(ancestor);
+				if (!next)
+				{
+					return Result<void>::Failure(next.error);
+				}
+				ancestor = next.value;
+			}
+			if (covered)
+			{
+				continue;
+			}
+			auto siblings = parent.value ? scene.ChildrenOf(parent.value)
+			                             : Result<Vector<GameObject::Ptr>>::Success(scene.RootGameObjects());
+			if (!siblings)
+			{
+				return Result<void>::Failure(siblings.error);
+			}
+			auto position = std::find(siblings.value.begin(), siblings.value.end(), object.value);
+			if (position == siblings.value.end())
+			{
+				return Result<void>::Failure("A selected GameObject is no longer in its sibling list");
+			}
+			targets.push_back(
+			    {object.value, parent.value, static_cast<Ursa::Size>(position - siblings.value.begin()), false});
+		}
+		if (targets.empty())
+		{
+			return Result<void>::Failure("Select at least one editable GameObject to duplicate");
+		}
+		for (Ursa::Size index = 0; index < targets.size(); ++index)
+		{
+			roots.push_back(targets[index].object);
+			if (targets[index].object->Id() == primaryId)
+			{
+				primaryIndex = index;
+			}
 		}
 	}
 	ComponentLoadContext context(documents.Session());
@@ -3016,10 +3903,44 @@ Result<void> DuplicateSceneObjects(Scene& scene, const Vector<ResourceId>& selec
 	}
 	const MaterialIdResolver materialId = [&draft](const std::shared_ptr<MaterialInstance>& material)
 	{ return draft.MaterialId(material); };
-	auto prefab = CapturePrefabAsset(ResourceId::Generate(), scene, roots, registry, context, materialId);
+	Result<PrefabAsset> capturedPrefab;
+	const PrefabAsset* prefab = prefabSnapshot;
 	if (!prefab)
 	{
-		return Result<void>::Failure(prefab.error);
+		capturedPrefab = CapturePrefabAsset(ResourceId::Generate(), scene, roots, registry, context, materialId);
+		if (!capturedPrefab)
+		{
+			return Result<void>::Failure(capturedPrefab.error);
+		}
+		prefab = &capturedPrefab.value;
+	}
+	if (!prefab->Root() || prefab->Root()->Children().size() != targets.size())
+	{
+		return Result<void>::Failure("The copied GameObject graph no longer matches the selection");
+	}
+	if (captureOnly)
+	{
+		if (!capturedSnapshot)
+		{
+			return Result<void>::Failure("No destination was provided for the copied GameObject snapshot");
+		}
+		*capturedSnapshot = std::make_shared<PrefabAsset>(*prefab);
+		if (capturedWorldTransforms)
+		{
+			capturedWorldTransforms->clear();
+			capturedWorldTransforms->reserve(roots.size());
+			for (const GameObject::Ptr& root : roots)
+			{
+				auto world = scene.WorldTransform(root);
+				if (!world)
+				{
+					capturedWorldTransforms->clear();
+					return Result<void>::Failure(world.error);
+				}
+				capturedWorldTransforms->push_back(world.value);
+			}
+		}
+		return {};
 	}
 	context.ClearMappings();
 	Set<String> copiedIds;
@@ -3087,7 +4008,7 @@ Result<void> DuplicateSceneObjects(Scene& scene, const Vector<ResourceId>& selec
 			return mapped;
 		}
 	}
-	auto wrapper = prefab.value.Instantiate(scene, registry, context, materialId, true);
+	auto wrapper = prefab->Instantiate(scene, registry, context, materialId, true);
 	if (!wrapper)
 	{
 		return Result<void>::Failure(wrapper.error);
@@ -3112,18 +4033,58 @@ Result<void> DuplicateSceneObjects(Scene& scene, const Vector<ResourceId>& selec
 			scene.DestroyGameObject(wrapper.value);
 		}
 	};
+	if (sourceWorldTransforms && sourceWorldTransforms->size() != copies.value.size())
+	{
+		rollback();
+		return Result<void>::Failure("The copied GameObject transforms do not match the clipboard snapshot");
+	}
 	Map<String, Ursa::Size> insertedByParent;
+	Map<String, Ursa::Size> appendStartIndexByParent;
+	for (const Target& target : targets)
+	{
+		const GameObject::Ptr targetParent = pasteParent ? pasteParent : target.parent;
+		if (pasteParent || target.append)
+		{
+			const String parentKey = targetParent ? targetParent->Id().ToString() : String{};
+			if (appendStartIndexByParent.find(parentKey) == appendStartIndexByParent.end())
+			{
+				auto siblings = targetParent ? scene.ChildrenOf(targetParent)
+				                            : Result<Vector<GameObject::Ptr>>::Success(scene.RootGameObjects());
+				if (!siblings)
+				{
+					rollback();
+					return Result<void>::Failure(siblings.error);
+				}
+				appendStartIndexByParent.emplace(parentKey, siblings.value.size());
+			}
+		}
+	}
 	for (Ursa::Size index = 0; index < copies.value.size(); ++index)
 	{
-		auto parented = scene.SetParent(copies.value[index], targets[index].parent);
+		const GameObject::Ptr targetParent = pasteParent ? pasteParent : targets[index].parent;
+		auto parented = scene.SetParent(copies.value[index], targetParent);
 		if (!parented)
 		{
 			rollback();
 			return parented;
 		}
-		const String parentKey = targets[index].parent ? targets[index].parent->Id().ToString() : String{};
+		if (sourceWorldTransforms)
+		{
+			auto transformed = SetSceneGameObjectWorldTransform(scene, copies.value[index], (*sourceWorldTransforms)[index]);
+			if (!transformed)
+			{
+				rollback();
+				return transformed;
+			}
+		}
+		const String parentKey = targetParent ? targetParent->Id().ToString() : String{};
 		const Ursa::Size inserted = insertedByParent[parentKey]++;
-		auto reordered = scene.ReorderGameObject(copies.value[index], targets[index].siblingIndex + 1 + inserted);
+		Ursa::Size insertionIndex = targets[index].siblingIndex + 1 + inserted;
+		if (pasteParent || targets[index].append)
+		{
+			insertionIndex = appendStartIndexByParent[parentKey] + inserted;
+		}
+		auto reordered = scene.ReorderGameObject(copies.value[index], insertionIndex);
 		if (!reordered)
 		{
 			rollback();
@@ -3161,6 +4122,28 @@ Result<void> DeleteGameObjectSelection(Scene& scene, const Vector<ResourceId>& s
                                        SceneDraft& draft, EditorSelectionContext* selection)
 {
 	return DeleteSceneObjects(scene, selectedIds, {}, registry, draft, selection);
+}
+
+Result<void> DuplicateGameObjectSelection(Scene& scene, const Vector<ResourceId>& selectedIds, ResourceId primaryId,
+                                          ComponentRegistry& registry, EditorDocuments& documents, SceneDraft& draft,
+                                          EditorSelectionContext* selection, ResourceId parentOverride,
+                                          const PrefabAsset* prefabSnapshot,
+                                          const Vector<Mat4>* sourceWorldTransforms)
+{
+	return DuplicateSceneObjects(scene, selectedIds, primaryId, registry, documents, draft, selection, parentOverride,
+	                             prefabSnapshot, nullptr, false, nullptr, sourceWorldTransforms);
+}
+
+Result<std::shared_ptr<PrefabAsset>> CaptureGameObjectSelection(Scene& scene, const Vector<ResourceId>& selectedIds,
+                                                                ResourceId primaryId, ComponentRegistry& registry,
+                                                                EditorDocuments& documents, SceneDraft& draft,
+                                                                Vector<Mat4>* sourceWorldTransforms)
+{
+	std::shared_ptr<PrefabAsset> snapshot;
+	auto captured = DuplicateSceneObjects(scene, selectedIds, primaryId, registry, documents, draft, nullptr, {}, nullptr,
+	                                     &snapshot, true, sourceWorldTransforms);
+	return captured ? Result<std::shared_ptr<PrefabAsset>>::Success(std::move(snapshot))
+	                : Result<std::shared_ptr<PrefabAsset>>::Failure(captured.error);
 }
 
 Result<void> RecordPrefabDeletionOverrides(LinkedSceneResource& linked, const Vector<ResourceId>& deletedIds)
@@ -3333,11 +4316,16 @@ Result<std::unique_ptr<SerializedObject>> CreateGameObjectSerializedProperties(G
 }
 
 Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hierarchy, EditorDocuments& documents,
-                                ProjectWorkspace& workspace, ComponentRegistry& registry,
-                                ComponentEditors& componentEditors, String& diagnostic,
+                                ProjectWorkspace& workspace, const ProjectTagLayerSettings& tagLayerSettings,
+                                ComponentRegistry& registry, ComponentEditors& componentEditors, String& diagnostic,
                                 const Vector<ScriptTypeDescriptor>* scriptTypes, bool* hierarchyOpen,
                                 bool* inspectorOpen, bool drawInspector, EditorSelectionContext* selection,
-                                EditorHierarchy::AssetDropAction assetDrop)
+                                EditorHierarchy::AssetDropAction assetDrop,
+                                std::function<void(bool)> openTagLayerSettings, bool canCopyGameObjects,
+                                bool canPasteGameObjectsAsChild,
+                                EditorHierarchy::CopySelectionAction copyGameObjects,
+                                EditorHierarchy::CutSelectionAction cutGameObjects,
+                                EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild)
 {
 	auto draft = document.Payload<SceneDraft>();
 	if (!draft)
@@ -3410,10 +4398,10 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				inspectorContext.selection = selection;
 				inspectorContext.documentId = document.Id();
 				inspectorContext.loadContext = &loadContext;
-				Icons::Section(Icons::ForObject(object, object == asset->Root()), "GameObject");
 				auto objectName = object->Name();
-				auto groupProperties =
-				    DrawGameObjectGroupProperties(group.value, objectName ? objectName.value : String{}, diagnostic);
+				auto groupProperties = DrawGameObjectGroupProperties(
+				    group.value, objectName ? objectName.value : String{}, diagnostic, tagLayerSettings,
+				    openTagLayerSettings);
 				if (!groupProperties)
 				{
 					diagnostic = groupProperties.error;
@@ -3422,27 +4410,6 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				{
 					changed |= groupProperties.value;
 				}
-				if (Icons::Button("Add child"))
-				{
-					auto child = GameObject::Create("GameObject");
-					auto parented = child->SetParent(object);
-					diagnostic = parented ? String{} : parented.error;
-					changed |= static_cast<bool>(parented);
-				}
-				Icons::SameLine();
-				ImGui::BeginDisabled(!object->Parent());
-				if (Icons::Button("Delete GameObject"))
-				{
-					auto removed = object->Destroy();
-					diagnostic = removed ? String{} : removed.error;
-					if (removed)
-					{
-						hierarchy.ClearSelection();
-						selected = Result<GameObject::Ptr>::Failure("Deleted selection");
-						changed = true;
-					}
-				}
-				ImGui::EndDisabled();
 				if (selectedObjects.size() > 1)
 				{
 					auto summary = DrawCommonComponentSummary(selectedObjects, object, registry, componentEditors,
@@ -3455,19 +4422,117 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				}
 				else
 				{
-					for (Component* component : object->Components())
+					const auto prefabComponents = object->Components();
+					for (Size componentIndex = 0; componentIndex < prefabComponents.size(); ++componentIndex)
 					{
+						Component* component = prefabComponents[componentIndex];
 						ImGui::PushID(component->PersistentId().ToString().c_str());
 						auto codec = registry.FindFor(*component);
 						const auto* scriptHeader = dynamic_cast<Scripting::ScriptBehaviourComponent*>(component);
 						const auto* descriptor = scriptHeader ? componentEditors.FindType(scriptHeader->TypeName())
 						                         : codec      ? componentEditors.FindType(codec.value->type)
 						                                      : nullptr;
-						Icons::Inline(Icons::ForComponent(component->SerializationType(), scriptHeader != nullptr));
-						ImGui::SeparatorText(descriptor     ? descriptor->displayName.c_str()
-						                     : scriptHeader ? scriptHeader->TypeName().c_str()
-						                     : codec        ? codec.value->type.c_str()
-						                                    : "Component");
+						const String componentLabel = descriptor     ? descriptor->displayName
+						                              : scriptHeader ? scriptHeader->TypeName()
+						                              : codec        ? codec.value->type
+						                                             : String("Component");
+						if (component->SupportsEnabled())
+						{
+							bool componentEnabled = component->IsEnabled();
+							if (ImGui::Checkbox("##ComponentEnabled", &componentEnabled))
+							{
+								auto set = component->SetEnabled(componentEnabled);
+								diagnostic = set ? String{} : set.error;
+								changed |= static_cast<bool>(set);
+							}
+							if (ImGui::IsItemHovered())
+							{
+								ImGui::SetTooltip("Enabled");
+							}
+							ImGui::SameLine();
+						}
+						const bool componentOpen = DrawInspectorComponentFoldout(
+						    Icons::ForComponent(component->SerializationType(), scriptHeader != nullptr),
+						    componentLabel.c_str());
+						const ImVec2 headerMin = ImGui::GetItemRectMin();
+						const ImVec2 headerMax = ImGui::GetItemRectMax();
+						bool removeFromHeader = false;
+						bool resetComponent = false;
+						bool moveComponentUp = false;
+						bool moveComponentDown = false;
+						bool copyComponent = false;
+						bool pasteComponentAsNew = false;
+						if (ImGui::BeginPopupContextItem("ComponentHeaderActions"))
+						{
+							const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							ImGui::BeginDisabled(componentEditors.FindType(factoryType) == nullptr);
+							resetComponent = Icons::MenuItem("Reset");
+							ImGui::EndDisabled();
+							ImGui::Separator();
+							copyComponent = Icons::MenuItem("Copy Component");
+							const String stableType = scriptHeader ? "script:" + scriptHeader->TypeName()
+							                                   : "native:" + component->SerializationType();
+							const bool canPasteAsNew = copiedComponentPayload && copiedComponentPayload->is_object() &&
+							                          copiedComponentPayload->contains("type") &&
+							                          copiedComponentPayload->contains("fields") &&
+							                          copiedComponentPayload->at("fields").is_object() &&
+							                          componentEditors.FindType(
+							                              ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
+							                                  .substr(7)) &&
+							                          static_cast<bool>(componentEditors.CanCreate(
+							                              ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
+							                                  .substr(7), inspectorContext));
+							ImGui::BeginDisabled(!canPasteAsNew);
+							pasteComponentAsNew = Icons::MenuItem("Paste Component As New");
+							ImGui::EndDisabled();
+							ImGui::Separator();
+							ImGui::BeginDisabled(componentIndex == 0);
+							moveComponentUp = Icons::MenuItem("Move Up");
+							ImGui::EndDisabled();
+							ImGui::BeginDisabled(componentIndex + 1 >= prefabComponents.size());
+							moveComponentDown = Icons::MenuItem("Move Down");
+							ImGui::EndDisabled();
+							ImGui::Separator();
+							removeFromHeader = ImGui::MenuItem("Remove Component");
+							ImGui::EndPopup();
+						}
+						if (resetComponent)
+						{
+							const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							auto reset = ResetComponentToDefaults(*component, factoryType, componentEditors, inspectorContext,
+							                                    registry, loadContext, nullptr, nullptr);
+							diagnostic = reset ? String{} : reset.error;
+							changed |= reset && reset.value;
+							resetComponent = false;
+						}
+						if (copyComponent)
+						{
+							ComponentSaveContext saveContext;
+							saveContext.serialization = &loadContext;
+							auto serialized = SerializedObject::Create(*component, registry, loadContext, saveContext);
+							if (!serialized || !serialized.value->Snapshot().contains("Fields"))
+							{
+								diagnostic = serialized ? "Component has no serialized fields" : serialized.error;
+							}
+							else
+							{
+								const String stableType = scriptHeader ? "script:" + scriptHeader->TypeName()
+								                                   : "native:" + component->SerializationType();
+								SerializedJson payload = SerializedJson::object();
+								payload["type"] = ToStdString(stableType);
+								payload["fields"] = serialized.value->Snapshot().at("Fields");
+								copiedComponentPayload = std::move(payload);
+							}
+						}
+						if (pasteComponentAsNew && copiedComponentPayload)
+						{
+							const String copiedStableType =
+							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>());
+							auto pasted = PasteComponentAsNew(componentEditors, copiedStableType, *copiedComponentPayload,
+							                                 inspectorContext, registry, loadContext, nullptr);
+							diagnostic = pasted ? String{} : pasted.error;
+							changed |= static_cast<bool>(pasted);
+						}
 						if (inspectorContext.selection)
 						{
 							EditorSelectionEntry owner;
@@ -3510,112 +4575,214 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 								ImGui::EndDragDropSource();
 							}
 						}
-						bool removeFromHeader = false;
-						if (ImGui::BeginPopupContextItem("ComponentHeaderActions"))
+						ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 28.f);
+						if (Icons::Button("ComponentActions", Icons::Icon::More, "Component actions"))
 						{
-							removeFromHeader = ImGui::MenuItem("Remove Component");
+							ImGui::OpenPopup("PrefabComponentActions");
+						}
+						if (ImGui::BeginPopup("PrefabComponentActions"))
+						{
+							const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							ImGui::BeginDisabled(componentEditors.FindType(factoryType) == nullptr);
+							resetComponent = Icons::MenuItem("Reset") || resetComponent;
+							ImGui::EndDisabled();
+							ImGui::Separator();
+							ImGui::BeginDisabled(componentIndex == 0);
+							moveComponentUp = Icons::MenuItem("Move Up") || moveComponentUp;
+							ImGui::EndDisabled();
+							ImGui::BeginDisabled(componentIndex + 1 >= prefabComponents.size());
+							moveComponentDown = Icons::MenuItem("Move Down") || moveComponentDown;
+							ImGui::EndDisabled();
+							ImGui::Separator();
+							removeFromHeader = Icons::MenuItem("Remove Component") || removeFromHeader;
 							ImGui::EndPopup();
 						}
-						bool componentEnabled = component->IsEnabled();
-						if (component->SupportsEnabled() && ImGui::Checkbox("Enabled", &componentEnabled))
+						if (resetComponent)
 						{
-							component->SetEnabled(componentEnabled);
-							changed = true;
+							const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							auto reset = ResetComponentToDefaults(*component, factoryType, componentEditors, inspectorContext,
+							                                    registry, loadContext, nullptr, nullptr);
+							diagnostic = reset ? String{} : reset.error;
+							changed |= reset && reset.value;
 						}
-						Icons::SameLine();
-						const ComponentEditor* customEditor =
-						    componentEditors.Find(scriptHeader ? scriptHeader->TypeName()
-						                          : codec      ? codec.value->type
-						                                       : String{});
-						bool customDrawn = false;
-						if (customEditor)
+						bool reorderedComponent = false;
+						const ImRect headerRect(headerMin, headerMax);
+						if (headerRect.Contains(ImGui::GetIO().MousePos) &&
+						    ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 						{
-							ImGuiInspectorUI inspectorUi;
-							auto edited = (*customEditor)(*component, inspectorContext, inspectorUi);
-							if (edited)
+							ImGui::OpenPopup("SceneComponentActions");
+						}
+						if (headerRect.GetHeight() > 0.f &&
+						    ImGui::BeginDragDropTargetCustom(headerRect, ImGui::GetID("##PrefabComponentOrderDropTarget")))
+						{
+							if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
+							        editorDragSessionPayloadType, ImGuiDragDropFlags_AcceptNoDrawDefaultRect |
+							                                          ImGuiDragDropFlags_AcceptBeforeDelivery))
 							{
-								changed |= edited.value;
-								customDrawn = true;
+								auto decoded = DecodeEditorDragPayload(
+								    payload->DataType, payload->Data, payload->DataSize,
+								    selection ? std::optional<UInt64>(selection->revision) : std::nullopt);
+								if (!decoded)
+								{
+									if (payload->IsDelivery())
+									{
+										diagnostic = decoded.error;
+									}
+								}
+								else if (decoded.value.sources.size() == 1 &&
+								         decoded.value.sources.front().identity.kind ==
+								             EditorSelectionKind::GameObject &&
+								         decoded.value.sources.front().identity.documentId == document.Id() &&
+								         decoded.value.sources.front().identity.objectId == object->Id() &&
+								         decoded.value.sources.front().componentId)
+								{
+									const bool insertAfter =
+									    ImGui::GetIO().MousePos.y >= (headerMin.y + headerMax.y) * 0.5f;
+									const Float32 insertionY = insertAfter ? headerMax.y : headerMin.y;
+									ImGui::GetWindowDrawList()->AddLine(
+									    {headerMin.x, insertionY}, {headerMax.x, insertionY},
+									    ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.f);
+									if (payload->IsDelivery() && ClaimEditorDragDropDelivery(payload))
+									{
+										const auto& source = decoded.value.sources.front();
+										const auto sourcePosition =
+										    std::find_if(prefabComponents.begin(), prefabComponents.end(),
+										                [&](const Component* candidate)
+										                { return candidate->PersistentId() == source.componentId; });
+										if (sourcePosition == prefabComponents.end())
+										{
+											diagnostic = "Dragged component is no longer attached to this Prefab GameObject.";
+										}
+										else
+										{
+											Size targetIndex = componentIndex + (insertAfter ? 1 : 0);
+											const Size sourceIndex =
+											    static_cast<Size>(sourcePosition - prefabComponents.begin());
+											if (sourceIndex < targetIndex)
+											{
+												--targetIndex;
+											}
+											targetIndex = std::min(targetIndex, prefabComponents.size() - 1);
+											if (targetIndex != sourceIndex)
+											{
+												auto moved = object->ReorderDetachedComponent(
+												    *sourcePosition, targetIndex);
+												diagnostic = moved ? String{} : moved.error;
+												changed |= static_cast<bool>(moved);
+												reorderedComponent = static_cast<bool>(moved);
+											}
+										}
+									}
+								}
+								else if (payload->IsDelivery())
+								{
+									diagnostic = "Reorder one component at a time within the same Prefab GameObject.";
+								}
+							}
+							ImGui::EndDragDropTarget();
+						}
+						if (moveComponentUp || moveComponentDown)
+						{
+							const Size destination = moveComponentUp ? componentIndex - 1 : componentIndex + 1;
+						const auto moved = object->ReorderDetachedComponent(component, destination);
+						diagnostic = moved ? String{} : moved.error;
+						changed |= static_cast<bool>(moved);
+						reorderedComponent = static_cast<bool>(moved);
+					}
+						if (reorderedComponent)
+						{
+							ImGui::PopID();
+							break;
+						}
+						if (componentOpen)
+						{
+							const ComponentEditor* customEditor =
+							    componentEditors.Find(scriptHeader ? scriptHeader->TypeName()
+							                          : codec      ? codec.value->type
+							                                       : String{});
+							bool customDrawn = false;
+							if (customEditor)
+							{
+								ImGuiInspectorUI inspectorUi;
+								auto edited = (*customEditor)(*component, inspectorContext, inspectorUi);
+								if (edited)
+								{
+									changed |= edited.value;
+									customDrawn = true;
+								}
+								else
+								{
+									diagnostic = edited.error;
+								}
+							}
+							if (customDrawn)
+							{
+							}
+							else if (auto* scriptData = dynamic_cast<Scripting::ScriptBehaviourComponent*>(component))
+							{
+								changed |= DrawSerializedScriptFields(*scriptData, workspace, inspectorContext,
+								                                      diagnostic, scriptTypes);
+							}
+							else if (HasMeshInspector(*component))
+							{
+								auto edited = DrawMeshInspector(*component, workspace, documents.Session());
+								if (edited)
+								{
+									changed |= edited.value;
+								}
+								else
+								{
+									diagnostic = edited.error;
+								}
+							}
+							else if (auto* camera = dynamic_cast<CameraComponent*>(component))
+							{
+								changed |= DrawCameraInspectorFields(*camera, diagnostic);
+							}
+							else if (auto* light = dynamic_cast<DirectionalLightComponent*>(component))
+							{
+								Ursa::Float32 intensity = light->Intensity();
+								if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
+								{
+									light->SetIntensity(intensity);
+									changed = true;
+								}
+								changed |= DrawDirectionalShadowControls(*light, diagnostic);
+							}
+							else if (auto* pointLight = dynamic_cast<PointLightComponent*>(component))
+							{
+								Ursa::Float32 intensity = pointLight->Intensity();
+								Ursa::Float32 range = pointLight->Range();
+								bool edited = ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f);
+								edited |= ImGui::DragFloat("Range", &range, 0.05f, 0.001f, 10000.f);
+								if (edited)
+								{
+									pointLight->SetIntensity(intensity);
+									pointLight->SetRange(range);
+									changed = true;
+								}
+							}
+							else if (codec && componentEditors.Find(codec.value->type))
+							{
+								ImGuiInspectorUI inspectorUi;
+								auto edited = (*componentEditors.Find(codec.value->type))(*component, inspectorContext,
+								                                                          inspectorUi);
+								diagnostic = edited ? String{} : edited.error;
+								changed |= edited && edited.value;
 							}
 							else
 							{
-								diagnostic = edited.error;
+								ImGui::TextDisabled("No property editor registered; serialized data is preserved");
 							}
 						}
-						if (customDrawn)
-						{
-						}
-						else if (auto* scriptData = dynamic_cast<Scripting::ScriptBehaviourComponent*>(component))
-						{
-							changed |= DrawSerializedScriptFields(*scriptData, workspace, inspectorContext, diagnostic,
-							                                      scriptTypes);
-						}
-						else if (HasMeshInspector(*component))
-						{
-							auto edited = DrawMeshInspector(*component, workspace, documents.Session());
-							if (edited)
-							{
-								changed |= edited.value;
-							}
-							else
-							{
-								diagnostic = edited.error;
-							}
-						}
-						else if (auto* camera = dynamic_cast<CameraComponent*>(component))
-						{
-							Ursa::Float32 fov = camera->verticalFovRadians * 57.2957795f;
-							bool edited = ImGui::DragFloat("FOV degrees", &fov, 0.5f, 1.f, 179.f);
-							edited |= ImGui::DragFloat("Near", &camera->nearPlane, 0.01f, 0.001f, 10000.f);
-							edited |= ImGui::DragFloat("Far", &camera->farPlane, 0.1f, 0.002f, 100000.f);
-							if (edited && fov > 0.f && fov < 180.f)
-							{
-								camera->verticalFovRadians = fov * 0.0174532925f;
-								changed = true;
-							}
-						}
-						else if (auto* light = dynamic_cast<DirectionalLightComponent*>(component))
-						{
-							Ursa::Float32 intensity = light->Intensity();
-							if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
-							{
-								light->SetIntensity(intensity);
-								changed = true;
-							}
-							changed |= DrawDirectionalShadowControls(*light, diagnostic);
-						}
-						else if (auto* pointLight = dynamic_cast<PointLightComponent*>(component))
-						{
-							Ursa::Float32 intensity = pointLight->Intensity();
-							Ursa::Float32 range = pointLight->Range();
-							bool edited = ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f);
-							edited |= ImGui::DragFloat("Range", &range, 0.05f, 0.001f, 10000.f);
-							if (edited)
-							{
-								pointLight->SetIntensity(intensity);
-								pointLight->SetRange(range);
-								changed = true;
-							}
-						}
-						else if (codec && componentEditors.Find(codec.value->type))
-						{
-							ImGuiInspectorUI inspectorUi;
-							auto edited =
-							    (*componentEditors.Find(codec.value->type))(*component, inspectorContext, inspectorUi);
-							diagnostic = edited ? String{} : edited.error;
-							changed |= edited && edited.value;
-						}
-						else
-						{
-							ImGui::TextDisabled("No property editor registered; serialized data is preserved");
-						}
-						if (removeFromHeader || Icons::ComponentMenu())
+						if (removeFromHeader)
 						{
 							auto removed = object->RemoveComponent(component);
 							diagnostic = removed ? String{} : removed.error;
 							changed |= static_cast<bool>(removed);
 						}
 						ImGui::PopID();
+						ImGui::Spacing();
 					}
 					changed |= DrawAddComponentBrowser(componentEditors, inspectorContext, diagnostic, scriptTypes,
 					                                   selectedObjects);
@@ -3644,7 +4811,10 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 	{ return DeleteSceneObjects(target, ids, primary, registry, *draft, selection); };
 	auto hierarchyChanged =
 	    hierarchy.Draw(scene, hierarchyOpen, draft->LinkedScene(), selection, document.Id(), false, document.Revision(),
-	                   std::move(duplicateObjects), std::move(deleteObjects), std::move(assetDrop));
+	                   std::move(duplicateObjects), std::move(deleteObjects), std::move(assetDrop),
+	                   document.Path().FileName(), &workspace.Index().Filesystem(), canCopyGameObjects,
+	                   canPasteGameObjectsAsChild, std::move(copyGameObjects), std::move(cutGameObjects),
+	                   std::move(pasteGameObjectsAsChild));
 	if (!hierarchyChanged)
 	{
 		return hierarchyChanged;
@@ -3652,8 +4822,6 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 	bool changed = hierarchyChanged.value;
 	ResourceId prefabOperation;
 	bool applyPrefab = false;
-	ResourceId prefabToPlace;
-	ResourceId placementParent;
 	auto selected = hierarchy.SelectedGameObject(scene);
 	Vector<GameObject::Ptr> selectedObjects;
 	Vector<std::unique_ptr<SerializedObject>> serializedTargets;
@@ -3709,7 +4877,6 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 		else
 		{
 			GameObject::Ptr node = selected.value;
-			Icons::Section(Icons::ForObject(node, hierarchy.IsPrefabObject(node->Id())), "GameObject");
 			if (!objectGroup)
 			{
 				ImGui::TextWrapped("%s", diagnostic.empty() ? "The selected objects could not be resolved."
@@ -3723,9 +4890,11 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				{
 					diagnostic = overrideCommit.error;
 				}
-				auto groupProperties =
-				    DrawGameObjectGroupProperties(*objectGroup, primaryName ? primaryName.value : String{}, diagnostic,
-				                                  overrideCommit ? overrideCommit.value : GroupCommitObserver{});
+				auto groupProperties = DrawGameObjectGroupProperties(
+				    *objectGroup, primaryName ? primaryName.value : String{}, diagnostic, tagLayerSettings,
+				    openTagLayerSettings,
+				    overrideCommit ? overrideCommit.value : GroupCommitObserver{}, &scene, &selectedObjects,
+				    true);
 				if (!groupProperties)
 				{
 					diagnostic = groupProperties.error;
@@ -3735,24 +4904,6 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					changed |= groupProperties.value;
 				}
 			}
-		}
-		if (draft->Kind() == ResourceKind::Scene && ImGui::BeginCombo("Place Prefab", "Select source"))
-		{
-			for (const auto& entry : workspace.Resources())
-			{
-				if (entry.location.kind == ResourceKind::Prefab)
-				{
-					ImGui::PushID(entry.id.ToString().c_str());
-					const auto name = entry.location.path.FileName();
-					if (ImGui::Selectable(name.c_str()))
-					{
-						prefabToPlace = entry.id;
-						placementParent = selected ? selected.value->Id() : ResourceId{};
-					}
-					ImGui::PopID();
-				}
-			}
-			ImGui::EndCombo();
 		}
 		if (selected)
 		{
@@ -3799,105 +4950,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					}
 				}
 			}
-			if (Icons::Button("Add child"))
-			{
-				auto added = scene.CreateGameObject(node);
-				diagnostic = added ? String{} : added.error;
-				changed |= static_cast<bool>(added);
-			}
-			Icons::SameLine();
-			if (Icons::Button("Delete node"))
-			{
-				auto removed = scene.DestroyGameObject(node);
-				diagnostic = removed ? String{} : removed.error;
-				if (removed)
-				{
-					hierarchy.ClearSelection();
-					changed = true;
-				}
-			}
 			if (scene.Contains(node))
 			{
-				auto parent = scene.ParentOf(node);
-				if (parent)
-				{
-					Vector<GameObject::Ptr> siblings;
-					if (parent.value)
-					{
-						auto children = scene.ChildrenOf(parent.value);
-						if (children)
-						{
-							siblings = std::move(children.value);
-						}
-					}
-					else
-					{
-						siblings = scene.RootGameObjects();
-					}
-					const auto position = std::find(siblings.begin(), siblings.end(), node);
-					if (position != siblings.end())
-					{
-						const Ursa::Size index = static_cast<Ursa::Size>(position - siblings.begin());
-						ImGui::BeginDisabled(index == 0);
-						if (Icons::Button("Move up"))
-						{
-							auto moved = scene.ReorderGameObject(node, index - 1);
-							diagnostic = moved ? String{} : moved.error;
-							changed |= static_cast<bool>(moved);
-						}
-						ImGui::EndDisabled();
-						Icons::SameLine();
-						ImGui::BeginDisabled(index + 1 >= siblings.size());
-						if (Icons::Button("Move down"))
-						{
-							auto moved = scene.ReorderGameObject(node, index + 1);
-							diagnostic = moved ? String{} : moved.error;
-							changed |= static_cast<bool>(moved);
-						}
-						ImGui::EndDisabled();
-					}
-					if (ImGui::BeginCombo("Parent", parent.value ? "Node" : "Scene root"))
-					{
-						if (ImGui::Selectable("Scene root", !parent.value))
-						{
-							auto moved = scene.SetParent(node, {});
-							diagnostic = moved ? String{} : moved.error;
-							changed |= static_cast<bool>(moved);
-						}
-						std::function<void(GameObject::Ptr)> offer = [&](GameObject::Ptr candidate)
-						{
-							if (candidate != node)
-							{
-								auto label = scene.GameObjectName(candidate);
-								auto id = scene.PersistentId(candidate);
-								if (label && id)
-								{
-									ImGui::PushID(id.value.ToString().c_str());
-									if (ImGui::Selectable(label.value.c_str(), parent.value == candidate))
-									{
-										auto moved = scene.SetParent(node, candidate);
-										diagnostic = moved ? String{} : moved.error;
-										changed |= static_cast<bool>(moved);
-									}
-									ImGui::PopID();
-								}
-							}
-							auto children = scene.ChildrenOf(candidate);
-							if (children)
-							{
-								for (GameObject::Ptr child : children.value)
-								{
-									offer(child);
-								}
-							}
-						};
-						for (GameObject::Ptr root : scene.RootGameObjects())
-						{
-							offer(root);
-						}
-						ImGui::EndCombo();
-					}
-				}
 				if (selectedObjects.size() > 1)
 				{
 					auto summary =
@@ -3914,8 +4968,9 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						ImGui::End();
 						return Result<bool>::Failure(components.error);
 					}
-					for (ComponentId componentId : components.value)
+					for (Size componentIndex = 0; componentIndex < components.value.size(); ++componentIndex)
 					{
+						const ComponentId componentId = components.value[componentIndex];
 						Component* object = scene.GetComponent(componentId);
 						if (!object)
 						{
@@ -3938,23 +4993,345 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 						auto* scriptHeader = dynamic_cast<Scripting::ScriptBehaviourComponent*>(object);
 						const auto* descriptor = scriptHeader ? componentEditors.FindType(scriptHeader->TypeName())
 						                                      : componentEditors.FindType(codec.value->type);
-						Icons::Inline(Icons::ForComponent(object->SerializationType(), scriptHeader != nullptr));
-						ImGui::SeparatorText(descriptor     ? descriptor->displayName.c_str()
-						                     : scriptHeader ? scriptHeader->TypeName().c_str()
-						                                    : codec.value->type.c_str());
+						const String componentLabel = scriptHeader ? scriptHeader->TypeName()
+						                              : descriptor ? descriptor->displayName
+						                                           : codec.value->type;
 						auto enabled = scene.IsComponentEnabled(componentId);
-						if (enabled && object->SupportsEnabled())
+						const bool canEnable = enabled && object->SupportsEnabled();
+						if (canEnable)
 						{
 							bool value = enabled.value;
-							if (ImGui::Checkbox("Enabled", &value))
+							if (ImGui::Checkbox("##ComponentEnabled", &value))
 							{
 								auto set = scene.SetComponentEnabled(componentId, value);
 								diagnostic = set ? String{} : set.error;
 								changed |= static_cast<bool>(set);
 							}
+							if (ImGui::IsItemHovered())
+							{
+								ImGui::SetTooltip("Enabled");
+							}
+							ImGui::SameLine();
 						}
-						Icons::SameLine();
-						const bool remove = Icons::ComponentMenu();
+						const bool componentOpen = DrawInspectorComponentFoldout(
+						    Icons::ForComponent(object->SerializationType(), scriptHeader != nullptr),
+						    componentLabel.c_str());
+						const ImVec2 headerMin = ImGui::GetItemRectMin();
+						const ImVec2 headerMax = ImGui::GetItemRectMax();
+						if (inspectorContext.selection)
+						{
+							EditorSelectionEntry owner;
+							owner.kind = EditorSelectionKind::GameObject;
+							owner.documentId = inspectorContext.documentId;
+							owner.objectId = node->Id();
+							const auto ownerEntry = std::find_if(
+							    inspectorContext.selection->entries.begin(), inspectorContext.selection->entries.end(),
+							    [&](const EditorSelectionEntry& entry)
+							    {
+								    return entry.kind == EditorSelectionKind::GameObject &&
+								           entry.documentId == owner.documentId && entry.objectId == owner.objectId;
+							    });
+							if (ownerEntry != inspectorContext.selection->entries.end())
+							{
+								owner = *ownerEntry;
+							}
+							if (ImGui::BeginDragDropSource())
+							{
+								auto drag = BeginEditorComponentDragSession(
+								    owner, id.value, object->SerializationType(), inspectorContext.selection->revision);
+								if (drag)
+								{
+									ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value,
+									                          sizeof(drag.value));
+								}
+								ImGui::TextUnformatted(componentLabel.c_str());
+								ImGui::EndDragDropSource();
+							}
+						}
+						ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 28.f);
+						if (Icons::Button("ComponentActions", Icons::Icon::More, "Component actions"))
+						{
+							ImGui::OpenPopup("SceneComponentActions");
+						}
+						bool reorderedComponent = false;
+						const ImRect headerRect(headerMin, headerMax);
+						if (headerRect.Contains(ImGui::GetIO().MousePos) &&
+						    ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+						{
+							ImGui::OpenPopup("SceneComponentActions");
+						}
+						if (headerRect.GetHeight() > 0.f &&
+						    ImGui::BeginDragDropTargetCustom(headerRect, ImGui::GetID("##ComponentOrderDropTarget")))
+						{
+							if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
+							        editorDragSessionPayloadType, ImGuiDragDropFlags_AcceptNoDrawDefaultRect |
+							                                          ImGuiDragDropFlags_AcceptBeforeDelivery))
+							{
+								auto decoded = DecodeEditorDragPayload(
+								    payload->DataType, payload->Data, payload->DataSize,
+								    inspectorContext.selection
+								        ? std::optional<UInt64>(inspectorContext.selection->revision)
+								        : std::nullopt);
+								if (!decoded)
+								{
+									if (payload->IsDelivery())
+									{
+										diagnostic = decoded.error;
+									}
+								}
+								else if (decoded.value.sources.size() == 1 &&
+								         decoded.value.sources.front().identity.kind ==
+								             EditorSelectionKind::GameObject &&
+								         decoded.value.sources.front().identity.documentId ==
+								             inspectorContext.documentId &&
+								         decoded.value.sources.front().identity.objectId == node->Id() &&
+								         decoded.value.sources.front().componentId)
+								{
+									const Float32 midpoint = (headerMin.y + headerMax.y) * 0.5f;
+									const bool insertAfter = ImGui::GetIO().MousePos.y >= midpoint;
+									const Float32 insertionY = insertAfter ? headerMax.y : headerMin.y;
+									ImGui::GetWindowDrawList()->AddLine(
+									    {headerMin.x, insertionY}, {headerMax.x, insertionY},
+									    ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.f);
+									if (payload->IsDelivery() && ClaimEditorDragDropDelivery(payload))
+									{
+										const auto& source = decoded.value.sources.front();
+										auto sourceId = scene.ComponentByPersistentId(source.componentId);
+										const auto sourcePosition =
+										    sourceId ? std::find(components.value.begin(), components.value.end(),
+										                         sourceId.value)
+										             : components.value.end();
+										if (!sourceId || sourcePosition == components.value.end())
+										{
+											diagnostic = "Dragged component is no longer attached to this GameObject.";
+										}
+										else
+										{
+											Size targetIndex = componentIndex + (insertAfter ? 1 : 0);
+											const Size sourceIndex =
+											    static_cast<Size>(sourcePosition - components.value.begin());
+											if (sourceIndex < targetIndex)
+											{
+												--targetIndex;
+											}
+											targetIndex = std::min(targetIndex, components.value.size() - 1);
+											if (targetIndex != sourceIndex)
+											{
+												auto moved = scene.ReorderComponent(sourceId.value, targetIndex);
+												diagnostic = moved ? String{} : moved.error;
+												changed |= static_cast<bool>(moved);
+												reorderedComponent = static_cast<bool>(moved);
+											}
+										}
+									}
+								}
+								else if (payload->IsDelivery() && decoded.value.sources.size() != 1)
+								{
+									diagnostic = "Reorder one component at a time within the same GameObject.";
+								}
+							}
+							ImGui::EndDragDropTarget();
+						}
+						if (reorderedComponent)
+						{
+							ImGui::PopID();
+							break;
+						}
+						bool resetComponent = false;
+						bool moveComponentUp = false;
+						bool moveComponentDown = false;
+						bool remove = false;
+						bool copyComponent = false;
+						bool pasteComponentValues = false;
+						bool pasteComponentAsNew = false;
+						const String componentType = scriptHeader
+						                                ? "script:" + scriptHeader->TypeName()
+						                                : "native:" + object->SerializationType();
+						if (ImGui::BeginPopup("SceneComponentActions"))
+						{
+							const String factoryType = componentType.substr(componentType.find(':') + 1);
+							ImGui::BeginDisabled(componentEditors.FindType(factoryType) == nullptr);
+							resetComponent = Icons::MenuItem("Reset");
+							ImGui::EndDisabled();
+							ImGui::Separator();
+							copyComponent = Icons::MenuItem("Copy Component");
+							const bool canPasteComponent =
+							    copiedComponentPayload && copiedComponentPayload->is_object() &&
+							    copiedComponentPayload->contains("type") &&
+							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>()) == componentType &&
+							    copiedComponentPayload->contains("fields") &&
+							    copiedComponentPayload->at("fields").is_object();
+							ImGui::BeginDisabled(!canPasteComponent);
+							pasteComponentValues = Icons::MenuItem("Paste Component Values");
+							ImGui::EndDisabled();
+			const String copiedStableType = copiedComponentPayload && copiedComponentPayload->is_object() &&
+			                                        copiedComponentPayload->contains("type") &&
+			                                        copiedComponentPayload->at("type").is_string()
+			                                    ? ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
+			                                    : String{};
+			const String copiedFactoryType = copiedStableType.compare(0, 7, "native:") == 0 ||
+			                                         copiedStableType.compare(0, 7, "script:") == 0
+			                                     ? copiedStableType.substr(7)
+			                                     : copiedStableType;
+			const bool canPasteAsNew =
+							    copiedComponentPayload && copiedComponentPayload->is_object() &&
+							    copiedComponentPayload->contains("type") && copiedComponentPayload->contains("fields") &&
+							    copiedComponentPayload->at("fields").is_object() &&
+			    componentEditors.FindType(copiedFactoryType) &&
+			    static_cast<bool>(componentEditors.CanCreate(copiedFactoryType, inspectorContext));
+							ImGui::BeginDisabled(!canPasteAsNew);
+							pasteComponentAsNew = Icons::MenuItem("Paste Component As New");
+							ImGui::EndDisabled();
+							ImGui::Separator();
+							ImGui::BeginDisabled(componentIndex == 0);
+							moveComponentUp = Icons::MenuItem("Move Up");
+							ImGui::EndDisabled();
+							ImGui::BeginDisabled(componentIndex + 1 >= components.value.size());
+							moveComponentDown = Icons::MenuItem("Move Down");
+							ImGui::EndDisabled();
+							ImGui::Separator();
+							remove = Icons::MenuItem("Remove Component");
+							ImGui::EndPopup();
+						}
+						if (resetComponent)
+						{
+							const String factoryType = componentType.substr(componentType.find(':') + 1);
+							auto reset = ResetComponentToDefaults(*object, factoryType, componentEditors, inspectorContext,
+							                                    registry, loadContext, draft.get(), &scene);
+							diagnostic = reset ? String{} : reset.error;
+							changed |= reset && reset.value;
+						}
+						if (copyComponent)
+						{
+							ComponentSaveContext saveContext;
+							saveContext.scene = &scene;
+							saveContext.serialization = &loadContext;
+							auto serialized = SerializedObject::Create(*object, registry, loadContext, saveContext);
+							if (!serialized || !serialized.value->Snapshot().contains("Fields"))
+							{
+								diagnostic = serialized ? "Component has no serialized fields" : serialized.error;
+							}
+							else
+							{
+								const String copiedComponentType = scriptHeader
+								                                ? "script:" + scriptHeader->TypeName()
+								                                : "native:" + object->SerializationType();
+								SerializedJson payload = SerializedJson::object();
+								payload["type"] = ToStdString(copiedComponentType);
+								payload["fields"] = serialized.value->Snapshot().at("Fields");
+								copiedComponentPayload = std::move(payload);
+							}
+						}
+						if (pasteComponentValues && copiedComponentPayload)
+						{
+							ComponentSaveContext saveContext;
+							saveContext.scene = &scene;
+							saveContext.serialization = &loadContext;
+							auto serialized = SerializedObject::Create(*object, registry, loadContext, saveContext);
+							if (!serialized)
+							{
+								diagnostic = serialized.error;
+							}
+							else
+							{
+								Vector<SerializedObject*> targets{serialized.value.get()};
+								auto grouped = SerializedObjectGroup::Create(std::move(targets));
+								if (!grouped)
+								{
+									diagnostic = grouped.error;
+								}
+								else
+								{
+									Vector<String> copiedFields;
+									const auto current = grouped.value.TargetSnapshot(0);
+									if (!current || !current.value.contains("Fields") ||
+									    !current.value.at("Fields").is_object())
+									{
+										diagnostic = current ? "Component has no writable serialized fields" : current.error;
+									}
+									else
+									{
+										for (auto field = copiedComponentPayload->at("fields").begin();
+										     field != copiedComponentPayload->at("fields").end(); ++field)
+										{
+											if (!current.value.at("Fields").contains(field.key()))
+											{
+												continue;
+											}
+											String escapedField = ToUrsaString(field.key());
+											for (Size offset = 0; (offset = escapedField.find('~', offset)) != String::npos;
+											     offset += 2)
+											{
+												escapedField.replace(offset, 1, "~0");
+											}
+											for (Size offset = 0; (offset = escapedField.find('/', offset)) != String::npos;
+											     offset += 2)
+											{
+												escapedField.replace(offset, 1, "~1");
+											}
+											const String path = "/Fields/" + escapedField;
+											auto set = grouped.value.SetValue(path, field.value());
+											if (!set)
+											{
+												diagnostic = set.error;
+												break;
+											}
+											copiedFields.push_back(path);
+										}
+									}
+									if (diagnostic.empty() && !copiedFields.empty())
+									{
+										const auto changedTargets = grouped.value.PendingTargetChanges();
+										auto applied = grouped.value.Apply();
+										if (!applied)
+										{
+											diagnostic = applied.error;
+										}
+										else
+										{
+											Vector<Component*> componentTargets{object};
+											auto commit = MakePrefabOverrideCommit(draft.get(), &scene, {}, &componentTargets);
+											if (!commit)
+											{
+												diagnostic = commit.error;
+											}
+											else
+											{
+												for (const String& path : copiedFields)
+												{
+													auto committed = commit.value(grouped.value, path, changedTargets);
+													if (!committed)
+													{
+														diagnostic = committed.error;
+														break;
+													}
+												}
+											}
+										}
+										changed |= std::any_of(changedTargets.begin(), changedTargets.end(),
+										                      [](bool value) { return value; });
+									}
+								}
+							}
+						}
+						if (pasteComponentAsNew && copiedComponentPayload)
+						{
+							const String copiedType =
+							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>());
+							auto pasted = PasteComponentAsNew(componentEditors, copiedType, *copiedComponentPayload,
+							                                 inspectorContext, registry, loadContext, &scene);
+							diagnostic = pasted ? String{} : pasted.error;
+							changed |= static_cast<bool>(pasted);
+						}
+						if (moveComponentUp || moveComponentDown)
+						{
+							const Size destination = moveComponentUp ? componentIndex - 1 : componentIndex + 1;
+							auto moved = scene.ReorderComponent(componentId, destination);
+							diagnostic = moved ? String{} : moved.error;
+							changed |= static_cast<bool>(moved);
+							ImGui::PopID();
+							break;
+						}
 						if (remove)
 						{
 							auto removed = scene.RemoveComponent(componentId);
@@ -3963,133 +5340,116 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 							ImGui::PopID();
 							continue;
 						}
-						const ComponentEditor* customEditor =
-						    componentEditors.Find(scriptHeader ? scriptHeader->TypeName()
-						                          : codec      ? codec.value->type
-						                                       : String{});
-						bool customDrawn = false;
-						if (customEditor)
+						if (componentOpen)
 						{
-							ImGuiInspectorUI inspectorUi;
-							auto edited = (*customEditor)(*object, inspectorContext, inspectorUi);
-							if (edited)
+							const ComponentEditor* customEditor =
+							    componentEditors.Find(scriptHeader ? scriptHeader->TypeName()
+							                          : codec      ? codec.value->type
+							                                       : String{});
+							bool customDrawn = false;
+							if (customEditor)
 							{
-								changed |= edited.value;
-								customDrawn = true;
-							}
-							else
-							{
-								diagnostic = edited.error;
-							}
-						}
-						if (customDrawn)
-						{
-						}
-						else if (auto* scriptData = dynamic_cast<Scripting::ScriptBehaviourComponent*>(object))
-						{
-							changed |= DrawSerializedScriptFields(*scriptData, workspace, inspectorContext, diagnostic,
-							                                      scriptTypes);
-						}
-						else if (HasMeshInspector(*object))
-						{
-							auto edited = DrawMeshInspector(*object, workspace, documents.Session());
-							if (edited)
-							{
-								changed |= edited.value;
-							}
-							else
-							{
-								diagnostic = edited.error;
-							}
-						}
-						else if (auto* camera = dynamic_cast<CameraComponent*>(object))
-						{
-							Ursa::Float32 fov = camera->verticalFovRadians * 57.2957795f;
-							Ursa::Float32 nearPlane = camera->nearPlane;
-							Ursa::Float32 farPlane = camera->farPlane;
-							bool edited = ImGui::DragFloat("FOV degrees", &fov, 0.5f, 1.f, 179.f);
-							edited |= ImGui::DragFloat("Near", &nearPlane, 0.01f, 0.001f, 10000.f);
-							edited |= ImGui::DragFloat("Far", &farPlane, 0.1f, 0.002f, 100000.f);
-							if (edited)
-							{
-								if (std::isfinite(fov) && std::isfinite(nearPlane) && std::isfinite(farPlane) &&
-								    fov > 0.f && fov < 180.f && nearPlane > 0.f && farPlane > nearPlane)
+								ImGuiInspectorUI inspectorUi;
+								auto edited = (*customEditor)(*object, inspectorContext, inspectorUi);
+								if (edited)
 								{
-									camera->verticalFovRadians = fov * 0.0174532925f;
-									camera->nearPlane = nearPlane;
-									camera->farPlane = farPlane;
-									changed = true;
-									diagnostic.clear();
+									changed |= edited.value;
+									customDrawn = true;
 								}
 								else
 								{
-									diagnostic = "Camera requires 0 < FOV < 180 and 0 < Near < Far";
+									diagnostic = edited.error;
 								}
 							}
-							if (Icons::Button("Use as game camera"))
+							if (customDrawn)
 							{
-								auto set = scene.SetActiveCamera(componentId);
-								diagnostic = set ? String{} : set.error;
-								changed |= static_cast<bool>(set);
 							}
-						}
-						else if (auto* directional = dynamic_cast<DirectionalLightComponent*>(object))
-						{
-							Color value = directional->Color();
-							Ursa::Float32 color[4]{value.red, value.green, value.blue, value.alpha};
-							if (ImGui::ColorEdit4("Color", color))
+							else if (auto* scriptData = dynamic_cast<Scripting::ScriptBehaviourComponent*>(object))
 							{
-								auto set = directional->SetColor({color[0], color[1], color[2], color[3]});
-								diagnostic = set ? String{} : set.error;
-								changed |= static_cast<bool>(set);
+								changed |= DrawSerializedScriptFields(*scriptData, workspace, inspectorContext,
+								                                      diagnostic, scriptTypes);
 							}
-							Ursa::Float32 intensity = directional->Intensity();
-							if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
+							else if (HasMeshInspector(*object))
 							{
-								auto set = directional->SetIntensity(intensity);
-								diagnostic = set ? String{} : set.error;
-								changed |= static_cast<bool>(set);
+								auto edited = DrawMeshInspector(*object, workspace, documents.Session());
+								if (edited)
+								{
+									changed |= edited.value;
+								}
+								else
+								{
+									diagnostic = edited.error;
+								}
 							}
-							changed |= DrawDirectionalShadowControls(*directional, diagnostic);
-						}
-						else if (auto* point = dynamic_cast<PointLightComponent*>(object))
-						{
-							Color value = point->Color();
-							Ursa::Float32 color[4]{value.red, value.green, value.blue, value.alpha};
-							if (ImGui::ColorEdit4("Color", color))
+							else if (auto* camera = dynamic_cast<CameraComponent*>(object))
 							{
-								auto set = point->SetColor({color[0], color[1], color[2], color[3]});
-								diagnostic = set ? String{} : set.error;
-								changed |= static_cast<bool>(set);
+								changed |= DrawCameraInspectorFields(*camera, diagnostic);
+								if (Icons::Button("Use as game camera"))
+								{
+									auto set = scene.SetActiveCamera(componentId);
+									diagnostic = set ? String{} : set.error;
+									changed |= static_cast<bool>(set);
+								}
 							}
-							Ursa::Float32 intensity = point->Intensity();
-							Ursa::Float32 range = point->Range();
-							if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
+							else if (auto* directional = dynamic_cast<DirectionalLightComponent*>(object))
 							{
-								auto set = point->SetIntensity(intensity);
-								diagnostic = set ? String{} : set.error;
-								changed |= static_cast<bool>(set);
+								Color value = directional->Color();
+								Ursa::Float32 color[4]{value.red, value.green, value.blue, value.alpha};
+								if (ImGui::ColorEdit4("Color", color))
+								{
+									auto set = directional->SetColor({color[0], color[1], color[2], color[3]});
+									diagnostic = set ? String{} : set.error;
+									changed |= static_cast<bool>(set);
+								}
+								Ursa::Float32 intensity = directional->Intensity();
+								if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
+								{
+									auto set = directional->SetIntensity(intensity);
+									diagnostic = set ? String{} : set.error;
+									changed |= static_cast<bool>(set);
+								}
+								changed |= DrawDirectionalShadowControls(*directional, diagnostic);
 							}
-							if (ImGui::DragFloat("Range", &range, 0.05f, 0.001f, 10000.f))
+							else if (auto* point = dynamic_cast<PointLightComponent*>(object))
 							{
-								auto set = point->SetRange(range);
-								diagnostic = set ? String{} : set.error;
-								changed |= static_cast<bool>(set);
+								Color value = point->Color();
+								Ursa::Float32 color[4]{value.red, value.green, value.blue, value.alpha};
+								if (ImGui::ColorEdit4("Color", color))
+								{
+									auto set = point->SetColor({color[0], color[1], color[2], color[3]});
+									diagnostic = set ? String{} : set.error;
+									changed |= static_cast<bool>(set);
+								}
+								Ursa::Float32 intensity = point->Intensity();
+								Ursa::Float32 range = point->Range();
+								if (ImGui::DragFloat("Intensity", &intensity, 0.05f, 0.f, 10000.f))
+								{
+									auto set = point->SetIntensity(intensity);
+									diagnostic = set ? String{} : set.error;
+									changed |= static_cast<bool>(set);
+								}
+								if (ImGui::DragFloat("Range", &range, 0.05f, 0.001f, 10000.f))
+								{
+									auto set = point->SetRange(range);
+									diagnostic = set ? String{} : set.error;
+									changed |= static_cast<bool>(set);
+								}
 							}
-						}
-						else if (const auto* editor = componentEditors.Find(codec.value->type))
-						{
-							inspectorContext.object = node;
-							ImGuiInspectorUI inspectorUi;
-							auto edited = (*editor)(*object, inspectorContext, inspectorUi);
-							diagnostic = edited ? String{} : edited.error;
-							changed |= edited && edited.value;
-						}
-						else
-						{
-							ImGui::TextDisabled("No property editor registered; serialized data is preserved");
+							else if (const auto* editor = componentEditors.Find(codec.value->type))
+							{
+								inspectorContext.object = node;
+								ImGuiInspectorUI inspectorUi;
+								auto edited = (*editor)(*object, inspectorContext, inspectorUi);
+								diagnostic = edited ? String{} : edited.error;
+								changed |= edited && edited.value;
+							}
+							else
+							{
+								ImGui::TextDisabled("No property editor registered; serialized data is preserved");
+							}
 						}
 						ImGui::PopID();
+						ImGui::Spacing();
 					}
 					changed |= DrawAddComponentBrowser(componentEditors, inspectorContext, diagnostic, scriptTypes,
 					                                   selectedObjects);
@@ -4135,12 +5495,6 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 			}
 			break;
 		}
-	}
-	if (prefabToPlace)
-	{
-		auto placed = draft->PlacePrefab(prefabToPlace, placementParent, document.Path(), document.Id());
-		diagnostic = placed ? String{} : placed.error;
-		changed |= static_cast<bool>(placed);
 	}
 	if (changed)
 	{
@@ -4191,31 +5545,35 @@ void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* i
 			for (Component* component : selected.value->Components())
 			{
 				ImGui::PushID(component->PersistentId().ToString().c_str());
-				Icons::Section(
+				const bool componentOpen = DrawInspectorComponentFoldout(
 				    Icons::ForComponent(component->SerializationType(),
 				                        dynamic_cast<Scripting::ScriptBehaviourComponent*>(component) != nullptr),
 				    component->SerializationType().c_str());
-				if (component->SupportsEnabled())
+				if (componentOpen)
 				{
-					bool enabled = component->IsEnabled();
-					if (ImGui::Checkbox("Enabled", &enabled))
+					if (component->SupportsEnabled())
 					{
-						auto set = component->SetEnabled(enabled);
-						if (!set)
+						bool enabled = component->IsEnabled();
+						if (ImGui::Checkbox("Enabled", &enabled))
 						{
-							diagnostic = set.error;
+							auto set = component->SetEnabled(enabled);
+							if (!set)
+							{
+								diagnostic = set.error;
+							}
+						}
+					}
+					if (workspace && resources && HasMeshInspector(*component))
+					{
+						auto edited = DrawMeshInspector(*component, *workspace, *resources);
+						if (!edited)
+						{
+							diagnostic = edited.error;
 						}
 					}
 				}
-				if (workspace && resources && HasMeshInspector(*component))
-				{
-					auto edited = DrawMeshInspector(*component, *workspace, *resources);
-					if (!edited)
-					{
-						diagnostic = edited.error;
-					}
-				}
 				ImGui::PopID();
+				ImGui::Spacing();
 			}
 			ImGui::TextDisabled("Runtime changes are discarded when Play stops.");
 		}

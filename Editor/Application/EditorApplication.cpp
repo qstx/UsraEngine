@@ -12,6 +12,9 @@
 #include <Assets/TextureDraft.hpp>
 #include <Assets/MaterialDraft.hpp>
 #include <Assets/SceneDraft.hpp>
+#include <Mesh/Primitive.hpp>
+#include <Scene/Lighting.hpp>
+#include <Scene/RenderingComponents.hpp>
 #include <Rendering/Pipeline/GraphicsSettings.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Serialization/PrefabAsset.hpp>
@@ -1378,6 +1381,7 @@ Result<void> EditorApplication::CompileScripts()
 		return Result<void>::Failure("Script compilation requires an idle editing project");
 	}
 	ScriptBuildService* service = scriptBuildService.get();
+	consolePanel.NotifyBuildStarted();
 	scriptBuildJob = std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
 	scriptBuildStatus = "正在编译脚本……";
 	return {};
@@ -1478,6 +1482,137 @@ void EditorApplication::ResetEditorLayout()
 	}
 }
 
+bool EditorApplication::CanCopyGameObjectSelection() const
+{
+	const EditorDocument* current = documents ? documents->Current() : nullptr;
+	return !play.Active() && current && current->Kind() == ResourceKind::Scene &&
+	       !selectionContext.entries.empty() && selectionContext.activeDocumentId == current->Id() &&
+	       std::all_of(selectionContext.entries.begin(), selectionContext.entries.end(),
+	                   [current](const EditorSelectionEntry& entry)
+	                   {
+		                   return entry.kind == EditorSelectionKind::GameObject && entry.documentId == current->Id() &&
+		                          !entry.playSession && !entry.IsMissing();
+	                   });
+}
+
+bool EditorApplication::CanPasteGameObjectSelection() const
+{
+	const EditorDocument* current = documents ? documents->Current() : nullptr;
+	if (play.Active() || !current || current->Kind() != ResourceKind::Scene || !gameObjectClipboardSnapshot)
+	{
+		return false;
+	}
+	return selectionContext.entries.empty() ||
+	       (selectionContext.activeDocumentId == current->Id() &&
+	        std::all_of(selectionContext.entries.begin(), selectionContext.entries.end(),
+	                    [current](const EditorSelectionEntry& entry)
+	                    {
+		                    return entry.kind == EditorSelectionKind::GameObject &&
+		                           entry.documentId == current->Id() && !entry.playSession && !entry.IsMissing();
+	                    }));
+}
+
+bool EditorApplication::CanPasteGameObjectSelectionAsChild() const
+{
+	const auto* parent = selectionContext.PrimaryEntry();
+	const EditorDocument* current = documents ? documents->Current() : nullptr;
+	return CanPasteGameObjectSelection() && current && selectionContext.entries.size() == 1 && parent &&
+	       parent->kind == EditorSelectionKind::GameObject && parent->documentId == current->Id() &&
+	       !parent->playSession && !parent->IsMissing();
+}
+
+Result<void> EditorApplication::CopyGameObjectSelection()
+{
+	if (!CanCopyGameObjectSelection() || !project || !documents)
+	{
+		return Result<void>::Failure("Copy requires selected GameObjects in an editable Scene");
+	}
+	EditorDocument* current = documents->Current();
+	auto draft = current ? current->Payload<SceneDraft>() : nullptr;
+	if (!draft)
+	{
+		return Result<void>::Failure("The active Scene draft is unavailable");
+	}
+	Vector<ResourceId> copiedIds;
+	copiedIds.reserve(selectionContext.entries.size());
+	for (const EditorSelectionEntry& entry : selectionContext.entries)
+	{
+		copiedIds.push_back(entry.objectId);
+	}
+	const auto* primary = selectionContext.PrimaryEntry();
+	Vector<Mat4> copiedWorldTransforms;
+	auto snapshot = CaptureGameObjectSelection(draft->GetScene(), copiedIds,
+	                                          primary ? primary->objectId : ResourceId{}, project->components,
+	                                          *documents, *draft, &copiedWorldTransforms);
+	if (!snapshot)
+	{
+		return Result<void>::Failure(snapshot.error);
+	}
+	gameObjectClipboardSnapshot = std::move(snapshot.value);
+	gameObjectClipboardWorldTransforms = std::move(copiedWorldTransforms);
+	gameObjectClipboardPrimary = primary ? primary->objectId : ResourceId{};
+	return {};
+}
+
+Result<void> EditorApplication::CutGameObjectSelection()
+{
+	if (!CanCopyGameObjectSelection() || !project || !documents)
+	{
+		return Result<void>::Failure("Cut requires selected GameObjects in an editable Scene");
+	}
+	auto copied = CopyGameObjectSelection();
+	if (!copied)
+	{
+		return copied;
+	}
+	EditorDocument* current = documents->Current();
+	auto draft = current ? current->Payload<SceneDraft>() : nullptr;
+	if (!draft)
+	{
+		return Result<void>::Failure("The active Scene draft is unavailable");
+	}
+	Vector<ResourceId> ids;
+	ids.reserve(selectionContext.entries.size());
+	for (const EditorSelectionEntry& entry : selectionContext.entries)
+	{
+		ids.push_back(entry.objectId);
+	}
+	auto deleted = DeleteGameObjectSelection(draft->GetScene(), ids, project->components, *draft, &selectionContext);
+	if (deleted)
+	{
+		current->MarkDirty();
+	}
+	return deleted;
+}
+
+Result<void> EditorApplication::PasteGameObjectSelection(bool asChild)
+{
+	if (!(asChild ? CanPasteGameObjectSelectionAsChild() : CanPasteGameObjectSelection()) || !project || !documents)
+	{
+		return Result<void>::Failure(asChild ? "Paste as Child requires one selected GameObject in the current Scene"
+		                                     : "Paste requires a copied GameObject selection");
+	}
+	EditorDocument* current = documents->Current();
+	auto draft = current ? current->Payload<SceneDraft>() : nullptr;
+	if (!draft)
+	{
+		return Result<void>::Failure("The active Scene cannot accept the copied GameObjects");
+	}
+	ResourceId parentOverride;
+	if (asChild)
+	{
+		parentOverride = selectionContext.PrimaryEntry()->objectId;
+	}
+	auto pasted = DuplicateGameObjectSelection(draft->GetScene(), {}, gameObjectClipboardPrimary, project->components,
+	                                           *documents, *draft, &selectionContext, parentOverride,
+	                                           gameObjectClipboardSnapshot.get(), &gameObjectClipboardWorldTransforms);
+	if (pasted)
+	{
+		current->MarkDirty();
+	}
+	return pasted;
+}
+
 void EditorApplication::DrawMainMenuBar()
 {
 	Icons::SetPanelResetAction([this] { ResetEditorLayout(); });
@@ -1486,14 +1621,642 @@ void EditorApplication::DrawMainMenuBar()
 	{
 		window->SetTitle(title);
 	}
+	const ImGuiIO& windowShortcutInput = ImGui::GetIO();
+	const bool editorShortcutsAllowed =
+	    !(play.Active() && sceneViewPanel && sceneViewPanel->DisableEditorShortcutsInPlay() &&
+	      (viewportFocused ||
+	       (showGamePanel && sceneViewPanel->WillFocusGameViewOnPlayStart())));
+	if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyCtrl &&
+	    !windowShortcutInput.KeyAlt)
+	{
+		const auto openAndFocus = [](bool& visible, const char* windowName)
+		{
+			visible = true;
+			ImGui::SetWindowFocus(windowName);
+		};
+		if (windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false))
+		{
+			openAndFocus(showConsolePanel, "Console");
+		}
+		else if (!windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_1, false))
+		{
+			openAndFocus(showScenePanel, "Scene");
+		}
+		else if (!windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_2, false))
+		{
+			openAndFocus(showGamePanel, "Game");
+		}
+		else if (!windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_3, false))
+		{
+			openAndFocus(showInspectorPanel, "Inspector");
+		}
+		else if (!windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_4, false))
+		{
+			openAndFocus(showHierarchyPanel, "Hierarchy");
+		}
+		else if (!windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_5, false))
+		{
+			openAndFocus(showProjectPanel, "Project");
+		}
+	}
+	EditorDocument* current = documents ? documents->Current() : nullptr;
+	const auto menuCommandContext =
+	    EditorCommandContext::Capture(selectionContext, current ? current->Id() : selectionContext.activeDocumentId,
+	                                  current ? current->Revision() : selectionContext.revision);
+	auto selectChildren = [this, current]() -> Result<void>
+	{
+		if (play.Active())
+		{
+			auto* scene = play.GetScene();
+			return scene ? hierarchy.SelectChildren(*scene, selectionContext, selectionContext.documentId, true)
+			             : Result<void>::Failure("There is no active Play scene");
+		}
+		auto draft = current ? current->Payload<SceneDraft>() : nullptr;
+		if (!draft)
+		{
+			return Result<void>::Failure("Open a Scene or Prefab to select its children");
+		}
+		if (current->Kind() == ResourceKind::Scene)
+		{
+			return hierarchy.SelectChildren(draft->GetScene(), selectionContext, current->Id(), false);
+		}
+		if (current->Kind() == ResourceKind::Prefab && draft->GetPrefabAsset())
+		{
+			return hierarchy.SelectChildren(*draft->GetPrefabAsset(), selectionContext, current->Id());
+		}
+		return Result<void>::Failure("The active document does not contain a selectable Hierarchy");
+	};
+	auto invertSelection = [this, current]() -> Result<void>
+	{
+		if (play.Active())
+		{
+			auto* scene = play.GetScene();
+			return scene ? hierarchy.InvertSelection(*scene, selectionContext, selectionContext.documentId, true)
+			             : Result<void>::Failure("There is no active Play scene");
+		}
+		auto draft = current ? current->Payload<SceneDraft>() : nullptr;
+		if (!draft)
+		{
+			return Result<void>::Failure("Open a Scene or Prefab to invert the Hierarchy selection");
+		}
+		if (current->Kind() == ResourceKind::Scene)
+		{
+			return hierarchy.InvertSelection(draft->GetScene(), selectionContext, current->Id(), false);
+		}
+		if (current->Kind() == ResourceKind::Prefab && draft->GetPrefabAsset())
+		{
+			return hierarchy.InvertSelection(*draft->GetPrefabAsset(), selectionContext, current->Id());
+		}
+		return Result<void>::Failure("The active document does not contain a selectable Hierarchy");
+	};
+	auto transformSelectionToView = [this, current](bool alignRotation) -> Result<void>
+	{
+		if (!sceneViewPanel)
+		{
+			return Result<void>::Failure("The Scene view is unavailable");
+		}
+		Scene* scene = nullptr;
+		ResourceId documentId;
+		const bool playSession = play.Active();
+		if (playSession)
+		{
+			scene = play.GetScene();
+			documentId = selectionContext.documentId;
+		}
+		else if (current && current->Kind() == ResourceKind::Scene)
+		{
+			auto draft = current->Payload<SceneDraft>();
+			if (draft)
+			{
+				scene = &draft->GetScene();
+				documentId = current->Id();
+			}
+		}
+		if (!scene)
+		{
+			return Result<void>::Failure("Open a Scene to transform its selection to the Scene view");
+		}
+		auto transformed = sceneViewPanel->TransformSelectionToView(*scene, selectionContext, documentId, playSession,
+		                                                            alignRotation);
+		if (transformed && !playSession && current)
+		{
+			current->MarkDirty();
+		}
+		return transformed;
+	};
+	const bool hasGameObjectSelection = !selectionContext.entries.empty() &&
+	                                    std::all_of(selectionContext.entries.begin(), selectionContext.entries.end(),
+	                                                [](const auto& entry)
+	                                                { return entry.kind == EditorSelectionKind::GameObject; });
+	const bool canCopyGameObjects = CanCopyGameObjectSelection();
+	const bool canPasteGameObjects = CanPasteGameObjectSelection();
+	const bool canPasteGameObjectsAsChild = CanPasteGameObjectSelectionAsChild();
+	auto copyGameObjects = [this] { return CopyGameObjectSelection(); };
+	auto cutGameObjects = [this] { return CutGameObjectSelection(); };
+	auto pasteGameObjects = [this](bool asChild) { return PasteGameObjectSelection(asChild); };
+	const bool hierarchyClipboardInputAllowed = editorShortcutsAllowed && !windowShortcutInput.WantTextInput &&
+	                                            !ImGui::IsAnyItemActive() && windowShortcutInput.KeyCtrl &&
+	                                            !windowShortcutInput.KeyAlt;
+	if (hierarchyClipboardInputAllowed && !windowShortcutInput.KeyShift && canCopyGameObjects &&
+	    ImGui::IsKeyPressed(ImGuiKey_X, false))
+	{
+		auto cut = cutGameObjects();
+		workspaceError = cut ? String{} : cut.error;
+	}
+	if (hierarchyClipboardInputAllowed && !windowShortcutInput.KeyShift && canCopyGameObjects &&
+	    ImGui::IsKeyPressed(ImGuiKey_C, false))
+	{
+		auto copied = copyGameObjects();
+		workspaceError = copied ? String{} : copied.error;
+	}
+	if (hierarchyClipboardInputAllowed && ImGui::IsKeyPressed(ImGuiKey_V, false) && canPasteGameObjects)
+	{
+		const bool asChild = windowShortcutInput.KeyShift;
+		if (!asChild || (selectionContext.entries.size() == 1 && selectionContext.PrimaryEntry() &&
+		                 selectionContext.PrimaryEntry()->kind == EditorSelectionKind::GameObject &&
+		                 selectionContext.PrimaryEntry()->documentId == current->Id() &&
+		                 !selectionContext.PrimaryEntry()->playSession &&
+		                 !selectionContext.PrimaryEntry()->IsMissing()))
+		{
+			auto pasted = pasteGameObjects(asChild);
+			workspaceError = pasted ? String{} : pasted.error;
+		}
+	}
+	auto createNewScene = [this, current]() -> Result<void>
+	{
+		if (!documents || !workspace || !project || play.Active())
+		{
+			return Result<void>::Failure("Create a Scene after opening a project and stopping Play mode");
+		}
+		auto& filesystem = workspace->Database()->Filesystem();
+		for (UInt32 suffix = 0; suffix < 10000; ++suffix)
+		{
+			const String filename = suffix == 0 ? String("NewScene.ursascene")
+			                                    : String("NewScene ") + ToUrsaString(std::to_string(suffix)) +
+			                                          ".ursascene";
+			auto path = ProjectAssetPath(filename.c_str());
+			if (!path)
+			{
+				return Result<void>::Failure(path.error);
+			}
+			if (current && current->Path() == path.value)
+			{
+				continue;
+			}
+			auto exists = filesystem.Exists(path.value);
+			if (!exists)
+			{
+				return Result<void>::Failure(exists.error);
+			}
+			auto sidecarExists = filesystem.Exists(VirtualPath{path.value.scheme, path.value.relative + ".meta"});
+			if (!sidecarExists)
+			{
+				return Result<void>::Failure(sidecarExists.error);
+			}
+			if (exists.value || sidecarExists.value)
+			{
+				continue;
+			}
+			auto created = NewSceneDocument(path.value, ResourceKind::Scene, project->components,
+			                                documents->Session(), project->editContextSetup);
+			if (!created)
+			{
+				return Result<void>::Failure(created.error);
+			}
+			return documents->RequestOpen(std::move(created.value));
+		}
+		return Result<void>::Failure("Could not find an unused Scene path for the new document");
+	};
+	if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyCtrl &&
+	    !windowShortcutInput.KeyAlt &&
+	    !windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_N, false))
+	{
+		auto created = createNewScene();
+		workspaceError = created ? String{} : created.error;
+	}
+	auto createGameObject = [this, current](const EditorCommandContext& context, bool asChild) -> Result<void>
+	{
+		if (!current || current->Kind() != ResourceKind::Scene || play.Active())
+		{
+			return Result<void>::Failure("Open an editable Scene to create a GameObject");
+		}
+		auto draft = current->Payload<SceneDraft>();
+		if (!draft)
+		{
+			return Result<void>::Failure("The active Scene draft is unavailable");
+		}
+		GameObject::Ptr parent;
+		if (asChild)
+		{
+			const auto* primary = context.selection.PrimaryEntry();
+			if (!primary || primary->kind != EditorSelectionKind::GameObject || primary->documentId != current->Id() ||
+			    primary->playSession || primary->IsMissing())
+			{
+				return Result<void>::Failure("Create Empty Child requires a selected GameObject");
+			}
+			auto selected = draft->GetScene().GameObjectById(primary->objectId);
+			if (!selected)
+			{
+				return Result<void>::Failure(selected.error);
+			}
+			parent = selected.value;
+		}
+		auto created = draft->GetScene().CreateGameObject("GameObject", parent);
+		if (!created)
+		{
+			return Result<void>::Failure(created.error);
+		}
+		auto identity = draft->GetScene().PersistentId(created.value);
+		if (!identity)
+		{
+			draft->GetScene().DestroyGameObject(created.value);
+			return Result<void>::Failure(identity.error);
+		}
+		hierarchy.Select(draft->GetScene(), created.value);
+		selectionContext.SelectGameObject(current->Id(), identity.value);
+		current->MarkDirty();
+		return {};
+	};
+	auto createComponentGameObject =
+	    [this, current](const char* objectName, LocalTransform transform,
+	                    const std::function<Result<ComponentId>(Scene&, const GameObject::Ptr&)>& addComponent)
+	    -> Result<void>
+	{
+		if (!documents || !current || current->Kind() != ResourceKind::Scene || play.Active())
+		{
+			return Result<void>::Failure("Open an editable Scene to create this GameObject");
+		}
+		auto draft = current->Payload<SceneDraft>();
+		if (!draft)
+		{
+			return Result<void>::Failure("The active Scene draft is unavailable");
+		}
+		auto& scene = draft->GetScene();
+		auto object = scene.CreateGameObject(objectName);
+		if (!object)
+		{
+			return Result<void>::Failure(object.error);
+		}
+		auto transformed = scene.SetLocalTransform(object.value, transform);
+		if (!transformed)
+		{
+			scene.DestroyGameObject(object.value);
+			return Result<void>::Failure(transformed.error);
+		}
+		auto component = addComponent(scene, object.value);
+		if (!component)
+		{
+			scene.DestroyGameObject(object.value);
+			return Result<void>::Failure(component.error);
+		}
+		auto identity = scene.PersistentId(object.value);
+		if (!identity)
+		{
+			scene.DestroyGameObject(object.value);
+			return Result<void>::Failure(identity.error);
+		}
+		hierarchy.Select(scene, object.value);
+		selectionContext.SelectGameObject(current->Id(), identity.value);
+		current->MarkDirty();
+		return {};
+	};
+	auto createEmptyParent = [this, current](const EditorCommandContext& context) -> Result<void>
+	{
+		if (!current || current->Kind() != ResourceKind::Scene || play.Active())
+		{
+			return Result<void>::Failure("Create Empty Parent requires an editable Scene");
+		}
+		auto draft = current->Payload<SceneDraft>();
+		const auto* primary = context.selection.PrimaryEntry();
+		if (!draft || context.selection.entries.size() != 1 || !primary ||
+		    primary->kind != EditorSelectionKind::GameObject || primary->documentId != current->Id() ||
+		    primary->playSession || primary->IsMissing())
+		{
+			return Result<void>::Failure("Create Empty Parent requires one selected GameObject");
+		}
+		auto& scene = draft->GetScene();
+		auto child = scene.GameObjectById(primary->objectId);
+		if (!child)
+		{
+			return Result<void>::Failure(child.error);
+		}
+		auto oldParent = scene.ParentOf(child.value);
+		auto oldLocal = scene.GetLocalTransform(child.value);
+		if (!oldParent || !oldLocal)
+		{
+			return Result<void>::Failure(!oldParent ? oldParent.error : oldLocal.error);
+		}
+		const Vector<GameObject::Ptr> siblings =
+		    oldParent.value ? scene.ChildrenOf(oldParent.value).value : scene.RootGameObjects();
+		const auto oldPosition = std::find(siblings.begin(), siblings.end(), child.value);
+		if (oldPosition == siblings.end())
+		{
+			return Result<void>::Failure("The selected GameObject is missing from its sibling list");
+		}
+		const auto oldIndex = static_cast<Ursa::Size>(std::distance(siblings.begin(), oldPosition));
+		auto parent = scene.CreateGameObject("GameObject", oldParent.value);
+		if (!parent)
+		{
+			return Result<void>::Failure(parent.error);
+		}
+		const auto rollback = [&]()
+		{
+			scene.SetParent(child.value, oldParent.value);
+			scene.SetLocalTransform(child.value, oldLocal.value);
+			scene.ReorderGameObject(child.value, oldIndex);
+			scene.DestroyGameObject(parent.value);
+		};
+		auto parentTransform = scene.SetLocalTransform(parent.value, oldLocal.value);
+		if (!parentTransform)
+		{
+			scene.DestroyGameObject(parent.value);
+			return Result<void>::Failure(parentTransform.error);
+		}
+		auto reparented = scene.SetParent(child.value, parent.value);
+		if (!reparented)
+		{
+			scene.DestroyGameObject(parent.value);
+			return Result<void>::Failure(reparented.error);
+		}
+		auto resetLocal = scene.SetLocalTransform(child.value, LocalTransform{});
+		if (!resetLocal)
+		{
+			rollback();
+			return Result<void>::Failure(resetLocal.error);
+		}
+		auto reordered = scene.ReorderGameObject(parent.value, oldIndex);
+		if (!reordered)
+		{
+			rollback();
+			return Result<void>::Failure(reordered.error);
+		}
+		auto identity = scene.PersistentId(parent.value);
+		if (!identity)
+		{
+			rollback();
+			return Result<void>::Failure(identity.error);
+		}
+		hierarchy.Select(scene, parent.value);
+		selectionContext.SelectGameObject(current->Id(), identity.value);
+		current->MarkDirty();
+		return {};
+	};
+	auto reorderGameObjects = [this, current](const EditorCommandContext& context, bool first) -> Result<void>
+	{
+		if (!current || current->Kind() != ResourceKind::Scene || play.Active() || context.selection.entries.empty())
+		{
+			return Result<void>::Failure("Sibling ordering requires selected GameObjects in an editable Scene");
+		}
+		auto draft = current->Payload<SceneDraft>();
+		if (!draft)
+		{
+			return Result<void>::Failure("The active Scene draft is unavailable");
+		}
+		auto& scene = draft->GetScene();
+		struct SiblingGroup
+		{
+			GameObject::Ptr parent;
+			Vector<GameObject::Ptr> original;
+			Vector<GameObject::Ptr> selected;
+		};
+		Vector<SiblingGroup> groups;
+		for (const auto& entry : context.selection.entries)
+		{
+			if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != current->Id() || entry.playSession ||
+			    entry.IsMissing())
+			{
+				return Result<void>::Failure("Sibling ordering requires GameObjects in the current Scene");
+			}
+			auto object = scene.GameObjectById(entry.objectId);
+			auto parent = object ? scene.ParentOf(object.value)
+			                    : Result<GameObject::Ptr>::Failure("The selected GameObject no longer exists");
+			if (!object || !parent)
+			{
+				return Result<void>::Failure(!object ? object.error : parent.error);
+			}
+			auto group = std::find_if(groups.begin(), groups.end(), [&](const SiblingGroup& candidate)
+			                          { return candidate.parent == parent.value; });
+			if (group == groups.end())
+			{
+				Vector<GameObject::Ptr> siblings;
+				if (parent.value)
+				{
+					auto children = scene.ChildrenOf(parent.value);
+					if (!children)
+					{
+						return Result<void>::Failure(children.error);
+					}
+					siblings = std::move(children.value);
+				}
+				else
+				{
+					siblings = scene.RootGameObjects();
+				}
+				groups.push_back({parent.value, siblings, {}});
+				group = std::prev(groups.end());
+			}
+			group->selected.push_back(object.value);
+		}
+		Vector<Vector<GameObject::Ptr>> reorderedGroups;
+		for (const auto& group : groups)
+		{
+			Vector<GameObject::Ptr> ordered;
+			ordered.reserve(group.original.size());
+			if (first)
+			{
+				for (const auto& sibling : group.original)
+				{
+					if (std::find(group.selected.begin(), group.selected.end(), sibling) != group.selected.end())
+					{
+						ordered.push_back(sibling);
+					}
+				}
+			}
+			for (const auto& sibling : group.original)
+			{
+				const bool selected =
+				    std::find(group.selected.begin(), group.selected.end(), sibling) != group.selected.end();
+				if (!selected)
+				{
+					ordered.push_back(sibling);
+				}
+			}
+			if (!first)
+			{
+				for (const auto& sibling : group.original)
+				{
+					if (std::find(group.selected.begin(), group.selected.end(), sibling) != group.selected.end())
+					{
+						ordered.push_back(sibling);
+					}
+				}
+			}
+			reorderedGroups.push_back(std::move(ordered));
+		}
+		for (Ursa::Size groupIndex = 0; groupIndex < groups.size(); ++groupIndex)
+		{
+			for (Ursa::Size siblingIndex = 0; siblingIndex < reorderedGroups[groupIndex].size(); ++siblingIndex)
+			{
+				auto reordered = scene.ReorderGameObject(reorderedGroups[groupIndex][siblingIndex], siblingIndex);
+				if (!reordered)
+				{
+					for (const auto& restoreGroup : groups)
+					{
+						for (Ursa::Size index = 0; index < restoreGroup.original.size(); ++index)
+						{
+							scene.ReorderGameObject(restoreGroup.original[index], index);
+						}
+					}
+					return Result<void>::Failure(reordered.error);
+				}
+			}
+		}
+		current->MarkDirty();
+		return {};
+	};
+	if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyCtrl &&
+	    windowShortcutInput.KeyShift &&
+	    !windowShortcutInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_N, false))
+	{
+		auto created = createGameObject(menuCommandContext, false);
+		workspaceError = created ? String{} : created.error;
+	}
+	else if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyCtrl &&
+	         windowShortcutInput.KeyShift &&
+	         !windowShortcutInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_G, false))
+	{
+		auto created = createEmptyParent(menuCommandContext);
+		workspaceError = created ? String{} : created.error;
+	}
+	else if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyCtrl &&
+	         !windowShortcutInput.KeyAlt &&
+	         !windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Equal, false))
+	{
+		auto reordered = reorderGameObjects(menuCommandContext, true);
+		workspaceError = reordered ? String{} : reordered.error;
+	}
+	else if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyCtrl &&
+	         !windowShortcutInput.KeyAlt &&
+	         !windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Minus, false))
+	{
+		auto reordered = reorderGameObjects(menuCommandContext, false);
+		workspaceError = reordered ? String{} : reordered.error;
+	}
+	else if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyAlt &&
+	         windowShortcutInput.KeyShift &&
+	         !windowShortcutInput.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_N, false))
+	{
+		auto created = createGameObject(menuCommandContext, true);
+		workspaceError = created ? String{} : created.error;
+	}
+	auto toggleGameObjectActive = [this, current]() -> Result<void>
+	{
+		if (!current || current->Kind() != ResourceKind::Scene || play.Active())
+		{
+			return Result<void>::Failure("Toggle Active State requires an editable Scene");
+		}
+		auto draft = current->Payload<SceneDraft>();
+		if (!draft || selectionContext.entries.empty())
+		{
+			return Result<void>::Failure("Select one or more GameObjects to toggle their active state");
+		}
+		Vector<std::pair<GameObject::Ptr, bool>> targets;
+		for (const auto& entry : selectionContext.entries)
+		{
+			if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != current->Id() || entry.playSession ||
+			    entry.IsMissing())
+			{
+				return Result<void>::Failure("Toggle Active State requires GameObjects in the current Scene");
+			}
+			auto object = draft->GetScene().GameObjectById(entry.objectId);
+			if (!object)
+			{
+				return Result<void>::Failure(object.error);
+			}
+			auto active = object.value->ActiveSelf();
+			if (!active)
+			{
+				return Result<void>::Failure(active.error);
+			}
+			targets.emplace_back(object.value, active.value);
+		}
+		Ursa::Size applied = 0;
+		for (; applied < targets.size(); ++applied)
+		{
+			auto changed = draft->GetScene().SetActive(targets[applied].first, !targets[applied].second);
+			if (!changed)
+			{
+				while (applied > 0)
+				{
+					--applied;
+					draft->GetScene().SetActive(targets[applied].first, targets[applied].second);
+				}
+				return Result<void>::Failure(changed.error);
+			}
+		}
+		current->MarkDirty();
+		return {};
+	};
+	if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyAlt &&
+	    windowShortcutInput.KeyShift &&
+	    !windowShortcutInput.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false))
+	{
+		auto toggled = toggleGameObjectActive();
+		workspaceError = toggled ? String{} : toggled.error;
+	}
+	if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyShift &&
+	    !windowShortcutInput.KeyCtrl &&
+	    !windowShortcutInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_D, false))
+	{
+		workspaceError = selectionContext.Clear() ? String{} : String("Selection could not be cleared yet");
+	}
+	if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyShift &&
+	    !windowShortcutInput.KeyCtrl &&
+	    !windowShortcutInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_C, false))
+	{
+		if (!selectionContext.entries.empty() &&
+		    std::all_of(selectionContext.entries.begin(), selectionContext.entries.end(),
+	                [](const auto& entry) { return entry.kind == EditorSelectionKind::GameObject; }))
+		{
+			auto selected = selectChildren();
+			workspaceError = selected ? String{} : selected.error;
+		}
+	}
+	if (editorShortcutsAllowed && !windowShortcutInput.WantTextInput && windowShortcutInput.KeyCtrl &&
+	    !windowShortcutInput.KeyShift &&
+	    !windowShortcutInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_I, false))
+	{
+		const bool gameObjectSelection = std::all_of(
+		    selectionContext.entries.begin(), selectionContext.entries.end(),
+		    [](const auto& entry) { return entry.kind == EditorSelectionKind::GameObject; });
+		if (gameObjectSelection &&
+		    (play.Active() || (current && (current->Kind() == ResourceKind::Scene ||
+		                                   current->Kind() == ResourceKind::Prefab))))
+		{
+			auto inverted = invertSelection();
+			workspaceError = inverted ? String{} : inverted.error;
+		}
+	}
+	if (editorShortcutsAllowed && hasGameObjectSelection && !windowShortcutInput.WantTextInput &&
+	    windowShortcutInput.KeyCtrl &&
+	    windowShortcutInput.KeyShift &&
+	    !windowShortcutInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_F, false))
+	{
+		auto transformed = transformSelectionToView(true);
+		workspaceError = transformed ? String{} : transformed.error;
+	}
+	else if (editorShortcutsAllowed && hasGameObjectSelection && !windowShortcutInput.WantTextInput &&
+	         windowShortcutInput.KeyCtrl &&
+	         windowShortcutInput.KeyAlt &&
+	         !windowShortcutInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false))
+	{
+		auto transformed = transformSelectionToView(false);
+		workspaceError = transformed ? String{} : transformed.error;
+	}
 	if (ImGui::BeginMainMenuBar())
 	{
 		ImGui::TextUnformatted("Ursa Editor");
 		ImGui::Separator();
-		EditorDocument* current = documents ? documents->Current() : nullptr;
-		const auto menuCommandContext =
-		    EditorCommandContext::Capture(selectionContext, current ? current->Id() : selectionContext.activeDocumentId,
-		                                  current ? current->Revision() : selectionContext.revision);
 		EditorCommands fileCommands;
 		fileCommands.Register({"file.save", "Save", "Ctrl+S",
 		                       [this, current](const EditorCommandContext&)
@@ -1550,6 +2313,13 @@ void EditorApplication::DrawMainMenuBar()
 		                       }});
 		if (Icons::BeginMenu("File"))
 		{
+			const bool canCreateScene = workspace && project && documents && !play.Active();
+			if (Icons::MenuItem("New Scene", "Ctrl+N", false, canCreateScene))
+			{
+				auto created = createNewScene();
+				workspaceError = created ? String{} : created.error;
+			}
+			ImGui::Separator();
 			const auto canSave = fileCommands.CanExecute("file.save", menuCommandContext, menuCommandContext);
 			ImGui::BeginDisabled(!canSave);
 			if (Icons::MenuItem("Save", "Ctrl+S"))
@@ -1605,6 +2375,54 @@ void EditorApplication::DrawMainMenuBar()
 		}
 		if (Icons::BeginMenu("Edit"))
 		{
+		if (Icons::MenuItem("Cut", "Ctrl+X", false, canCopyGameObjects))
+		{
+			auto cut = cutGameObjects();
+			workspaceError = cut ? String{} : cut.error;
+		}
+			if (Icons::MenuItem("Copy", "Ctrl+C", false, canCopyGameObjects))
+			{
+				auto copied = copyGameObjects();
+				workspaceError = copied ? String{} : copied.error;
+			}
+			if (Icons::MenuItem("Paste", "Ctrl+V", false, canPasteGameObjects))
+			{
+				auto pasted = pasteGameObjects(false);
+				workspaceError = pasted ? String{} : pasted.error;
+			}
+			if (Icons::MenuItem("Paste as Child", "Ctrl+Shift+V", false, canPasteGameObjectsAsChild))
+			{
+				auto pasted = pasteGameObjects(true);
+				workspaceError = pasted ? String{} : pasted.error;
+			}
+			ImGui::Separator();
+			const bool gameObjectSelection = std::all_of(
+			    selectionContext.entries.begin(), selectionContext.entries.end(),
+			    [](const auto& entry) { return entry.kind == EditorSelectionKind::GameObject; });
+			const bool canInvertSelection = gameObjectSelection &&
+			                                (play.Active() || (current && (current->Kind() == ResourceKind::Scene ||
+			                                                               current->Kind() == ResourceKind::Prefab)));
+			if (Icons::MenuItem("Invert Selection", "Ctrl+I", false, canInvertSelection))
+			{
+				auto inverted = invertSelection();
+				workspaceError = inverted ? String{} : inverted.error;
+			}
+			const bool canSelectChildren = !selectionContext.entries.empty() &&
+			                               (play.Active() || (current && (current->Kind() == ResourceKind::Scene ||
+			                                                              current->Kind() == ResourceKind::Prefab))) &&
+			                               std::all_of(selectionContext.entries.begin(), selectionContext.entries.end(),
+			                                           [](const auto& entry)
+			                                           { return entry.kind == EditorSelectionKind::GameObject; });
+			if (Icons::MenuItem("Select Children", "Shift+C", false, canSelectChildren))
+			{
+				auto selected = selectChildren();
+				workspaceError = selected ? String{} : selected.error;
+			}
+			if (Icons::MenuItem("Deselect All", "Shift+D", false, !selectionContext.entries.empty()))
+			{
+				workspaceError = selectionContext.Clear() ? String{} : String("Selection could not be cleared yet");
+			}
+			ImGui::Separator();
 			ImGui::BeginDisabled();
 			Icons::MenuItem("Undo", "Ctrl+Z");
 			Icons::MenuItem("Redo", "Ctrl+Y");
@@ -1705,10 +2523,23 @@ void EditorApplication::DrawMainMenuBar()
 		}
 		if (Icons::BeginMenu("GameObject"))
 		{
+			const bool canTransformToView = sceneViewPanel && hasGameObjectSelection &&
+			                                (play.Active() || (current && current->Kind() == ResourceKind::Scene));
+			if (Icons::MenuItem("Align With View", "Ctrl+Shift+F", false, canTransformToView))
+			{
+				auto transformed = transformSelectionToView(true);
+				workspaceError = transformed ? String{} : transformed.error;
+			}
+			if (Icons::MenuItem("Move To View", "Ctrl+Alt+F", false, canTransformToView))
+			{
+				auto transformed = transformSelectionToView(false);
+				workspaceError = transformed ? String{} : transformed.error;
+			}
+			ImGui::Separator();
 			EditorCommands commands;
 			commands.Register({"game-object.create-empty",
-			                   "Create Empty",
-			                   {},
+				"Create Empty",
+				"Ctrl+Shift+N",
 			                   [current, playing = play.Active()](const EditorCommandContext& context)
 			                   {
 				                   return current && current->Kind() == ResourceKind::Scene && !playing &&
@@ -1716,53 +2547,278 @@ void EditorApplication::DrawMainMenuBar()
 				                              ? Result<void>{}
 				                              : Result<void>::Failure("Open an editable Scene to create a GameObject");
 			                   },
-			                   [this, current](const EditorCommandContext& context)
+			                   [createGameObject](const EditorCommandContext& context)
+			                   { return createGameObject(context, false); }});
+			commands.Register({"game-object.create-cube", "Cube", {},
+			                   [current, playing = play.Active()](const EditorCommandContext& context)
 			                   {
+				                   return current && current->Kind() == ResourceKind::Scene && !playing &&
+				                                  context.activeDocumentId == current->Id()
+				                              ? Result<void>{}
+				                              : Result<void>::Failure("Open an editable Scene to create a Cube");
+			                   },
+			                   [this, current](const EditorCommandContext&)
+			                   {
+				                   if (!documents || !current)
+				                   {
+					                   return Result<void>::Failure("The active document service is unavailable");
+				                   }
 				                   auto draft = current->Payload<SceneDraft>();
 				                   if (!draft)
 				                   {
 					                   return Result<void>::Failure("The active Scene draft is unavailable");
 				                   }
-				                   auto& scene = draft->GetScene();
-				                   GameObject::Ptr parent;
-				                   const auto* primary = context.selection.PrimaryEntry();
-				                   if (primary && primary->kind == EditorSelectionKind::GameObject &&
-				                       primary->documentId == current->Id() && !primary->IsMissing())
-				                   {
-					                   auto selected = scene.GameObjectById(primary->objectId);
-					                   if (selected)
-					                   {
-						                   parent = selected.value;
-					                   }
-				                   }
-				                   auto created = scene.CreateGameObject("GameObject", parent);
+				                   auto created = CreatePrimitive(draft->GetScene(), documents->Session(), PrimitiveType::Cube);
 				                   if (!created)
 				                   {
 					                   return Result<void>::Failure(created.error);
 				                   }
-				                   auto identity = scene.PersistentId(created.value);
+				                   auto identity = draft->GetScene().PersistentId(created.value);
 				                   if (!identity)
 				                   {
-					                   scene.DestroyGameObject(created.value);
+					                   draft->GetScene().DestroyGameObject(created.value);
 					                   return Result<void>::Failure(identity.error);
 				                   }
-				                   hierarchy.Select(scene, created.value);
+				                   hierarchy.Select(draft->GetScene(), created.value);
 				                   selectionContext.SelectGameObject(current->Id(), identity.value);
 				                   current->MarkDirty();
-				                   return Result<void>{};
+					                   return Result<void>{};
 			                   }});
+			const auto canCreateSceneObject = [current, playing = play.Active()](const EditorCommandContext& context)
+			{
+				return current && current->Kind() == ResourceKind::Scene && !playing &&
+				               context.activeDocumentId == current->Id()
+				           ? Result<void>{}
+				           : Result<void>::Failure("Open an editable Scene to create a GameObject");
+			};
+			commands.Register({"game-object.create-camera", "Camera", {}, canCreateSceneObject,
+			                   [createComponentGameObject](const EditorCommandContext&)
+			                   {
+				                   LocalTransform transform;
+				                   transform.position = {0.f, 1.f, -10.f};
+				                   return createComponentGameObject(
+				                       "Camera", transform,
+				                       [](Scene& scene, const GameObject::Ptr& object)
+				                       { return scene.AddComponent<CameraComponent>(object); });
+			                   }});
+			commands.Register({"game-object.create-directional-light", "Directional Light", {}, canCreateSceneObject,
+			                   [createComponentGameObject](const EditorCommandContext&)
+			                   {
+				                   constexpr Float32 halfPiOver180 = 0.008726646259971648f;
+				                   const Float32 halfPitch = 50.f * halfPiOver180;
+				                   const Float32 halfYaw = -30.f * halfPiOver180;
+				                   const Float32 pitchSin = std::sin(halfPitch);
+				                   const Float32 pitchCos = std::cos(halfPitch);
+				                   const Float32 yawSin = std::sin(halfYaw);
+				                   const Float32 yawCos = std::cos(halfYaw);
+				                   LocalTransform transform;
+				                   transform.rotation = {yawCos * pitchSin, yawSin * pitchCos, -yawSin * pitchSin,
+				                                         yawCos * pitchCos};
+				                   return createComponentGameObject(
+				                       "Directional Light", transform,
+				                       [](Scene& scene, const GameObject::Ptr& object)
+				                       { return scene.AddComponent<DirectionalLightComponent>(object); });
+			                   }});
+			commands.Register({"game-object.create-point-light", "Point Light", {}, canCreateSceneObject,
+			                   [createComponentGameObject](const EditorCommandContext&)
+			                   {
+				                   return createComponentGameObject(
+				                       "Point Light", {},
+				                       [](Scene& scene, const GameObject::Ptr& object)
+				                       { return scene.AddComponent<PointLightComponent>(object); });
+			                   }});
+			const auto canEditGameObjectSelection = [current, playing = play.Active()](const EditorCommandContext& context)
+			{
+				const bool valid = !context.selection.entries.empty() &&
+				                   std::all_of(context.selection.entries.begin(), context.selection.entries.end(),
+				                               [current](const EditorSelectionEntry& entry)
+				                               {
+					                               return current && entry.kind == EditorSelectionKind::GameObject &&
+					                                              entry.documentId == current->Id() && !entry.playSession &&
+					                                              !entry.IsMissing();
+				                               });
+				return current && current->Kind() == ResourceKind::Scene && !playing && valid
+				           ? Result<void>{}
+				           : Result<void>::Failure("Select editable GameObjects in the current Scene");
+			};
+			commands.Register({"game-object.toggle-active", "Toggle Active State", "Alt+Shift+A",
+			                   canEditGameObjectSelection,
+			                   [toggleGameObjectActive](const EditorCommandContext&) { return toggleGameObjectActive(); }});
+			commands.Register({"game-object.create-empty-child", "Create Empty Child", "Alt+Shift+N",
+			                   canEditGameObjectSelection,
+			                   [createGameObject](const EditorCommandContext& context)
+			                   { return createGameObject(context, true); }});
+			const auto canCreateEmptyParent = [canEditGameObjectSelection](const EditorCommandContext& context)
+			{
+				auto editable = canEditGameObjectSelection(context);
+				if (!editable)
+				{
+					return editable;
+				}
+				return context.selection.entries.size() == 1
+				           ? Result<void>{}
+				           : Result<void>::Failure("Create Empty Parent requires one selected GameObject");
+			};
+			commands.Register({"game-object.create-empty-parent", "Create Empty Parent", "Ctrl+Shift+G",
+			                   canCreateEmptyParent,
+			                   [createEmptyParent](const EditorCommandContext& context)
+			                   { return createEmptyParent(context); }});
+			commands.Register({"game-object.set-first-sibling", "Set as First Sibling", "Ctrl+=",
+			                   canEditGameObjectSelection,
+			                   [reorderGameObjects](const EditorCommandContext& context)
+			                   { return reorderGameObjects(context, true); }});
+			commands.Register({"game-object.set-last-sibling", "Set as Last Sibling", "Ctrl+-",
+			                   canEditGameObjectSelection,
+			                   [reorderGameObjects](const EditorCommandContext& context)
+			                   { return reorderGameObjects(context, false); }});
+			commands.Register({"game-object.duplicate", "Duplicate", "Ctrl+D", canEditGameObjectSelection,
+			                   [this, current](const EditorCommandContext& context)
+			                   {
+					if (!documents || !project || !current)
+				                   {
+					                   return Result<void>::Failure("The active document service is unavailable");
+				                   }
+				                   auto draft = current->Payload<SceneDraft>();
+				                   if (!draft)
+				                   {
+					                   return Result<void>::Failure("The active Scene draft is unavailable");
+				                   }
+				                   Vector<ResourceId> ids;
+				                   for (const auto& entry : context.selection.entries)
+				                   {
+					                   ids.push_back(entry.objectId);
+				                   }
+				                   const auto* primary = context.selection.PrimaryEntry();
+				                   auto duplicated = DuplicateGameObjectSelection(
+					                       draft->GetScene(), ids, primary ? primary->objectId : ResourceId{},
+					                       project->components, *documents, *draft, &selectionContext);
+				                   if (duplicated)
+				                   {
+					                   current->MarkDirty();
+				                   }
+				                   return duplicated;
+		                   }});
+			commands.Register({"game-object.delete", "Delete", "Delete", canEditGameObjectSelection,
+			                   [this, current](const EditorCommandContext& context)
+			                   {
+				                   if (!project || !current)
+				                   {
+					                   return Result<void>::Failure("There is no active Scene document");
+				                   }
+				                   auto draft = current->Payload<SceneDraft>();
+				                   if (!draft)
+				                   {
+					                   return Result<void>::Failure("The active Scene draft is unavailable");
+				                   }
+				                   Vector<ResourceId> ids;
+				                   for (const auto& entry : context.selection.entries)
+				                   {
+					                   ids.push_back(entry.objectId);
+				                   }
+				                   auto removed = DeleteGameObjectSelection(
+				                       draft->GetScene(), ids, project->components, *draft, &selectionContext);
+				                   if (removed)
+					                   {
+					                   current->MarkDirty();
+					                   }
+				                   return removed;
+		                   }});
 			const auto commandContext =
 			    current ? EditorCommandContext::Capture(selectionContext, current->Id(), current->Revision())
 			            : EditorCommandContext{};
 			const auto canCreateObject =
 			    commands.CanExecute("game-object.create-empty", commandContext, commandContext);
 			ImGui::BeginDisabled(!canCreateObject);
-			if (Icons::MenuItem("Create Empty"))
+			if (Icons::MenuItem("Create Empty", "Ctrl+Shift+N"))
 			{
 				const auto executed = commands.Execute("game-object.create-empty", commandContext, commandContext);
 				workspaceError = executed ? String{} : executed.error;
 			}
 			ImGui::EndDisabled();
+			if (Icons::BeginMenu("3D Object"))
+			{
+				const auto canCreateCube = commands.CanExecute("game-object.create-cube", commandContext, commandContext);
+				if (Icons::MenuItem("Cube", nullptr, false, static_cast<bool>(canCreateCube)))
+				{
+					const auto created = commands.Execute("game-object.create-cube", commandContext, commandContext);
+					workspaceError = created ? String{} : created.error;
+				}
+				ImGui::EndMenu();
+			}
+			const auto canCreateCamera =
+			    commands.CanExecute("game-object.create-camera", commandContext, commandContext);
+			if (Icons::MenuItem("Camera", nullptr, false, static_cast<bool>(canCreateCamera)))
+			{
+				const auto created = commands.Execute("game-object.create-camera", commandContext, commandContext);
+				workspaceError = created ? String{} : created.error;
+			}
+			if (Icons::BeginMenu("Light"))
+			{
+				const auto canCreateDirectional =
+				    commands.CanExecute("game-object.create-directional-light", commandContext, commandContext);
+				if (Icons::MenuItem("Directional Light", nullptr, false, static_cast<bool>(canCreateDirectional)))
+				{
+					const auto created =
+					    commands.Execute("game-object.create-directional-light", commandContext, commandContext);
+					workspaceError = created ? String{} : created.error;
+				}
+				const auto canCreatePoint =
+				    commands.CanExecute("game-object.create-point-light", commandContext, commandContext);
+				if (Icons::MenuItem("Point Light", nullptr, false, static_cast<bool>(canCreatePoint)))
+				{
+					const auto created = commands.Execute("game-object.create-point-light", commandContext, commandContext);
+					workspaceError = created ? String{} : created.error;
+				}
+				ImGui::EndMenu();
+			}
+			const auto canCreateChild =
+			    commands.CanExecute("game-object.create-empty-child", commandContext, commandContext);
+			if (Icons::MenuItem("Create Empty Child", "Alt+Shift+N", false, static_cast<bool>(canCreateChild)))
+			{
+				const auto created = commands.Execute("game-object.create-empty-child", commandContext, commandContext);
+				workspaceError = created ? String{} : created.error;
+			}
+			const auto canCreateParent =
+			    commands.CanExecute("game-object.create-empty-parent", commandContext, commandContext);
+			if (Icons::MenuItem("Create Empty Parent", "Ctrl+Shift+G", false,
+			                    static_cast<bool>(canCreateParent)))
+			{
+				const auto created = commands.Execute("game-object.create-empty-parent", commandContext, commandContext);
+				workspaceError = created ? String{} : created.error;
+			}
+			const auto canDuplicate = commands.CanExecute("game-object.duplicate", commandContext, commandContext);
+			if (Icons::MenuItem("Duplicate", "Ctrl+D", false, static_cast<bool>(canDuplicate)))
+			{
+				const auto duplicated = commands.Execute("game-object.duplicate", commandContext, commandContext);
+				workspaceError = duplicated ? String{} : duplicated.error;
+			}
+			const auto canDelete = commands.CanExecute("game-object.delete", commandContext, commandContext);
+			if (Icons::MenuItem("Delete", "Delete", false, static_cast<bool>(canDelete)))
+			{
+				const auto removed = commands.Execute("game-object.delete", commandContext, commandContext);
+				workspaceError = removed ? String{} : removed.error;
+			}
+			const auto canToggleActive =
+			    commands.CanExecute("game-object.toggle-active", commandContext, commandContext);
+			if (Icons::MenuItem("Toggle Active State", "Alt+Shift+A", false, static_cast<bool>(canToggleActive)))
+			{
+				const auto toggled = commands.Execute("game-object.toggle-active", commandContext, commandContext);
+				workspaceError = toggled ? String{} : toggled.error;
+			}
+			const auto canSetFirst =
+			    commands.CanExecute("game-object.set-first-sibling", commandContext, commandContext);
+			if (Icons::MenuItem("Set as First Sibling", "Ctrl+=", false, static_cast<bool>(canSetFirst)))
+			{
+				const auto reordered = commands.Execute("game-object.set-first-sibling", commandContext, commandContext);
+				workspaceError = reordered ? String{} : reordered.error;
+			}
+			const auto canSetLast =
+			    commands.CanExecute("game-object.set-last-sibling", commandContext, commandContext);
+			if (Icons::MenuItem("Set as Last Sibling", "Ctrl+-", false, static_cast<bool>(canSetLast)))
+			{
+				const auto reordered = commands.Execute("game-object.set-last-sibling", commandContext, commandContext);
+				workspaceError = reordered ? String{} : reordered.error;
+			}
 			DrawManagedMenus("GameObject");
 			ImGui::EndMenu();
 		}
@@ -1862,35 +2918,44 @@ void EditorApplication::DrawMainMenuBar()
 			{
 				showGraphicsSettings = !showGraphicsSettings;
 			}
+			if (Icons::MenuItem("Tags and Layers", nullptr, showTagLayerSettings))
+			{
+				showTagLayerSettings = !showTagLayerSettings;
+			}
 			ImGui::Separator();
 			if (Icons::MenuItem("Reset Layout"))
 			{
 				ResetEditorLayout();
 			}
 			ImGui::Separator();
-			if (Icons::MenuItem("Project", nullptr, showProjectPanel))
+			const auto openPanel = [](bool& visible, const char* windowName)
 			{
-				showProjectPanel = !showProjectPanel;
+				visible = true;
+				ImGui::SetWindowFocus(windowName);
+			};
+			if (Icons::MenuItem("Project", "Ctrl+5"))
+			{
+				openPanel(showProjectPanel, "Project");
 			}
-			if (Icons::MenuItem("Hierarchy", nullptr, showHierarchyPanel))
+			if (Icons::MenuItem("Hierarchy", "Ctrl+4"))
 			{
-				showHierarchyPanel = !showHierarchyPanel;
+				openPanel(showHierarchyPanel, "Hierarchy");
 			}
-			if (Icons::MenuItem("Inspector", nullptr, showInspectorPanel))
+			if (Icons::MenuItem("Inspector", "Ctrl+3"))
 			{
-				showInspectorPanel = !showInspectorPanel;
+				openPanel(showInspectorPanel, "Inspector");
 			}
-			if (Icons::MenuItem("Scene", nullptr, showScenePanel))
+			if (Icons::MenuItem("Scene", "Ctrl+1"))
 			{
-				showScenePanel = !showScenePanel;
+				openPanel(showScenePanel, "Scene");
 			}
-			if (Icons::MenuItem("Game", nullptr, showGamePanel))
+			if (Icons::MenuItem("Game", "Ctrl+2"))
 			{
-				showGamePanel = !showGamePanel;
+				openPanel(showGamePanel, "Game");
 			}
-			if (Icons::MenuItem("Console", nullptr, showConsolePanel))
+			if (Icons::MenuItem("Console", "Ctrl+Shift+C"))
 			{
-				showConsolePanel = !showConsolePanel;
+				openPanel(showConsolePanel, "Console");
 			}
 			DrawManagedMenus("Window");
 			ImGui::EndMenu();
@@ -2034,7 +3099,7 @@ void EditorApplication::DrawMainMenuBar()
 			ImGui::Text("Project: %s", name.c_str());
 		}
 		ImGui::EndMainMenuBar();
-		if (!ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive())
+		if (editorShortcutsAllowed && !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive())
 		{
 			if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))
 			{
@@ -2048,7 +3113,6 @@ void EditorApplication::DrawMainMenuBar()
 			}
 		}
 	}
-	const auto* current = documents ? documents->Current() : nullptr;
 	DrawPlayToolbar(current);
 }
 
@@ -2649,7 +3713,8 @@ Result<void> EditorApplication::ApplyGraphicsSettings(AssetReference pipeline)
 Result<void> EditorApplication::RenderManagedViewport(Scene& renderScene,
                                                       const std::shared_ptr<Rendering::RenderTextureResource>& target,
                                                       std::optional<Rendering::CameraType> cameraFilter,
-                                                      std::optional<Rendering::CameraData> cameraOverride)
+                                                      std::optional<Rendering::CameraData> cameraOverride,
+                                                      Vector<ResourceId> excludedObjects)
 {
 #if defined(URSA_ENABLE_DOTNET)
 	if (!target || !target->description.width || !target->description.height)
@@ -2693,8 +3758,10 @@ Result<void> EditorApplication::RenderManagedViewport(Scene& renderScene,
 	stableApi->SetRenderSceneOverride(&renderScene);
 	stableApi->SetRenderOutput(target);
 	stableApi->SetRenderCameraSelection(cameraFilter, std::move(cameraOverride));
+	stableApi->SetRenderObjectExclusions(std::move(excludedObjects));
 	auto rendered =
 	    host->RenderScene(session, Float32(target->description.width) / Float32(target->description.height));
+	stableApi->SetRenderObjectExclusions({});
 	stableApi->SetRenderSceneOverride(nullptr);
 	stableApi->SetRenderCameraSelection({});
 	stableApi->SetRenderOutput(nullptr);
@@ -2704,6 +3771,7 @@ Result<void> EditorApplication::RenderManagedViewport(Scene& renderScene,
 	(void)target;
 	(void)cameraFilter;
 	(void)cameraOverride;
+	(void)excludedObjects;
 	return Result<void>::Failure("Project pipeline viewports require the .NET rendering host");
 #endif
 }
@@ -2827,6 +3895,181 @@ void EditorApplication::DrawGraphicsSettings()
 	if (!graphicsSettingsDiagnostic.empty())
 	{
 		ImGui::TextWrapped("%s", graphicsSettingsDiagnostic.c_str());
+	}
+	ImGui::End();
+}
+
+void EditorApplication::DrawTagLayerSettings()
+{
+	if (!workspace)
+	{
+		if (showTagLayerSettings)
+		{
+			if (ImGui::Begin("Tags and Layers", &showTagLayerSettings))
+			{
+				ImGui::TextDisabled("Open a project to configure its tags and layers.");
+			}
+			ImGui::End();
+		}
+		return;
+	}
+	const String projectKey = PathToUrsaString(workspace->ProjectRoot());
+	if (tagLayerSettingsProject != projectKey)
+	{
+		tagLayerSettingsProject = projectKey;
+		tagLayerSettings = ProjectTagLayerSettings::Defaults();
+		tagLayerSettingsDiagnostic.clear();
+		auto loaded = ProjectTagLayerSettings::Read(workspace->Index().Filesystem());
+		if (loaded)
+		{
+			tagLayerSettings = std::move(loaded.value);
+		}
+		else
+		{
+			tagLayerSettingsDiagnostic = loaded.error;
+		}
+		selectedTagIndex = 0;
+		tagInput.fill('\0');
+		tagEditInput.fill('\0');
+		for (Size index = 0; index < tagLayerSettings.layers.size(); ++index)
+		{
+			const auto& name = tagLayerSettings.layers[index];
+			std::memcpy(layerEditInputs[index].data(), name.data(), std::min<Size>(name.size(), 64));
+			layerEditInputs[index][std::min<Size>(name.size(), 64)] = '\0';
+		}
+	}
+	if (!showTagLayerSettings)
+	{
+		return;
+	}
+	if (!ImGui::Begin("Tags and Layers", &showTagLayerSettings))
+	{
+		ImGui::End();
+		return;
+	}
+	const auto saveCandidate = [&](const ProjectTagLayerSettings& candidate) -> Result<void>
+	{
+		auto saved = candidate.Save(workspace->Index().Filesystem());
+		if (saved)
+		{
+			tagLayerSettings = candidate;
+			tagLayerSettingsDiagnostic.clear();
+		}
+		else
+		{
+			tagLayerSettingsDiagnostic = saved.error;
+		}
+		return saved;
+	};
+	if (ImGui::BeginTabBar("##TagsLayersTabs"))
+	{
+		const ImGuiTabItemFlags tagTabFlags = requestedTagLayerSettingsTab == 0 ? ImGuiTabItemFlags_SetSelected : 0;
+		if (ImGui::BeginTabItem("Tags", nullptr, tagTabFlags))
+		{
+			if (requestedTagLayerSettingsTab == 0)
+			{
+				requestedTagLayerSettingsTab = -1;
+			}
+			ImGui::TextDisabled("Tags assigned to GameObjects in this project.");
+			ImGui::BeginChild("##TagList", ImVec2(0.f, 145.f), ImGuiChildFlags_Borders);
+			for (Size index = 0; index < tagLayerSettings.tags.size(); ++index)
+			{
+				ImGui::PushID(static_cast<int>(index));
+				if (ImGui::Selectable(tagLayerSettings.tags[index].c_str(),
+				                      selectedTagIndex == static_cast<int>(index)))
+				{
+					selectedTagIndex = static_cast<int>(index);
+					std::memset(tagEditInput.data(), 0, tagEditInput.size());
+					std::memcpy(tagEditInput.data(), tagLayerSettings.tags[index].data(),
+					            std::min<Size>(tagLayerSettings.tags[index].size(), tagEditInput.size() - 1));
+				}
+				ImGui::PopID();
+			}
+			ImGui::EndChild();
+			ImGui::BeginDisabled(selectedTagIndex <= 0 ||
+			                     static_cast<Size>(selectedTagIndex) >= tagLayerSettings.tags.size());
+			ImGui::SetNextItemWidth(220.f);
+			ImGui::InputText("Selected tag", tagEditInput.data(), tagEditInput.size());
+			if (ImGui::Button("Rename") && selectedTagIndex > 0 &&
+			    static_cast<Size>(selectedTagIndex) < tagLayerSettings.tags.size())
+			{
+				auto candidate = tagLayerSettings;
+				candidate.tags[static_cast<Size>(selectedTagIndex)] = ToUrsaString(tagEditInput.data());
+				saveCandidate(candidate);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Remove") && selectedTagIndex > 0 &&
+			    static_cast<Size>(selectedTagIndex) < tagLayerSettings.tags.size())
+			{
+				auto candidate = tagLayerSettings;
+				candidate.tags.erase(candidate.tags.begin() + selectedTagIndex);
+				selectedTagIndex = 0;
+				saveCandidate(candidate);
+			}
+			ImGui::EndDisabled();
+			ImGui::SetNextItemWidth(220.f);
+			ImGui::InputText("##NewTag", tagInput.data(), tagInput.size());
+			ImGui::SameLine();
+			if (ImGui::Button("Add Tag"))
+			{
+				auto candidate = tagLayerSettings;
+				candidate.tags.push_back(ToUrsaString(tagInput.data()));
+				if (saveCandidate(candidate))
+				{
+					tagInput.fill('\0');
+					selectedTagIndex = static_cast<int>(candidate.tags.size() - 1);
+					std::memcpy(tagEditInput.data(), candidate.tags.back().data(), candidate.tags.back().size());
+				}
+			}
+			ImGui::EndTabItem();
+		}
+		const ImGuiTabItemFlags layerTabFlags = requestedTagLayerSettingsTab == 1 ? ImGuiTabItemFlags_SetSelected : 0;
+		if (ImGui::BeginTabItem("Layers", nullptr, layerTabFlags))
+		{
+			if (requestedTagLayerSettingsTab == 1)
+			{
+				requestedTagLayerSettingsTab = -1;
+			}
+			ImGui::TextDisabled("Layer indices are stable and range from 0 to 31.");
+			if (ImGui::BeginTable("##LayerTable", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerH))
+			{
+				ImGui::TableSetupColumn("Index", ImGuiTableColumnFlags_WidthFixed, 58.f);
+				ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+				for (Size index = 0; index < tagLayerSettings.layers.size(); ++index)
+				{
+					ImGui::TableNextRow();
+					ImGui::TableSetColumnIndex(0);
+					ImGui::Text("%zu", index);
+					ImGui::TableSetColumnIndex(1);
+					ImGui::PushID(static_cast<int>(index));
+					ImGui::SetNextItemWidth(-FLT_MIN);
+					const bool fixedDefault = index == 0;
+					ImGui::BeginDisabled(fixedDefault);
+					const bool edited =
+					    ImGui::InputText("##LayerName", layerEditInputs[index].data(), layerEditInputs[index].size());
+					ImGui::EndDisabled();
+					if (!fixedDefault && edited && ImGui::IsItemDeactivatedAfterEdit())
+					{
+						auto candidate = tagLayerSettings;
+						candidate.layers[index] = ToUrsaString(layerEditInputs[index].data());
+						if (!saveCandidate(candidate))
+						{
+							const auto& previous = tagLayerSettings.layers[index];
+							std::memset(layerEditInputs[index].data(), 0, layerEditInputs[index].size());
+							std::memcpy(layerEditInputs[index].data(), previous.data(), previous.size());
+						}
+					}
+					ImGui::PopID();
+				}
+				ImGui::EndTable();
+			}
+			ImGui::EndTabItem();
+		}
+		ImGui::EndTabBar();
+	}
+	if (!tagLayerSettingsDiagnostic.empty())
+	{
+		ImGui::TextWrapped("%s", tagLayerSettingsDiagnostic.c_str());
 	}
 	ImGui::End();
 }
@@ -2976,12 +4219,20 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 	}
 	const bool awaitingPlay = !play.Active() && (requestRun || runAfterScriptBuild);
 	const bool playingOrRequested = play.Active() || awaitingPlay;
+	const ImGuiIO& playInput = ImGui::GetIO();
+	const bool playShortcutInputAllowed = !playInput.WantTextInput && !ImGui::IsAnyItemActive();
+	const bool shortcutCtrl = playInput.KeyCtrl || playInput.KeySuper;
+	const bool playToggleShortcut = playShortcutInputAllowed && shortcutCtrl && !playInput.KeyShift &&
+	                                !playInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_P, false) &&
+	                                (play.Active() || canRun || awaitingPlay);
 	ImGui::BeginDisabled(!play.Active() && !canRun);
-	const bool runClicked = Icons::Button("Run", playingOrRequested ? Icons::Icon::Stop : Icons::Icon::Play,
-	                                      play.Active()  ? "Stop"
-	                                      : awaitingPlay ? "Cancel Play"
-	                                                     : "Play",
-	                                      playingOrRequested);
+	const bool runClicked =
+	    Icons::Button("Run", playingOrRequested ? Icons::Icon::Stop : Icons::Icon::Play,
+	                  play.Active() ? "Stop"
+	                  : awaitingPlay ? "Cancel Play"
+	                                 : "Play",
+	                  playingOrRequested) ||
+	    playToggleShortcut;
 	const bool runAction = runClicked || requestRun;
 	if (runClicked && awaitingPlay)
 	{
@@ -3066,6 +4317,7 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 				else if (!selectedDocumentBuild.value)
 				{
 					ScriptBuildService* service = scriptBuildService.get();
+					consolePanel.NotifyBuildStarted();
 					scriptBuildJob = std::async(std::launch::async,
 					                            [service] { return service->Build(ScriptAssemblyGroup::Editor); });
 					runAfterScriptBuild = true;
@@ -3229,7 +4481,10 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 	ImGui::BeginDisabled(!play.Active());
 	{
 		Icons::SameLine();
-		if (Icons::Button("Pause", Icons::Icon::Pause, play.Paused() ? "Resume" : "Pause", play.Paused()))
+		const bool pauseShortcut = playShortcutInputAllowed && shortcutCtrl && playInput.KeyShift &&
+		                           !playInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_P, false) && play.Active();
+		if (Icons::Button("Pause", Icons::Icon::Pause, play.Paused() ? "Resume" : "Pause", play.Paused()) ||
+		    pauseShortcut)
 		{
 			if (play.Paused())
 			{
@@ -3242,7 +4497,9 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 		}
 		Icons::SameLine();
 		ImGui::BeginDisabled(!play.Paused());
-		if (Icons::Button("Step", Icons::Icon::Step, "Step"))
+		const bool stepShortcut = playShortcutInputAllowed && shortcutCtrl && !playInput.KeyShift &&
+		                          playInput.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_P, false) && play.Paused();
+		if (Icons::Button("Step", Icons::Icon::Step, "Step") || stepShortcut)
 		{
 			play.Step();
 		}
@@ -3344,6 +4601,7 @@ Result<void> EditorApplication::OnGui()
 	{
 		auto result = scriptBuildJob.get();
 		scriptDiagnostics = scriptBuildService ? scriptBuildService->LastDiagnostics() : Vector<ScriptDiagnostic>{};
+		consolePanel.AddCompilerDiagnostics(scriptDiagnostics);
 		if (!result)
 		{
 			scriptBuildStatus = result.error;
@@ -3394,6 +4652,7 @@ Result<void> EditorApplication::OnGui()
 		{
 			observedScriptSources = std::move(checked.value);
 			ScriptBuildService* service = scriptBuildService.get();
+			consolePanel.NotifyRecompileStarted();
 			scriptBuildJob =
 			    std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
 			if (requestRun && documents && documents->Current() &&
@@ -3453,15 +4712,17 @@ Result<void> EditorApplication::OnGui()
 			ImGui::DockBuilderSetNodeSize(dockspace, dockspaceSize);
 			ImGuiID inspectorDock = 0;
 			ImGuiID leftDock = 0;
-			ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Right, 0.25f, &inspectorDock, &leftDock);
-			ImGuiID projectDock = 0;
-			ImGuiID upperDock = 0;
-			ImGui::DockBuilderSplitNode(leftDock, ImGuiDir_Down, 0.28f, &projectDock, &upperDock);
-			ImGuiID hierarchyDock = 0;
+			ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Right, 0.20f, &inspectorDock, &leftDock);
+			ImGuiID hierarchyProjectDock = 0;
 			ImGuiID sceneDock = 0;
-			ImGui::DockBuilderSplitNode(upperDock, ImGuiDir_Left, 0.23f, &hierarchyDock, &sceneDock);
+			ImGui::DockBuilderSplitNode(leftDock, ImGuiDir_Right, 0.275f, &hierarchyProjectDock, &sceneDock);
+			ImGuiID consoleDock = 0;
+			ImGui::DockBuilderSplitNode(sceneDock, ImGuiDir_Down, 0.30f, &consoleDock, &sceneDock);
+			ImGuiID projectDock = 0;
+			ImGuiID hierarchyDock = 0;
+			ImGui::DockBuilderSplitNode(hierarchyProjectDock, ImGuiDir_Down, 0.515f, &projectDock, &hierarchyDock);
 			ImGui::DockBuilderDockWindow("Project", projectDock);
-			ImGui::DockBuilderDockWindow("Console", projectDock);
+			ImGui::DockBuilderDockWindow("Console", consoleDock);
 			ImGui::DockBuilderDockWindow("Hierarchy", hierarchyDock);
 			ImGui::DockBuilderDockWindow("Scene", sceneDock);
 			ImGui::DockBuilderDockWindow("Game", sceneDock);
@@ -3475,6 +4736,7 @@ Result<void> EditorApplication::OnGui()
 	drawDockspace();
 	DrawExternalTools();
 	DrawGraphicsSettings();
+	DrawTagLayerSettings();
 	if (!activeEditorTool.empty())
 	{
 		const auto* tool = project->tools.Find(activeEditorTool);
@@ -3597,6 +4859,88 @@ Result<void> EditorApplication::OnGui()
 			}
 			RequestAssetReimport(sources);
 			return Result<void>{};
+		};
+		actions.duplicateAssets = [this](const Vector<VirtualPath>& sources)
+		{
+			if (!workspace || !workspace->Database() || play.Active() || sources.empty())
+			{
+				return Result<Vector<VirtualPath>>::Failure("Duplicate project assets after opening a project and stopping Play mode");
+			}
+			auto* database = workspace->Database();
+			Vector<VirtualPath> destinations;
+			Set<String> reserved;
+			for (const VirtualPath& source : sources)
+			{
+				auto metadata = database->Metadata(source);
+				if (!metadata || source.scheme != database->SourceScheme())
+				{
+					return Result<Vector<VirtualPath>>::Failure(metadata ? "Only project source assets can be duplicated"
+					                                                    : metadata.error);
+				}
+				auto writable = database->Filesystem().CheckWritable(source);
+				if (!writable)
+				{
+					return Result<Vector<VirtualPath>>::Failure(writable.error);
+				}
+				const Size slash = source.relative.rfind('/');
+				const String parent = slash == String::npos ? String{} : source.relative.substr(0, slash + 1);
+				const String filename = source.relative.substr(slash == String::npos ? 0 : slash + 1);
+				Size dot = filename.rfind('.');
+				if (metadata.value.folder || dot == 0 || dot == String::npos)
+				{
+					dot = filename.size();
+				}
+				const String stem = filename.substr(0, dot);
+				const String extension = filename.substr(dot);
+				VirtualPath destination;
+				bool found = false;
+				for (UInt32 suffix = 1; suffix < 10000; ++suffix)
+				{
+					const String suffixText = std::to_string(suffix).c_str();
+					auto candidate = VirtualPath::Parse(source.scheme + ":" + parent + stem + " " + suffixText + extension);
+					if (!candidate)
+					{
+						return Result<Vector<VirtualPath>>::Failure(candidate.error);
+					}
+					const String identity = candidate.value.ToString();
+					if (reserved.find(identity) != reserved.end())
+					{
+						continue;
+					}
+					auto exists = database->Filesystem().Exists(candidate.value);
+					auto sidecar = VirtualPath::Parse(candidate.value.ToString() + ".meta");
+					auto sidecarExists = sidecar ? database->Filesystem().Exists(sidecar.value)
+					                            : Result<bool>::Failure(sidecar.error);
+					if (!exists || !sidecarExists)
+					{
+						return Result<Vector<VirtualPath>>::Failure(!exists ? exists.error : sidecarExists.error);
+					}
+					if (!exists.value && !sidecarExists.value)
+					{
+						destination = std::move(candidate.value);
+						reserved.insert(identity);
+						found = true;
+						break;
+					}
+				}
+				if (!found)
+				{
+					return Result<Vector<VirtualPath>>::Failure("Could not find a free duplicate name for " + source.ToString());
+				}
+				auto copied = database->Copy(source, destination);
+				if (!copied)
+				{
+					return Result<Vector<VirtualPath>>::Failure(copied.error);
+				}
+				destinations.push_back(std::move(destination));
+			}
+			auto refreshed = workspace->Refresh();
+			if (!refreshed)
+			{
+				return Result<Vector<VirtualPath>>::Failure(refreshed.error);
+			}
+			RequestAssetImport();
+			return Result<Vector<VirtualPath>>::Success(std::move(destinations));
 		};
 		actions.moveAssets = [this](const Vector<AssetMoveRequest>& moves)
 		{
@@ -3789,7 +5133,9 @@ Result<void> EditorApplication::OnGui()
 			{
 				auto hierarchyResult =
 				    hierarchy.Draw(*play.GetScene(), &showHierarchyPanel, draft->LinkedScene(), &selectionContext,
-				                   documents->Current()->Id(), true, documents->Current()->Revision());
+				                   documents->Current()->Id(), true, documents->Current()->Revision(), {}, {}, {},
+				                   documents->Current()->Path().FileName(),
+				                   workspace ? &workspace->Index().Filesystem() : nullptr);
 				if (!hierarchyResult)
 				{
 					inspectorError = hierarchyResult.error;
@@ -3814,11 +5160,18 @@ Result<void> EditorApplication::OnGui()
 					return Result<void>{};
 				};
 				auto inspected = DrawSceneInspector(
-				    *documents->Current(), hierarchy, *documents, *workspace, project->components,
+				    *documents->Current(), hierarchy, *documents, *workspace, tagLayerSettings, project->components,
 				    project->componentEditors, inspectorError,
 				    scriptBuildService ? &scriptBuildService->ScriptTypes() : nullptr, &showHierarchyPanel,
 				    &showInspectorPanel, selectionContext.kind != EditorSelectionKind::Asset && showInspectorPanel,
-				    &selectionContext, std::move(queueAssetDrop));
+					&selectionContext, std::move(queueAssetDrop), [this](bool layers)
+					{
+						showTagLayerSettings = true;
+						requestedTagLayerSettingsTab = layers ? 1 : 0;
+					}, CanCopyGameObjectSelection(), CanPasteGameObjectSelectionAsChild(),
+					[this] { return CopyGameObjectSelection(); },
+					[this] { return CutGameObjectSelection(); },
+					[this] { return PasteGameObjectSelection(true); });
 				if (!inspected)
 				{
 					workspaceError = inspected.error;
@@ -4042,8 +5395,45 @@ Result<void> EditorApplication::OnGui()
 					}
 					placements.push_back(std::move(placement));
 				}
-				const Size rootIndex = draft->GetScene().RootGameObjects().size();
-				auto placed = draft->PlaceImportedAssets(placements, {}, rootIndex, documents->Current()->Path(),
+				const ResourceId parentId = hierarchy.DefaultParent(draft->GetScene(), documents->Current()->Id());
+				Size insertionIndex = draft->GetScene().RootGameObjects().size();
+				Vec3 localPosition = position;
+				if (parentId)
+				{
+					auto parent = draft->GetScene().GameObjectById(parentId);
+					if (!parent)
+					{
+						return Result<void>::Failure(parent.error);
+					}
+					auto children = draft->GetScene().ChildrenOf(parent.value);
+					auto world = draft->GetScene().WorldTransform(parent.value);
+					if (!children || !world)
+					{
+						return Result<void>::Failure(!children ? children.error : world.error);
+					}
+					insertionIndex = children.value.size();
+					try
+					{
+						const Mat4 inverse = world.value.InverseAffine();
+						localPosition = {
+						    inverse.At(0, 0) * position.x + inverse.At(0, 1) * position.y +
+						        inverse.At(0, 2) * position.z + inverse.At(0, 3),
+						    inverse.At(1, 0) * position.x + inverse.At(1, 1) * position.y +
+						        inverse.At(1, 2) * position.z + inverse.At(1, 3),
+						    inverse.At(2, 0) * position.x + inverse.At(2, 1) * position.y +
+						        inverse.At(2, 2) * position.z + inverse.At(2, 3)};
+						if (!std::isfinite(localPosition.x) || !std::isfinite(localPosition.y) ||
+						    !std::isfinite(localPosition.z))
+						{
+							return Result<void>::Failure("Default parent has an invalid world transform");
+						}
+					}
+					catch (const std::exception& error)
+					{
+						return Result<void>::Failure(String("Default parent transform is singular: ") + error.what());
+					}
+				}
+				auto placed = draft->PlaceImportedAssets(placements, parentId, insertionIndex, documents->Current()->Path(),
 				                                         documents->Current()->Id());
 				if (!placed)
 				{
@@ -4061,7 +5451,7 @@ Result<void> EditorApplication::OnGui()
 					{
 						return Result<void>::Failure(transform.error);
 					}
-					transform.value.position = position;
+					transform.value.position = localPosition;
 					auto moved = draft->GetScene().SetLocalTransform(object.value, transform.value);
 					if (!moved)
 					{
@@ -4085,7 +5475,7 @@ Result<void> EditorApplication::OnGui()
 			};
 			auto drawn = sceneViewPanel->Draw(*draft, *documents->Current(), hierarchy, play, settingsFiles, projectKey,
 			                                  showScenePanel, showGamePanel, viewportFocused, inspectorError,
-			                                  placeSceneAssets, &focusedGameViewport);
+			                                  placeSceneAssets, &focusedGameViewport, &selectionContext);
 			if (!drawn)
 			{
 				inspectorError = drawn.error;
@@ -4352,109 +5742,117 @@ Result<void> EditorApplication::OnGui()
 		    },
 		    documents.get());
 	}
-	consolePanel.Draw(showConsolePanel, inspectorError,
-	                  [this](const LogRecord& record) -> Result<void>
-	                  {
-		                  Result<void> resourceResult;
-		                  VirtualPath resourcePath;
-		                  if (!record.context.resourcePath.empty())
-		                  {
-			                  auto parsedPath = VirtualPath::Parse(record.context.resourcePath);
-			                  if (!parsedPath)
-			                  {
-				                  return Result<void>::Failure(parsedPath.error);
-			                  }
-			                  resourcePath = parsedPath.value;
-			                  if (resourcePath.scheme == projectResourceScheme)
-			                  {
-				                  if (const auto* asset = projectBrowser.Find(resourcePath))
-				                  {
-					                  const Size separator =
-					                      asset->folder ? String::npos : asset->path.relative.rfind('/');
-					                  const String parent = asset->folder ? asset->path.relative
-					                                        : separator == String::npos
-					                                            ? String{}
-					                                            : asset->path.relative.substr(0, separator);
-					                  projectBrowser.NavigateTo(parent);
-				                  }
-				                  selectionContext.SelectAsset(resourcePath);
-				                  resourceResult = OpenEditorAsset(resourcePath);
-			                  }
-			                  else
-			                  {
-				                  resourceResult = OpenEditorAsset(resourcePath);
-			                  }
-			                  if (!resourceResult || record.context.objectId.empty())
-			                  {
-				                  return resourceResult;
-			                  }
-		                  }
-		                  if (!record.context.objectId.empty() && documents && documents->Current() &&
-		                      (documents->Current()->Kind() == ResourceKind::Scene ||
-		                       documents->Current()->Kind() == ResourceKind::Prefab))
-		                  {
-			                  auto id = ResourceId::Parse(record.context.objectId);
-			                  auto draft = documents->Current()->Payload<SceneDraft>();
-			                  if (!id || !draft)
-			                  {
-				                  return Result<void>::Failure(id ? "No scene document is open" : id.error);
-			                  }
-			                  if (!resourcePath.scheme.empty() && documents->Current()->Path() != resourcePath)
-			                  {
-				                  return resourceResult;
-			                  }
-			                  if (documents->Current()->Kind() == ResourceKind::Scene)
-			                  {
-				                  auto object = draft->GetScene().GameObjectById(id.value);
-				                  if (!object)
-				                  {
-					                  return Result<void>::Failure(object.error);
-				                  }
-				                  auto selected = hierarchy.Select(draft->GetScene(), object.value);
-				                  if (selected)
-				                  {
-					                  selectionContext.SelectGameObject(documents->Current()->Id(), id.value);
-				                  }
-				                  return selected;
-			                  }
-			                  auto prefab = draft->GetPrefabAsset();
-			                  if (!prefab || !prefab->Root())
-			                  {
-				                  return Result<void>::Failure("Prefab document has no GameObject hierarchy");
-			                  }
-			                  std::function<GameObject::Ptr(const GameObject::Ptr&)> findObject =
-			                      [&](const GameObject::Ptr& candidate)
-			                  {
-				                  if (candidate->Id() == id.value)
-				                  {
-					                  return candidate;
-				                  }
-				                  for (const GameObject::Ptr& child : candidate->Children())
-				                  {
-					                  auto found = findObject(child);
-					                  if (found)
-					                  {
-						                  return found;
-					                  }
-				                  }
-				                  return GameObject::Ptr{};
-			                  };
-			                  auto object = findObject(prefab->Root());
-			                  if (!object)
-			                  {
-				                  return Result<void>::Failure("GameObject is not present in the Prefab");
-			                  }
-			                  auto selected = hierarchy.Select(*prefab, object);
-			                  if (selected)
-			                  {
-				                  selectionContext.SelectGameObject(documents->Current()->Id(), id.value);
-			                  }
-			                  return selected;
-		                  }
-		                  return resourcePath.scheme.empty()
-		                             ? Result<void>::Failure("Log entry has no navigable resource or object context")
-		                             : resourceResult;
-	                  });
+	consolePanel.Draw(
+	    showConsolePanel, inspectorError,
+	    [this](const LogRecord& record) -> Result<void>
+	    {
+		    Result<void> resourceResult;
+		    VirtualPath resourcePath;
+		    if (!record.context.resourcePath.empty())
+		    {
+			    auto parsedPath = VirtualPath::Parse(record.context.resourcePath);
+			    if (!parsedPath)
+			    {
+				    return Result<void>::Failure(parsedPath.error);
+			    }
+			    resourcePath = parsedPath.value;
+			    if (resourcePath.scheme == projectResourceScheme)
+			    {
+				    if (const auto* asset = projectBrowser.Find(resourcePath))
+				    {
+					    const Size separator = asset->folder ? String::npos : asset->path.relative.rfind('/');
+					    const String parent = asset->folder               ? asset->path.relative
+					                          : separator == String::npos ? String{}
+					                                                      : asset->path.relative.substr(0, separator);
+					    projectBrowser.NavigateTo(parent);
+				    }
+				    selectionContext.SelectAsset(resourcePath);
+				    resourceResult = OpenEditorAsset(resourcePath);
+			    }
+			    else
+			    {
+				    resourceResult = OpenEditorAsset(resourcePath);
+			    }
+			    if (!resourceResult || record.context.objectId.empty())
+			    {
+				    return resourceResult;
+			    }
+		    }
+		    if (!record.context.objectId.empty() && documents && documents->Current() &&
+		        (documents->Current()->Kind() == ResourceKind::Scene ||
+		         documents->Current()->Kind() == ResourceKind::Prefab))
+		    {
+			    auto id = ResourceId::Parse(record.context.objectId);
+			    auto draft = documents->Current()->Payload<SceneDraft>();
+			    if (!id || !draft)
+			    {
+				    return Result<void>::Failure(id ? "No scene document is open" : id.error);
+			    }
+			    if (!resourcePath.scheme.empty() && documents->Current()->Path() != resourcePath)
+			    {
+				    return resourceResult;
+			    }
+			    if (documents->Current()->Kind() == ResourceKind::Scene)
+			    {
+				    auto object = draft->GetScene().GameObjectById(id.value);
+				    if (!object)
+				    {
+					    return Result<void>::Failure(object.error);
+				    }
+				    auto selected = hierarchy.Select(draft->GetScene(), object.value);
+				    if (selected)
+				    {
+					    selectionContext.SelectGameObject(documents->Current()->Id(), id.value);
+				    }
+				    return selected;
+			    }
+			    auto prefab = draft->GetPrefabAsset();
+			    if (!prefab || !prefab->Root())
+			    {
+				    return Result<void>::Failure("Prefab document has no GameObject hierarchy");
+			    }
+			    std::function<GameObject::Ptr(const GameObject::Ptr&)> findObject =
+			        [&](const GameObject::Ptr& candidate)
+			    {
+				    if (candidate->Id() == id.value)
+				    {
+					    return candidate;
+				    }
+				    for (const GameObject::Ptr& child : candidate->Children())
+				    {
+					    auto found = findObject(child);
+					    if (found)
+					    {
+						    return found;
+					    }
+				    }
+				    return GameObject::Ptr{};
+			    };
+			    auto object = findObject(prefab->Root());
+			    if (!object)
+			    {
+				    return Result<void>::Failure("GameObject is not present in the Prefab");
+			    }
+			    auto selected = hierarchy.Select(*prefab, object);
+			    if (selected)
+			    {
+				    selectionContext.SelectGameObject(documents->Current()->Id(), id.value);
+			    }
+			    return selected;
+		    }
+		    return resourcePath.scheme.empty()
+		               ? Result<void>::Failure("Log entry has no navigable resource or object context")
+		               : resourceResult;
+	    },
+	    nullptr,
+	    [this]
+	    {
+		    if (play.Active() && !play.Paused())
+		    {
+			    play.Pause();
+		    }
+	    },
+	    play.Active());
 	DrawImporterSelectionPrompt();
 	if (documents)
 	{
@@ -5056,7 +6454,15 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 				    [this](Scene& renderScene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
 				           std::optional<Rendering::CameraType> cameraFilter,
 				           std::optional<Rendering::CameraData> cameraOverride)
-				{ return RenderManagedViewport(renderScene, target, cameraFilter, std::move(cameraOverride)); };
+				{
+					Vector<ResourceId> excludedObjects;
+					if (cameraFilter == Rendering::CameraType::SceneView)
+					{
+						excludedObjects = hierarchy.SceneVisibilityExclusions(renderScene);
+					}
+					return RenderManagedViewport(renderScene, target, cameraFilter, std::move(cameraOverride),
+					                             std::move(excludedObjects));
+				};
 				auto rendered = sceneViewPanel->RenderPending(*draft, play, renderViewport);
 				if (!rendered)
 				{
@@ -5169,6 +6575,7 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	documents.reset();
 	workspace.reset();
 	projectBrowser = ProjectBrowserModel{};
+	projectBrowserPanel.Reset();
 	selectionContext.Clear();
 	hierarchy.ClearSelection();
 	sceneViewPanel.reset();

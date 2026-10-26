@@ -42,6 +42,7 @@ Result<void> EditorScenePreview::Render(const Scene& scene,
 	data.inverseViewProjection = data.viewProjection.Inverse();
 	data.nearPlane = camera.nearPlane;
 	data.farPlane = camera.farPlane;
+	data.orthographic = camera.orthographic;
 	return renderer->RenderOffscreen(scene, target, finalState, Rendering::CameraType::SceneView, data);
 }
 

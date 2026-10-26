@@ -11,6 +11,8 @@ struct Camera
 	Vec3 target{};
 	Vec3 up{0.0f, 1.0f, 0.0f};
 	Ursa::Float32 verticalFovRadians = 0.78539816f;
+	bool orthographic = false;
+	Ursa::Float32 orthographicSize = 5.0f;
 	Ursa::Float32 nearPlane = 0.1f;
 	Ursa::Float32 farPlane = 100.0f;
 

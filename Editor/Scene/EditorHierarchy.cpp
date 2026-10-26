@@ -1,14 +1,17 @@
 #include <Ui/EditorIcons.hpp>
 #include <Serialization/PrefabResource.hpp>
 #include <Core/Types.hpp>
+#include <Core/StringInterop.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Workspace/EditorDragSession.hpp>
 #include <Inspector/ReferencePicker.hpp>
 #include <Serialization/PrefabAsset.hpp>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <functional>
 #include <imgui_internal.h>
+#include <nlohmann/json.hpp>
 
 namespace Ursa::Editor
 {
@@ -24,14 +27,97 @@ EditorSelectionEntry GameObjectSelection(ResourceId documentId, ResourceId objec
 	return entry;
 }
 
+Vector<GameObject::Ptr> OrderedGameObjects(const Vector<GameObject::Ptr>& objects, bool alphabetical)
+{
+	if (!alphabetical)
+	{
+		return objects;
+	}
+	struct NamedObject
+	{
+		String sortName;
+		GameObject::Ptr object;
+	};
+	Vector<NamedObject> named;
+	named.reserve(objects.size());
+	for (const GameObject::Ptr& object : objects)
+	{
+		const auto name = object ? object->Name() : Result<String>::Failure("Missing GameObject");
+		named.push_back({name ? name.value : String{}, object});
+	}
+	std::stable_sort(named.begin(), named.end(), [](const NamedObject& left, const NamedObject& right)
+	                  {
+		                  Size leftIndex = 0;
+		                  Size rightIndex = 0;
+		                  while (leftIndex < left.sortName.size() && rightIndex < right.sortName.size())
+		                  {
+			                  const unsigned char leftCharacter =
+			                      static_cast<unsigned char>(left.sortName[leftIndex]);
+			                  const unsigned char rightCharacter =
+			                      static_cast<unsigned char>(right.sortName[rightIndex]);
+			                  if (std::isdigit(leftCharacter) && std::isdigit(rightCharacter))
+			                  {
+				                  Size leftDigits = leftIndex;
+				                  Size rightDigits = rightIndex;
+				                  while (leftDigits < left.sortName.size() && left.sortName[leftDigits] == '0') ++leftDigits;
+				                  while (rightDigits < right.sortName.size() && right.sortName[rightDigits] == '0') ++rightDigits;
+				                  Size leftEnd = leftDigits;
+				                  Size rightEnd = rightDigits;
+				                  while (leftEnd < left.sortName.size() && std::isdigit(static_cast<unsigned char>(left.sortName[leftEnd]))) ++leftEnd;
+				                  while (rightEnd < right.sortName.size() && std::isdigit(static_cast<unsigned char>(right.sortName[rightEnd]))) ++rightEnd;
+				                  const Size leftLength = leftEnd - leftDigits;
+				                  const Size rightLength = rightEnd - rightDigits;
+				                  if (leftLength != rightLength) return leftLength < rightLength;
+				                  const int comparison = left.sortName.compare(leftDigits, leftLength,
+				                                                       right.sortName, rightDigits, rightLength);
+				                  if (comparison != 0) return comparison < 0;
+				                  Size leftFullEnd = leftEnd;
+				                  Size rightFullEnd = rightEnd;
+				                  while (leftFullEnd < left.sortName.size() && std::isdigit(static_cast<unsigned char>(left.sortName[leftFullEnd]))) ++leftFullEnd;
+				                  while (rightFullEnd < right.sortName.size() && std::isdigit(static_cast<unsigned char>(right.sortName[rightFullEnd]))) ++rightFullEnd;
+				                  if (leftFullEnd - leftIndex != rightFullEnd - rightIndex)
+					                  {
+					                  return leftFullEnd - leftIndex < rightFullEnd - rightIndex;
+				                  }
+				                  leftIndex = leftFullEnd;
+				                  rightIndex = rightFullEnd;
+			                  continue;
+			                  }
+			                  const int leftLower = std::tolower(leftCharacter);
+			                  const int rightLower = std::tolower(rightCharacter);
+			                  if (leftLower != rightLower) return leftLower < rightLower;
+			                  ++leftIndex;
+			                  ++rightIndex;
+	                  }
+	                  return left.sortName.size() < right.sortName.size();
+	                  });
+	Vector<GameObject::Ptr> result;
+	result.reserve(named.size());
+	for (NamedObject& item : named)
+	{
+		result.push_back(std::move(item.object));
+	}
+	return result;
+}
+
 void AppendVisibleRows(const Scene& scene, GameObject::Ptr object, ResourceId documentId,
-                       Vector<EditorSelectionEntry>& visibleRows, const char* treeNodeId, bool playSession)
+                       Vector<EditorSelectionEntry>& visibleRows, const char* treeNodeId, bool playSession,
+                       const Map<String, bool>& searchMatches, bool filtering, bool expandFilteredBranches,
+                       bool alphabetical)
 {
 	const auto id = scene.PersistentId(object);
 	const auto children = scene.ChildrenOf(object);
 	if (!id || !children)
 	{
 		return;
+	}
+	if (filtering)
+	{
+		const auto match = searchMatches.find(id.value.ToString());
+		if (match == searchMatches.end() || !match->second)
+		{
+			return;
+		}
 	}
 	visibleRows.push_back(GameObjectSelection(documentId, id.value, playSession));
 	if (children.value.empty())
@@ -40,23 +126,33 @@ void AppendVisibleRows(const Scene& scene, GameObject::Ptr object, ResourceId do
 	}
 	const String key = id.value.ToString();
 	ImGui::PushID(key.c_str());
-	const bool open = ImGui::TreeNodeGetOpen(ImGui::GetID(treeNodeId));
+	const bool open = (filtering && expandFilteredBranches) || ImGui::TreeNodeGetOpen(ImGui::GetID(treeNodeId));
 	ImGui::PopID();
 	if (open)
 	{
-		for (const auto& child : children.value)
+		for (const auto& child : OrderedGameObjects(children.value, alphabetical))
 		{
-			AppendVisibleRows(scene, child, documentId, visibleRows, treeNodeId, playSession);
+			AppendVisibleRows(scene, child, documentId, visibleRows, treeNodeId, playSession, searchMatches, filtering,
+			                  expandFilteredBranches, alphabetical);
 		}
 	}
 }
 
 void AppendVisibleRows(const GameObject::Ptr& object, ResourceId documentId, Vector<EditorSelectionEntry>& visibleRows,
-                       const char* treeNodeId)
+                       const char* treeNodeId, const Map<String, bool>& searchMatches, bool filtering,
+                       bool expandFilteredBranches)
 {
 	if (!object)
 	{
 		return;
+	}
+	if (filtering)
+	{
+		const auto match = searchMatches.find(object->Id().ToString());
+		if (match == searchMatches.end() || !match->second)
+		{
+			return;
+		}
 	}
 	visibleRows.push_back(GameObjectSelection(documentId, object->Id()));
 	const auto children = object->Children();
@@ -66,15 +162,71 @@ void AppendVisibleRows(const GameObject::Ptr& object, ResourceId documentId, Vec
 	}
 	const String key = object->Id().ToString();
 	ImGui::PushID(key.c_str());
-	const bool open = ImGui::TreeNodeGetOpen(ImGui::GetID(treeNodeId));
+	const bool open = (filtering && expandFilteredBranches) || ImGui::TreeNodeGetOpen(ImGui::GetID(treeNodeId));
 	ImGui::PopID();
 	if (open)
 	{
 		for (const auto& child : children)
 		{
-			AppendVisibleRows(child, documentId, visibleRows, treeNodeId);
+			AppendVisibleRows(child, documentId, visibleRows, treeNodeId, searchMatches, filtering,
+			                  expandFilteredBranches);
 		}
 	}
+}
+
+bool MatchesHierarchySearch(const GameObject::Ptr& object, const ImGuiTextFilter& filter, bool typeOnly)
+{
+	if (!object)
+	{
+		return false;
+	}
+	const auto name = object->Name();
+	const bool nameMatches = !typeOnly && name && filter.PassFilter(name.value.c_str());
+	const auto components = object->Components();
+	const bool typeMatches = std::any_of(components.begin(), components.end(),
+	                                    [&](const Component* component)
+	                                    {
+		                                    return component && filter.PassFilter(component->SerializationType().c_str());
+	                                    });
+	return nameMatches || typeMatches;
+}
+
+bool BuildSceneSearchMatches(const Scene& scene, const GameObject::Ptr& object, const ImGuiTextFilter& filter,
+                             bool typeOnly, Map<String, bool>& matches, Map<String, bool>& directMatches)
+{
+	const auto id = scene.PersistentId(object);
+	const auto children = scene.ChildrenOf(object);
+	if (!id || !children)
+	{
+		return false;
+	}
+	const bool directMatch = MatchesHierarchySearch(object, filter, typeOnly);
+	bool matched = directMatch;
+	for (const auto& child : children.value)
+	{
+		matched = BuildSceneSearchMatches(scene, child, filter, typeOnly, matches, directMatches) || matched;
+	}
+	matches.emplace(id.value.ToString(), matched);
+	directMatches.emplace(id.value.ToString(), directMatch);
+	return matched;
+}
+
+bool BuildPrefabSearchMatches(const GameObject::Ptr& object, const ImGuiTextFilter& filter, bool typeOnly,
+                              Map<String, bool>& matches, Map<String, bool>& directMatches)
+{
+	if (!object)
+	{
+		return false;
+	}
+	const bool directMatch = MatchesHierarchySearch(object, filter, typeOnly);
+	bool matched = directMatch;
+	for (const auto& child : object->Children())
+	{
+		matched = BuildPrefabSearchMatches(child, filter, typeOnly, matches, directMatches) || matched;
+	}
+	matches.emplace(object->Id().ToString(), matched);
+	directMatches.emplace(object->Id().ToString(), directMatch);
+	return matched;
 }
 
 void SetLegacySelected(EditorSelectionContext* selection, ResourceId& selected)
@@ -85,6 +237,178 @@ void SetLegacySelected(EditorSelectionContext* selection, ResourceId& selected)
 	}
 	const auto* primary = selection->PrimaryEntry();
 	selected = primary && primary->kind == EditorSelectionKind::GameObject ? primary->objectId : ResourceId{};
+}
+
+bool SelectHierarchyEntry(const EditorSelectionEntry& entry, const Vector<EditorSelectionEntry>& visibleRows,
+                          EditorSelectionContext* selection, ResourceId& selected, bool extend,
+                          ResourceId& keyboardFocusTarget)
+{
+	const bool accepted = selection ? selection->SelectClicked(entry, visibleRows, false, extend) : true;
+	if (!accepted)
+	{
+		return false;
+	}
+	if (selection)
+	{
+		SetLegacySelected(selection, selected);
+	}
+	else
+	{
+		selected = entry.objectId;
+	}
+	keyboardFocusTarget = entry.objectId;
+	return true;
+}
+
+bool NavigateHierarchySelection(const Vector<EditorSelectionEntry>& visibleRows, EditorSelectionContext* selection,
+                                ResourceId& selected, Int32 direction, bool extend, ResourceId& keyboardFocusTarget)
+{
+	if (visibleRows.empty() || (direction != -1 && direction != 1))
+	{
+		return false;
+	}
+	const EditorSelectionEntry* primary = selection ? selection->PrimaryEntry() : nullptr;
+	const ResourceId currentId =
+	    primary && primary->kind == EditorSelectionKind::GameObject ? primary->objectId : selected;
+	const auto current = std::find_if(visibleRows.begin(), visibleRows.end(),
+	                                  [&](const EditorSelectionEntry& entry) { return entry.objectId == currentId; });
+	Size targetIndex = 0;
+	if (current == visibleRows.end())
+	{
+		targetIndex = direction > 0 ? 0 : visibleRows.size() - 1;
+	}
+	else
+	{
+		const auto currentIndex = static_cast<Size>(std::distance(visibleRows.begin(), current));
+		if ((direction < 0 && currentIndex == 0) || (direction > 0 && currentIndex + 1 >= visibleRows.size()))
+		{
+			return false;
+		}
+		targetIndex = direction < 0 ? currentIndex - 1 : currentIndex + 1;
+	}
+	return SelectHierarchyEntry(visibleRows[targetIndex], visibleRows, selection, selected, extend,
+	                            keyboardFocusTarget);
+}
+
+bool IsHierarchyNodeOpen(const String& key, const char* nodeId)
+{
+	ImGui::PushID(key.c_str());
+	const bool open = ImGui::TreeNodeGetOpen(ImGui::GetID(nodeId));
+	ImGui::PopID();
+	return open;
+}
+
+void SetHierarchyNodeOpen(const String& key, const char* nodeId, bool open)
+{
+	ImGui::PushID(key.c_str());
+	ImGui::TreeNodeSetOpen(ImGui::GetID(nodeId), open);
+	ImGui::PopID();
+}
+
+void SetHierarchyDescendantsOpen(const GameObject::Ptr& parent, const char* nodeId, bool open,
+                                 const std::function<String(const GameObject::Ptr&)>& keyForObject)
+{
+	if (!parent)
+	{
+		return;
+	}
+	for (const GameObject::Ptr& child : parent->Children())
+	{
+		const String key = keyForObject(child);
+		ImGui::PushID(key.c_str());
+		ImGui::TreeNodeSetOpen(ImGui::GetID(nodeId), open);
+		ImGui::PopID();
+		SetHierarchyDescendantsOpen(child, nodeId, open, keyForObject);
+	}
+}
+
+void DrawHierarchySearchField(std::array<char, 257>& searchText, Float32 trailingWidth = 0.f)
+{
+	Icons::Inline(Icons::Icon::Search);
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F))
+	{
+		ImGui::SetKeyboardFocusHere();
+	}
+	ImGui::SetNextItemWidth(trailingWidth > 0.f ? -trailingWidth : -1.f);
+	ImGui::InputTextWithHint("##HierarchySearch", "Search Hierarchy (t:Type)", searchText.data(), searchText.size(),
+	                         ImGuiInputTextFlags_EscapeClearsAll);
+}
+
+void DrawEyeGlyph(ImDrawList* drawList, ImVec2 center, Float32 size, bool visible, ImU32 color)
+{
+	const Float32 halfWidth = size * 0.43f;
+	const Float32 halfHeight = size * 0.27f;
+	drawList->AddBezierCubic({center.x - halfWidth, center.y}, {center.x - halfWidth * 0.5f, center.y - halfHeight},
+	                         {center.x + halfWidth * 0.5f, center.y - halfHeight}, {center.x + halfWidth, center.y},
+	                         color, 1.3f, 12);
+	drawList->AddBezierCubic({center.x + halfWidth, center.y}, {center.x + halfWidth * 0.5f, center.y + halfHeight},
+	                         {center.x - halfWidth * 0.5f, center.y + halfHeight}, {center.x - halfWidth, center.y},
+	                         color, 1.3f, 12);
+	if (visible)
+	{
+		drawList->AddCircle(center, size * 0.12f, color, 10, 1.2f);
+		drawList->AddCircleFilled(center, size * 0.055f, color, 8);
+	}
+	else
+	{
+		drawList->AddLine({center.x - size * 0.42f, center.y + size * 0.39f},
+		                  {center.x + size * 0.42f, center.y - size * 0.39f}, color, 1.6f);
+	}
+}
+
+void DrawPickGlyph(ImDrawList* drawList, ImVec2 center, Float32 size, bool pickable, ImU32 color)
+{
+	const ImVec2 points[]{
+	    {center.x - size * 0.23f, center.y + size * 0.42f}, {center.x - size * 0.18f, center.y - size * 0.42f},
+	    {center.x - size * 0.04f, center.y - size * 0.48f}, {center.x + size * 0.02f, center.y - size * 0.05f},
+	    {center.x + size * 0.14f, center.y - size * 0.27f}, {center.x + size * 0.27f, center.y - size * 0.19f},
+	    {center.x + size * 0.15f, center.y + size * 0.10f}, {center.x + size * 0.29f, center.y + size * 0.02f},
+	    {center.x + size * 0.38f, center.y + size * 0.14f}, {center.x + size * 0.12f, center.y + size * 0.43f}};
+	drawList->AddPolyline(points, static_cast<Int32>(std::size(points)), color, ImDrawFlags_Closed, 1.35f);
+	if (!pickable)
+	{
+		drawList->AddLine({center.x - size * 0.45f, center.y + size * 0.45f},
+		                  {center.x + size * 0.45f, center.y - size * 0.45f}, color, 1.6f);
+	}
+}
+
+ImRect SceneRowControlRect(const ImRect& row, Size index)
+{
+	const Float32 size = std::min(15.f, row.GetHeight() - 2.f);
+	const Float32 gap = 2.f;
+	const Float32 x = row.Max.x - (size + gap) * static_cast<Float32>(2 - index);
+	const Float32 y = row.Min.y + (row.GetHeight() - size) * 0.5f;
+	return {{x, y}, {x + size, y + size}};
+}
+
+bool DrawSceneRowControl(const char* id, const ImRect& rect, bool eye, bool enabled, const char* tooltip)
+{
+	if (rect.GetWidth() <= 0.f)
+	{
+		return false;
+	}
+	ImGui::SetCursorScreenPos(rect.Min);
+	ImGui::PushID(id);
+	const bool clicked = ImGui::InvisibleButton("##SceneRowControl", rect.GetSize());
+	const bool hovered = ImGui::IsItemHovered();
+	const ImU32 color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+	const ImVec2 center{(rect.Min.x + rect.Max.x) * 0.5f, (rect.Min.y + rect.Max.y) * 0.5f};
+	if (eye)
+	{
+		DrawEyeGlyph(ImGui::GetWindowDrawList(), center, rect.GetHeight() - 3.f, enabled, color);
+	}
+	else
+	{
+		DrawPickGlyph(ImGui::GetWindowDrawList(), center, rect.GetHeight() - 3.f, enabled, color);
+	}
+	if (hovered)
+	{
+		ImGui::SetTooltip("%s%s", tooltip,
+		                  ImGui::GetIO().KeyAlt ? " (Alt: this object only)" : " (including children)");
+	}
+	ImGui::PopID();
+	return clicked;
 }
 } // namespace
 
@@ -269,7 +593,8 @@ Result<LocalTransform> DecomposeHierarchyLocal(const Mat4& matrix)
 std::optional<HierarchyDropZone>
 DrawHierarchyRowDropFeedback(const ImRect& rect, ResourceId documentId, bool playSession,
                              const std::function<ResourceId(ResourceId)>& parentOf, bool allowDrop,
-                             const std::function<void(const EditorDragSession&, HierarchyDropZone)>& onDrop)
+                             const std::function<void(const EditorDragSession&, HierarchyDropZone)>& onDrop,
+                             bool allowReorder = true)
 {
 	if (!allowDrop || !ImGui::GetDragDropPayload())
 	{
@@ -287,21 +612,26 @@ DrawHierarchyRowDropFeedback(const ImRect& rect, ResourceId documentId, bool pla
 		auto session = DecodeEditorDragPayload(payload->DataType, payload->Data, static_cast<Size>(payload->DataSize));
 		if (session && NormalizeHierarchyDragSources(session.value, documentId, playSession, parentOf))
 		{
-			zone = ClassifyHierarchyDropZone(ImGui::GetIO().MousePos.y, rect.Min.y, rect.Max.y);
-			if (onDrop && ClaimEditorDragDropDelivery(payload))
+			const HierarchyDropZone classified =
+			    ClassifyHierarchyDropZone(ImGui::GetIO().MousePos.y, rect.Min.y, rect.Max.y);
+			if (allowReorder || classified == HierarchyDropZone::Into)
 			{
-				onDrop(session.value, *zone);
-			}
-			if (*zone == HierarchyDropZone::Into)
-			{
-				ImGui::GetWindowDrawList()->AddRectFilled(rect.Min, rect.Max,
-				                                          ImGui::GetColorU32(ImGuiCol_DragDropTarget, 0.22f), 2.0f);
-			}
-			else
-			{
-				const float y = *zone == HierarchyDropZone::Above ? rect.Min.y + 1.0f : rect.Max.y - 1.0f;
-				ImGui::GetWindowDrawList()->AddLine({rect.Min.x, y}, {rect.Max.x, y},
-				                                    ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+				zone = classified;
+				if (onDrop && ClaimEditorDragDropDelivery(payload))
+				{
+					onDrop(session.value, *zone);
+				}
+				if (*zone == HierarchyDropZone::Into)
+				{
+					ImGui::GetWindowDrawList()->AddRectFilled(rect.Min, rect.Max,
+					                                          ImGui::GetColorU32(ImGuiCol_DragDropTarget, 0.22f), 2.0f);
+				}
+				else
+				{
+					const float y = *zone == HierarchyDropZone::Above ? rect.Min.y + 1.0f : rect.Max.y - 1.0f;
+					ImGui::GetWindowDrawList()->AddLine({rect.Min.x, y}, {rect.Max.x, y},
+					                                    ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+				}
 			}
 		}
 	}
@@ -344,6 +674,39 @@ void DrawHierarchyRootDropFeedback(ResourceId documentId, bool playSession,
 	ImGui::EndDragDropTarget();
 }
 } // namespace
+
+Result<void> SetSceneGameObjectWorldTransform(Scene& scene, const GameObject::Ptr& object,
+                                               const Mat4& worldTransform)
+{
+	if (!object || !scene.Contains(object))
+	{
+		return Result<void>::Failure("Cannot set the world transform of a missing GameObject");
+	}
+	auto parent = scene.ParentOf(object);
+	if (!parent)
+	{
+		return Result<void>::Failure(parent.error);
+	}
+	Mat4 localMatrix = worldTransform;
+	if (parent.value)
+	{
+		auto parentWorld = scene.WorldTransform(parent.value);
+		if (!parentWorld)
+		{
+			return Result<void>::Failure(parentWorld.error);
+		}
+		try
+		{
+			localMatrix = parentWorld.value.InverseAffine() * worldTransform;
+		}
+		catch (const std::exception& error)
+		{
+			return Result<void>::Failure(String("Cannot preserve GameObject world transform: ") + ToUrsaString(error.what()));
+		}
+	}
+	auto local = DecomposeHierarchyLocal(localMatrix);
+	return local ? scene.SetLocalTransform(object, local.value) : Result<void>::Failure(local.error);
+}
 
 Result<void> ApplyHierarchyDrop(Scene& scene, const EditorDragSession& session, ResourceId targetId,
                                 HierarchyDropZone zone, ResourceId documentId)
@@ -574,6 +937,142 @@ Result<void> ApplyHierarchyDrop(Scene& scene, const EditorDragSession& session, 
 	return {};
 }
 
+Result<ResourceId> CreateEmptyParent(Scene& scene, const Vector<EditorSelectionEntry>& selection, ResourceId documentId)
+{
+	if (selection.empty())
+	{
+		return Result<ResourceId>::Failure("Select one or more GameObjects to create a parent");
+	}
+	Vector<GameObject::Ptr> children;
+	GameObject::Ptr commonParent;
+	for (const EditorSelectionEntry& entry : selection)
+	{
+		if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId || entry.playSession ||
+		    entry.IsMissing())
+		{
+			return Result<ResourceId>::Failure("Create Empty Parent requires editable GameObjects from one scene");
+		}
+		auto resolved = scene.GameObjectById(entry.objectId);
+		if (!resolved)
+		{
+			return Result<ResourceId>::Failure("A selected GameObject no longer exists");
+		}
+		if (children.empty())
+		{
+			commonParent = resolved.value->Parent();
+		}
+		else if (resolved.value->Parent() != commonParent)
+		{
+			return Result<ResourceId>::Failure("Create Empty Parent requires selected siblings");
+		}
+		children.push_back(resolved.value);
+	}
+	Vector<GameObject::Ptr> siblings = commonParent ? scene.ChildrenOf(commonParent).value : scene.RootGameObjects();
+	std::sort(children.begin(), children.end(), [&](const auto& left, const auto& right)
+	          { return std::find(siblings.begin(), siblings.end(), left) < std::find(siblings.begin(), siblings.end(), right); });
+	struct SavedTransform
+	{
+		GameObject::Ptr object;
+		LocalTransform local;
+		Mat4 world;
+	};
+	Vector<SavedTransform> saved;
+	for (const auto& child : children)
+	{
+		auto local = scene.GetLocalTransform(child);
+		auto world = scene.WorldTransform(child);
+		if (!local || !world)
+		{
+			return Result<ResourceId>::Failure(!local ? local.error : world.error);
+		}
+		saved.push_back({child, local.value, world.value});
+	}
+	const auto insertion = std::find(siblings.begin(), siblings.end(), children.front());
+	if (insertion == siblings.end())
+	{
+		return Result<ResourceId>::Failure("A selected GameObject is missing from its sibling list");
+	}
+	auto created = scene.CreateGameObject("GameObject", commonParent);
+	if (!created)
+	{
+		return Result<ResourceId>::Failure(created.error);
+	}
+	auto newParentId = scene.PersistentId(created.value);
+	if (!newParentId)
+	{
+		scene.DestroyGameObject(created.value);
+		return Result<ResourceId>::Failure(newParentId.error);
+	}
+	auto parentWorld = scene.WorldTransform(created.value);
+	if (!parentWorld)
+	{
+		scene.DestroyGameObject(created.value);
+		return Result<ResourceId>::Failure(parentWorld.error);
+	}
+	Vector<LocalTransform> childLocals;
+	for (const SavedTransform& state : saved)
+	{
+		Result<LocalTransform> local = Result<LocalTransform>::Failure("Could not decompose child transform");
+		try
+		{
+			local = DecomposeHierarchyLocal(parentWorld.value.InverseAffine() * state.world);
+		}
+		catch (const std::exception& error)
+		{
+			scene.DestroyGameObject(created.value);
+			return Result<ResourceId>::Failure(String("Could not preserve child world transform: ") + error.what());
+		}
+		if (!local)
+		{
+			scene.DestroyGameObject(created.value);
+			return Result<ResourceId>::Failure(local.error);
+		}
+		childLocals.push_back(local.value);
+	}
+	auto rollback = [&]()
+	{
+		for (const SavedTransform& state : saved)
+		{
+			scene.SetParent(state.object, commonParent);
+			scene.SetLocalTransform(state.object, state.local);
+		}
+		for (Ursa::Size index = 0; index < siblings.size(); ++index)
+		{
+			scene.ReorderGameObject(siblings[index], index);
+		}
+		scene.DestroyGameObject(created.value);
+	};
+	for (Ursa::Size index = 0; index < saved.size(); ++index)
+	{
+		auto reparented = scene.SetParent(saved[index].object, created.value);
+		if (!reparented)
+		{
+			rollback();
+			return Result<ResourceId>::Failure(reparented.error);
+		}
+		auto transformed = scene.SetLocalTransform(saved[index].object, childLocals[index]);
+		if (!transformed)
+		{
+			rollback();
+			return Result<ResourceId>::Failure(transformed.error);
+		}
+		auto reordered = scene.ReorderGameObject(saved[index].object, index);
+		if (!reordered)
+		{
+			rollback();
+			return Result<ResourceId>::Failure(reordered.error);
+		}
+	}
+	const Ursa::Size insertionIndex = static_cast<Ursa::Size>(std::distance(siblings.begin(), insertion));
+	auto reorderedParent = scene.ReorderGameObject(created.value, insertionIndex);
+	if (!reorderedParent)
+	{
+		rollback();
+		return Result<ResourceId>::Failure(reorderedParent.error);
+	}
+	return Result<ResourceId>::Success(newParentId.value);
+}
+
 Result<void> EditorHierarchy::Select(const Scene& scene, GameObject::Ptr node)
 {
 	auto id = scene.PersistentId(node);
@@ -582,6 +1081,197 @@ Result<void> EditorHierarchy::Select(const Scene& scene, GameObject::Ptr node)
 		return Result<void>::Failure(id.error);
 	}
 	selected = id.value;
+	return {};
+}
+
+Result<void> EditorHierarchy::SelectChildren(const Scene& scene, EditorSelectionContext& selection,
+                                             ResourceId documentId, bool playSession)
+{
+	if (selection.entries.empty())
+	{
+		return Result<void>::Failure("Select one or more GameObjects first");
+	}
+	Vector<EditorSelectionEntry> children;
+	for (const auto& entry : selection.entries)
+	{
+		if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId ||
+		    entry.playSession != playSession || entry.IsMissing())
+		{
+			return Result<void>::Failure("Select GameObjects in the active Hierarchy first");
+		}
+		auto object = scene.GameObjectById(entry.objectId);
+		if (!object)
+		{
+			return Result<void>::Failure(object.error);
+		}
+		for (const auto& child : object.value->Children())
+		{
+			auto id = scene.PersistentId(child);
+			if (!id)
+			{
+				return Result<void>::Failure(id.error);
+			}
+			EditorSelectionEntry selectedChild;
+			selectedChild.kind = EditorSelectionKind::GameObject;
+			selectedChild.documentId = documentId;
+			selectedChild.objectId = id.value;
+			selectedChild.playSession = playSession;
+			if (std::none_of(children.begin(), children.end(), [&](const auto& existing)
+			                 { return existing.SameIdentity(selectedChild); }))
+			{
+				children.push_back(std::move(selectedChild));
+			}
+		}
+	}
+	if (!selection.SelectEntries(std::move(children)))
+	{
+		return Result<void>::Failure("The current selection cannot be changed yet");
+	}
+	selected = selection.PrimaryEntry() ? selection.PrimaryEntry()->objectId : ResourceId{};
+	return {};
+}
+
+Result<void> EditorHierarchy::SelectChildren(const PrefabAsset& asset, EditorSelectionContext& selection,
+                                             ResourceId documentId)
+{
+	if (selection.entries.empty() || !asset.Root())
+	{
+		return Result<void>::Failure("Select one or more GameObjects in the Prefab Hierarchy first");
+	}
+	Vector<EditorSelectionEntry> children;
+	for (const auto& entry : selection.entries)
+	{
+		if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId || entry.playSession ||
+		    entry.IsMissing())
+		{
+			return Result<void>::Failure("Select GameObjects in the active Prefab Hierarchy first");
+		}
+		GameObject::Ptr parent;
+		std::function<void(const GameObject::Ptr&)> find = [&](const GameObject::Ptr& object)
+		{
+			if (!object || parent)
+			{
+				return;
+			}
+			if (object->Id() == entry.objectId)
+			{
+				parent = object;
+				return;
+			}
+			for (const auto& child : object->Children())
+			{
+				find(child);
+			}
+		};
+		find(asset.Root());
+		if (!parent)
+		{
+			return Result<void>::Failure("A selected GameObject no longer exists in the Prefab");
+		}
+		for (const auto& child : parent->Children())
+		{
+			EditorSelectionEntry selectedChild;
+			selectedChild.kind = EditorSelectionKind::GameObject;
+			selectedChild.documentId = documentId;
+			selectedChild.objectId = child->Id();
+			if (std::none_of(children.begin(), children.end(), [&](const auto& existing)
+			                 { return existing.SameIdentity(selectedChild); }))
+			{
+				children.push_back(std::move(selectedChild));
+			}
+		}
+	}
+	if (!selection.SelectEntries(std::move(children)))
+	{
+		return Result<void>::Failure("The current selection cannot be changed yet");
+	}
+	selected = selection.PrimaryEntry() ? selection.PrimaryEntry()->objectId : ResourceId{};
+	return {};
+}
+
+Result<void> EditorHierarchy::InvertSelection(const Scene& scene, EditorSelectionContext& selection,
+                                              ResourceId documentId, bool playSession)
+{
+	Vector<EditorSelectionEntry> inverted;
+	std::function<Result<void>(const GameObject::Ptr&)> visit = [&](const GameObject::Ptr& object) -> Result<void>
+	{
+		if (!object)
+		{
+			return {};
+		}
+		auto id = scene.PersistentId(object);
+		if (!id)
+		{
+			return Result<void>::Failure(id.error);
+		}
+		EditorSelectionEntry entry;
+		entry.kind = EditorSelectionKind::GameObject;
+		entry.documentId = documentId;
+		entry.objectId = id.value;
+		entry.playSession = playSession;
+		if (!selection.Contains(entry))
+		{
+			inverted.push_back(entry);
+		}
+		for (const auto& child : object->Children())
+		{
+			auto visited = visit(child);
+			if (!visited)
+			{
+				return visited;
+			}
+		}
+		return {};
+	};
+	for (const auto& root : scene.RootGameObjects())
+	{
+		auto visited = visit(root);
+		if (!visited)
+		{
+			return visited;
+		}
+	}
+	if (!selection.SelectEntries(std::move(inverted)))
+	{
+		return Result<void>::Failure("The current selection cannot be changed yet");
+	}
+	selected = selection.PrimaryEntry() ? selection.PrimaryEntry()->objectId : ResourceId{};
+	return {};
+}
+
+Result<void> EditorHierarchy::InvertSelection(const PrefabAsset& asset, EditorSelectionContext& selection,
+                                              ResourceId documentId)
+{
+	if (!asset.Root())
+	{
+		return Result<void>::Failure("The active Prefab has no root GameObject");
+	}
+	Vector<EditorSelectionEntry> inverted;
+	std::function<void(const GameObject::Ptr&)> visit = [&](const GameObject::Ptr& object)
+	{
+		if (!object)
+		{
+			return;
+		}
+		EditorSelectionEntry entry;
+		entry.kind = EditorSelectionKind::GameObject;
+		entry.documentId = documentId;
+		entry.objectId = object->Id();
+		if (!selection.Contains(entry))
+		{
+			inverted.push_back(entry);
+		}
+		for (const auto& child : object->Children())
+		{
+			visit(child);
+		}
+	};
+	visit(asset.Root());
+	if (!selection.SelectEntries(std::move(inverted)))
+	{
+		return Result<void>::Failure("The current selection cannot be changed yet");
+	}
+	selected = selection.PrimaryEntry() ? selection.PrimaryEntry()->objectId : ResourceId{};
 	return {};
 }
 
@@ -618,6 +1308,313 @@ void EditorHierarchy::ClearSelection()
 {
 	selected = {};
 	pendingSelectionClick.Cancel();
+}
+
+bool EditorHierarchy::SceneObjectVisible(ResourceId id) const
+{
+	const auto found = std::find_if(sceneVisibilityOverrides.begin(), sceneVisibilityOverrides.end(),
+	                                [&](const auto& entry) { return entry.first == id; });
+	return found == sceneVisibilityOverrides.end() || found->second;
+}
+
+bool EditorHierarchy::SceneObjectPickable(ResourceId id) const
+{
+	const auto found = std::find_if(scenePickabilityOverrides.begin(), scenePickabilityOverrides.end(),
+	                                [&](const auto& entry) { return entry.first == id; });
+	return found == scenePickabilityOverrides.end() || found->second;
+}
+
+void EditorHierarchy::SetDefaultParent(ResourceId documentId, ResourceId objectId)
+{
+	defaultParentDocument = documentId;
+	defaultParent = objectId;
+}
+
+void EditorHierarchy::ClearDefaultParent()
+{
+	defaultParent = {};
+	defaultParentDocument = {};
+}
+
+ResourceId EditorHierarchy::DefaultParent(const Scene& scene, ResourceId documentId) const
+{
+	if (!defaultParent || defaultParentDocument != documentId || !scene.GameObjectById(defaultParent))
+	{
+		return {};
+	}
+	return defaultParent;
+}
+
+void EditorHierarchy::ToggleSceneObjectVisibility(Scene& scene, const GameObject::Ptr& object, bool onlyThisObject)
+{
+	ToggleSceneObjectsVisibility(scene, Vector<GameObject::Ptr>{object}, onlyThisObject);
+}
+
+void EditorHierarchy::ToggleSceneObjectsVisibility(Scene& scene, const Vector<GameObject::Ptr>& objects,
+                                                   bool onlyThisObject)
+{
+	Vector<ResourceId> affected;
+	const auto addId = [&](ResourceId id)
+	{
+		if (id && std::find(affected.begin(), affected.end(), id) == affected.end())
+		{
+			affected.push_back(id);
+		}
+	};
+	std::function<void(const GameObject::Ptr&)> appendTree = [&](const GameObject::Ptr& object)
+	{
+		if (!object)
+		{
+			return;
+		}
+		auto id = scene.PersistentId(object);
+		if (id)
+		{
+			addId(id.value);
+		}
+		if (onlyThisObject)
+		{
+			return;
+		}
+		auto children = scene.ChildrenOf(object);
+		if (children)
+		{
+			for (const auto& child : children.value)
+			{
+				appendTree(child);
+			}
+		}
+	};
+	for (const auto& object : objects)
+	{
+		appendTree(object);
+	}
+	if (affected.empty())
+	{
+		return;
+	}
+	const bool allVisible =
+	    std::all_of(affected.begin(), affected.end(), [&](ResourceId id) { return SceneObjectVisible(id); });
+	const bool visible = !allVisible;
+	for (const ResourceId id : affected)
+	{
+		const auto found = std::find_if(sceneVisibilityOverrides.begin(), sceneVisibilityOverrides.end(),
+		                                [&](const auto& entry) { return entry.first == id; });
+		if (found == sceneVisibilityOverrides.end())
+		{
+			sceneVisibilityOverrides.emplace_back(id, visible);
+		}
+		else
+		{
+			found->second = visible;
+		}
+	}
+	++sceneViewOverridesRevision;
+}
+
+void EditorHierarchy::ToggleSceneObjectPickability(Scene& scene, const GameObject::Ptr& object, bool onlyThisObject)
+{
+	ToggleSceneObjectsPickability(scene, Vector<GameObject::Ptr>{object}, onlyThisObject);
+}
+
+void EditorHierarchy::ToggleSceneObjectsPickability(Scene& scene, const Vector<GameObject::Ptr>& objects,
+                                                    bool onlyThisObject)
+{
+	Vector<ResourceId> affected;
+	const auto addId = [&](ResourceId id)
+	{
+		if (id && std::find(affected.begin(), affected.end(), id) == affected.end())
+		{
+			affected.push_back(id);
+		}
+	};
+	std::function<void(const GameObject::Ptr&)> appendTree = [&](const GameObject::Ptr& object)
+	{
+		if (!object)
+		{
+			return;
+		}
+		auto id = scene.PersistentId(object);
+		if (id)
+		{
+			addId(id.value);
+		}
+		if (onlyThisObject)
+		{
+			return;
+		}
+		auto children = scene.ChildrenOf(object);
+		if (children)
+		{
+			for (const auto& child : children.value)
+			{
+				appendTree(child);
+			}
+		}
+	};
+	for (const auto& object : objects)
+	{
+		appendTree(object);
+	}
+	if (affected.empty())
+	{
+		return;
+	}
+	const bool allPickable =
+	    std::all_of(affected.begin(), affected.end(), [&](ResourceId id) { return SceneObjectPickable(id); });
+	const bool pickable = !allPickable;
+	for (const ResourceId id : affected)
+	{
+		const auto found = std::find_if(scenePickabilityOverrides.begin(), scenePickabilityOverrides.end(),
+		                                [&](const auto& entry) { return entry.first == id; });
+		if (found == scenePickabilityOverrides.end())
+		{
+			scenePickabilityOverrides.emplace_back(id, pickable);
+		}
+		else
+		{
+			found->second = pickable;
+		}
+	}
+	++sceneViewOverridesRevision;
+}
+
+Vector<ResourceId> EditorHierarchy::SceneVisibilityExclusions(const Scene& scene) const
+{
+	Vector<ResourceId> excluded;
+	std::function<void(const GameObject::Ptr&)> collect = [&](const GameObject::Ptr& object)
+	{
+		if (!object)
+		{
+			return;
+		}
+		auto id = scene.PersistentId(object);
+		if (id && !SceneObjectVisible(id.value))
+		{
+			excluded.push_back(id.value);
+		}
+		auto children = scene.ChildrenOf(object);
+		if (children)
+		{
+			for (const auto& child : children.value)
+			{
+				collect(child);
+			}
+		}
+	};
+	for (const auto& root : scene.RootGameObjects())
+	{
+		collect(root);
+	}
+	return excluded;
+}
+
+String EditorHierarchy::SerializeSceneViewOverrides(const Scene& scene) const
+{
+	Vector<ResourceId> sceneIds;
+	std::function<void(const GameObject::Ptr&)> collect = [&](const GameObject::Ptr& object)
+	{
+		if (!object)
+		{
+			return;
+		}
+		const auto id = scene.PersistentId(object);
+		if (id)
+		{
+			sceneIds.push_back(id.value);
+		}
+		const auto children = scene.ChildrenOf(object);
+		if (children)
+		{
+			for (const auto& child : children.value)
+			{
+				collect(child);
+			}
+		}
+	};
+	for (const auto& root : scene.RootGameObjects())
+	{
+		collect(root);
+	}
+
+	nlohmann::json json = {
+	    {"version", 1}, {"visibility", nlohmann::json::array()}, {"pickability", nlohmann::json::array()}};
+	for (const auto& entry : sceneVisibilityOverrides)
+	{
+		if (std::find(sceneIds.begin(), sceneIds.end(), entry.first) != sceneIds.end() && !entry.second)
+		{
+			json["visibility"].push_back(ToStdString(entry.first.ToString()));
+		}
+	}
+	for (const auto& entry : scenePickabilityOverrides)
+	{
+		if (std::find(sceneIds.begin(), sceneIds.end(), entry.first) != sceneIds.end() && !entry.second)
+		{
+			json["pickability"].push_back(ToStdString(entry.first.ToString()));
+		}
+	}
+	return ToUrsaString(json.dump(2));
+}
+
+Result<void> EditorHierarchy::RestoreSceneViewOverrides(Scene& scene, const String& text)
+{
+	try
+	{
+		const auto json = nlohmann::json::parse(ToStdString(text));
+		if (json.at("version").get<int>() != 1 || !json.at("visibility").is_array() ||
+		    !json.at("pickability").is_array())
+		{
+			return Result<void>::Failure("Unsupported Scene view state version");
+		}
+		Vector<ResourceId> sceneIds;
+		std::function<void(const GameObject::Ptr&)> collect = [&](const GameObject::Ptr& object)
+		{
+			if (!object)
+			{
+				return;
+			}
+			const auto id = scene.PersistentId(object);
+			if (id)
+			{
+				sceneIds.push_back(id.value);
+			}
+			const auto children = scene.ChildrenOf(object);
+			if (children)
+			{
+				for (const auto& child : children.value)
+				{
+					collect(child);
+				}
+			}
+		};
+		for (const auto& root : scene.RootGameObjects())
+		{
+			collect(root);
+		}
+
+		auto restore = [&](const nlohmann::json& values, auto& overrides)
+		{
+			overrides.erase(
+			    std::remove_if(overrides.begin(), overrides.end(), [&](const auto& entry)
+			                   { return std::find(sceneIds.begin(), sceneIds.end(), entry.first) != sceneIds.end(); }),
+			    overrides.end());
+			for (const auto& value : values)
+			{
+				const auto id = ResourceId::Parse(ToUrsaString(value.get<std::string>()));
+				if (id && std::find(sceneIds.begin(), sceneIds.end(), id.value) != sceneIds.end())
+				{
+					overrides.emplace_back(id.value, false);
+				}
+			}
+		};
+		restore(json.at("visibility"), sceneVisibilityOverrides);
+		restore(json.at("pickability"), scenePickabilityOverrides);
+		return {};
+	}
+	catch (const std::exception& error)
+	{
+		return Result<void>::Failure(String("Cannot parse Scene view state: ") + ToUrsaString(error.what()));
+	}
 }
 
 Result<GameObject::Ptr> EditorHierarchy::SelectedGameObject(const Scene& scene) const
@@ -669,6 +1666,27 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		return Result<bool>::Failure("PrefabAsset has no root GameObject");
 	}
 	ImGui::Begin("Hierarchy", open);
+	DrawHierarchySearchField(searchText);
+	const String currentSearch(searchText.data());
+	const bool typeOnly = currentSearch.size() > 2 &&
+	                      (currentSearch.compare(0, 2, "t:") == 0 || currentSearch.compare(0, 2, "T:") == 0);
+	const String filterText = typeOnly ? currentSearch.substr(2)
+	                                   : (currentSearch == "t:" || currentSearch == "T:" ? String{} : currentSearch);
+	ImGuiTextFilter hierarchyFilter(filterText.c_str());
+	const bool filtering = !filterText.empty();
+	const bool expandFilteredBranches =
+	    filtering && (currentSearch != previousSearchText || documentId != previousSearchDocument);
+	previousSearchText = currentSearch;
+	previousSearchDocument = documentId;
+	Map<String, bool> searchMatches;
+	Map<String, bool> directMatches;
+	if (filtering)
+	{
+		BuildPrefabSearchMatches(asset.Root(), hierarchyFilter, typeOnly, searchMatches, directMatches);
+	}
+	directSearchMatches = std::move(directMatches);
+	directSearchQuery = currentSearch;
+	directSearchDocument = documentId;
 	if (!ImGui::GetDragDropPayload())
 	{
 		dragHoverTarget = {};
@@ -680,18 +1698,117 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	pendingClickHovered = false;
 	pointerOverHierarchyRow = false;
 	Vector<EditorSelectionEntry> visibleRows;
-	AppendVisibleRows(asset.Root(), documentId, visibleRows, "##gameObject");
+	AppendVisibleRows(asset.Root(), documentId, visibleRows, "##gameObject", searchMatches, filtering,
+	                  expandFilteredBranches);
+	visibleSelectionRows = visibleRows;
+	if (selection && !visibleRows.empty() &&
+	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) && selection->SelectEntries(visibleRows))
+	{
+		SetLegacySelected(selection, selected);
+	}
+	const ImGuiIO& hierarchyInput = ImGui::GetIO();
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !hierarchyInput.WantTextInput)
+	{
+		if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, false))
+		{
+			NavigateHierarchySelection(visibleRows, selection, selected, 1, hierarchyInput.KeyShift,
+			                           keyboardFocusTarget);
+		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false))
+		{
+			NavigateHierarchySelection(visibleRows, selection, selected, -1, hierarchyInput.KeyShift,
+			                           keyboardFocusTarget);
+		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false))
+		{
+			const bool expand = ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
+			const auto* primary = selection ? selection->PrimaryEntry() : nullptr;
+			const ResourceId activeId =
+			    primary && primary->kind == EditorSelectionKind::GameObject && primary->documentId == documentId
+			        ? primary->objectId
+			        : selected;
+			std::function<GameObject::Ptr(const GameObject::Ptr&)> findObject =
+			    [&](const GameObject::Ptr& current) -> GameObject::Ptr
+			{
+				if (!current)
+				{
+					return {};
+				}
+				if (current->Id() == activeId)
+				{
+					return current;
+				}
+				for (const auto& child : current->Children())
+				{
+					auto match = findObject(child);
+					if (match)
+					{
+						return match;
+					}
+				}
+				return {};
+			};
+			auto object = findObject(asset.Root());
+			if (object)
+			{
+				const String key = object->Id().ToString();
+				const auto children = object->Children();
+				const bool nodeOpen = IsHierarchyNodeOpen(key, "##gameObject");
+				if (expand && !children.empty())
+				{
+					if (!nodeOpen && !filtering)
+					{
+						SetHierarchyNodeOpen(key, "##gameObject", true);
+					}
+					else
+					{
+						NavigateHierarchySelection(visibleRows, selection, selected, 1, false, keyboardFocusTarget);
+					}
+				}
+				else if (!expand)
+				{
+					if (!children.empty() && nodeOpen && !filtering)
+					{
+						SetHierarchyNodeOpen(key, "##gameObject", false);
+					}
+					else if (auto parent = object->Parent())
+					{
+						const EditorSelectionEntry parentEntry = GameObjectSelection(documentId, parent->Id());
+						SelectHierarchyEntry(parentEntry, visibleRows, selection, selected, false, keyboardFocusTarget);
+					}
+				}
+			}
+		}
+	}
 	std::function<void(const GameObject::Ptr&)> draw = [&](const GameObject::Ptr& object)
 	{
 		const ResourceId id = object->Id();
 		const String key = id.ToString();
+		if (filtering)
+		{
+			const auto match = searchMatches.find(key);
+			if (match == searchMatches.end() || !match->second)
+			{
+				return;
+			}
+		}
 		const auto name = object->Name();
 		const auto children = object->Children();
 		ImGui::PushID(key.c_str());
 		const String label = name && !name.value.empty() ? name.value : String("GameObject ") + key.substr(0, 8);
 		const bool hasContent = !children.empty();
-		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
-		if (!hasContent)
+		const bool hasVisibleChildren =
+		    filtering ? std::any_of(children.begin(), children.end(),
+		                            [&](const auto& child)
+		                            {
+			                            const auto match = searchMatches.find(child->Id().ToString());
+			                            return match != searchMatches.end() && match->second;
+		                            })
+		              : hasContent;
+		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow |
+		                           ImGuiTreeNodeFlags_OpenOnDoubleClick;
+		if (!hasVisibleChildren)
 		{
 			flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 		}
@@ -702,7 +1819,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		}
 		const auto active = object->ActiveInHierarchy();
 		const bool autoExpand = hasContent && dragHoverTarget == id && ImGui::GetTime() - dragHoverStartedAt >= 0.6;
-		if (autoExpand)
+		if (autoExpand || (filtering && expandFilteredBranches && hasVisibleChildren))
 		{
 			ImGui::SetNextItemOpen(true, ImGuiCond_Always);
 		}
@@ -712,7 +1829,13 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		}
 		const bool open =
 		    Icons::TreeNode("##gameObject", flags, Icons::ForObject(object, object == asset.Root()), label.c_str());
+		const bool recursivelyToggleDescendants = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
 		const ImRect rowRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+		if (keyboardFocusTarget == id)
+		{
+			ImGui::SetScrollHereY(0.5f);
+			keyboardFocusTarget = {};
+		}
 		pointerOverHierarchyRow |= ImGui::IsMouseHoveringRect(rowRect.Min, rowRect.Max, false);
 		if (active && !active.value)
 		{
@@ -788,11 +1911,19 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		{
 			for (const auto& child : children)
 			{
-				draw(child);
+				if (!filtering || searchMatches[child->Id().ToString()])
+				{
+					draw(child);
+				}
 			}
 			ImGui::TreePop();
 		}
 		ImGui::PopID();
+		if (recursivelyToggleDescendants)
+		{
+			SetHierarchyDescendantsOpen(object, "##gameObject", open,
+			                            [](const GameObject::Ptr& child) { return child->Id().ToString(); });
+		}
 	};
 	draw(asset.Root());
 	if (!pointerOverHierarchyRow)
@@ -847,6 +1978,32 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	return Result<bool>::Success(false);
 }
 
+void EditorHierarchy::RefreshSceneSearchMatches(const Scene& scene, ResourceId documentId)
+{
+	const String currentSearch(searchText.data());
+	if (currentSearch == directSearchQuery && documentId == directSearchDocument)
+	{
+		return;
+	}
+	const bool typeOnly = currentSearch.size() > 2 &&
+	                      (currentSearch.compare(0, 2, "t:") == 0 || currentSearch.compare(0, 2, "T:") == 0);
+	const String filterText = typeOnly ? currentSearch.substr(2)
+	                                   : (currentSearch == "t:" || currentSearch == "T:" ? String{} : currentSearch);
+	directSearchMatches.clear();
+	directSearchQuery = currentSearch;
+	directSearchDocument = documentId;
+	if (filterText.empty())
+	{
+		return;
+	}
+	const ImGuiTextFilter filter(filterText.c_str());
+	Map<String, bool> searchMatches;
+	for (const auto& root : scene.RootGameObjects())
+	{
+		BuildSceneSearchMatches(scene, root, filter, typeOnly, searchMatches, directSearchMatches);
+	}
+}
+
 void EditorHierarchy::DrawEmpty(bool* open)
 {
 	if (open && !*open)
@@ -864,9 +2021,19 @@ void EditorHierarchy::DrawEmpty(bool* open)
 Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
                                              const Vector<EditorSelectionEntry>& visibleRows,
                                              EditorSelectionContext* selection, ResourceId documentId, bool playSession,
-                                             UInt64 documentRevision, bool editableScene)
+                                             UInt64 documentRevision, bool editableScene,
+                                             const Map<String, bool>& searchMatches, bool filtering,
+                                             bool expandFilteredBranches)
 {
 	auto id = scene.PersistentId(node);
+	if (filtering && id)
+	{
+		const auto match = searchMatches.find(id.value.ToString());
+		if (match == searchMatches.end() || !match->second)
+		{
+			return Result<bool>::Success(false);
+		}
+	}
 	auto name = scene.GameObjectName(node);
 	auto enabled = scene.ActiveSelf(node);
 	auto children = scene.ChildrenOf(node);
@@ -877,9 +2044,26 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	const auto key = id.value.ToString();
 	ImGui::PushID(key.c_str());
 	String display = name.value.empty() ? String("Node ") + key.substr(0, 8) : name.value;
+	const bool isDefaultParent = DefaultParent(scene, documentId) == id.value;
+	if (isDefaultParent)
+	{
+		display += "  [Default Parent]";
+	}
 	const bool hasChildren = !children.value.empty();
-	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
-	if (!hasChildren)
+	const Vector<GameObject::Ptr> orderedChildren = OrderedGameObjects(children.value, hierarchyAlphabeticalSort);
+	const bool hasVisibleChildren =
+	    filtering ? std::any_of(orderedChildren.begin(), orderedChildren.end(),
+	                            [&](const auto& child)
+	                            {
+		                            const auto childId = scene.PersistentId(child);
+		                            const auto match =
+		                                childId ? searchMatches.find(childId.value.ToString()) : searchMatches.end();
+		                            return match != searchMatches.end() && match->second;
+	                            })
+	              : hasChildren;
+	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow |
+	                           ImGuiTreeNodeFlags_OpenOnDoubleClick;
+	if (!hasVisibleChildren)
 	{
 		flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 	}
@@ -890,7 +2074,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	}
 	const auto active = scene.ActiveInHierarchy(node);
 	const bool autoExpand = hasChildren && dragHoverTarget == id.value && ImGui::GetTime() - dragHoverStartedAt >= 0.6;
-	if (autoExpand)
+	if (autoExpand || (filtering && expandFilteredBranches && hasVisibleChildren))
 	{
 		ImGui::SetNextItemOpen(true, ImGuiCond_Always);
 	}
@@ -898,17 +2082,57 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	{
 		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.45f);
 	}
+	if (isDefaultParent)
+	{
+		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(125, 195, 255, 255));
+	}
 	const bool open = Icons::TreeNode(
 	    "##node", flags, Icons::ForObject(node, prefabObjects.find(key) != prefabObjects.end()), display.c_str());
+	if (isDefaultParent)
+	{
+		ImGui::PopStyleColor();
+	}
+	const bool recursivelyToggleDescendants = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
 	const ImRect rowRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+	if (keyboardFocusTarget == id.value)
+	{
+		ImGui::SetScrollHereY(0.5f);
+		keyboardFocusTarget = {};
+	}
+	const ImVec2 rowCursorAfterTree = ImGui::GetCursorScreenPos();
 	pointerOverHierarchyRow |= ImGui::IsMouseHoveringRect(rowRect.Min, rowRect.Max, false);
-	const bool rightClicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+	const bool rowClicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+	const bool rowRightClicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
 	const bool rowHovered = ImGui::IsItemHovered();
+	const bool rowLabelDoubleClicked =
+	    rowHovered && ImGui::GetIO().MousePos.x >= rowRect.Min.x + ImGui::GetTreeNodeToLabelSpacing() &&
+	    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 	if (active && !active.value)
 	{
 		ImGui::PopStyleVar();
 	}
-	if (ImGui::IsItemClicked())
+	const bool visibleInScene = SceneObjectVisible(id.value);
+	const bool pickableInScene = SceneObjectPickable(id.value);
+	const bool showSceneControls = rowHovered || !visibleInScene || !pickableInScene;
+	bool sceneControlHovered = false;
+	if (showSceneControls)
+	{
+		const ImRect visibilityRect = SceneRowControlRect(rowRect, 0);
+		const ImRect pickabilityRect = SceneRowControlRect(rowRect, 1);
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		sceneControlHovered = visibilityRect.Contains(mouse) || pickabilityRect.Contains(mouse);
+		if (DrawSceneRowControl("SceneVisibility", visibilityRect, true, visibleInScene, "Toggle Scene visibility"))
+		{
+			ToggleSceneObjectVisibility(scene, node, ImGui::GetIO().KeyAlt);
+		}
+		if (DrawSceneRowControl("ScenePickability", pickabilityRect, false, pickableInScene,
+		                        "Toggle Scene pickability"))
+		{
+			ToggleSceneObjectPickability(scene, node, ImGui::GetIO().KeyAlt);
+		}
+		ImGui::SetCursorScreenPos(rowCursorAfterTree);
+	}
+	if (rowClicked && !sceneControlHovered)
 	{
 		if (selection)
 		{
@@ -920,7 +2144,11 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			selected = id.value;
 		}
 	}
-	if (ImGui::BeginDragDropSource())
+	if (rowLabelDoubleClicked && !sceneControlHovered)
+	{
+		focusSelectionRequested = true;
+	}
+	if (!sceneControlHovered && ImGui::BeginDragDropSource())
 	{
 		const auto drag = selection ? BeginEditorDragSession(*selection, entry) : BeginEditorDragSession({entry}, 0);
 		if (drag)
@@ -978,7 +2206,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		                      : ApplyHierarchyDrop(scene, drag, targetId, zone, documentId);
 		    changed |= static_cast<bool>(result);
 		    commandDiagnostic = result ? String{} : result.error;
-	    });
+	    }, !hierarchyAlphabeticalSort);
 	if (dropZone == HierarchyDropZone::Into && hasChildren && ImGui::GetDragDropPayload())
 	{
 		if (dragHoverTarget != id.value)
@@ -991,7 +2219,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	{
 		dragHoverTarget = {};
 	}
-	if (rightClicked)
+	if (rowRightClicked && !sceneControlHovered)
 	{
 		bool contextSelectionAccepted = true;
 		if (selection && !selection->Contains(entry))
@@ -1059,6 +2287,13 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			                   {
 				                   selected = identity.value;
 			                   }
+			                   if (renameNewObjects)
+			                   {
+				                   renameTarget = identity.value;
+				                   std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
+				                   std::copy_n("GameObject", 10, renameBuffer.data());
+				                   renamePopupRequested = true;
+			                   }
 			                   return Result<void>{};
 		                   }});
 		commands.Register(
@@ -1114,7 +2349,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			                   std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
 			                   std::copy_n(name.value.data(), std::min(name.value.size(), renameBuffer.size() - 1),
 			                               renameBuffer.data());
-			                   ImGui::OpenPopup("Rename GameObject");
+			                   renamePopupRequested = true;
 			                   return Result<void>{};
 		                   }});
 		commands.Register(
@@ -1155,6 +2390,39 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			auto executed = commands.Execute("hierarchy.create-empty-child", *contextMenuTarget, current);
 			changed = static_cast<bool>(executed);
 		}
+		if (Icons::MenuItem("Copy", "Ctrl+C", false, canCopySelection && static_cast<bool>(copySelectionAction)))
+		{
+			auto copied = copySelectionAction();
+			commandDiagnostic = copied ? String{} : copied.error;
+		}
+		if (Icons::MenuItem("Cut", "Ctrl+X", false, canCopySelection && static_cast<bool>(cutSelectionAction)))
+		{
+			auto cut = cutSelectionAction();
+			commandDiagnostic = cut ? String{} : cut.error;
+			changed |= static_cast<bool>(cut);
+		}
+		if (Icons::MenuItem("Paste as Child", "Ctrl+Shift+V", false,
+		                    canPasteAsChild && static_cast<bool>(pasteAsChildAction)))
+		{
+			auto pasted = pasteAsChildAction();
+			commandDiagnostic = pasted ? String{} : pasted.error;
+			changed |= static_cast<bool>(pasted);
+		}
+		if (editableScene)
+		{
+			const ResourceId currentDefaultParent = DefaultParent(scene, documentId);
+			if (currentDefaultParent == id.value)
+			{
+				if (Icons::MenuItem("Clear Default Parent"))
+				{
+					ClearDefaultParent();
+				}
+			}
+			else if (Icons::MenuItem("Set as Default Parent"))
+			{
+				SetDefaultParent(documentId, id.value);
+			}
+		}
 		const auto canDuplicate = contextMenuTarget
 		                              ? commands.CanExecute("hierarchy.duplicate", *contextMenuTarget, current)
 		                              : Result<void>::Failure("The hierarchy menu target is unavailable");
@@ -1162,6 +2430,55 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		{
 			auto duplicated = commands.Execute("hierarchy.duplicate", *contextMenuTarget, current);
 			changed = static_cast<bool>(duplicated);
+		}
+		commands.Register({"hierarchy.create-empty-parent",
+		                   "Create Empty Parent",
+		                   "Ctrl+Shift+G",
+		                   [editableScene, documentId](const EditorCommandContext& context)
+		                   {
+			                   return editableScene && !context.selection.entries.empty() &&
+				                              std::all_of(context.selection.entries.begin(), context.selection.entries.end(),
+				                                          [documentId](const EditorSelectionEntry& item)
+				                                          {
+					                                          return item.kind == EditorSelectionKind::GameObject &&
+					                                                 item.documentId == documentId && !item.playSession &&
+					                                                 !item.IsMissing();
+				                                          })
+			                   ? Result<void>{}
+			                   : Result<void>::Failure("Select editable GameObjects to create a parent");
+		                   },
+		                   [&scene, selection, documentId, this](const EditorCommandContext& context)
+		                   {
+			                   auto created = CreateEmptyParent(scene, context.selection.entries, documentId);
+			                   if (!created)
+			                   {
+				                   return Result<void>::Failure(created.error);
+			                   }
+			                   if (selection)
+			                   {
+				                   selection->SelectGameObject(documentId, created.value);
+				                   SetLegacySelected(selection, selected);
+			                   }
+			                   else
+			                   {
+				                   selected = created.value;
+			                   }
+			                   if (renameNewObjects)
+			                   {
+				                   renameTarget = created.value;
+				                   std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
+				                   std::copy_n("GameObject", 10, renameBuffer.data());
+				                   renamePopupRequested = true;
+			                   }
+			                   return Result<void>{};
+	                   }});
+		const auto canCreateParent = contextMenuTarget
+		                                 ? commands.CanExecute("hierarchy.create-empty-parent", *contextMenuTarget, current)
+		                                 : Result<void>::Failure("The hierarchy menu target is unavailable");
+		if (Icons::MenuItem("Create Empty Parent", "Ctrl+Shift+G", false, static_cast<bool>(canCreateParent)))
+		{
+			auto created = commands.Execute("hierarchy.create-empty-parent", *contextMenuTarget, current);
+			changed = static_cast<bool>(created);
 		}
 		const auto canRename = contextMenuTarget ? commands.CanExecute("hierarchy.rename", *contextMenuTarget, current)
 		                                         : Result<void>::Failure("The hierarchy menu target is unavailable");
@@ -1181,12 +2498,12 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	{
 		pendingClickHovered = true;
 	}
-	if (open && hasChildren)
+	if (open && hasVisibleChildren)
 	{
-		for (GameObject::Ptr child : children.value)
+		for (GameObject::Ptr child : orderedChildren)
 		{
 			auto drawn = DrawGameObject(scene, child, visibleRows, selection, documentId, playSession, documentRevision,
-			                            editableScene);
+			                            editableScene, searchMatches, filtering, expandFilteredBranches);
 			if (!drawn)
 			{
 				ImGui::TreePop();
@@ -1198,21 +2515,64 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		ImGui::TreePop();
 	}
 	ImGui::PopID();
+	if (recursivelyToggleDescendants)
+	{
+		SetHierarchyDescendantsOpen(node, "##node", open,
+		                            [&scene](const GameObject::Ptr& child)
+		                            {
+			                            const auto childId = scene.PersistentId(child);
+			                            return childId ? childId.value.ToString() : child->Id().ToString();
+		                            });
+	}
 	return Result<bool>::Success(changed);
 }
 
 Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneResource* linked,
                                    EditorSelectionContext* selection, ResourceId documentId, bool playSession,
                                    UInt64 documentRevision, DuplicateObjectsAction duplicateObjects,
-                                   DeleteObjectsAction deleteObjects, AssetDropAction assetDrop)
+                                   DeleteObjectsAction deleteObjects, AssetDropAction assetDrop, String sceneName,
+                                   VirtualFileSystem* userFiles, bool copySelectionAvailable,
+                                   bool pasteAsChildAvailable, CopySelectionAction copyAction,
+                                   CutSelectionAction cutAction, PasteAsChildAction pasteAction)
 {
 	if (open && !*open)
 	{
 		return Result<bool>::Success(false);
 	}
+	if (!hierarchySettingsLoaded && userFiles)
+	{
+		hierarchySettingsLoaded = true;
+		auto path = VirtualPath::Parse("user:Settings/Hierarchy.json");
+		if (path)
+		{
+			auto text = userFiles->ReadText(path.value);
+			if (text)
+			{
+				try
+				{
+					const auto json = nlohmann::json::parse(ToStdString(text.value));
+					if (json.value("version", 0) == 1)
+					{
+						renameNewObjects = json.value("renameNewObjects", true);
+						hierarchyAlphabeticalSort = json.value("alphabeticalSort", false);
+					}
+				}
+				catch (const std::exception&)
+				{
+					commandDiagnostic = "Cannot parse Hierarchy settings";
+				}
+			}
+		}
+	}
+	renamePopupRequested = false;
 	duplicateObjectsAction = std::move(duplicateObjects);
 	deleteObjectsAction = std::move(deleteObjects);
 	assetDropAction = std::move(assetDrop);
+	canCopySelection = copySelectionAvailable;
+	canPasteAsChild = pasteAsChildAvailable;
+	copySelectionAction = std::move(copyAction);
+	cutSelectionAction = std::move(cutAction);
+	pasteAsChildAction = std::move(pasteAction);
 	pendingDeleteIds.clear();
 	pendingDeletePrimary = {};
 	prefabObjects.clear();
@@ -1229,6 +2589,99 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		}
 	}
 	ImGui::Begin("Hierarchy", open);
+	const bool editableScene = linked == nullptr && !playSession;
+	bool createRootRequested = false;
+	bool createChildRequested = false;
+	if (Icons::Button("CreateRoot", Icons::Icon::Add, "Create"))
+	{
+		ImGui::OpenPopup("HierarchyCreateRoot");
+	}
+	if (ImGui::BeginPopup("HierarchyCreateRoot"))
+	{
+		createRootRequested = Icons::MenuItem("Create Empty", "Ctrl+Shift+N", false, editableScene);
+		const auto* primary = selection ? selection->PrimaryEntry() : nullptr;
+		const bool canCreateChild = editableScene && primary && primary->kind == EditorSelectionKind::GameObject &&
+		                            primary->documentId == documentId && primary->playSession == playSession &&
+		                            !primary->IsMissing();
+		createChildRequested = Icons::MenuItem("Create Empty Child", "Alt+Shift+N", false, canCreateChild);
+		ImGui::EndPopup();
+	}
+	Icons::SameLine();
+	DrawHierarchySearchField(searchText, 34.f);
+	Icons::SameLine();
+	if (Icons::SmallButton("..."))
+	{
+		ImGui::OpenPopup("HierarchyOptions");
+	}
+	if (ImGui::BeginPopup("HierarchyOptions"))
+	{
+		bool settingsChanged = ImGui::Checkbox("Rename New Objects", &renameNewObjects);
+		settingsChanged = ImGui::Checkbox("Alphabetical Sorting", &hierarchyAlphabeticalSort) || settingsChanged;
+		if (settingsChanged && userFiles)
+		{
+			auto path = VirtualPath::Parse("user:Settings/Hierarchy.json");
+			if (path)
+			{
+				const String text = ToUrsaString(nlohmann::json{{"version", 1},
+				                                               {"renameNewObjects", renameNewObjects},
+				                                               {"alphabeticalSort", hierarchyAlphabeticalSort}}
+				                                    .dump(2));
+				Vector<UInt8> bytes(text.begin(), text.end());
+				auto written = userFiles->WriteAtomic(path.value, bytes);
+				commandDiagnostic = written ? String{} : written.error;
+			}
+		}
+		ImGui::EndPopup();
+	}
+	const String currentSearch(searchText.data());
+	const bool typeOnly = currentSearch.size() > 2 &&
+	                      (currentSearch.compare(0, 2, "t:") == 0 || currentSearch.compare(0, 2, "T:") == 0);
+	const String filterText = typeOnly ? currentSearch.substr(2)
+	                                   : (currentSearch == "t:" || currentSearch == "T:" ? String{} : currentSearch);
+	ImGuiTextFilter hierarchyFilter(filterText.c_str());
+	const bool filtering = !filterText.empty();
+	const bool expandFilteredBranches =
+	    filtering && (currentSearch != previousSearchText || documentId != previousSearchDocument);
+	previousSearchText = currentSearch;
+	previousSearchDocument = documentId;
+	Map<String, bool> searchMatches;
+	Map<String, bool> directMatches;
+	if (filtering)
+	{
+		for (const auto& root : scene.RootGameObjects())
+		{
+			BuildSceneSearchMatches(scene, root, hierarchyFilter, typeOnly, searchMatches, directMatches);
+		}
+	}
+	directSearchMatches = std::move(directMatches);
+	directSearchQuery = currentSearch;
+	directSearchDocument = documentId;
+	const String groupKey = documentId.ToString();
+	if (sceneName.empty())
+	{
+		sceneName = "Scene";
+	}
+	const Size extension = sceneName.rfind('.');
+	if (extension != String::npos)
+	{
+		sceneName.resize(extension);
+	}
+	auto groupState = sceneGroupOpenByDocument.emplace(groupKey, true).first;
+	if (filtering)
+	{
+		ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+	}
+	ImGui::PushID(groupKey.c_str());
+	const bool sceneRootsOpen = Icons::TreeNode("##sceneGroup", ImGuiTreeNodeFlags_SpanAvailWidth |
+	                                                        ImGuiTreeNodeFlags_OpenOnArrow |
+	                                                        ImGuiTreeNodeFlags_OpenOnDoubleClick,
+	                                           Icons::Icon::Scene, sceneName.c_str());
+	ImGui::PopID();
+	if (ImGui::IsItemToggledOpen())
+	{
+		groupState->second = sceneRootsOpen;
+	}
+	const bool showSceneRoots = filtering || groupState->second;
 	if (!ImGui::GetDragDropPayload())
 	{
 		dragHoverTarget = {};
@@ -1240,22 +2693,238 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	pendingClickHovered = false;
 	pointerOverHierarchyRow = false;
 	Vector<EditorSelectionEntry> visibleRows;
-	for (const auto& root : scene.RootGameObjects())
+	if (showSceneRoots)
 	{
-		AppendVisibleRows(scene, root, documentId, visibleRows, "##node", playSession);
-	}
-	const bool editableScene = linked == nullptr && !playSession;
-	bool changed = false;
-	for (GameObject::Ptr root : scene.RootGameObjects())
-	{
-		auto drawn = DrawGameObject(scene, root, visibleRows, selection, documentId, playSession, documentRevision,
-		                            editableScene);
-		if (!drawn)
+		for (const auto& root : OrderedGameObjects(scene.RootGameObjects(), hierarchyAlphabeticalSort))
 		{
-			ImGui::End();
-			return drawn;
+			AppendVisibleRows(scene, root, documentId, visibleRows, "##node", playSession, searchMatches, filtering,
+			                  expandFilteredBranches, hierarchyAlphabeticalSort);
 		}
-		changed |= drawn.value;
+	}
+	visibleSelectionRows = visibleRows;
+	if (selection && !visibleRows.empty() &&
+	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) && selection->SelectEntries(visibleRows))
+	{
+		SetLegacySelected(selection, selected);
+	}
+	bool changed = false;
+	auto beginRename = [this](ResourceId id)
+	{
+		if (!renameNewObjects)
+		{
+			return;
+		}
+		renameTarget = id;
+		std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
+		std::copy_n("GameObject", 10, renameBuffer.data());
+		renamePopupRequested = true;
+	};
+	auto createEmptyRoot = [&]() -> Result<void>
+	{
+		if (!editableScene)
+		{
+			return Result<void>::Failure("The current hierarchy is read-only");
+		}
+		auto created = scene.CreateGameObject("GameObject");
+		if (!created)
+		{
+			return Result<void>::Failure(created.error);
+		}
+		auto identity = scene.PersistentId(created.value);
+		if (!identity)
+		{
+			scene.DestroyGameObject(created.value);
+			return Result<void>::Failure(identity.error);
+		}
+		if (selection)
+		{
+			selection->SelectGameObject(documentId, identity.value);
+			SetLegacySelected(selection, selected);
+		}
+		else
+		{
+			selected = identity.value;
+		}
+		beginRename(identity.value);
+		searchText.fill(0);
+		return {};
+	};
+	auto createEmptyChild = [&]() -> Result<void>
+	{
+		if (!editableScene || !selection)
+		{
+			return Result<void>::Failure("Create Empty Child requires an editable Scene selection");
+		}
+		const auto* primary = selection->PrimaryEntry();
+		if (!primary || primary->kind != EditorSelectionKind::GameObject || primary->documentId != documentId ||
+		    primary->playSession != playSession || primary->IsMissing())
+		{
+			return Result<void>::Failure("Select a GameObject to create an empty child");
+		}
+		auto parent = scene.GameObjectById(primary->objectId);
+		if (!parent)
+		{
+			return Result<void>::Failure(parent.error);
+		}
+		auto created = scene.CreateGameObject("GameObject", parent.value);
+		if (!created)
+		{
+			return Result<void>::Failure(created.error);
+		}
+		auto identity = scene.PersistentId(created.value);
+		if (!identity)
+		{
+			scene.DestroyGameObject(created.value);
+			return Result<void>::Failure(identity.error);
+		}
+		selection->SelectGameObject(documentId, identity.value);
+		SetLegacySelected(selection, selected);
+		beginRename(identity.value);
+		searchText.fill(0);
+		return {};
+	};
+	const ImGuiIO& hierarchyInput = ImGui::GetIO();
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !hierarchyInput.WantTextInput)
+	{
+		const bool toggleVisibility = !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
+		                              !hierarchyInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_H, false);
+		const bool togglePickability = !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
+		                               !hierarchyInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_L, false);
+		if ((toggleVisibility || togglePickability) && !playSession)
+		{
+			Vector<GameObject::Ptr> selectedObjects;
+			bool validSelection = selection && !selection->entries.empty();
+			if (validSelection)
+			{
+				for (const EditorSelectionEntry& entry : selection->entries)
+				{
+					if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId ||
+					    entry.playSession || entry.IsMissing())
+					{
+						validSelection = false;
+						break;
+					}
+					auto object = scene.GameObjectById(entry.objectId);
+					if (!object)
+					{
+						validSelection = false;
+						break;
+					}
+					selectedObjects.push_back(object.value);
+				}
+			}
+			else if (!selection && selected)
+			{
+				auto object = scene.GameObjectById(selected);
+				if (object)
+				{
+					selectedObjects.push_back(object.value);
+					validSelection = true;
+				}
+			}
+			if (validSelection && !selectedObjects.empty())
+			{
+				if (toggleVisibility)
+				{
+					ToggleSceneObjectsVisibility(scene, selectedObjects);
+				}
+				else
+				{
+					ToggleSceneObjectsPickability(scene, selectedObjects);
+				}
+				changed = true;
+			}
+		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, false))
+		{
+			NavigateHierarchySelection(visibleRows, selection, selected, 1, hierarchyInput.KeyShift,
+			                           keyboardFocusTarget);
+		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false))
+		{
+			NavigateHierarchySelection(visibleRows, selection, selected, -1, hierarchyInput.KeyShift,
+			                           keyboardFocusTarget);
+		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false))
+		{
+			const bool expand = ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
+			const auto* primary = selection ? selection->PrimaryEntry() : nullptr;
+			const ResourceId activeId = primary && primary->kind == EditorSelectionKind::GameObject &&
+			                                    primary->documentId == documentId && primary->playSession == playSession
+			                                ? primary->objectId
+			                                : selected;
+			auto object = scene.GameObjectById(activeId);
+			if (object)
+			{
+				auto persistentId = scene.PersistentId(object.value);
+				auto children = scene.ChildrenOf(object.value);
+				if (persistentId && children)
+				{
+					const String key = persistentId.value.ToString();
+					const bool nodeOpen = IsHierarchyNodeOpen(key, "##node");
+					if (expand && !children.value.empty())
+					{
+						if (!nodeOpen && !filtering)
+						{
+							SetHierarchyNodeOpen(key, "##node", true);
+						}
+						else
+						{
+							NavigateHierarchySelection(visibleRows, selection, selected, 1, false, keyboardFocusTarget);
+						}
+					}
+					else if (!expand)
+					{
+						if (!children.value.empty() && nodeOpen && !filtering)
+						{
+							SetHierarchyNodeOpen(key, "##node", false);
+						}
+						else
+						{
+							auto parent = scene.ParentOf(object.value);
+							auto parentId = parent && parent.value
+							                    ? scene.PersistentId(parent.value)
+							                    : Result<ResourceId>::Failure("GameObject has no parent");
+							if (parentId)
+							{
+								const auto parentEntry = GameObjectSelection(documentId, parentId.value, playSession);
+								SelectHierarchyEntry(parentEntry, visibleRows, selection, selected, false,
+								                     keyboardFocusTarget);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if (createRootRequested)
+	{
+		auto created = createEmptyRoot();
+		changed |= static_cast<bool>(created);
+		commandDiagnostic = created ? String{} : created.error;
+	}
+	else if (createChildRequested)
+	{
+		auto created = createEmptyChild();
+		changed |= static_cast<bool>(created);
+		commandDiagnostic = created ? String{} : created.error;
+	}
+	if (showSceneRoots)
+	{
+		for (GameObject::Ptr root : OrderedGameObjects(scene.RootGameObjects(), hierarchyAlphabeticalSort))
+		{
+			auto drawn =
+			    DrawGameObject(scene, root, visibleRows, selection, documentId, playSession, documentRevision,
+			                   editableScene, searchMatches, filtering && !createRootRequested && !createChildRequested,
+			                   expandFilteredBranches);
+			if (!drawn)
+			{
+				ImGui::End();
+				return drawn;
+			}
+			changed |= drawn.value;
+		}
 	}
 	if (!pointerOverHierarchyRow)
 	{
@@ -1297,9 +2966,27 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		pendingDeleteIds.clear();
 		pendingDeletePrimary = {};
 	}
+	if (selection && !selection->entries.empty() && !pointerOverHierarchyRow && !ImGui::IsAnyItemHovered() &&
+	    ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+	    ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload())
+	{
+		if (selection->SelectEntries({}))
+		{
+			SetLegacySelected(selection, selected);
+			ClearSelection();
+		}
+	}
 	if (!commandDiagnostic.empty())
 	{
 		ImGui::TextWrapped("%s", commandDiagnostic.c_str());
+	}
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	    ImGui::IsKeyPressed(ImGuiKey_F, false) && selection && selection->PrimaryEntry() &&
+	    selection->PrimaryEntry()->kind == EditorSelectionKind::GameObject &&
+	    selection->PrimaryEntry()->documentId == documentId &&
+	    selection->PrimaryEntry()->playSession == playSession && !selection->PrimaryEntry()->IsMissing())
+	{
+		focusSelectionRequested = true;
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    ImGui::IsKeyPressed(ImGuiKey_F2) && selection && selection->entries.size() == 1 && editableScene)
@@ -1318,9 +3005,22 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 					std::fill(renameBuffer.begin(), renameBuffer.end(), '\0');
 					std::copy_n(name.value.data(), std::min(name.value.size(), renameBuffer.size() - 1),
 					            renameBuffer.data());
-					ImGui::OpenPopup("Rename GameObject");
+					renamePopupRequested = true;
 				}
 			}
+		}
+	}
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	    ImGui::GetIO().KeyCtrl && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_G, false) &&
+	    selection && !selection->entries.empty() && editableScene)
+	{
+		auto created = CreateEmptyParent(scene, selection->entries, documentId);
+		commandDiagnostic = created ? String{} : created.error;
+		if (created)
+		{
+			selection->SelectGameObject(documentId, created.value);
+			SetLegacySelected(selection, selected);
+			changed = true;
 		}
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
@@ -1378,30 +3078,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		     {},
 		     [editableScene](const EditorCommandContext&)
 		     { return editableScene ? Result<void>{} : Result<void>::Failure("The current hierarchy is read-only"); },
-		     [&scene, selection, documentId, this](const EditorCommandContext&)
-		     {
-			     auto created = scene.CreateGameObject("GameObject");
-			     if (!created)
-			     {
-				     return Result<void>::Failure(created.error);
-			     }
-			     auto identity = scene.PersistentId(created.value);
-			     if (!identity)
-			     {
-				     scene.DestroyGameObject(created.value);
-				     return Result<void>::Failure(identity.error);
-			     }
-			     if (selection)
-			     {
-				     selection->SelectGameObject(documentId, identity.value);
-				     SetLegacySelected(selection, selected);
-			     }
-			     else
-			     {
-				     selected = identity.value;
-			     }
-			     return Result<void>{};
-		     }});
+		     [&createEmptyRoot](const EditorCommandContext&) { return createEmptyRoot(); }});
 		EditorSelectionContext emptySelection;
 		emptySelection.activeDocumentId = documentId;
 		emptySelection.revision = selection ? selection->revision : 0;
@@ -1417,11 +3094,20 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		}
 		ImGui::EndPopup();
 	}
+	if (renamePopupRequested)
+	{
+		ImGui::OpenPopup("Rename GameObject");
+		renamePopupRequested = false;
+	}
 	if (renameTarget && ImGui::BeginPopupModal("Rename GameObject", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 	{
 		ImGui::SetNextItemWidth(260.0f);
-		const bool submit =
-		    ImGui::InputText("Name", renameBuffer.data(), renameBuffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+		if (ImGui::IsWindowAppearing())
+		{
+			ImGui::SetKeyboardFocusHere();
+		}
+		const bool submit = ImGui::InputText("Name", renameBuffer.data(), renameBuffer.size(),
+		                                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
 		if (submit || ImGui::Button("Apply"))
 		{
 			auto target = scene.GameObjectById(renameTarget);

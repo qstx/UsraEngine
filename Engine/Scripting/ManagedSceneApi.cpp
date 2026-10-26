@@ -152,6 +152,15 @@ void ManagedSceneApi::SetRenderSceneOverride(Scene* source)
 	renderSceneOverride = source;
 }
 
+void ManagedSceneApi::SetRenderObjectExclusions(Vector<ResourceId> objectIds)
+{
+	if (activeRenderToken || ownerThread != std::this_thread::get_id())
+	{
+		throw std::runtime_error("Render object exclusions can only change between contexts on their owner thread");
+	}
+	renderObjectExclusions = std::move(objectIds);
+}
+
 void ManagedSceneApi::SetRenderWindow(Rhi::SwapchainPtr output)
 {
 	if (activeRenderToken || ownerThread != std::this_thread::get_id())

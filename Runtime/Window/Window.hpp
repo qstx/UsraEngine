@@ -189,6 +189,13 @@ public:
 
 	std::pair<Ursa::Float64, Ursa::Float64> CursorPosition() const;
 
+	void SetCursorCaptured(bool captured);
+
+	bool CursorCaptured() const
+	{
+		return cursorCaptured;
+	}
+
 	std::pair<Ursa::Float64, Ursa::Float64> DesktopCursorPosition() const;
 
 	std::pair<Ursa::Int32, Ursa::Int32> Position() const;
@@ -232,6 +239,7 @@ private:
 	void DispatchEvent(const WindowEvent& event);
 
 	void* handle{};
+	bool cursorCaptured = false;
 	Ursa::UInt64 nextSubscription = 1;
 	Vector<std::pair<Ursa::UInt64, WindowEventCallback>> subscriptions;
 };

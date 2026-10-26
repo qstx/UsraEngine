@@ -3,6 +3,7 @@
 #include <Scripting/Bindings/BindingHandles.hpp>
 #include <Scripting/Bindings/BindingMath.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
+#include <Math/Camera.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -46,9 +47,14 @@ Result<void> EditorServices::BeginPreview(B::BindingCall& call, UInt64 utility, 
 Result<void> EditorServices::SetPreviewCamera(B::BindingCall& call, UInt64 utility,
                                               const B::Wire::Value_Ursa_Editor_PreviewCamera& camera)
 {
-	Preview(call).SetCamera(utility, {B::ReadVector3(camera.F_Position), B::ReadVector3(camera.F_Target),
-	                                  B::ReadVector3(camera.F_Up), camera.F_FieldOfView * .01745329252f,
-	                                  camera.F_NearPlane, camera.F_FarPlane});
+	Camera native;
+	native.position = B::ReadVector3(camera.F_Position);
+	native.target = B::ReadVector3(camera.F_Target);
+	native.up = B::ReadVector3(camera.F_Up);
+	native.verticalFovRadians = camera.F_FieldOfView * .01745329252f;
+	native.nearPlane = camera.F_NearPlane;
+	native.farPlane = camera.F_FarPlane;
+	Preview(call).SetCamera(utility, native);
 	return {};
 }
 

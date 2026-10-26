@@ -45,6 +45,7 @@ struct LogRecord
 	String category;
 	String message;
 	LogContext context;
+	bool compilerMessage = false;
 };
 
 class Log final

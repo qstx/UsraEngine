@@ -12,6 +12,7 @@
 #include <Workspace/EditorDocuments.hpp>
 #include <Workspace/EditorSelectionContext.hpp>
 #include <Workspace/EditorDragSession.hpp>
+#include <Workspace/ProjectTagLayerSettings.hpp>
 #include <Assets/ProjectBrowserModel.hpp>
 #include <Assets/ProjectBrowserPanel.hpp>
 #include <Inspector/AssetInspectorPanel.hpp>
@@ -37,6 +38,11 @@
 namespace Ursa::Scripting
 {
 class DotNetHost;
+}
+
+namespace Ursa
+{
+class PrefabAsset;
 }
 
 namespace Ursa::Editor
@@ -278,6 +284,12 @@ private:
 	std::chrono::steady_clock::time_point nextAssetScan{};
 
 	void DrawMainMenuBar();
+	bool CanCopyGameObjectSelection() const;
+	bool CanPasteGameObjectSelection() const;
+	bool CanPasteGameObjectSelectionAsChild() const;
+	Result<void> CopyGameObjectSelection();
+	Result<void> CutGameObjectSelection();
+	Result<void> PasteGameObjectSelection(bool asChild);
 	void ResetEditorLayout();
 
 	void PumpScriptIde();
@@ -287,6 +299,7 @@ private:
 	void SetScriptEditorInput(const ScriptEditorConfig& config);
 
 	void DrawGraphicsSettings();
+	void DrawTagLayerSettings();
 
 	void DrawPlayToolbar(const EditorDocument* current);
 
@@ -302,7 +315,8 @@ private:
 
 	Result<void> RenderManagedViewport(Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
 	                                   std::optional<Rendering::CameraType> cameraFilter,
-	                                   std::optional<Rendering::CameraData> cameraOverride = {});
+	                                   std::optional<Rendering::CameraData> cameraOverride = {},
+	                                   Vector<ResourceId> excludedObjects = {});
 
 	Result<void> CreateProjectFolder(const String& requestedName = {});
 
@@ -344,6 +358,9 @@ private:
 	bool pendingSourceAsset = false;
 	VirtualPath pendingImporterOpen;
 	EditorSelectionContext selectionContext;
+	std::shared_ptr<Ursa::PrefabAsset> gameObjectClipboardSnapshot;
+	ResourceId gameObjectClipboardPrimary;
+	Vector<Mat4> gameObjectClipboardWorldTransforms;
 	EditorConsolePanel consolePanel;
 	std::unique_ptr<AssetDatabase> scriptAssetDatabase;
 	std::unique_ptr<ScriptBuildService> scriptBuildService;
@@ -399,6 +416,15 @@ private:
 	String graphicsSettingsProject;
 	AssetReference graphicsSettingsCandidate;
 	String graphicsSettingsDiagnostic;
+	bool showTagLayerSettings = false;
+	int requestedTagLayerSettingsTab = -1;
+	String tagLayerSettingsProject;
+	ProjectTagLayerSettings tagLayerSettings = ProjectTagLayerSettings::Defaults();
+	String tagLayerSettingsDiagnostic;
+	Ursa::Array<char, 128> tagInput{};
+	Ursa::Array<char, 128> tagEditInput{};
+	Ursa::Array<Ursa::Array<char, 65>, 32> layerEditInputs{};
+	int selectedTagIndex = 0;
 	String savedPanelVisibility;
 };
 } // namespace Ursa::Editor

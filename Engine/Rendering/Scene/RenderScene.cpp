@@ -164,6 +164,18 @@ Result<void> RenderScene::Capture(const Scene& scene, Float32 aspect, std::optio
 	}
 }
 
+void RenderScene::ExcludeObjects(const Vector<ResourceId>& objectIds)
+{
+	if (objectIds.empty())
+	{
+		return;
+	}
+	objects.erase(
+	    std::remove_if(objects.begin(), objects.end(), [&](const RenderObject& object)
+	                   { return std::find(objectIds.begin(), objectIds.end(), object.objectId) != objectIds.end(); }),
+	    objects.end());
+}
+
 Result<void> RenderScene::Collect(const Scene& scene, const GameObject::Ptr& object, Float32 aspect,
                                   const BuiltinShaderResolver& resolveBuiltin)
 {
