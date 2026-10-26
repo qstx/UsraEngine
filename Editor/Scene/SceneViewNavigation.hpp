@@ -10,6 +10,8 @@ void OrbitSceneView(Camera& camera, ViewportPoint mouseDelta);
 void PanSceneView(Camera& camera, ViewportPoint mouseDelta, Float32 viewportHeight);
 
 void ZoomSceneView(Camera& camera, Float32 wheelDelta, ViewportPoint mousePosition, ViewportPoint viewportSize);
+void ZoomSceneViewByDrag(Camera& camera, Float32 zoomDelta, Float32 startZoom, Float32 zoomSpeed,
+                         Float32& totalMotion);
 void ZoomSceneViewByWheel(Camera& camera, Float32 wheelDelta, ViewportPoint mousePosition, ViewportPoint viewportSize);
 
 void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint movement, Float32 verticalMovement,

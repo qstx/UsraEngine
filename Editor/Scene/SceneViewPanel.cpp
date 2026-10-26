@@ -3047,6 +3047,13 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							if (io.KeyAlt)
 							{
 								sceneNavigationGesture = SceneNavigationGesture::DragZoom;
+								const Vec3 offset = camera.position - camera.target;
+								const Float32 distance = std::sqrt(Dot(offset, offset));
+								sceneDragZoomStart = camera.orthographic
+								                         ? camera.orthographicSize * 0.5f
+								                         : distance * std::sin(camera.verticalFovRadians * 0.5f);
+								sceneDragZoomSpeed = std::max(std::abs(sceneDragZoomStart), 0.3f);
+								sceneDragZoomTotalMotion = 0.f;
 							}
 							else if (sceneView2DMode || sceneViewRotationLocked)
 							{
@@ -3102,10 +3109,20 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					}
 					else if (sceneNavigationGesture == SceneNavigationGesture::DragZoom)
 					{
-						const Float32 speed = io.KeyShift ? 3.f : 1.f;
-						ZoomSceneView(camera, -io.MouseDelta.y * 0.1f * speed,
-						              {layout.displayRect.width * 0.5f, layout.displayRect.height * 0.5f},
-						              {layout.displayRect.width, layout.displayRect.height});
+						const Float32 deltaX = -io.MouseDelta.x;
+						const Float32 deltaY = -io.MouseDelta.y;
+						const Float32 dominantDelta = std::max(std::abs(deltaX), std::abs(deltaY));
+						if (dominantDelta > 0.f && std::abs(std::abs(deltaX) - std::abs(deltaY)) / dominantDelta > 0.1f)
+						{
+							sceneZoomUseYSign = std::abs(deltaY) > std::abs(deltaX);
+						}
+						const Float32 signedAxisDelta = sceneZoomUseYSign ? deltaY : deltaX;
+						const Float32 signedDelta = (signedAxisDelta < 0.f ? -1.f : 1.f) *
+						                            std::sqrt(deltaX * deltaX + deltaY * deltaY);
+						const Float32 acceleration = io.KeyShift ? 4.f : 1.f;
+						const Float32 zoomSensitivity = io.KeyShift ? 9.f : 3.f;
+						ZoomSceneViewByDrag(camera, signedDelta * acceleration * zoomSensitivity, sceneDragZoomStart,
+						                    sceneDragZoomSpeed, sceneDragZoomTotalMotion);
 					}
 					else if (sceneNavigationGesture == SceneNavigationGesture::Flythrough)
 					{

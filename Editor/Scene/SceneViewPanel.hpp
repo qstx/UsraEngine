@@ -152,6 +152,10 @@ private:
 	Float32 sceneFlythroughSpeed = 10.f;
 	Float32 sceneFlythroughMinSpeed = 0.01f;
 	Float32 sceneFlythroughMaxSpeed = 99.f;
+	Float32 sceneDragZoomStart = 0.f;
+	Float32 sceneDragZoomSpeed = 0.3f;
+	Float32 sceneDragZoomTotalMotion = 0.f;
+	bool sceneZoomUseYSign = false;
 	Float32 sceneCameraFieldOfView = 45.f;
 	bool showSceneGizmos = true;
 	bool showSceneCameraGizmos = true;

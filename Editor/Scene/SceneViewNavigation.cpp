@@ -137,6 +137,41 @@ void ZoomSceneViewByWheel(Camera& camera, Float32 wheelDelta, ViewportPoint mous
 	ZoomSceneView(camera, -std::log(zoomRatio) / 0.12f, mousePosition, viewportSize);
 }
 
+void ZoomSceneViewByDrag(Camera& camera, Float32 zoomDelta, Float32 startZoom, Float32 zoomSpeed, Float32& totalMotion)
+{
+	if (!std::isfinite(zoomDelta) || !std::isfinite(startZoom) || !std::isfinite(zoomSpeed) || zoomSpeed <= 0.f ||
+	    !std::isfinite(totalMotion))
+	{
+		return;
+	}
+	if (camera.orthographic)
+	{
+		if (!std::isfinite(camera.orthographicSize) || camera.orthographicSize <= 0.f)
+		{
+			return;
+		}
+		const Float32 size =
+		    std::clamp(camera.orthographicSize * 0.5f * (1.f + zoomDelta * 0.001f), 0.0001f, MaximumDistance);
+		camera.orthographicSize = size * 2.f;
+		return;
+	}
+
+	const Vec3 offset = camera.position - camera.target;
+	const Float32 distance = Length(offset);
+	if (!std::isfinite(distance) || distance <= 0.f || !std::isfinite(camera.verticalFovRadians) ||
+	    camera.verticalFovRadians <= 0.f || camera.verticalFovRadians >= Pi)
+	{
+		return;
+	}
+	totalMotion += zoomDelta;
+	const Float32 size = distance * std::sin(camera.verticalFovRadians * 0.5f);
+	const Float32 nextSize =
+	    totalMotion < 0.f ? startZoom * (1.f + totalMotion * 0.001f) : size + zoomDelta * zoomSpeed * 0.003f;
+	const Float32 nextDistance = nextSize / std::sin(camera.verticalFovRadians * 0.5f);
+	const Float32 clampedDistance = std::clamp(nextDistance, MinimumDistance, MaximumDistance);
+	camera.position = Add(camera.target, Scale(offset, clampedDistance / distance));
+}
+
 void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint movement, Float32 verticalMovement,
                          Float32 deltaTime, Float32 speed, bool fast)
 {
