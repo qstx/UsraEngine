@@ -155,6 +155,7 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 		settings.showSceneGizmoLabels = json.value("showSceneGizmoLabels", true);
 		settings.sceneGizmo3DIcons = json.value("sceneGizmo3DIcons", true);
 		settings.sceneGizmoIconSize = json.value("sceneGizmoIconSize", 1.f);
+		settings.showSceneOrientationBackground = json.value("showSceneOrientationBackground", true);
 		if (!settings.width || !settings.height || !std::isfinite(settings.scale) || settings.scale <= 0 ||
 		    !std::isfinite(settings.pan.x) || !std::isfinite(settings.pan.y) || !std::isfinite(settings.snapMoveX) ||
 		    settings.snapMoveX <= 0.f || !std::isfinite(settings.snapMoveY) || settings.snapMoveY <= 0.f ||
@@ -224,6 +225,7 @@ String SerializeGameViewSettings(const GameViewSettingsState& settings)
 	json["showSceneGizmoLabels"] = settings.showSceneGizmoLabels;
 	json["sceneGizmo3DIcons"] = settings.sceneGizmo3DIcons;
 	json["sceneGizmoIconSize"] = settings.sceneGizmoIconSize;
+	json["showSceneOrientationBackground"] = settings.showSceneOrientationBackground;
 	return ToUrsaString(json.dump(2));
 }
 } // namespace Ursa::Editor

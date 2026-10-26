@@ -873,7 +873,7 @@ bool SetSceneView2DMode(Camera& camera, bool& twoDMode, bool enabled)
 }
 
 bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& twoDMode, bool& rotationLocked,
-                               bool& hovered)
+                               bool& showBackground, bool& settingsChanged, bool& hovered)
 {
 	const Float32 radius = 30.f;
 	const Float32 axisHitRadius = 9.f;
@@ -1043,6 +1043,13 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 	const Float32 centerDistance = distanceToMouse(center);
 	if (!twoDMode)
 	{
+		const ImVec2 gizmoMinimum{center.x - 42.f, center.y - 42.f};
+		const ImVec2 gizmoMaximum{center.x + 42.f, center.y + 42.f};
+		if (showBackground)
+		{
+			drawList->AddRectFilled(gizmoMinimum, gizmoMaximum, ImGui::GetColorU32(ImGuiCol_WindowBg, 0.28f), 5.f);
+			drawList->AddRect(gizmoMinimum, gizmoMaximum, ImGui::GetColorU32(ImGuiCol_Border, 0.5f), 5.f);
+		}
 		Vector<const AxisEnd*> depthSortedEnds;
 		depthSortedEnds.reserve(std::size(ends));
 		for (const AxisEnd& end : ends)
@@ -1161,6 +1168,11 @@ bool DrawSceneOrientationGizmo(Camera& camera, ImVec2 viewportMaximum, bool& two
 			toggleProjection();
 		}
 		ImGui::EndDisabled();
+		ImGui::Separator();
+		if (ImGui::MenuItem("Show background", nullptr, &showBackground))
+		{
+			settingsChanged = true;
+		}
 		ImGui::EndPopup();
 	}
 	if (!rotationLocked && orientationRect.Contains(mouse) && centerDistance <= centerHitRadius)
@@ -1462,6 +1474,7 @@ void SceneViewPanel::SaveProjectSettings(VirtualFileSystem& userFiles, const Str
 	settings.showSceneGizmoLabels = showSceneGizmoLabels;
 	settings.sceneGizmo3DIcons = sceneGizmo3DIcons;
 	settings.sceneGizmoIconSize = sceneGizmoIconSize;
+	settings.showSceneOrientationBackground = showSceneOrientationBackground;
 	const String text = SerializeGameViewSettings(settings);
 	auto written = userFiles.WriteAtomic(path.value, ToBytes(text));
 	diagnostic = written ? String{} : written.error;
@@ -1560,6 +1573,7 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 		showSceneGrid = true;
 		sceneGridSize = 1.f;
 		showSceneGizmos = true;
+		showSceneOrientationBackground = true;
 		diagnostic = settings.error;
 	}
 	else
@@ -1594,6 +1608,7 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			showSceneGrid = true;
 			sceneGridSize = 1.f;
 			showSceneGizmos = true;
+			showSceneOrientationBackground = true;
 			diagnostic = "Saved Game resolution exceeds supported limits; restored defaults.";
 		}
 		else
@@ -1632,6 +1647,7 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			showSceneGizmoLabels = saved.showSceneGizmoLabels;
 			sceneGizmo3DIcons = saved.sceneGizmo3DIcons;
 			sceneGizmoIconSize = saved.sceneGizmoIconSize;
+			showSceneOrientationBackground = saved.showSceneOrientationBackground;
 		}
 		if (!selectedCustomPreset.empty() &&
 		    std::none_of(customPresets.begin(), customPresets.end(),
@@ -2548,6 +2564,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				        {layout.displayRect.x + layout.displayRect.width - 8.f, layout.displayRect.y + 8.f},
 				        sceneView2DMode,
 				        sceneViewRotationLocked,
+				        showSceneOrientationBackground,
+				        settingsChanged,
 				        sceneOrientationHovered))
 				{
 					sceneViewLockedTarget = {};

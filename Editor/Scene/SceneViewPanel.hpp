@@ -149,6 +149,7 @@ private:
 	bool sceneView2DModePending = false;
 	bool sceneView2DModePendingTarget = false;
 	bool sceneViewRotationLocked = false;
+	bool showSceneOrientationBackground = true;
 	Float32 sceneFlythroughSpeed = 1.f;
 	Float32 sceneFlythroughMinSpeed = 0.01f;
 	Float32 sceneFlythroughMaxSpeed = 2.f;
