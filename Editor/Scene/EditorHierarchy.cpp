@@ -2052,7 +2052,10 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		}
 		const auto active = object->ActiveInHierarchy();
 		const ImVec2 mousePosition = ImGui::GetIO().MousePos;
+	const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+	const bool hoveringIndentedContent = mousePosition.x >= rowStart.x + ImGui::GetTreeNodeToLabelSpacing();
 		const bool autoExpand = hasContent && dragHoverTarget == id &&
+		                        hoveringIndentedContent &&
 		                        mousePosition.x == dragHoverPosition.x && mousePosition.y == dragHoverPosition.y &&
 		                        ImGui::GetTime() - dragHoverStartedAt > 0.7;
 		if (autoExpand || (filtering && expandFilteredBranches && hasVisibleChildren))
@@ -2127,7 +2130,8 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 			return parent ? parent->Id() : ResourceId{};
 		};
 		const auto dropZone = DrawHierarchyRowDropFeedback(rowRect, documentId, false, parentOf, false, {});
-		if (dropZone == HierarchyDropZone::Into && hasContent && ImGui::GetDragDropPayload())
+		if (dropZone == HierarchyDropZone::Into && hasContent && hoveringIndentedContent &&
+		    ImGui::GetDragDropPayload())
 		{
 			if (dragHoverTarget != id || mousePosition.x != dragHoverPosition.x ||
 			    mousePosition.y != dragHoverPosition.y)
@@ -2313,7 +2317,10 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	}
 	const auto active = scene.ActiveInHierarchy(node);
 	const ImVec2 mousePosition = ImGui::GetIO().MousePos;
+	const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+	const bool hoveringIndentedContent = mousePosition.x >= rowStart.x + ImGui::GetTreeNodeToLabelSpacing();
 	const bool autoExpand = hasChildren && dragHoverTarget == id.value &&
+	                        hoveringIndentedContent &&
 	                        mousePosition.x == dragHoverPosition.x && mousePosition.y == dragHoverPosition.y &&
 	                        ImGui::GetTime() - dragHoverStartedAt > 0.7;
 	if (autoExpand || (filtering && expandFilteredBranches && hasVisibleChildren))
@@ -2521,7 +2528,8 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		    commandDiagnostic = result ? String{} : result.error;
 	    },
 	    !hierarchyAlphabeticalSort);
-	if (dropZone == HierarchyDropZone::Into && hasChildren && ImGui::GetDragDropPayload())
+	if (dropZone == HierarchyDropZone::Into && hasChildren && hoveringIndentedContent &&
+	    ImGui::GetDragDropPayload())
 	{
 		if (dragHoverTarget != id.value || mousePosition.x != dragHoverPosition.x ||
 		    mousePosition.y != dragHoverPosition.y)
