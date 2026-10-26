@@ -146,6 +146,7 @@ private:
 	ResourceId selected;
 	ResourceId defaultParent;
 	ResourceId defaultParentDocument;
+	Vector<ImGuiID> hierarchyRowIds;
 	Vector<EditorSelectionEntry> visibleSelectionRows;
 	ResourceId keyboardFocusTarget;
 	bool focusSelectionRequested = false;

@@ -1912,7 +1912,12 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	AppendVisibleRows(asset.Root(), documentId, visibleRows, "##gameObject", searchMatches, filtering,
 	                  expandFilteredBranches);
 	visibleSelectionRows = visibleRows;
-	if (selection && !visibleRows.empty() &&
+	const ImGuiID focusedHierarchyItem = ImGui::GetFocusID();
+	const bool hierarchyRowFocused = focusedHierarchyItem != 0 &&
+	                                 std::find(hierarchyRowIds.begin(), hierarchyRowIds.end(), focusedHierarchyItem) !=
+	                                     hierarchyRowIds.end();
+	hierarchyRowIds.clear();
+	if (selection && hierarchyRowFocused && !visibleRows.empty() &&
 	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) && selection->SelectEntries(visibleRows))
 	{
@@ -1923,7 +1928,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	                                 (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
 	                                  ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	    (!hierarchyInput.WantTextInput || searchNavigationKey))
+	    (!hierarchyInput.WantTextInput || searchNavigationKey) && (hierarchyRowFocused || searchNavigationKey))
 	{
 		if (searchNavigationKey)
 		{
@@ -2068,6 +2073,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		}
 		const bool open =
 		    Icons::TreeNode("##gameObject", flags, Icons::ForObject(object, object == asset.Root()), label.c_str());
+		hierarchyRowIds.push_back(ImGui::GetItemID());
 		const bool recursivelyToggleDescendants = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
 		const ImRect rowRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
 		if (keyboardFocusTarget == id)
@@ -2338,6 +2344,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	const bool open =
 	    Icons::TreeNode("##node", flags, Icons::ForObject(node, prefabObjects.find(key) != prefabObjects.end()),
 	                    renameTarget == id.value ? "" : display.c_str());
+	hierarchyRowIds.push_back(ImGui::GetItemID());
 	if (isDefaultParent)
 	{
 		ImGui::PopStyleColor();
@@ -3118,7 +3125,12 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		}
 	}
 	visibleSelectionRows = visibleRows;
-	if (selection && !visibleRows.empty() &&
+	const ImGuiID focusedHierarchyItem = ImGui::GetFocusID();
+	const bool hierarchyRowFocused = focusedHierarchyItem != 0 &&
+	                                 std::find(hierarchyRowIds.begin(), hierarchyRowIds.end(), focusedHierarchyItem) !=
+	                                     hierarchyRowIds.end();
+	hierarchyRowIds.clear();
+	if (selection && hierarchyRowFocused && !visibleRows.empty() &&
 	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) && selection->SelectEntries(visibleRows))
 	{
@@ -3205,7 +3217,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	                                 (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
 	                                  ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	    (!hierarchyInput.WantTextInput || searchNavigationKey))
+	    (!hierarchyInput.WantTextInput || searchNavigationKey) && (hierarchyRowFocused || searchNavigationKey))
 	{
 		const bool toggleVisibility = !searchNavigationKey && !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
 		                              !hierarchyInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_H, false);
@@ -3418,7 +3430,8 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	{
 		ImGui::TextWrapped("%s", commandDiagnostic.c_str());
 	}
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && hierarchyRowFocused &&
+	    !ImGui::GetIO().WantTextInput &&
 	    ImGui::IsKeyPressed(ImGuiKey_F, false) && selection && selection->PrimaryEntry() &&
 	    selection->PrimaryEntry()->kind == EditorSelectionKind::GameObject &&
 	    selection->PrimaryEntry()->documentId == documentId &&
@@ -3426,7 +3439,8 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	{
 		focusSelectionRequested = true;
 	}
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && hierarchyRowFocused &&
+	    !ImGui::GetIO().WantTextInput &&
 	    ImGui::IsKeyPressed(ImGuiKey_F2) && selection && selection->entries.size() == 1 && editableScene)
 	{
 		const auto* primary = selection->PrimaryEntry();
