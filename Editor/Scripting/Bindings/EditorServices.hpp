@@ -165,6 +165,8 @@ struct EditorServices
 	static Result<void> NewLine(B::BindingCall& call);
 	static Result<void> Separator(B::BindingCall& call);
 	static Result<bool> FoldoutHeader(B::BindingCall& call, const B::Utf8View& label);
+	static Result<bool> InspectorComponentHeader(B::BindingCall& call, const B::Utf8View& componentType,
+	                                             const B::Utf8View& label, bool scriptComponent);
 	static Result<void> EndFoldout(B::BindingCall& call);
 	static Result<bool> IsLastItemEdited(B::BindingCall& call);
 	static Result<bool> IsLastItemActive(B::BindingCall& call);

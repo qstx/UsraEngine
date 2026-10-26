@@ -64,7 +64,16 @@ public:
 };
 
 using ComponentEditor = std::function<Result<bool>(Component&, ComponentInspectorContext&, InspectorUI&)>;
-using ComponentHeaderEditor = std::function<Result<bool>(Component&, ComponentInspectorContext&, InspectorUI&)>;
+
+struct ComponentHeaderResult
+{
+	bool handled = false;
+	bool expanded = false;
+	bool changed = false;
+};
+
+using ComponentHeaderEditor =
+    std::function<Result<ComponentHeaderResult>(Component&, ComponentInspectorContext&, InspectorUI&)>;
 
 using ComponentFactory = std::function<Result<Component*>(ComponentInspectorContext&)>;
 

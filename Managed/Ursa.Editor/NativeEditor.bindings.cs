@@ -116,6 +116,8 @@ internal static partial class NativeEditorBindings
 	internal static partial void Separator();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::FoldoutHeader")]
 	internal static partial bool FoldoutHeader(string label);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::InspectorComponentHeader")]
+	internal static partial bool InspectorComponentHeader(string componentType, string label, bool scriptComponent);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::EndFoldout")]
 	internal static partial void EndFoldout();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IsLastItemEdited")]

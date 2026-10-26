@@ -1,4 +1,5 @@
 #include <Scripting/Bindings/EditorServices.hpp>
+#include <Ui/EditorIcons.hpp>
 #include <Assets/AssetPreviewExtension.hpp>
 #include <Assets/AssetPreviewContent.hpp>
 #include <Inspector/ReferencePicker.hpp>
@@ -372,6 +373,20 @@ Result<bool> EditorServices::FoldoutHeader(B::BindingCall& call, const B::Utf8Vi
 {
 	RequireGui(call);
 	return Result<bool>::Success(ImGui::TreeNodeEx(GuiString(label).c_str(), ImGuiTreeNodeFlags_SpanAvailWidth));
+}
+
+Result<bool> EditorServices::InspectorComponentHeader(B::BindingCall& call, const B::Utf8View& componentType,
+                                                      const B::Utf8View& label, bool scriptComponent)
+{
+	RequireGui(call);
+	const String type = GuiString(componentType);
+	const String title = GuiString(label);
+	Icons::Inline(Icons::ForComponent(type, scriptComponent));
+	ImGui::SameLine();
+	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+	const bool expanded = ImGui::CollapsingHeader(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+	Scope(call).source.componentHeaderExpanded = expanded;
+	return Result<bool>::Success(expanded);
 }
 
 Result<void> EditorServices::EndFoldout(B::BindingCall& call)

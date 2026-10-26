@@ -27,6 +27,7 @@ struct ManagedEditorContext
 	Component* target = nullptr;
 	Vector<Component*> componentTargets;
 	Size componentPrimaryIndex = 0;
+	std::optional<bool> componentHeaderExpanded;
 	Vector<GameObject::Ptr> gameObjectTargets;
 	Size gameObjectPrimaryIndex = 0;
 	Vector<String> projectTags;

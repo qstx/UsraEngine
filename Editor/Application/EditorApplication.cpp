@@ -6489,11 +6489,11 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 			candidateEditors.ReplaceHeaderEditor(
 			    target,
 			    [this, extensionId, sessionId](Component& component, ComponentInspectorContext& selection,
-			                                   InspectorUI&) -> Result<bool>
+			                                   InspectorUI&) -> Result<ComponentHeaderResult>
 			    {
 				    if (!managedHost || managedHost->IsSessionFaulted())
 				    {
-					    return Result<bool>::Failure("Managed Editor environment is unavailable");
+					    return Result<ComponentHeaderResult>::Failure("Managed Editor environment is unavailable");
 				    }
 				    ManagedEditorContext context;
 				    context.document = documents ? documents->Current() : nullptr;
@@ -6510,13 +6510,19 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 				        *managedHost, sessionId, "inspector-component-header:" + extensionId.substr(10), context);
 				    if (!invoked)
 				    {
-					    return Result<bool>::Failure(invoked.error);
+					    return Result<ComponentHeaderResult>::Failure(invoked.error);
 				    }
 				    if (!invoked.value)
 				    {
-					    return Result<bool>::Failure("Managed Component Inspector header is unavailable");
+					    return Result<ComponentHeaderResult>::Failure(
+					        "Managed Component Inspector header is unavailable");
 				    }
-				    return Result<bool>::Success(wasEnabled != component.IsEnabled());
+				    const bool changed = wasEnabled != component.IsEnabled();
+				    if (!context.componentHeaderExpanded)
+				    {
+					    return Result<ComponentHeaderResult>::Success({false, false, changed});
+				    }
+				    return Result<ComponentHeaderResult>::Success({true, *context.componentHeaderExpanded, changed});
 			    });
 		}
 	}

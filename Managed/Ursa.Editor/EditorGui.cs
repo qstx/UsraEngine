@@ -61,6 +61,11 @@ public static class EditorGui
 	public static void NewLine() { _ = EditorApi.Generation; NativeEditorBindings.NewLine(); }
 	public static void Separator() { _ = EditorApi.Generation; NativeEditorBindings.Separator(); }
 	public static bool FoldoutHeader(string label) { _ = EditorApi.Generation; return NativeEditorBindings.FoldoutHeader(label); }
+	public static bool InspectorComponentHeader(string componentType, string label, bool scriptComponent = false)
+	{
+		_ = EditorApi.Generation;
+		return NativeEditorBindings.InspectorComponentHeader(componentType, label, scriptComponent);
+	}
 	public static void EndFoldout() { _ = EditorApi.Generation; NativeEditorBindings.EndFoldout(); }
 	private static bool WasLastControlEdited() { _ = EditorApi.Generation; return NativeEditorBindings.IsLastItemEdited(); }
 	public static bool IsLastControlEdited => WasLastControlEdited();

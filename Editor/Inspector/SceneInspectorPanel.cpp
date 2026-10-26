@@ -4695,6 +4695,7 @@ Result<bool> DrawSceneInspector(
 						                                : codec      ? codec.value->type
 						                                             : String{};
 						bool managedComponentHeader = false;
+						bool componentOpen = false;
 						if (const auto* headerEditor = componentEditors.FindHeader(headerEditorType))
 						{
 							ComponentInspectorContext componentContext = inspectorContext;
@@ -4704,8 +4705,9 @@ Result<bool> DrawSceneInspector(
 							auto header = (*headerEditor)(*component, componentContext, ui);
 							if (header)
 							{
-								changed |= header.value;
-								managedComponentHeader = scriptHeader != nullptr;
+								changed |= header.value.changed;
+								managedComponentHeader = header.value.handled;
+								componentOpen = header.value.expanded;
 							}
 							else
 							{
@@ -4727,13 +4729,12 @@ Result<bool> DrawSceneInspector(
 							}
 							ImGui::SameLine();
 						}
-						else if (managedComponentHeader && component->SupportsEnabled())
+						if (!managedComponentHeader)
 						{
-							ImGui::SameLine();
+							componentOpen = DrawInspectorComponentFoldout(
+							    Icons::ForComponent(component->SerializationType(), scriptHeader != nullptr),
+							    componentLabel.c_str());
 						}
-						const bool componentOpen = DrawInspectorComponentFoldout(
-						    Icons::ForComponent(component->SerializationType(), scriptHeader != nullptr),
-						    componentLabel.c_str());
 						const ImVec2 headerMin = ImGui::GetItemRectMin();
 						const ImVec2 headerMax = ImGui::GetItemRectMax();
 						bool removeFromHeader = false;
@@ -5408,6 +5409,7 @@ Result<bool> DrawSceneInspector(
 						                                           : codec.value->type;
 						const String headerEditorType = scriptHeader ? scriptHeader->TypeName() : codec.value->type;
 						bool managedComponentHeader = false;
+						bool componentOpen = false;
 						if (const auto* headerEditor = componentEditors.FindHeader(headerEditorType))
 						{
 							ComponentInspectorContext componentContext = inspectorContext;
@@ -5418,8 +5420,9 @@ Result<bool> DrawSceneInspector(
 							auto header = (*headerEditor)(*object, componentContext, ui);
 							if (header)
 							{
-								changed |= header.value;
-								managedComponentHeader = scriptHeader != nullptr;
+								changed |= header.value.changed;
+								managedComponentHeader = header.value.handled;
+								componentOpen = header.value.expanded;
 							}
 							else
 							{
@@ -5443,13 +5446,12 @@ Result<bool> DrawSceneInspector(
 							}
 							ImGui::SameLine();
 						}
-						else if (managedComponentHeader && canEnable)
+						if (!managedComponentHeader)
 						{
-							ImGui::SameLine();
+							componentOpen = DrawInspectorComponentFoldout(
+							    Icons::ForComponent(object->SerializationType(), scriptHeader != nullptr),
+							    componentLabel.c_str());
 						}
-						const bool componentOpen = DrawInspectorComponentFoldout(
-						    Icons::ForComponent(object->SerializationType(), scriptHeader != nullptr),
-						    componentLabel.c_str());
 						const ImVec2 headerMin = ImGui::GetItemRectMin();
 						const ImVec2 headerMax = ImGui::GetItemRectMax();
 						if (inspectorContext.selection)

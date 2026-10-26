@@ -69,6 +69,8 @@ public abstract class Inspector
 		bool enabled = behaviour.Enabled;
 		bool edited = EditorGui.Toggle("##ComponentEnabled", enabled);
 		if (edited != enabled || EditorGui.IsLastControlEdited) behaviour.Enabled = edited;
+		EditorGui.SameLine();
+		EditorGui.InspectorComponentHeader(behaviour.TypeId, TargetType.Name, scriptComponent: true);
 	}
 	public virtual void OnGameObjectHeaderGUI()
 	{
