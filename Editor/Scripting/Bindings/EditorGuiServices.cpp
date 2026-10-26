@@ -692,7 +692,11 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 			throw std::runtime_error("AssetField reference kind does not match its control");
 		}
 	}
-	String preview = !value.present ? String("None") : current.hasAsset ? current.asset.guid.ToString() : current.id;
+	String preview = !value.present ? String("None")
+	                : current.hasAsset   ? current.asset.guid.ToString()
+	                                     : (current.kind == K::V_Mesh || current.kind == K::V_Material)
+	                                           ? String("Local ") + PickerReferenceType(current.kind)
+	                                           : current.id;
 	const auto choices = AssetChoices(scope);
 	for (const auto& asset : choices)
 	{

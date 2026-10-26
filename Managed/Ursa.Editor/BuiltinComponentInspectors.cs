@@ -4,6 +4,17 @@ using Ursa;
 namespace Ursa.Editor;
 
 [BuiltinEditor]
+[CustomEditor(typeof(MeshFilterComponent))]
+public sealed class MeshFilterComponentInspector : Inspector
+{
+	public override void OnInspectorGUI()
+	{
+		EditorGui.PropertyField(SerializedObject.FindProperty("mesh"), "Mesh");
+		SerializedObject.ApplyModifiedProperties();
+	}
+}
+
+[BuiltinEditor]
 [CustomEditor(typeof(CameraComponent))]
 [CanEditMultipleObjects]
 public sealed class CameraComponentInspector : Inspector

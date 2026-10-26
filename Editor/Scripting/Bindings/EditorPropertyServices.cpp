@@ -234,6 +234,10 @@ UInt32 EditorServices::PropertyType(const Json& descriptor)
 	{
 		return P::V_ObjectReference;
 	}
+	if (kind == "NativeMeshBinding")
+	{
+		return P::V_AssetReference;
+	}
 	if (ReferenceKind(descriptor) != K::V_None)
 	{
 		return P::V_AssetReference;
@@ -255,6 +259,10 @@ UInt32 EditorServices::ReferenceKind(const Json& descriptor)
 	if (kind == "AssetReference")
 	{
 		return K::V_Asset;
+	}
+	if (kind == "NativeMeshBinding")
+	{
+		return K::V_Mesh;
 	}
 	if (kind == "MeshReference")
 	{
@@ -350,7 +358,28 @@ EditorServices::PropertyValue EditorServices::ReadValue(B::BindingCall& call, co
 			EditorReferenceData reference;
 			reference.kind = ReferenceKind(descriptor);
 			reference.typeId = ToUrsaString(descriptor.value("TypeName", std::string{}));
-			if (reference.kind == K::V_Asset)
+			if (descriptor.value("Kind", std::string{}) == "NativeMeshBinding")
+			{
+				if (!value.is_object())
+				{
+					throw std::runtime_error("Native Mesh binding is not an object");
+				}
+				const auto bindingKind = value.value("kind", std::string{});
+				if (bindingKind == "asset")
+				{
+					reference.hasAsset = true;
+					reference.asset = B::TakeBindingResult(AssetReferenceFromJson(value.at("asset"), "Serialized Mesh"));
+				}
+				else if (bindingKind == "local")
+				{
+					reference.id = ToUrsaString(value.at("id").get<std::string>());
+				}
+				else
+				{
+					throw std::runtime_error("Native Mesh binding kind is invalid");
+				}
+			}
+			else if (reference.kind == K::V_Asset)
 			{
 				reference.hasAsset = true;
 				reference.asset = B::TakeBindingResult(AssetReferenceFromJson(value, "SerializedProperty"));
@@ -461,6 +490,12 @@ nlohmann::json EditorServices::WriteValue(EditorInvocation& scope, const Propert
 			if (expected == K::V_Asset)
 			{
 				return AssetReferenceToJson(reference.asset);
+			}
+			if (descriptor.value("Kind", std::string{}) == "NativeMeshBinding")
+			{
+				return reference.hasAsset
+				           ? Json{{"kind", "asset"}, {"asset", AssetReferenceToJson(reference.asset)}}
+				           : Json{{"kind", "local"}, {"id", ToStdString(reference.id)}};
 			}
 			Json data{{"Kind", ReferenceName(expected)}, {"Id", ""}};
 			if (expected <= K::V_Component)
