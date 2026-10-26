@@ -1839,38 +1839,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			projectKeyboardFocusTarget.reset();
 		}
 	};
-	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput && !ImGui::IsAnyItemActive() &&
-	    ImGui::IsAnyItemFocused() && projectInput.KeyCtrl &&
-	    ImGui::IsKeyPressed(ImGuiKey_A, false) && !visibleRows.empty())
-	{
-		if (selection.SelectEntries(visibleRows, visibleRows.size() - 1, visibleRows.back()))
-		{
-			model.SelectAsset(visibleRows.back().assetPath);
-			hierarchy.ClearSelection();
-		}
-	}
-	if (ImGui::IsWindowFocused() && !projectInput.WantTextInput && !ImGui::IsAnyItemActive() &&
-	    ImGui::IsAnyItemFocused() &&
-	    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
-	    selection.entries.size() == 1 && actions.openAsset)
-	{
-		const auto* primary = selection.PrimaryEntry();
-		const bool visibleSelection =
-		    primary && primary->kind == EditorSelectionKind::Asset && !primary->IsMissing() &&
-		    primary->assetRole == EditorAssetSelectionRole::Source && !primary->assetLocalFileId &&
-		    std::any_of(visibleRows.begin(), visibleRows.end(),
-		                [&](const EditorSelectionEntry& row) { return row.SameIdentity(*primary); });
-		const auto* asset = visibleSelection ? model.Find(primary->assetPath) : nullptr;
-		if (asset && asset->folder)
-		{
-			selectFolder(asset->path.relative);
-		}
-		else if (asset)
-		{
-			auto opened = actions.openAsset(*asset);
-			diagnostic = opened ? String{} : opened.error;
-		}
-	}
+	Vector<ImGuiID> projectContentRowIds;
+	projectContentRowIds.reserve(visibleRows.size());
 	if (gridView)
 	{
 		const Float32 iconSize = static_cast<Float32>(gridIconSize);
@@ -1915,6 +1885,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			focusProjectEntry(entry);
 			const bool clicked = ImGui::Selectable("##ProjectAssetTile", selection.Contains(entry),
 			                                       ImGuiSelectableFlags_AllowDoubleClick, {tileWidth, tileHeight});
+			projectContentRowIds.push_back(ImGui::GetItemID());
 			const ImVec2 minimum = ImGui::GetItemRectMin();
 			const ImVec2 maximum = ImGui::GetItemRectMax();
 			if (asset->folder && !entry.assetLocalFileId)
@@ -2056,6 +2027,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				const bool folderClicked = Icons::Selectable(
 				    Icons::Icon::Folder, editingName ? "" : folder.name.c_str(),
 				    selection.Contains(folderEntry), ImGuiSelectableFlags_AllowDoubleClick);
+				projectContentRowIds.push_back(ImGui::GetItemID());
 				const ImVec2 folderMinimum = ImGui::GetItemRectMin();
 				const ImVec2 folderMaximum = ImGui::GetItemRectMax();
 				const ImRect folderRect(folderMinimum, folderMaximum);
@@ -2329,6 +2301,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			const bool assetClicked =
 			    Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative),
 			                      editingName ? "" : label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick);
+			projectContentRowIds.push_back(ImGui::GetItemID());
 			const ImVec2 assetMinimum = ImGui::GetItemRectMin();
 			const ImVec2 assetMaximum = ImGui::GetItemRectMax();
 			if (editingName)
@@ -2593,6 +2566,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 						{
 						}
 					}
+					projectContentRowIds.push_back(ImGui::GetItemID());
 					if (ImGui::BeginDragDropSource())
 					{
 						const auto drag = BeginEditorDragSession(selection, objectEntry);
@@ -2663,6 +2637,42 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				ImGui::Unindent();
 			}
 			ImGui::PopID();
+		}
+	}
+	const ImGuiID focusedItemId = ImGui::GetFocusID();
+	const bool projectContentRowFocused = focusedItemId != 0 &&
+	                                      std::find(projectContentRowIds.begin(), projectContentRowIds.end(),
+	                                                focusedItemId) != projectContentRowIds.end();
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && projectContentRowFocused &&
+	    !projectInput.WantTextInput && !ImGui::IsAnyItemActive() && projectInput.KeyCtrl &&
+	    ImGui::IsKeyPressed(ImGuiKey_A, false) && !visibleRows.empty())
+	{
+		if (selection.SelectEntries(visibleRows, visibleRows.size() - 1, visibleRows.back()))
+		{
+			model.SelectAsset(visibleRows.back().assetPath);
+			hierarchy.ClearSelection();
+		}
+	}
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && projectContentRowFocused &&
+	    !projectInput.WantTextInput && !ImGui::IsAnyItemActive() &&
+	    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
+	    selection.entries.size() == 1 && actions.openAsset)
+	{
+		const auto* primary = selection.PrimaryEntry();
+		const bool visibleSelection =
+		    primary && primary->kind == EditorSelectionKind::Asset && !primary->IsMissing() &&
+		    primary->assetRole == EditorAssetSelectionRole::Source && !primary->assetLocalFileId &&
+		    std::any_of(visibleRows.begin(), visibleRows.end(),
+			            [&](const EditorSelectionEntry& row) { return row.SameIdentity(*primary); });
+		const auto* asset = visibleSelection ? model.Find(primary->assetPath) : nullptr;
+		if (asset && asset->folder)
+		{
+			selectFolder(asset->path.relative);
+		}
+		else if (asset)
+		{
+			auto opened = actions.openAsset(*asset);
+			diagnostic = opened ? String{} : opened.error;
 		}
 	}
 	if (renameEditing && !renameTargetRendered)
