@@ -536,10 +536,14 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 					diagnostic = located ? String{} : located.error;
 				}
 			}
+			else if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+			{
+				selectedRecord = record;
+			}
 			if (contextProbe && record.message == contextProbe->message)
 			{
 				contextProbe->messageCenter = {(rowMinimum.x + rowMaximum.x) * 0.5f,
-				                              (rowMinimum.y + rowMaximum.y) * 0.5f};
+				                               (rowMinimum.y + rowMaximum.y) * 0.5f};
 				contextProbe->messageHovered = ImGui::IsItemHovered();
 			}
 			if (ImGui::BeginPopupContextItem("ConsoleEntryActions"))
