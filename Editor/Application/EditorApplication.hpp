@@ -282,6 +282,7 @@ private:
 	std::chrono::steady_clock::time_point assetRequestDeadline{};
 	UInt64 assetFocusSubscription = 0;
 	std::chrono::steady_clock::time_point nextAssetScan{};
+	Vector<ProjectBrowserFileDrop> pendingProjectBrowserFileDrops;
 
 	void DrawMainMenuBar();
 	bool CanCopyGameObjectSelection() const;
@@ -321,6 +322,7 @@ private:
 	Result<void> CreateProjectFolder(const String& requestedName = {});
 
 	Result<void> RenameProjectAsset(const VirtualPath& source, const VirtualPath& destination);
+	Result<void> ImportExternalProjectFiles(const Vector<String>& paths, const String& destinationFolder);
 
 	Result<void> LoadPanelVisibility();
 

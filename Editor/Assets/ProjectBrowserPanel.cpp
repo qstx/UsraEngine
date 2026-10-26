@@ -334,6 +334,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
                                        EditorSelectionContext& selection, EditorHierarchy& hierarchy, bool& open,
                                        bool readOnly, String& diagnostic, const ProjectBrowserActions& actions)
 {
+	Vector<ProjectBrowserFileDrop> externalDrops = actions.takeExternalFileDrops ? actions.takeExternalFileDrops()
+	                                                                            : Vector<ProjectBrowserFileDrop>{};
 	if (!open)
 	{
 		return {};
@@ -344,6 +346,24 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		ImGui::End();
 		return {};
+	}
+	if (!readOnly && actions.importExternalFiles)
+	{
+		const ImVec2 windowPosition = ImGui::GetWindowPos();
+		const ImVec2 windowSize = ImGui::GetWindowSize();
+		for (const ProjectBrowserFileDrop& drop : externalDrops)
+		{
+			if (drop.x < windowPosition.x || drop.y < windowPosition.y || drop.x >= windowPosition.x + windowSize.x ||
+			    drop.y >= windowPosition.y + windowSize.y)
+			{
+				continue;
+			}
+			auto imported = actions.importExternalFiles(drop.paths, model.CurrentFolder());
+			if (!imported)
+			{
+				diagnostic = imported.error;
+			}
+		}
 	}
 	if (model.NeedsRefresh(workspace))
 	{

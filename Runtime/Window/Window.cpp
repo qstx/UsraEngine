@@ -280,6 +280,22 @@ Result<std::shared_ptr<Window>> Window::Create(const WindowCreateDesc& desc)
 		                                  event.y = static_cast<Ursa::Float64>(y);
 		                                  Send(native, event);
 	                                  });
+	glfwSetDropCallback(handle,
+	                    [](GLFWwindow* native, int count, const char** paths)
+	                    {
+		                    WindowEvent event;
+		                    event.type = WindowEventType::FilesDropped;
+		                    glfwGetCursorPos(native, &event.x, &event.y);
+		                    event.paths.reserve(static_cast<std::size_t>(count));
+		                    for (int index = 0; index < count; ++index)
+		                    {
+			                    if (paths[index])
+			                    {
+				                    event.paths.emplace_back(paths[index]);
+			                    }
+		                    }
+		                    Send(native, event);
+	                    });
 	return Result<std::shared_ptr<Window>>::Success(std::move(window));
 }
 

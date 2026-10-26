@@ -11,6 +11,13 @@
 
 namespace Ursa::Editor
 {
+struct ProjectBrowserFileDrop
+{
+	Float64 x = 0.0;
+	Float64 y = 0.0;
+	Vector<String> paths;
+};
+
 struct ProjectBrowserActions
 {
 	std::function<Result<void>()> refresh;
@@ -26,6 +33,8 @@ struct ProjectBrowserActions
 	std::function<Result<Vector<VirtualPath>>(const Vector<VirtualPath>&, const String&, bool)> pasteAssets;
 	std::function<Result<void>(const ProjectBrowserEntry&)> openAsset;
 	std::function<Result<void>(const EditorDragSession&, const String&)> exportScenePrefabs;
+	std::function<Vector<ProjectBrowserFileDrop>()> takeExternalFileDrops;
+	std::function<Result<void>(const Vector<String>&, const String&)> importExternalFiles;
 };
 
 class ProjectBrowserPanel final

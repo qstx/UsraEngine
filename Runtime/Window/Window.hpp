@@ -99,7 +99,8 @@ enum class WindowEventType
 	PositionChanged,
 	SizeChanged,
 	FramebufferSizeChanged,
-	ContentScaleChanged
+	ContentScaleChanged,
+	FilesDropped
 };
 
 struct WindowEvent
@@ -111,6 +112,7 @@ struct WindowEvent
 	Ursa::Float64 x = 0.0;
 	Ursa::Float64 y = 0.0;
 	bool focused = false;
+	Vector<String> paths;
 };
 
 using WindowEventCallback = std::function<void(const WindowEvent&)>;
