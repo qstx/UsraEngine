@@ -260,6 +260,13 @@ Result<Int64> EditorServices::IntField(B::BindingCall& call, const B::Utf8View& 
 	return Result<Int64>::Success(value);
 }
 
+Result<UInt64> EditorServices::ULongField(B::BindingCall& call, const B::Utf8View& label, UInt64 value)
+{
+	RequireGui(call);
+	Edited(call, ImGui::InputScalar(GuiString(label).c_str(), ImGuiDataType_U64, &value));
+	return Result<UInt64>::Success(value);
+}
+
 Result<Float64> EditorServices::FloatField(B::BindingCall& call, const B::Utf8View& label, Float64 value)
 {
 	RequireGui(call);
@@ -267,6 +274,26 @@ Result<Float64> EditorServices::FloatField(B::BindingCall& call, const B::Utf8Vi
 	Edited(call, ImGui::InputDouble(GuiString(label).c_str(), &value));
 	Finite(value);
 	return Result<Float64>::Success(value);
+}
+
+Result<Float64> EditorServices::SliderFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value,
+                                            Float64 minimum, Float64 maximum)
+{
+	RequireGui(call);
+	Finite(value);
+	Finite(minimum);
+	Finite(maximum);
+	if (minimum > maximum || std::abs(value) > std::numeric_limits<Float32>::max() ||
+	    std::abs(minimum) > std::numeric_limits<Float32>::max() ||
+	    std::abs(maximum) > std::numeric_limits<Float32>::max())
+	{
+		throw std::runtime_error("SliderFloat requires finite, representable values and ordered bounds");
+	}
+	Float32 editedValue = static_cast<Float32>(value);
+	const bool changed = Edited(call, ImGui::SliderFloat(GuiString(label).c_str(), &editedValue,
+	                                                      static_cast<Float32>(minimum),
+	                                                      static_cast<Float32>(maximum)));
+	return Result<Float64>::Success(changed ? editedValue : value);
 }
 
 Result<Float64> EditorServices::DragFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value, Float64 speed,
@@ -378,7 +405,7 @@ Result<EditorServices::QuaternionValue> EditorServices::QuaternionField(B::Bindi
 }
 
 Result<EditorServices::ColorValue> EditorServices::ColorField(B::BindingCall& call, const B::Utf8View& label,
-                                                              const ColorValue& value, bool mixedValue)
+                                                              const ColorValue& value, bool mixedValue, bool hdr)
 {
 	RequireGui(call);
 	MixedValueScope mixed(mixedValue);
@@ -387,7 +414,8 @@ Result<EditorServices::ColorValue> EditorServices::ColorField(B::BindingCall& ca
 	Finite(value.F_B);
 	Finite(value.F_A);
 	Float32 values[]{value.F_R, value.F_G, value.F_B, value.F_A};
-	Edited(call, ImGui::ColorEdit4(GuiString(label).c_str(), values));
+	const ImGuiColorEditFlags flags = hdr ? ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float : 0;
+	Edited(call, ImGui::ColorEdit4(GuiString(label).c_str(), values, flags));
 	return Result<ColorValue>::Success({values[0], values[1], values[2], values[3]});
 }
 

@@ -90,8 +90,12 @@ internal static partial class NativeEditorBindings
 	internal static partial bool Toggle(string label, bool value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IntField")]
 	internal static partial long IntField(string label, long value);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ULongField")]
+	internal static partial ulong ULongField(string label, ulong value);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::FloatField")]
 	internal static partial double FloatField(string label, double value);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SliderFloat")]
+	internal static partial double SliderFloat(string label, double value, double minimum, double maximum);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DragFloat")]
 	internal static partial double DragFloat(string label, double value, double speed, double minimum, double maximum, string format, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::TextField")]
@@ -107,7 +111,7 @@ internal static partial class NativeEditorBindings
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::QuaternionField")]
 	internal static partial Quaternion QuaternionField(string label, Quaternion value);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ColorField")]
-	internal static partial Color ColorField(string label, Color value, bool mixedValue);
+	internal static partial Color ColorField(string label, Color value, bool mixedValue, bool hdr);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ObjectField")]
 	internal static partial EditorReferenceValue? ObjectField(string label, EditorReferenceValue? value, EditorReferenceKind kind);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::AssetField")]

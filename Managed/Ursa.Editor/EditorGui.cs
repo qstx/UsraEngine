@@ -32,7 +32,13 @@ public static class EditorGui
 		return NativeEditorBindings.Toggle(label, value, mixedValue);
 	}
 	public static long IntField(string label, long value) { _ = EditorApi.Generation; return NativeEditorBindings.IntField(label, value); }
+	public static ulong ULongField(string label, ulong value) { _ = EditorApi.Generation; return NativeEditorBindings.ULongField(label, value); }
 	public static double FloatField(string label, double value) { _ = EditorApi.Generation; return NativeEditorBindings.FloatField(label, value); }
+	public static double SliderFloat(string label, double value, double minimum, double maximum)
+	{
+		_ = EditorApi.Generation;
+		return NativeEditorBindings.SliderFloat(label, value, minimum, maximum);
+	}
 	public static double DragFloat(string label, double value, double speed, double minimum, double maximum,
 		string format = "%.3f", bool mixedValue = false)
 	{
@@ -50,10 +56,10 @@ public static class EditorGui
 	public static Vector3 Vector3Field(string label, Vector3 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector3Field(label, value); }
 	public static Vector4 Vector4Field(string label, Vector4 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector4Field(label, value); }
 	public static Quaternion QuaternionField(string label, Quaternion value) { _ = EditorApi.Generation; return NativeEditorBindings.QuaternionField(label, value); }
-	public static Color ColorField(string label, Color value, bool mixedValue = false)
+	public static Color ColorField(string label, Color value, bool mixedValue = false, bool hdr = false)
 	{
 		_ = EditorApi.Generation;
-		return NativeEditorBindings.ColorField(label, value, mixedValue);
+		return NativeEditorBindings.ColorField(label, value, mixedValue, hdr);
 	}
 	public static EditorReference? ObjectField(string label, EditorReference? value, EditorReferenceKind kind)
 	{
@@ -84,10 +90,18 @@ public static class EditorGui
 				long editedInteger = IntField(caption, originalInteger);
 				if (editedInteger != originalInteger) property.LongValue = editedInteger;
 				break;
+			case SerializedPropertyType.UnsignedInteger:
+				if (property.HasMultipleDifferentValues) goto default;
+				ulong originalUnsigned = property.ULongValue;
+				ulong editedUnsigned = ULongField(caption, originalUnsigned);
+				if (editedUnsigned != originalUnsigned) property.ULongValue = editedUnsigned;
+				break;
 			case SerializedPropertyType.Float:
-				if (property.HasMultipleDifferentValues || property.HasRange) goto default;
+				if (property.HasMultipleDifferentValues) goto default;
 				double originalFloat = property.DoubleValue;
-				double editedFloat = FloatField(caption, originalFloat);
+				double editedFloat = property.HasRange
+					? SliderFloat(caption, originalFloat, property.Minimum, property.Maximum)
+					: FloatField(caption, originalFloat);
 				if (editedFloat != originalFloat) property.DoubleValue = editedFloat;
 				break;
 			case SerializedPropertyType.String:
@@ -126,9 +140,9 @@ public static class EditorGui
 				if (!editedQuaternion.Equals(originalQuaternion)) property.QuaternionValue = editedQuaternion;
 				break;
 			case SerializedPropertyType.Color:
-				if (property.Hdr || property.HasMultipleDifferentValues) goto default;
+				if (property.HasMultipleDifferentValues) goto default;
 				Color originalColor = property.ColorValue;
-				Color editedColor = ColorField(caption, originalColor);
+				Color editedColor = ColorField(caption, originalColor, hdr: property.Hdr);
 				if (!editedColor.Equals(originalColor)) property.ColorValue = editedColor;
 				break;
 			default:

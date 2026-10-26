@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "73291a1e33132c6250546caa1e344ecd29abe50bae0c3746ce74fd2bf9850601",
+      "Hash": "11f4b1b8eb733358965dd5d92ab80a8dc5c6d88bdd73f4a61d9a3d0d5da08709",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -164,6 +164,12 @@
             },
             {
               "Name": "mixedValue",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "hdr",
               "Type": "bool",
               "HandleKind": 0,
               "Session": false
@@ -955,6 +961,39 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SliderFloat",
+          "Direction": "NativeMethod",
+          "Return": "double",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "minimum",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "maximum",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.Text",
           "Direction": "NativeMethod",
           "Return": "void",
@@ -1010,6 +1049,27 @@
             {
               "Name": "mixedValue",
               "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ULongField",
+          "Direction": "NativeMethod",
+          "Return": "ulong",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "ulong",
               "HandleKind": 0,
               "Session": false
             }

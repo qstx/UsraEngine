@@ -149,7 +149,10 @@ struct EditorServices
 	static Result<void> EndGroup(B::BindingCall& call);
 	static Result<bool> Toggle(B::BindingCall& call, const B::Utf8View& label, bool value, bool mixedValue);
 	static Result<Int64> IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value);
+	static Result<UInt64> ULongField(B::BindingCall& call, const B::Utf8View& label, UInt64 value);
 	static Result<Float64> FloatField(B::BindingCall& call, const B::Utf8View& label, Float64 value);
+	static Result<Float64> SliderFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value,
+	                                   Float64 minimum, Float64 maximum);
 	static Result<Float64> DragFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value, Float64 speed,
 	                                 Float64 minimum, Float64 maximum, const B::Utf8View& format, bool mixedValue);
 	static Result<B::Utf8View> TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value);
@@ -161,7 +164,7 @@ struct EditorServices
 	static Result<QuaternionValue> QuaternionField(B::BindingCall& call, const B::Utf8View& label,
 	                                               const QuaternionValue& value);
 	static Result<ColorValue> ColorField(B::BindingCall& call, const B::Utf8View& label, const ColorValue& value,
-	                                     bool mixedValue);
+	                                     bool mixedValue, bool hdr);
 	static Result<OptionalReference> ObjectField(B::BindingCall& call, const B::Utf8View& label,
 	                                             const OptionalReference& value, UInt32 kind);
 	static Result<OptionalReference> AssetField(B::BindingCall& call, const B::Utf8View& label,

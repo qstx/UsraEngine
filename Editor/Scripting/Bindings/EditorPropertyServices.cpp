@@ -782,7 +782,7 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 			{
 				const auto edited = B::TakeBindingResult(ColorField(
 				    call, caption, {value.F_Vector.F_X, value.F_Vector.F_Y, value.F_Vector.F_Z, value.F_Vector.F_W},
-				    state.F_HasMultipleDifferentValues != 0));
+				    state.F_HasMultipleDifferentValues != 0, false));
 				value.F_Vector = {edited.F_R, edited.F_G, edited.F_B, edited.F_A};
 			}
 			break;
