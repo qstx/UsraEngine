@@ -184,6 +184,10 @@ void EditorConsolePanel::Clear()
 	{
 		selectionAnchor.reset();
 	}
+	if (searchRestoreRecord && !searchRestoreRecord->compilerMessage)
+	{
+		searchRestoreRecord.reset();
+	}
 }
 
 void EditorConsolePanel::ClearAll()
@@ -193,6 +197,7 @@ void EditorConsolePanel::ClearAll()
 	selectedRecord.reset();
 	selectedRecords.clear();
 	selectionAnchor.reset();
+	searchRestoreRecord.reset();
 }
 
 void EditorConsolePanel::AddCompilerDiagnostics(const Vector<ScriptDiagnostic>& diagnostics)
@@ -381,6 +386,25 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 	}
 	ImGui::InputTextWithHint("##ConsoleSearch", "Search", searchText.data(), searchText.size(),
 	                         ImGuiInputTextFlags_EscapeClearsAll);
+	const String searchQuery(searchText.data());
+	if (previousSearch.empty() && !searchQuery.empty())
+	{
+		searchRestoreRecord = selectedRecord;
+		selectedRecord.reset();
+		selectedRecords.clear();
+		selectionAnchor.reset();
+	}
+	else if (!previousSearch.empty() && searchQuery.empty())
+	{
+		if (searchRestoreRecord)
+		{
+			selectedRecord = searchRestoreRecord;
+			selectedRecords = {*searchRestoreRecord};
+			selectionAnchor = searchRestoreRecord;
+		}
+		searchRestoreRecord.reset();
+	}
+	previousSearch = searchQuery;
 	const bool searchInputActive = ImGui::IsItemActive();
 	bool focusConsoleRows = searchInputActive && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
 	                                              ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
@@ -430,10 +454,58 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		auto located = contextHandler(*selectedRecord);
 		diagnostic = located ? String{} : located.error;
 	}
+	struct VisibleRecord
+	{
+		const LogRecord* record = nullptr;
+		Size count = 1;
+		Size originalIndex = 0;
+	};
+
+	Vector<VisibleRecord> visibleRecords;
+	Map<String, Size> collapsedIndices;
+	for (Size index = 0; index < snapshot.size(); ++index)
+	{
+		const LogRecord& record = snapshot[index];
+		const String timestamp = FormatTimestamp(record);
+		const bool matchesSearch = searchQuery.empty() || ContainsCaseInsensitive(record.message, searchQuery) ||
+		                           ContainsCaseInsensitive(LevelLabel(record.level), searchQuery) ||
+		                           ContainsCaseInsensitive(record.category, searchQuery) ||
+		                           ContainsCaseInsensitive(timestamp, searchQuery) ||
+		                           ContainsCaseInsensitive(record.context.resourcePath, searchQuery) ||
+		                           ContainsCaseInsensitive(record.context.objectId, searchQuery);
+		if (!VisibleLevel(record.level, showMessages, showWarnings, showErrors) || !matchesSearch)
+		{
+			continue;
+		}
+		if (collapse)
+		{
+			const String key = CollapseKey(record);
+			const auto found = collapsedIndices.find(key);
+			if (found != collapsedIndices.end())
+			{
+				++visibleRecords[found->second].count;
+				continue;
+			}
+			collapsedIndices.emplace(key, visibleRecords.size());
+		}
+		visibleRecords.push_back({&record, 1, index});
+	}
+	if (visibleRecords.empty() && !searchQuery.empty())
+	{
+		const ImVec2 emptyRegionMin = ImGui::GetCursorScreenPos();
+		const ImVec2 emptyRegionSize = ImGui::GetContentRegionAvail();
+		const String message = "No results for \"" + searchQuery + "\"";
+		const ImVec2 messageSize = ImGui::CalcTextSize(message.c_str());
+		ImGui::GetWindowDrawList()->AddText(
+		    {emptyRegionMin.x + (emptyRegionSize.x - messageSize.x) * 0.5f,
+		     emptyRegionMin.y + (emptyRegionSize.y - messageSize.y) * 0.5f},
+		    ImGui::GetColorU32(ImGuiCol_TextDisabled), message.c_str());
+		ImGui::Dummy(emptyRegionSize);
+	}
 	const Float32 tableContentWidth = ImGui::GetContentRegionAvail().x;
 	const Float32 detailHeight =
 	    selectedRecord ? std::clamp(ImGui::GetContentRegionAvail().y * 0.3f, 88.f, 180.f) : 0.f;
-	if (ImGui::BeginTable("ConsoleEntries", 4,
+	if (!(visibleRecords.empty() && !searchQuery.empty()) && ImGui::BeginTable("ConsoleEntries", 4,
 	                      ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
 	                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp,
 	                      {0.f, selectedRecord ? -detailHeight : 0.f}))
@@ -444,43 +516,6 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		ImGui::TableSetupColumn("Message", ImGuiTableColumnFlags_WidthStretch);
 		ImGui::TableHeadersRow();
 
-		struct VisibleRecord
-		{
-			const LogRecord* record = nullptr;
-			Size count = 1;
-			Size originalIndex = 0;
-		};
-
-		Vector<VisibleRecord> visibleRecords;
-		Map<String, Size> collapsedIndices;
-		const String query(searchText.data());
-		for (Size index = 0; index < snapshot.size(); ++index)
-		{
-			const LogRecord& record = snapshot[index];
-			const String timestamp = FormatTimestamp(record);
-			const bool matchesSearch =
-			    query.empty() || ContainsCaseInsensitive(record.message, query) ||
-			    ContainsCaseInsensitive(LevelLabel(record.level), query) ||
-			    ContainsCaseInsensitive(record.category, query) || ContainsCaseInsensitive(timestamp, query) ||
-			    ContainsCaseInsensitive(record.context.resourcePath, query) ||
-			    ContainsCaseInsensitive(record.context.objectId, query);
-			if (!VisibleLevel(record.level, showMessages, showWarnings, showErrors) || !matchesSearch)
-			{
-				continue;
-			}
-			if (collapse)
-			{
-				const String key = CollapseKey(record);
-				const auto found = collapsedIndices.find(key);
-				if (found != collapsedIndices.end())
-				{
-					++visibleRecords[found->second].count;
-					continue;
-				}
-				collapsedIndices.emplace(key, visibleRecords.size());
-			}
-			visibleRecords.push_back({&record, 1, index});
-		}
 		Size keyboardTargetIndex = visibleRecords.size();
 		const ImGuiIO& consoleInput = ImGui::GetIO();
 		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
@@ -759,12 +794,12 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			const ImVec2 messageMinimum = ImGui::GetCursorScreenPos();
 			ImGui::GetWindowDrawList()->PushClipRect(
 			    messageMinimum, {messageMinimum.x + messageWidth, messageMinimum.y + messageHeight}, true);
-			const Size matchIndex = FindCaseInsensitive(record.message, query);
+			const Size matchIndex = FindCaseInsensitive(record.message, searchQuery);
 			if (matchIndex != String::npos)
 			{
 				const char* begin = record.message.c_str();
 				const char* match = begin + matchIndex;
-				const char* matchEnd = match + query.size();
+				const char* matchEnd = match + searchQuery.size();
 				const ImVec2 prefixSize = ImGui::CalcTextSize(begin, match, false, messageWidth);
 				const ImVec2 matchSize = ImGui::CalcTextSize(match, matchEnd, false, messageWidth);
 				const Float32 lineHeight = ImGui::GetTextLineHeight();

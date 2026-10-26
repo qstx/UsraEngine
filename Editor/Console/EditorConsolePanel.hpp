@@ -65,6 +65,8 @@ private:
 	std::optional<LogRecord> selectedRecord;
 	Vector<LogRecord> selectedRecords;
 	std::optional<LogRecord> selectionAnchor;
+	std::optional<LogRecord> searchRestoreRecord;
+	String previousSearch;
 	std::chrono::system_clock::time_point observedLatestError{};
 	Array<char, 256> searchText{};
 	VirtualFileSystem* settingsFiles = nullptr;
