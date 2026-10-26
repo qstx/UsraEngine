@@ -15,6 +15,20 @@ public sealed class MeshFilterComponentInspector : Inspector
 }
 
 [BuiltinEditor]
+[CustomEditor(typeof(MeshRendererComponent))]
+public sealed class MeshRendererComponentInspector : Inspector
+{
+	public override void OnInspectorGUI()
+	{
+		EditorGui.PropertyField(SerializedObject.FindProperty("castShadows"), "Cast Shadows");
+		EditorGui.PropertyField(SerializedObject.FindProperty("receiveShadows"), "Receive Shadows");
+		EditorGui.Separator();
+		EditorGui.PropertyField(SerializedObject.FindProperty("materials"), "Materials");
+		SerializedObject.ApplyModifiedProperties();
+	}
+}
+
+[BuiltinEditor]
 [CustomEditor(typeof(CameraComponent))]
 [CanEditMultipleObjects]
 public sealed class CameraComponentInspector : Inspector

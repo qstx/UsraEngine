@@ -151,7 +151,7 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 			Type? projectInspector = InspectorTargetMatching.Select(actual, projectRegistrations);
 			Type? builtinInspector = InspectorTargetMatching.Select(actual, builtinRegistrations);
 			if (builtinInspector == typeof(DefaultComponentInspector) &&
-			    (actual == typeof(MeshRendererComponent) || actual == typeof(SkinnedMeshRendererComponent)))
+			    actual == typeof(SkinnedMeshRendererComponent))
 			{
 				builtinInspector = null;
 			}

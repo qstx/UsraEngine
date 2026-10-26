@@ -89,6 +89,10 @@ const char* ReferenceName(UInt32 kind)
 
 Json DefaultValue(const Json& descriptor)
 {
+	if (descriptor.value("Kind", std::string{}) == "NativeMaterialBinding")
+	{
+		return Json{{"value", nullptr}, {"instantiated", false}};
+	}
 	switch (EditorServices::PropertyType(descriptor))
 	{
 		case P::V_Boolean:
@@ -234,7 +238,7 @@ UInt32 EditorServices::PropertyType(const Json& descriptor)
 	{
 		return P::V_ObjectReference;
 	}
-	if (kind == "NativeMeshBinding")
+	if (kind == "NativeMeshBinding" || kind == "NativeMaterialBinding")
 	{
 		return P::V_AssetReference;
 	}
@@ -263,6 +267,10 @@ UInt32 EditorServices::ReferenceKind(const Json& descriptor)
 	if (kind == "NativeMeshBinding")
 	{
 		return K::V_Mesh;
+	}
+	if (kind == "NativeMaterialBinding")
+	{
+		return K::V_Material;
 	}
 	if (kind == "MeshReference")
 	{
@@ -358,21 +366,35 @@ EditorServices::PropertyValue EditorServices::ReadValue(B::BindingCall& call, co
 			EditorReferenceData reference;
 			reference.kind = ReferenceKind(descriptor);
 			reference.typeId = ToUrsaString(descriptor.value("TypeName", std::string{}));
-			if (descriptor.value("Kind", std::string{}) == "NativeMeshBinding")
+			const auto descriptorKind = descriptor.value("Kind", std::string{});
+			if (descriptorKind == "NativeMeshBinding" || descriptorKind == "NativeMaterialBinding")
 			{
-				if (!value.is_object())
+				const Json* binding = &value;
+				if (descriptorKind == "NativeMaterialBinding")
 				{
-					throw std::runtime_error("Native Mesh binding is not an object");
+					if (!value.is_object() || !value.contains("value"))
+					{
+						throw std::runtime_error("Native Material binding slot is malformed");
+					}
+					binding = &value.at("value");
 				}
-				const auto bindingKind = value.value("kind", std::string{});
+				if (binding->is_null())
+				{
+					break;
+				}
+				if (!binding->is_object())
+				{
+					throw std::runtime_error("Native resource binding is not an object");
+				}
+				const auto bindingKind = binding->value("kind", std::string{});
 				if (bindingKind == "asset")
 				{
 					reference.hasAsset = true;
-					reference.asset = B::TakeBindingResult(AssetReferenceFromJson(value.at("asset"), "Serialized Mesh"));
+					reference.asset = B::TakeBindingResult(AssetReferenceFromJson(binding->at("asset"), "Serialized Resource"));
 				}
 				else if (bindingKind == "local")
 				{
-					reference.id = ToUrsaString(value.at("id").get<std::string>());
+					reference.id = ToUrsaString(binding->at("id").get<std::string>());
 				}
 				else
 				{
@@ -432,6 +454,10 @@ nlohmann::json EditorServices::WriteValue(EditorInvocation& scope, const Propert
 	}
 	if (value.F_IsNull)
 	{
+		if (descriptor.value("Kind", std::string{}) == "NativeMaterialBinding")
+		{
+			return Json{{"value", nullptr}, {"instantiated", false}};
+		}
 		if (type != P::V_String && type != P::V_ObjectReference && type != P::V_AssetReference && type != P::V_Array &&
 		    type != P::V_List)
 		{
@@ -491,11 +517,15 @@ nlohmann::json EditorServices::WriteValue(EditorInvocation& scope, const Propert
 			{
 				return AssetReferenceToJson(reference.asset);
 			}
-			if (descriptor.value("Kind", std::string{}) == "NativeMeshBinding")
+			const auto descriptorKind = descriptor.value("Kind", std::string{});
+			if (descriptorKind == "NativeMeshBinding" || descriptorKind == "NativeMaterialBinding")
 			{
-				return reference.hasAsset
-				           ? Json{{"kind", "asset"}, {"asset", AssetReferenceToJson(reference.asset)}}
-				           : Json{{"kind", "local"}, {"id", ToStdString(reference.id)}};
+				Json binding = reference.hasAsset
+				                   ? Json{{"kind", "asset"}, {"asset", AssetReferenceToJson(reference.asset)}}
+				                   : Json{{"kind", "local"}, {"id", ToStdString(reference.id)}};
+				return descriptorKind == "NativeMaterialBinding"
+				           ? Json{{"value", std::move(binding)}, {"instantiated", false}}
+				           : std::move(binding);
 			}
 			Json data{{"Kind", ReferenceName(expected)}, {"Id", ""}};
 			if (expected <= K::V_Component)
