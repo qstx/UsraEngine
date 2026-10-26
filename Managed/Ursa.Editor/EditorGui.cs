@@ -99,6 +99,22 @@ public static class EditorGui
 	internal static void DrawHierarchyInput()
 	{
 		uint state = EditorContext.HierarchyInputState;
+		if ((state & (1u << 29)) != 0)
+		{
+			uint clickModifiers = KeyModifiers;
+			bool clickControl = (clickModifiers & 9u) != 0;
+			bool clickShift = (clickModifiers & 2u) != 0;
+			bool clickAlt = (clickModifiers & 4u) != 0;
+			uint clickCommand = 1u << 18;
+			if (clickControl) clickCommand |= 1u;
+			if (clickShift) clickCommand |= 2u;
+			bool label = (state & (1u << 28)) != 0;
+			bool editable = (state & (1u << 27)) != 0;
+			bool doubleClick = (state & (1u << 26)) != 0;
+			if (label && editable && !clickControl && !clickShift && !clickAlt && !doubleClick) clickCommand |= 4u;
+			EditorContext.SetHierarchyInputCommand(clickCommand);
+			return;
+		}
 		bool hierarchyFocused = (state & (1u << 31)) != 0;
 		bool searchFocused = (state & (1u << 30)) != 0;
 		bool wantsTextInput = WantsTextInput;

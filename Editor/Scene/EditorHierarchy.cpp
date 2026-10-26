@@ -2332,8 +2332,18 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		{
 			if (selection)
 			{
-				pendingSelectionClick.Begin(entry, visibleRows, ImGui::GetIO().KeyCtrl, ImGui::GetIO().KeyShift,
-				                            selection->revision);
+				bool control = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper;
+				bool shift = ImGui::GetIO().KeyShift;
+				if (inputAction)
+				{
+					auto click = inputAction(1u << 29);
+					if (click && (click.value & (1u << 18)) != 0)
+					{
+						control = (click.value & 1u) != 0;
+						shift = (click.value & 2u) != 0;
+					}
+				}
+				pendingSelectionClick.Begin(entry, visibleRows, control, shift, selection->revision);
 			}
 			else
 			{
@@ -2700,8 +2710,23 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	{
 		const ImGuiIO& clickInput = ImGui::GetIO();
 		const bool labelClicked = clickInput.MousePos.x >= rowRect.Min.x + ImGui::GetTreeNodeToLabelSpacing();
-		const bool singleUnmodifiedClick = !clickInput.KeyCtrl && !clickInput.KeySuper && !clickInput.KeyShift &&
-		                                   !clickInput.KeyAlt && !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+		bool control = clickInput.KeyCtrl || clickInput.KeySuper;
+		bool shift = clickInput.KeyShift;
+		bool singleUnmodifiedClick = !control && !shift && !clickInput.KeyAlt &&
+		                             !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+		if (inputAction)
+		{
+			UInt32 clickState = (1u << 29) | (labelClicked ? 1u << 28 : 0) |
+			                    (editableScene && !playSession ? 1u << 27 : 0) |
+			                    (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) ? 1u << 26 : 0);
+			auto click = inputAction(clickState);
+			if (click && (click.value & (1u << 18)) != 0)
+			{
+				control = (click.value & 1u) != 0;
+				shift = (click.value & 2u) != 0;
+				singleUnmodifiedClick = (click.value & 4u) != 0;
+			}
+		}
 		if (renameClickCandidate)
 		{
 			renameClickCandidate = {};
@@ -2716,8 +2741,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		}
 		if (selection)
 		{
-			pendingSelectionClick.Begin(entry, visibleRows, ImGui::GetIO().KeyCtrl, ImGui::GetIO().KeyShift,
-			                            selection->revision);
+			pendingSelectionClick.Begin(entry, visibleRows, control, shift, selection->revision);
 		}
 		else
 		{
