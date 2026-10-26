@@ -5,6 +5,7 @@ namespace Ursa.Editor;
 
 [BuiltinEditor]
 [CustomEditor(typeof(MeshFilterComponent))]
+[CanEditMultipleObjects]
 public sealed class MeshFilterComponentInspector : Inspector
 {
 	public override void OnInspectorGUI()
@@ -16,6 +17,7 @@ public sealed class MeshFilterComponentInspector : Inspector
 
 [BuiltinEditor]
 [CustomEditor(typeof(MeshRendererComponent))]
+[CanEditMultipleObjects]
 public sealed class MeshRendererComponentInspector : Inspector
 {
 	public override void OnInspectorGUI()
@@ -25,6 +27,7 @@ public sealed class MeshRendererComponentInspector : Inspector
 		EditorGui.Separator();
 		EditorGui.PropertyField(SerializedObject.FindProperty("materials"), "Materials");
 		SerializedObject.ApplyModifiedProperties();
+		if (SerializedObject.IsEditingMultipleObjects) return;
 		if (Target is not RendererComponent renderer) return;
 		Material?[] materials = renderer.SharedMaterials;
 		for (int index = 0; index < materials.Length; ++index)
