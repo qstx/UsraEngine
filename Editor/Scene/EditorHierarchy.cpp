@@ -2065,23 +2065,26 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	const bool hierarchyCommandFocused = selection && hierarchyRowFocused &&
 	                                     ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
 	                                     !ImGui::GetIO().WantTextInput;
-	UInt32 inputCapabilities = hierarchyRowFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
-	                              ? (1u << 31)
-	                              : 0;
+	const bool hierarchyWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+	const bool hierarchyKeyboardFocused = hierarchyRowFocused && hierarchyWindowFocused;
+	UInt32 inputCapabilities = hierarchyKeyboardFocused ? (1u << 31) | 0x0ff0u : 0;
+	if (searchFieldActive && hierarchyWindowFocused) inputCapabilities |= (1u << 30) | 0xc000u;
 	if (hierarchyCommandFocused && !visibleRows.empty()) inputCapabilities |= 1u;
 	if (hierarchyCommandFocused && !selection->entries.empty()) inputCapabilities |= 2u | 4u | 8u;
 	bool managedInput = false;
 	UInt32 inputCommand = 0;
+	UInt32 inputModifiers = 0;
 	if (inputAction)
 	{
 		auto input = inputAction(inputCapabilities);
 		if (input)
 		{
 			managedInput = true;
-			if (input.value > 0 && input.value <= 4 &&
-			    (inputCapabilities & (1u << (input.value - 1))) != 0)
+			const UInt32 action = input.value & 0xffffu;
+			if (action > 0 && action <= 16 && (inputCapabilities & (1u << (action - 1))) != 0)
 			{
-				inputCommand = input.value;
+				inputCommand = action;
+				inputModifiers = input.value & 0x30000u;
 			}
 		}
 	}
@@ -2094,43 +2097,55 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		SetLegacySelected(selection, selected);
 	}
 	const ImGuiIO& hierarchyInput = ImGui::GetIO();
-	const bool searchNavigationKey = searchFieldActive &&
-	                                 (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
-	                                  ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	    (!hierarchyInput.WantTextInput || searchNavigationKey) && (hierarchyRowFocused || searchNavigationKey))
+	const bool keyDown = managedInput ? inputCommand == 5 : ImGui::IsKeyPressed(ImGuiKey_DownArrow, false);
+	const bool keyUp = managedInput ? inputCommand == 6 : ImGui::IsKeyPressed(ImGuiKey_UpArrow, false);
+	const bool keyHome = managedInput ? inputCommand == 7 : ImGui::IsKeyPressed(ImGuiKey_Home, false);
+	const bool keyEnd = managedInput ? inputCommand == 8 : ImGui::IsKeyPressed(ImGuiKey_End, false);
+	const bool keyPageDown = managedInput ? inputCommand == 9 : ImGui::IsKeyPressed(ImGuiKey_PageDown, false);
+	const bool keyPageUp = managedInput ? inputCommand == 10 : ImGui::IsKeyPressed(ImGuiKey_PageUp, false);
+	const bool keyLeft = managedInput ? inputCommand == 11 : ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false);
+	const bool keyRight = managedInput ? inputCommand == 12 : ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
+	const bool searchNavigationKey = managedInput ? inputCommand == 15 || inputCommand == 16
+	                                               : searchFieldActive && (keyUp || keyDown);
+	const bool keyboardNavigation = managedInput
+	                                    ? (inputCommand >= 5 && inputCommand <= 12) || searchNavigationKey
+	                                    : ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	                                          (!hierarchyInput.WantTextInput || searchNavigationKey) &&
+	                                          (hierarchyRowFocused || searchNavigationKey);
+	const bool inputShift = managedInput ? (inputModifiers & (1u << 16)) != 0 : hierarchyInput.KeyShift;
+	const bool inputAlt = managedInput ? (inputModifiers & (1u << 17)) != 0 : hierarchyInput.KeyAlt;
+	if (keyboardNavigation)
 	{
 		if (searchNavigationKey)
 		{
 			EnsureHierarchySelectionVisible(visibleRows, selection, documentId, selected, keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, false))
+		else if (keyDown)
 		{
-			NavigateHierarchySelection(visibleRows, selection, selected, 1, hierarchyInput.KeyShift,
+			NavigateHierarchySelection(visibleRows, selection, selected, 1, inputShift,
 			                           keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false))
+		else if (keyUp)
 		{
-			NavigateHierarchySelection(visibleRows, selection, selected, -1, hierarchyInput.KeyShift,
+			NavigateHierarchySelection(visibleRows, selection, selected, -1, inputShift,
 			                           keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_Home, false) || ImGui::IsKeyPressed(ImGuiKey_End, false))
+		else if (keyHome || keyEnd)
 		{
-			const bool last = ImGui::IsKeyPressed(ImGuiKey_End, false);
-			NavigateHierarchySelectionToEdge(visibleRows, selection, selected, last, hierarchyInput.KeyShift,
+			NavigateHierarchySelectionToEdge(visibleRows, selection, selected, keyEnd, inputShift,
 			                                 keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_PageDown, false) || ImGui::IsKeyPressed(ImGuiKey_PageUp, false))
+		else if (keyPageDown || keyPageUp)
 		{
 			const Int32 pageStep = static_cast<Int32>(
 			    std::max(1.f, std::floor(ImGui::GetContentRegionAvail().y / ImGui::GetFrameHeight())));
-			const Int32 offset = ImGui::IsKeyPressed(ImGuiKey_PageDown, false) ? pageStep : -pageStep;
-			NavigateHierarchySelectionByOffset(visibleRows, selection, selected, offset, hierarchyInput.KeyShift,
+			const Int32 offset = keyPageDown ? pageStep : -pageStep;
+			NavigateHierarchySelectionByOffset(visibleRows, selection, selected, offset, inputShift,
 			                                   keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false))
+		else if (keyLeft || keyRight)
 		{
-			const bool expand = ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
+			const bool expand = keyRight;
 			const auto* primary = selection ? selection->PrimaryEntry() : nullptr;
 			const ResourceId activeId =
 			    primary && primary->kind == EditorSelectionKind::GameObject && primary->documentId == documentId
@@ -2173,7 +2188,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 						if (nodeOpen != expand)
 						{
 							SetHierarchyNodeOpen(key, "##gameObject", expand);
-							if (hierarchyInput.KeyAlt)
+							if (inputAlt)
 							{
 								SetHierarchyDescendantsOpen(
 								    selectedObject, "##gameObject", expand,
@@ -2194,7 +2209,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 					if (expand && !children.empty() && !nodeOpen && !filtering)
 					{
 						SetHierarchyNodeOpen(key, "##gameObject", true);
-						if (hierarchyInput.KeyAlt)
+						if (inputAlt)
 						{
 							SetHierarchyDescendantsOpen(
 							    object, "##gameObject", true,
@@ -2222,7 +2237,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 						if (!children.empty() && nodeOpen && !filtering)
 						{
 							SetHierarchyNodeOpen(key, "##gameObject", false);
-							if (hierarchyInput.KeyAlt)
+							if (inputAlt)
 							{
 								SetHierarchyDescendantsOpen(
 								    object, "##gameObject", false,
@@ -3489,23 +3504,27 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	const bool hierarchyCommandFocused = selection && hierarchyRowFocused &&
 	                                     ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
 	                                     !ImGui::GetIO().WantTextInput;
-	UInt32 inputCapabilities = hierarchyRowFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
-	                              ? (1u << 31)
-	                              : 0;
+	const bool hierarchyWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+	const bool hierarchyKeyboardFocused = hierarchyRowFocused && hierarchyWindowFocused;
+	UInt32 inputCapabilities = hierarchyKeyboardFocused ? (1u << 31) | 0x0ff0u : 0;
+	if (searchFieldActive && hierarchyWindowFocused) inputCapabilities |= (1u << 30) | 0xc000u;
 	if (hierarchyCommandFocused && !visibleRows.empty()) inputCapabilities |= 1u;
 	if (hierarchyCommandFocused && !selection->entries.empty()) inputCapabilities |= 2u | 4u | 8u;
+	if (hierarchyCommandFocused && !playSession && !selection->entries.empty()) inputCapabilities |= 0x3000u;
 	bool managedInput = false;
 	UInt32 inputCommand = 0;
+	UInt32 inputModifiers = 0;
 	if (inputAction)
 	{
 		auto input = inputAction(inputCapabilities);
 		if (input)
 		{
 			managedInput = true;
-			if (input.value > 0 && input.value <= 4 &&
-			    (inputCapabilities & (1u << (input.value - 1))) != 0)
+			const UInt32 action = input.value & 0xffffu;
+			if (action > 0 && action <= 16 && (inputCapabilities & (1u << (action - 1))) != 0)
 			{
-				inputCommand = input.value;
+				inputCommand = action;
+				inputModifiers = input.value & 0x30000u;
 			}
 		}
 	}
@@ -3618,16 +3637,33 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		return {};
 	};
 	const ImGuiIO& hierarchyInput = ImGui::GetIO();
-	const bool searchNavigationKey = searchFieldActive &&
-	                                 (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
-	                                  ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	    (!hierarchyInput.WantTextInput || searchNavigationKey) && (hierarchyRowFocused || searchNavigationKey))
+	const bool keyDown = managedInput ? inputCommand == 5 : ImGui::IsKeyPressed(ImGuiKey_DownArrow, false);
+	const bool keyUp = managedInput ? inputCommand == 6 : ImGui::IsKeyPressed(ImGuiKey_UpArrow, false);
+	const bool keyHome = managedInput ? inputCommand == 7 : ImGui::IsKeyPressed(ImGuiKey_Home, false);
+	const bool keyEnd = managedInput ? inputCommand == 8 : ImGui::IsKeyPressed(ImGuiKey_End, false);
+	const bool keyPageDown = managedInput ? inputCommand == 9 : ImGui::IsKeyPressed(ImGuiKey_PageDown, false);
+	const bool keyPageUp = managedInput ? inputCommand == 10 : ImGui::IsKeyPressed(ImGuiKey_PageUp, false);
+	const bool keyLeft = managedInput ? inputCommand == 11 : ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false);
+	const bool keyRight = managedInput ? inputCommand == 12 : ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
+	const bool searchNavigationKey = managedInput ? inputCommand == 15 || inputCommand == 16
+	                                               : searchFieldActive && (keyUp || keyDown);
+	const bool keyboardNavigation = managedInput
+	                                    ? (inputCommand >= 5 && inputCommand <= 14) || searchNavigationKey
+	                                    : ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	                                          (!hierarchyInput.WantTextInput || searchNavigationKey) &&
+	                                          (hierarchyRowFocused || searchNavigationKey);
+	const bool inputShift = managedInput ? (inputModifiers & (1u << 16)) != 0 : hierarchyInput.KeyShift;
+	const bool inputAlt = managedInput ? (inputModifiers & (1u << 17)) != 0 : hierarchyInput.KeyAlt;
+	if (keyboardNavigation)
 	{
-		const bool toggleVisibility = !searchNavigationKey && !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
-		                              !hierarchyInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_H, false);
-		const bool togglePickability = !searchNavigationKey && !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
-		                               !hierarchyInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_L, false);
+		const bool toggleVisibility = managedInput ? inputCommand == 13
+		                                           : !searchNavigationKey && !hierarchyInput.KeyCtrl &&
+		                                                 !hierarchyInput.KeyAlt && !hierarchyInput.KeyShift &&
+		                                                 ImGui::IsKeyPressed(ImGuiKey_H, false);
+		const bool togglePickability = managedInput ? inputCommand == 14
+		                                            : !searchNavigationKey && !hierarchyInput.KeyCtrl &&
+		                                                  !hierarchyInput.KeyAlt && !hierarchyInput.KeyShift &&
+		                                                  ImGui::IsKeyPressed(ImGuiKey_L, false);
 		if (searchNavigationKey)
 		{
 			EnsureHierarchySelectionVisible(visibleRows, selection, documentId, selected, keyboardFocusTarget);
@@ -3677,33 +3713,32 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 				changed = true;
 			}
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, false))
+		else if (keyDown)
 		{
-			NavigateHierarchySelection(visibleRows, selection, selected, 1, hierarchyInput.KeyShift,
+			NavigateHierarchySelection(visibleRows, selection, selected, 1, inputShift,
 			                           keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false))
+		else if (keyUp)
 		{
-			NavigateHierarchySelection(visibleRows, selection, selected, -1, hierarchyInput.KeyShift,
+			NavigateHierarchySelection(visibleRows, selection, selected, -1, inputShift,
 			                           keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_Home, false) || ImGui::IsKeyPressed(ImGuiKey_End, false))
+		else if (keyHome || keyEnd)
 		{
-			const bool last = ImGui::IsKeyPressed(ImGuiKey_End, false);
-			NavigateHierarchySelectionToEdge(visibleRows, selection, selected, last, hierarchyInput.KeyShift,
+			NavigateHierarchySelectionToEdge(visibleRows, selection, selected, keyEnd, inputShift,
 			                                 keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_PageDown, false) || ImGui::IsKeyPressed(ImGuiKey_PageUp, false))
+		else if (keyPageDown || keyPageUp)
 		{
 			const Int32 pageStep = static_cast<Int32>(
 			    std::max(1.f, std::floor(ImGui::GetContentRegionAvail().y / ImGui::GetFrameHeight())));
-			const Int32 offset = ImGui::IsKeyPressed(ImGuiKey_PageDown, false) ? pageStep : -pageStep;
-			NavigateHierarchySelectionByOffset(visibleRows, selection, selected, offset, hierarchyInput.KeyShift,
+			const Int32 offset = keyPageDown ? pageStep : -pageStep;
+			NavigateHierarchySelectionByOffset(visibleRows, selection, selected, offset, inputShift,
 			                                   keyboardFocusTarget);
 		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false))
+		else if (keyLeft || keyRight)
 		{
-			const bool expand = ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
+			const bool expand = keyRight;
 			const auto* primary = selection ? selection->PrimaryEntry() : nullptr;
 			const ResourceId activeId = primary && primary->kind == EditorSelectionKind::GameObject &&
 			                                    primary->documentId == documentId && primary->playSession == playSession
@@ -3740,7 +3775,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 							if (nodeOpen != expand)
 							{
 								SetHierarchyNodeOpen(key, "##node", expand);
-								if (hierarchyInput.KeyAlt)
+								if (inputAlt)
 								{
 									setSceneDescendantsOpen(selectedObject.value, expand);
 								}
@@ -3763,7 +3798,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 						if (expand && !children.value.empty() && !nodeOpen && !filtering)
 						{
 							SetHierarchyNodeOpen(key, "##node", true);
-							if (hierarchyInput.KeyAlt)
+							if (inputAlt)
 							{
 								setSceneDescendantsOpen(object.value, true);
 							}
@@ -3792,7 +3827,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 							if (!children.value.empty() && nodeOpen && !filtering)
 							{
 								SetHierarchyNodeOpen(key, "##node", false);
-								if (hierarchyInput.KeyAlt)
+								if (inputAlt)
 								{
 									setSceneDescendantsOpen(object.value, false);
 								}

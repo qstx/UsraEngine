@@ -99,16 +99,43 @@ public static class EditorGui
 	internal static void DrawHierarchyInput()
 	{
 		uint state = EditorContext.HierarchyInputState;
-		if ((state & (1u << 31)) == 0 || WantsTextInput) return;
+		bool hierarchyFocused = (state & (1u << 31)) != 0;
+		bool searchFocused = (state & (1u << 30)) != 0;
+		bool wantsTextInput = WantsTextInput;
+		if ((!hierarchyFocused && !searchFocused) || wantsTextInput && !searchFocused) return;
 		uint modifiers = KeyModifiers;
 		bool control = (modifiers & 9u) != 0;
 		bool shift = (modifiers & 2u) != 0;
+		bool alt = (modifiers & 4u) != 0;
 		uint command = 0;
-		if (control && IsHierarchyKeyPressed(1) && (state & 1u) != 0) command = 1;
-		else if (shift && IsHierarchyKeyPressed(3) && (state & 2u) != 0) command = 2;
-		else if (control && !shift && IsHierarchyKeyPressed(4) && (state & 4u) != 0) command = 3;
-		else if (shift && IsHierarchyKeyPressed(2) && (state & 8u) != 0) command = 4;
-		if (command != 0) EditorContext.SetHierarchyInputCommand(command);
+		if (searchFocused)
+		{
+			if (IsHierarchyKeyPressed(5) && (state & (1u << 14)) != 0) command = 15;
+			else if (IsHierarchyKeyPressed(6) && (state & (1u << 15)) != 0) command = 16;
+		}
+		else if (hierarchyFocused)
+		{
+			if (control && IsHierarchyKeyPressed(1) && (state & 1u) != 0) command = 1;
+			else if (shift && IsHierarchyKeyPressed(3) && (state & 2u) != 0) command = 2;
+			else if (control && !shift && IsHierarchyKeyPressed(4) && (state & 4u) != 0) command = 3;
+			else if (shift && IsHierarchyKeyPressed(2) && (state & 8u) != 0) command = 4;
+			else if (IsHierarchyKeyPressed(5) && (state & (1u << 4)) != 0) command = 5;
+			else if (IsHierarchyKeyPressed(6) && (state & (1u << 5)) != 0) command = 6;
+			else if (IsHierarchyKeyPressed(7) && (state & (1u << 6)) != 0) command = 7;
+			else if (IsHierarchyKeyPressed(8) && (state & (1u << 7)) != 0) command = 8;
+			else if (IsHierarchyKeyPressed(9) && (state & (1u << 8)) != 0) command = 9;
+			else if (IsHierarchyKeyPressed(10) && (state & (1u << 9)) != 0) command = 10;
+			else if (IsHierarchyKeyPressed(11) && (state & (1u << 10)) != 0) command = 11;
+			else if (IsHierarchyKeyPressed(12) && (state & (1u << 11)) != 0) command = 12;
+			else if (!control && !shift && !alt && IsHierarchyKeyPressed(13) && (state & (1u << 12)) != 0) command = 13;
+			else if (!control && !shift && !alt && IsHierarchyKeyPressed(14) && (state & (1u << 13)) != 0) command = 14;
+		}
+		if (command != 0)
+		{
+			if (shift) command |= 1u << 16;
+			if (alt) command |= 1u << 17;
+			EditorContext.SetHierarchyInputCommand(command);
+		}
 	}
 	public static int DragDropArrayElement(string id, int index, int count)
 	{

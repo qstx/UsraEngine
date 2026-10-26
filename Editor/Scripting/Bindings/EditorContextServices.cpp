@@ -1146,7 +1146,8 @@ Result<UInt32> EditorServices::GetHierarchyInputState(B::BindingCall& call)
 
 Result<void> EditorServices::SetHierarchyInputCommand(B::BindingCall& call, UInt32 command)
 {
-	if (command > 4)
+	const UInt32 action = command & 0xffffu;
+	if (action > 16 || (command & ~0x3ffffu) != 0)
 	{
 		return Result<void>::Failure("Unknown Hierarchy input command");
 	}
