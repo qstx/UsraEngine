@@ -3123,7 +3123,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						{
 							clearSceneViewLock();
 							MoveSceneView(camera, arrowMovement, io.DeltaTime, sceneFlythroughSpeed * 0.5f, io.KeyShift,
-							             sceneView2DMode);
+							              sceneView2DMode);
 						}
 					}
 					if (imageHovered && io.MouseWheel != 0.f &&
@@ -3131,8 +3131,12 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					    sceneNavigationGesture != SceneNavigationGesture::DragZoom)
 					{
 						clearSceneViewLock();
-						ZoomSceneView(camera, io.MouseWheel,
-						              {io.MousePos.x - layout.displayRect.x, io.MousePos.y - layout.displayRect.y},
+						const ViewportPoint zoomPosition =
+						    sceneView2DMode == io.KeyAlt
+						        ? ViewportPoint{layout.displayRect.width * 0.5f, layout.displayRect.height * 0.5f}
+						        : ViewportPoint{io.MousePos.x - layout.displayRect.x,
+						                        io.MousePos.y - layout.displayRect.y};
+						ZoomSceneView(camera, io.MouseWheel, zoomPosition,
 						              {layout.displayRect.width, layout.displayRect.height});
 					}
 					const bool hierarchyFocusRequested = hierarchy.ConsumeFocusSelectionRequest();
