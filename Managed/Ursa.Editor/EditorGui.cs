@@ -25,6 +25,11 @@ public static class EditorGui
 	public static void Text(string text) { _ = EditorApi.Generation; NativeEditorBindings.Text(text); }
 	public static bool Button(string label) { _ = EditorApi.Generation; return NativeEditorBindings.Button(label); }
 	public static bool SmallButton(string label) { _ = EditorApi.Generation; return NativeEditorBindings.SmallButton(label); }
+	public static int DragDropArrayElement(string id, int index, int count)
+	{
+		_ = EditorApi.Generation;
+		return NativeEditorBindings.DragDropArrayElement(id, index, count);
+	}
 	public static void SameLine() { _ = EditorApi.Generation; NativeEditorBindings.SameLine(); }
 	public static void NewLine() { _ = EditorApi.Generation; NativeEditorBindings.NewLine(); }
 	public static void Separator() { _ = EditorApi.Generation; NativeEditorBindings.Separator(); }
@@ -198,19 +203,11 @@ public static class EditorGui
 					{
 						string elementIndex = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
 						string elementId = property.PropertyPath + ".Array.data[" + elementIndex + "]";
-						if (index > 0 && SmallButton("^##" + elementId + ".up"))
+						int draggedIndex = DragDropArrayElement(property.PropertyPath, index, property.ArraySize);
+						if (draggedIndex >= 0)
 						{
-							property.MoveArrayElement(index, index - 1);
+							property.MoveArrayElement(draggedIndex, index);
 							return;
-						}
-						if (index + 1 < property.ArraySize)
-						{
-							SameLine();
-							if (SmallButton("v##" + elementId + ".down"))
-							{
-								property.MoveArrayElement(index, index + 1);
-								return;
-							}
 						}
 						SameLine();
 						SerializedProperty element = property.GetArrayElementAtIndex(index);

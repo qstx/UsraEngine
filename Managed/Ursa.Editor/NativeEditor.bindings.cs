@@ -82,6 +82,8 @@ internal static partial class NativeEditorBindings
 	internal static partial bool Button(string label);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SmallButton")]
 	internal static partial bool SmallButton(string label);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DragDropArrayElement")]
+	internal static partial int DragDropArrayElement(string id, int index, int count);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SameLine")]
 	internal static partial void SameLine();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::NewLine")]

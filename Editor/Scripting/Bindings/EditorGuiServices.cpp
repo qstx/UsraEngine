@@ -50,6 +50,12 @@ struct IdScope
 	}
 };
 
+struct ArrayElementDragPayload
+{
+	ImGuiID arrayId;
+	Int32 index;
+};
+
 struct MixedValueScope
 {
 	explicit MixedValueScope(bool mixed) : mixed(mixed)
@@ -234,6 +240,44 @@ Result<bool> EditorServices::SmallButton(B::BindingCall& call, const B::Utf8View
 {
 	RequireGui(call);
 	return Result<bool>::Success(Edited(call, ImGui::SmallButton(GuiString(label).c_str())));
+}
+
+Result<Int32> EditorServices::DragDropArrayElement(B::BindingCall& call, const B::Utf8View& id, Int32 index,
+                                                   Int32 count)
+{
+	RequireGui(call);
+	if (index < 0 || index >= count)
+	{
+		return Result<Int32>::Failure("Array element drag handle index is out of range");
+	}
+	const String nativeId = GuiString(id);
+	const ImGuiID arrayId = ImGui::GetID(nativeId.c_str());
+	const String label = String("::##") + nativeId + ".drag." + ToUrsaString(std::to_string(index));
+	ImGui::SmallButton(label.c_str());
+	if (ImGui::BeginDragDropSource())
+	{
+		const ArrayElementDragPayload payload{arrayId, index};
+		ImGui::SetDragDropPayload("UrsaSerializedArrayElement", &payload, sizeof(payload));
+		ImGui::Text("Element %d", index);
+		ImGui::EndDragDropSource();
+	}
+	Int32 sourceIndex = -1;
+	if (ImGui::BeginDragDropTarget())
+	{
+		if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("UrsaSerializedArrayElement"))
+		{
+			if (payload->DataSize == sizeof(ArrayElementDragPayload))
+			{
+				const auto& dragged = *static_cast<const ArrayElementDragPayload*>(payload->Data);
+				if (dragged.arrayId == arrayId && dragged.index >= 0 && dragged.index < count && dragged.index != index)
+				{
+					sourceIndex = dragged.index;
+				}
+			}
+		}
+		ImGui::EndDragDropTarget();
+	}
+	return Result<Int32>::Success(sourceIndex);
 }
 
 Result<void> EditorServices::SameLine(B::BindingCall& call)
