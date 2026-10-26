@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "9be80fc1496e916983779597cdf6c71fdf481e0b90de7be0cee9a51d64c839f7",
+      "Hash": "ad2e95f4a69c4895c513fb654b630d6f3dcfbbba57ac6b812b51a18bddb663e9",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -100,6 +100,12 @@
             {
               "Name": "expectedType",
               "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mixedValue",
+              "Type": "bool",
               "HandleKind": 0,
               "Session": false
             }
@@ -671,6 +677,12 @@
             {
               "Name": "expectedType",
               "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mixedValue",
+              "Type": "bool",
               "HandleKind": 0,
               "Session": false
             }

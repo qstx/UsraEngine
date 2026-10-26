@@ -184,9 +184,11 @@ String GuiString(const B::Utf8View& value)
 
 bool Edited(B::BindingCall& call, bool changed)
 {
-	if (changed && EditorServices::Scope(call).source.preview)
+	auto& scope = EditorServices::Scope(call);
+	scope.lastControlEdited = changed;
+	if (changed && scope.source.preview)
 	{
-		EditorServices::Scope(call).source.preview->RequestRepaint();
+		scope.source.preview->RequestRepaint();
 	}
 	return changed;
 }
@@ -251,7 +253,7 @@ Result<void> EditorServices::Separator(B::BindingCall& call)
 Result<bool> EditorServices::IsLastItemEdited(B::BindingCall& call)
 {
 	RequireGui(call);
-	return Result<bool>::Success(ImGui::IsItemEdited());
+	return Result<bool>::Success(Scope(call).lastControlEdited);
 }
 
 Result<void> EditorServices::BeginGroup(B::BindingCall& call)
@@ -461,10 +463,12 @@ Result<EditorServices::ColorValue> EditorServices::ColorField(B::BindingCall& ca
 
 Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::BindingCall& call, const B::Utf8View& label,
                                                                       const OptionalReference& value, UInt32 kind,
-                                                                      const B::Utf8View& expectedType)
+                                                                      const B::Utf8View& expectedType,
+                                                                      bool mixedValue)
 {
 	RequireGui(call);
 	auto& scope = Scope(call);
+	scope.lastControlEdited = false;
 	PickerTypeScope expectedTypeScope(scope.expectedObjectType, B::ReadString(expectedType));
 	if (kind != K::V_GameObject && kind != K::V_Component)
 	{
@@ -541,8 +545,8 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 			}
 		}
 	}
-	String currentName = value.present ? "Missing " + current.id : "None";
-	for (Size index = 1; index < candidates.size(); ++index)
+	String currentName = mixedValue ? String("— Mixed —") : value.present ? "Missing " + current.id : "None";
+	for (Size index = 1; !mixedValue && index < candidates.size(); ++index)
 	{
 		if (candidates[index].reference.id == current.id)
 		{
@@ -555,6 +559,7 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 	    candidates, value.present ? String(kind == K::V_GameObject ? "object:" : "component:") + current.id : String{});
 	if (chosen)
 	{
+		scope.lastControlEdited = true;
 		result = *chosen == 0 ? OptionalReference{}
 		                      : OptionalReference{1, WriteReference(call, candidates[*chosen].reference)};
 	}
@@ -582,6 +587,7 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 						const String item = component->SerializationType() + "##" + componentId.ToString();
 						if (ImGui::Selectable(item.c_str()))
 						{
+							scope.lastControlEdited = true;
 							result = {1, WriteReference(call, Resolve(scope, kind, componentId.ToString()))};
 							pendingComponentDropChoices.erase(pending);
 							ImGui::CloseCurrentPopup();
@@ -631,6 +637,7 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 						if (component && owner && component->GetGameObject() == owner.value &&
 						    std::find(compatible.begin(), compatible.end(), component) != compatible.end())
 						{
+							scope.lastControlEdited = true;
 							result = {1, WriteReference(call, Resolve(scope, kind, dragged.componentId.ToString()))};
 						}
 						else
@@ -669,6 +676,7 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 							{
 								componentId = persistent.value;
 							}
+							scope.lastControlEdited = true;
 							result = {1, WriteReference(call, Resolve(scope, kind, componentId.ToString()))};
 						}
 						else if (compatible.size() > 1)
@@ -696,10 +704,12 @@ Result<EditorServices::OptionalReference> EditorServices::ObjectField(B::Binding
 
 Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingCall& call, const B::Utf8View& label,
                                                                      const OptionalReference& value, UInt32 kind,
-                                                                     const B::Utf8View& expectedType)
+                                                                     const B::Utf8View& expectedType,
+                                                                     bool mixedValue)
 {
 	RequireGui(call);
 	auto& scope = Scope(call);
+	scope.lastControlEdited = false;
 	PickerTypeScope expectedTypeScope(scope.expectedAssetType, B::ReadString(expectedType));
 	if (kind < K::V_Asset || kind > K::V_ComputeShader)
 	{
@@ -830,7 +840,11 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 		                        (candidate.reference.asset.localFileId == current.asset.localFileId ||
 		                         (!current.asset.localFileId && !candidate.reference.asset.localFileId));
 	                 });
-	if (currentCandidate != candidates.end())
+	if (mixedValue)
+	{
+		preview = "— Mixed —";
+	}
+	else if (currentCandidate != candidates.end())
 	{
 		preview = currentCandidate->name;
 	}
@@ -839,11 +853,12 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 		preview = "Missing " + preview;
 	}
 	const String pickerType = scope.expectedAssetType.empty() ? PickerReferenceType(kind) : scope.expectedAssetType;
-	const String currentKey = currentCandidate == candidates.end() ? String{} : currentCandidate->key;
+	const String currentKey = mixedValue || currentCandidate == candidates.end() ? String{} : currentCandidate->key;
 	const auto chosen =
 	    DrawReferencePicker(PickerTargetKey(scope), GuiString(label), preview, pickerType, candidates, currentKey);
 	if (chosen)
 	{
+		scope.lastControlEdited = true;
 		result = *chosen == 0
 		             ? OptionalReference{}
 		             : OptionalReference{
@@ -865,6 +880,7 @@ Result<EditorServices::OptionalReference> EditorServices::AssetField(B::BindingC
 					    (asset.reference.asset.localFileId == reference.localFileId ||
 					     (!reference.localFileId && !asset.isSubAsset)))
 					{
+						scope.lastControlEdited = true;
 						result = {1, WriteReference(call, Resolve(scope, kind, {}, reference))};
 						break;
 					}

@@ -12,7 +12,7 @@ struct Table
 	Int32 (*NativeEditorBindings_ApplyImporterSettings)(void*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_ApplyProperties)(void*, UInt64, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_ApplyTargetFields)(void*, const Utf8View*, UInt32*, BindingOutcome*) = nullptr;
-	Int32 (*NativeEditorBindings_AssetField)(void*, const Utf8View*, const Wire::Value_Ursa_Editor_EditorReferenceValue_*, UInt32, const Utf8View*, Wire::Value_Ursa_Editor_EditorReferenceValue_*, BindingOutcome*) = nullptr;
+	Int32 (*NativeEditorBindings_AssetField)(void*, const Utf8View*, const Wire::Value_Ursa_Editor_EditorReferenceValue_*, UInt32, const Utf8View*, UInt32, Wire::Value_Ursa_Editor_EditorReferenceValue_*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_BeginGroup)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_BeginPreview)(void*, UInt64, const Wire::Value_Ursa_Rect*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_Button)(void*, const Utf8View*, UInt32*, BindingOutcome*) = nullptr;
@@ -49,7 +49,7 @@ struct Table
 	Int32 (*NativeEditorBindings_MarkDirty)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_MarkImporterControlsDrawn)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_MoveArrayElement)(void*, UInt64, const Utf8View*, Int32, Int32, BindingOutcome*) = nullptr;
-	Int32 (*NativeEditorBindings_ObjectField)(void*, const Utf8View*, const Wire::Value_Ursa_Editor_EditorReferenceValue_*, UInt32, const Utf8View*, Wire::Value_Ursa_Editor_EditorReferenceValue_*, BindingOutcome*) = nullptr;
+	Int32 (*NativeEditorBindings_ObjectField)(void*, const Utf8View*, const Wire::Value_Ursa_Editor_EditorReferenceValue_*, UInt32, const Utf8View*, UInt32, Wire::Value_Ursa_Editor_EditorReferenceValue_*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_OpenAsset)(void*, const Utf8View*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_Popup)(void*, const Utf8View*, Int32, const DataView*, UInt32, Int32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_PreviewDrawMesh)(void*, UInt64, const Wire::Value_Ursa_NativeHandle*, const Wire::Value_Ursa_NativeHandle*, const Wire::Value_Ursa_Vector3*, const Wire::Value_Ursa_Quaternion*, const Wire::Value_Ursa_Vector3*, BindingOutcome*) = nullptr;
@@ -143,7 +143,7 @@ inline Int32 NativeEditorBindings_ApplyTargetFields(void* context, const Utf8Vie
 #line 1 "Editor.generated.hpp"
 // Contract: Ursa.Editor/NativeEditor.bindings.cs:124
 #line 124 "Ursa.Editor/NativeEditor.bindings.cs"
-inline Int32 NativeEditorBindings_AssetField(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Editor_EditorReferenceValue_* p_value, UInt32 p_kind, const Utf8View* p_expectedType, Wire::Value_Ursa_Editor_EditorReferenceValue_* result, BindingOutcome* outcome) noexcept
+inline Int32 NativeEditorBindings_AssetField(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Editor_EditorReferenceValue_* p_value, UInt32 p_kind, const Utf8View* p_expectedType, UInt32 p_mixedValue, Wire::Value_Ursa_Editor_EditorReferenceValue_* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
 	{
@@ -154,10 +154,11 @@ inline Int32 NativeEditorBindings_AssetField(void* context, const Utf8View* p_la
 		Check_Wire_c94f08ee88a24e17(p_kind);
 		if (!p_expectedType) throw std::runtime_error("Null binding parameter: expectedType");
 		Check_Wire_473287f8298dba71(*p_expectedType);
+		Check_Wire_b760f44fa5965c24(p_mixedValue);
 		if (!result) throw std::runtime_error("Null binding output");
-		using TargetSignature = Result<Wire::Value_Ursa_Editor_EditorReferenceValue_> (*)(BindingCall&, const Utf8View&, const Wire::Value_Ursa_Editor_EditorReferenceValue_&, UInt32, const Utf8View&);
+		using TargetSignature = Result<Wire::Value_Ursa_Editor_EditorReferenceValue_> (*)(BindingCall&, const Utf8View&, const Wire::Value_Ursa_Editor_EditorReferenceValue_&, UInt32, const Utf8View&, bool);
 		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::AssetField), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.AssetField");
-		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::AssetField(call, *p_label, *p_value, p_kind, *p_expectedType));
+		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::AssetField(call, *p_label, *p_value, p_kind, *p_expectedType, (p_mixedValue != 0)));
 		CheckOwned_Wire_3cd81e8a7d61cdf2(*result, call.arena);
 		Check_Wire_3cd81e8a7d61cdf2(*result);
 	});
@@ -715,7 +716,7 @@ inline Int32 NativeEditorBindings_MoveArrayElement(void* context, UInt64 p_revis
 #line 1 "Editor.generated.hpp"
 // Contract: Ursa.Editor/NativeEditor.bindings.cs:122
 #line 122 "Ursa.Editor/NativeEditor.bindings.cs"
-inline Int32 NativeEditorBindings_ObjectField(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Editor_EditorReferenceValue_* p_value, UInt32 p_kind, const Utf8View* p_expectedType, Wire::Value_Ursa_Editor_EditorReferenceValue_* result, BindingOutcome* outcome) noexcept
+inline Int32 NativeEditorBindings_ObjectField(void* context, const Utf8View* p_label, const Wire::Value_Ursa_Editor_EditorReferenceValue_* p_value, UInt32 p_kind, const Utf8View* p_expectedType, UInt32 p_mixedValue, Wire::Value_Ursa_Editor_EditorReferenceValue_* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
 	{
@@ -726,10 +727,11 @@ inline Int32 NativeEditorBindings_ObjectField(void* context, const Utf8View* p_l
 		Check_Wire_c94f08ee88a24e17(p_kind);
 		if (!p_expectedType) throw std::runtime_error("Null binding parameter: expectedType");
 		Check_Wire_473287f8298dba71(*p_expectedType);
+		Check_Wire_b760f44fa5965c24(p_mixedValue);
 		if (!result) throw std::runtime_error("Null binding output");
-		using TargetSignature = Result<Wire::Value_Ursa_Editor_EditorReferenceValue_> (*)(BindingCall&, const Utf8View&, const Wire::Value_Ursa_Editor_EditorReferenceValue_&, UInt32, const Utf8View&);
+		using TargetSignature = Result<Wire::Value_Ursa_Editor_EditorReferenceValue_> (*)(BindingCall&, const Utf8View&, const Wire::Value_Ursa_Editor_EditorReferenceValue_&, UInt32, const Utf8View&, bool);
 		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::ObjectField), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.ObjectField");
-		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::ObjectField(call, *p_label, *p_value, p_kind, *p_expectedType));
+		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::ObjectField(call, *p_label, *p_value, p_kind, *p_expectedType, (p_mixedValue != 0)));
 		CheckOwned_Wire_3cd81e8a7d61cdf2(*result, call.arena);
 		Check_Wire_3cd81e8a7d61cdf2(*result);
 	});
@@ -1245,7 +1247,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_Vector3Field,
 		&NativeEditorBindings_Vector4Field,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 68, &table, &ValidateBindingContext, {0x9b, 0xe8, 0x0f, 0xc1, 0x49, 0x6e, 0x91, 0x69, 0x83, 0x77, 0x95, 0x97, 0xcd, 0xf6, 0xc7, 0x1f, 0xdf, 0x48, 0x1e, 0x0b, 0x90, 0xde, 0x7b, 0xe0, 0xce, 0xe9, 0xa5, 0x1d, 0x64, 0xc8, 0x39, 0xf7}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 68, &table, &ValidateBindingContext, {0xad, 0x2e, 0x95, 0xf4, 0xa6, 0x9c, 0x48, 0x95, 0xc5, 0x13, 0xfb, 0x65, 0x4b, 0x63, 0x0d, 0x6f, 0x3d, 0xcf, 0xbb, 0xba, 0x57, 0xac, 0x6b, 0x81, 0x2b, 0x51, 0xa1, 0x8b, 0xdd, 0xb6, 0x63, 0xe9}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Editor

@@ -119,9 +119,9 @@ internal static partial class NativeEditorBindings
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ColorField")]
 	internal static partial Color ColorField(string label, Color value, bool mixedValue, bool hdr);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ObjectField")]
-	internal static partial EditorReferenceValue? ObjectField(string label, EditorReferenceValue? value, EditorReferenceKind kind, string expectedType);
+	internal static partial EditorReferenceValue? ObjectField(string label, EditorReferenceValue? value, EditorReferenceKind kind, string expectedType, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::AssetField")]
-	internal static partial EditorReferenceValue? AssetField(string label, EditorReferenceValue? value, EditorReferenceKind kind, string expectedType);
+	internal static partial EditorReferenceValue? AssetField(string label, EditorReferenceValue? value, EditorReferenceKind kind, string expectedType, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetProperty")]
 	internal static partial SerializedPropertyState GetProperty(ulong revision, string path);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetProperty")]

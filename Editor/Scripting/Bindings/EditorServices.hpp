@@ -36,6 +36,7 @@ public:
 	Vector<String> appliedPropertyPaths;
 	Int32 groups = 0;
 	bool changed = false;
+	bool lastControlEdited = false;
 
 private:
 	friend struct EditorServices;
@@ -176,10 +177,10 @@ struct EditorServices
 	                                     bool mixedValue, bool hdr);
 	static Result<OptionalReference> ObjectField(B::BindingCall& call, const B::Utf8View& label,
 	                                             const OptionalReference& value, UInt32 kind,
-	                                             const B::Utf8View& expectedType);
+	                                             const B::Utf8View& expectedType, bool mixedValue = false);
 	static Result<OptionalReference> AssetField(B::BindingCall& call, const B::Utf8View& label,
 	                                            const OptionalReference& value, UInt32 kind,
-	                                            const B::Utf8View& expectedType);
+	                                            const B::Utf8View& expectedType, bool mixedValue = false);
 	static Result<PropertyState> GetProperty(B::BindingCall& call, UInt64 revision, const B::Utf8View& path);
 	static Result<void> SetProperty(B::BindingCall& call, UInt64 revision, const B::Utf8View& path,
 	                                const PropertyValue& value);

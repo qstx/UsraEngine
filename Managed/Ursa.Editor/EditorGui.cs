@@ -64,16 +64,16 @@ public static class EditorGui
 		return NativeEditorBindings.ColorField(label, value, mixedValue, hdr);
 	}
 	public static EditorReference? ObjectField(string label, EditorReference? value, EditorReferenceKind kind,
-		string expectedType = "")
+		string expectedType = "", bool mixedValue = false)
 	{
 		_ = EditorApi.Generation;
-		return NativeEditorBindings.ObjectField(label, value?.value, kind, expectedType) is { } edited ? new(edited) : null;
+		return NativeEditorBindings.ObjectField(label, value?.value, kind, expectedType, mixedValue) is { } edited ? new(edited) : null;
 	}
 	public static EditorReference? AssetField(string label, EditorReference? value,
-		EditorReferenceKind kind = EditorReferenceKind.Asset, string expectedType = "")
+		EditorReferenceKind kind = EditorReferenceKind.Asset, string expectedType = "", bool mixedValue = false)
 	{
 		_ = EditorApi.Generation;
-		return NativeEditorBindings.AssetField(label, value?.value, kind, expectedType) is { } edited ? new(edited) : null;
+		return NativeEditorBindings.AssetField(label, value?.value, kind, expectedType, mixedValue) is { } edited ? new(edited) : null;
 	}
 	private static bool SameReference(EditorReference? left, EditorReference? right)
 	{
@@ -160,16 +160,18 @@ public static class EditorGui
 					property.ColorValue = editedColor;
 				break;
 			case SerializedPropertyType.ObjectReference:
-				if (property.HasMultipleDifferentValues) goto default;
 				EditorReference? originalObject = property.ObjectReferenceValue;
-				EditorReference? editedObject = ObjectField(caption, originalObject, property.ReferenceKind, property.TypeName);
-				if (!SameReference(editedObject, originalObject)) property.ObjectReferenceValue = editedObject;
+				EditorReference? editedObject = ObjectField(caption, originalObject, property.ReferenceKind, property.TypeName,
+					property.HasMultipleDifferentValues);
+				if (!SameReference(editedObject, originalObject) ||
+				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.ObjectReferenceValue = editedObject;
 				break;
 			case SerializedPropertyType.AssetReference:
-				if (property.HasMultipleDifferentValues) goto default;
 				EditorReference? originalAsset = property.AssetReferenceValue;
-				EditorReference? editedAsset = AssetField(caption, originalAsset, property.ReferenceKind, property.TypeName);
-				if (!SameReference(editedAsset, originalAsset)) property.AssetReferenceValue = editedAsset;
+				EditorReference? editedAsset = AssetField(caption, originalAsset, property.ReferenceKind, property.TypeName,
+					property.HasMultipleDifferentValues);
+				if (!SameReference(editedAsset, originalAsset) ||
+				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.AssetReferenceValue = editedAsset;
 				break;
 			case SerializedPropertyType.Array:
 			case SerializedPropertyType.List:
