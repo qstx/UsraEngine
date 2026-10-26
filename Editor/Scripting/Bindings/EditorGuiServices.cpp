@@ -249,6 +249,27 @@ Result<Float64> EditorServices::FloatField(B::BindingCall& call, const B::Utf8Vi
 	return Result<Float64>::Success(value);
 }
 
+Result<Float64> EditorServices::DragFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value, Float64 speed,
+                                          Float64 minimum, Float64 maximum, const B::Utf8View& format)
+{
+	RequireGui(call);
+	Finite(value);
+	Finite(speed);
+	Finite(minimum);
+	Finite(maximum);
+	if (speed <= 0.0 || minimum > maximum || std::abs(value) > std::numeric_limits<Float32>::max() ||
+	    speed > std::numeric_limits<Float32>::max() || std::abs(minimum) > std::numeric_limits<Float32>::max() ||
+	    std::abs(maximum) > std::numeric_limits<Float32>::max())
+	{
+		throw std::runtime_error("DragFloat requires finite, representable values and ordered bounds");
+	}
+	Float32 editedValue = static_cast<Float32>(value);
+	Edited(call,
+	       ImGui::DragFloat(GuiString(label).c_str(), &editedValue, static_cast<Float32>(speed),
+	                        static_cast<Float32>(minimum), static_cast<Float32>(maximum), GuiString(format).c_str()));
+	return Result<Float64>::Success(editedValue);
+}
+
 Result<B::Utf8View> EditorServices::TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value)
 {
 	RequireGui(call);

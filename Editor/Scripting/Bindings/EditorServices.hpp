@@ -140,6 +140,7 @@ struct EditorServices
 	static Result<void> MarkDirty(B::BindingCall& call);
 	static Result<void> Save(B::BindingCall& call);
 	static Result<void> OpenAsset(B::BindingCall& call, const B::Utf8View& path);
+	static Result<void> SetActiveCamera(B::BindingCall& call);
 	static Result<void> Text(B::BindingCall& call, const B::Utf8View& text);
 	static Result<bool> Button(B::BindingCall& call, const B::Utf8View& label);
 	static Result<void> SameLine(B::BindingCall& call);
@@ -149,6 +150,8 @@ struct EditorServices
 	static Result<bool> Toggle(B::BindingCall& call, const B::Utf8View& label, bool value);
 	static Result<Int64> IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value);
 	static Result<Float64> FloatField(B::BindingCall& call, const B::Utf8View& label, Float64 value);
+	static Result<Float64> DragFloat(B::BindingCall& call, const B::Utf8View& label, Float64 value, Float64 speed,
+	                                 Float64 minimum, Float64 maximum, const B::Utf8View& format);
 	static Result<B::Utf8View> TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value);
 	static Result<Int32> Popup(B::BindingCall& call, const B::Utf8View& label, Int32 selected,
 	                           const B::DataView& options);

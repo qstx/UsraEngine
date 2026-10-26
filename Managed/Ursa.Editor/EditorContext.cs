@@ -21,4 +21,5 @@ public static class EditorContext
 	public static void Save() { _ = EditorApi.Generation; InspectorTargetScope.SynchronizeCurrent(); NativeEditorBindings.Save(); }
 	public static void MarkDirty() { _ = EditorApi.Generation; InspectorTargetScope.SynchronizeCurrent(); NativeEditorBindings.MarkDirty(); }
 	public static void OpenAsset(string virtualPath) { _ = EditorApi.Generation; NativeEditorBindings.OpenAsset(virtualPath); }
+	public static void SetActiveCamera() { _ = EditorApi.Generation; NativeEditorBindings.SetActiveCamera(); }
 }

@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "bffd5fb4f3729ff822a61c1e7d88647ddbe6c194e07a4a3771749b6f9d06f06a",
+      "Hash": "ca4fe795dfa4d9a75a3a9d0af28ce0818ad19bcc28269704cfee5f78fc9b6852",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -182,6 +182,51 @@
             {
               "Name": "utility",
               "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.DragFloat",
+          "Direction": "NativeMethod",
+          "Return": "double",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "speed",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "minimum",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "maximum",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "format",
+              "Type": "string",
               "HandleKind": 0,
               "Session": false
             }
@@ -784,6 +829,14 @@
         },
         {
           "Identity": "Ursa.Editor.NativeEditorBindings.Separator",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SetActiveCamera",
           "Direction": "NativeMethod",
           "Return": "void",
           "Parameters": [],

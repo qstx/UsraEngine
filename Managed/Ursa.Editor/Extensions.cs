@@ -38,6 +38,11 @@ public sealed class CustomEditorAttribute : Attribute
 	public bool EditorForChildClasses { get; }
 }
 
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+internal sealed class BuiltinEditorAttribute : Attribute
+{
+}
+
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
 public sealed class CanEditMultipleObjectsAttribute : Attribute
 {
@@ -129,15 +134,22 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 	private void AddInspectors(Type[] types)
 	{
 		var registrations = types.Where(type => !type.IsAbstract && !type.ContainsGenericParameters && typeof(Inspector).IsAssignableFrom(type))
-			.Select(type => (Inspector: type, Declaration: type.GetCustomAttribute<CustomEditorAttribute>(inherit: false)))
-			.Where(item => item.Declaration != null).Select(item => new InspectorRegistration(item.Inspector, item.Declaration!)).ToArray();
-		var targets = registrations.Select(item => item.Declaration.InspectedType)
+			.Select(type => (Inspector: type, Declaration: type.GetCustomAttribute<CustomEditorAttribute>(inherit: false),
+				Builtin: type.GetCustomAttribute<BuiltinEditorAttribute>(inherit: false) != null))
+			.Where(item => item.Declaration != null).ToArray();
+		var projectRegistrations = registrations.Where(item => !item.Builtin)
+			.Select(item => new InspectorRegistration(item.Inspector, item.Declaration!)).ToArray();
+		var builtinRegistrations = registrations.Where(item => item.Builtin)
+			.Select(item => new InspectorRegistration(item.Inspector, item.Declaration!)).ToArray();
+		var targets = registrations.Select(item => item.Declaration!.InspectedType)
 			.Concat(types).Concat(typeof(Component).Assembly.GetTypes()).Concat(new[] { typeof(TextureImporter), typeof(ModelImporter) })
 			.Where(type => !type.IsAbstract && !type.ContainsGenericParameters && InspectorTargetMatching.Supports(type))
 			.Where(type => !typeof(Texture).IsAssignableFrom(type) || type == typeof(Texture2D)).Distinct();
 		foreach (Type actual in targets.OrderBy(type => type.FullName, StringComparer.Ordinal))
 		{
-			Type? selected = InspectorTargetMatching.Select(actual, registrations);
+			// Project Inspectors override the editor's built-in defaults for the same target.
+			Type? selected = InspectorTargetMatching.Select(actual, projectRegistrations) ??
+			                 InspectorTargetMatching.Select(actual, builtinRegistrations);
 			if (selected == null) continue;
 			string target = InspectorTargetMatching.Identity(actual);
 			var inspector = (Inspector)Activator.CreateInstance(selected)!;

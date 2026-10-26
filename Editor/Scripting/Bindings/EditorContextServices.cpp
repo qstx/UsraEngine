@@ -1111,4 +1111,34 @@ Result<void> EditorServices::OpenAsset(B::BindingCall& call, const B::Utf8View& 
 	}
 	return scope.source.openAsset(parsed.value);
 }
+
+Result<void> EditorServices::SetActiveCamera(B::BindingCall& call)
+{
+	auto& scope = Scope(call);
+	RequireGui(call);
+	if (!scope.source.canEditTarget || !scope.source.target)
+	{
+		return Result<void>::Failure("The current Inspector target cannot be edited");
+	}
+	if (!scope.source.selection.scene)
+	{
+		return Result<void>::Failure("The current document has no editable Scene");
+	}
+	auto* camera = dynamic_cast<CameraComponent*>(scope.source.target);
+	if (!camera)
+	{
+		return Result<void>::Failure("The current Inspector target is not a Camera component");
+	}
+	auto activated = scope.source.selection.scene->SetActiveCamera(camera->Id());
+	if (!activated)
+	{
+		return Result<void>::Failure(activated.error);
+	}
+	scope.changed = true;
+	if (scope.source.document)
+	{
+		scope.source.document->MarkDirty();
+	}
+	return {};
+}
 } // namespace Ursa::Editor::Bindings

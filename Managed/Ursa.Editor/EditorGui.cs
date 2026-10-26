@@ -29,6 +29,12 @@ public static class EditorGui
 	public static bool Toggle(string label, bool value) { _ = EditorApi.Generation; return NativeEditorBindings.Toggle(label, value); }
 	public static long IntField(string label, long value) { _ = EditorApi.Generation; return NativeEditorBindings.IntField(label, value); }
 	public static double FloatField(string label, double value) { _ = EditorApi.Generation; return NativeEditorBindings.FloatField(label, value); }
+	public static double DragFloat(string label, double value, double speed, double minimum, double maximum, string format = "%.3f")
+	{
+		_ = EditorApi.Generation;
+		ArgumentException.ThrowIfNullOrEmpty(format);
+		return NativeEditorBindings.DragFloat(label, value, speed, minimum, maximum, format);
+	}
 	public static string TextField(string label, string value) { _ = EditorApi.Generation; return NativeEditorBindings.TextField(label, value); }
 	public static int Popup(string label, int selected, string[] options) { _ = EditorApi.Generation; return NativeEditorBindings.Popup(label, selected, options); }
 	public static Vector2 Vector2Field(string label, Vector2 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector2Field(label, value); }

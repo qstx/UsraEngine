@@ -72,6 +72,8 @@ internal static partial class NativeEditorBindings
 	internal static partial void Save();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::OpenAsset")]
 	internal static partial void OpenAsset(string path);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetActiveCamera")]
+	internal static partial void SetActiveCamera();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Text")]
 	internal static partial void Text(string text);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Button")]
@@ -90,6 +92,8 @@ internal static partial class NativeEditorBindings
 	internal static partial long IntField(string label, long value);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::FloatField")]
 	internal static partial double FloatField(string label, double value);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DragFloat")]
+	internal static partial double DragFloat(string label, double value, double speed, double minimum, double maximum, string format);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::TextField")]
 	internal static partial string TextField(string label, string value);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Popup")]
