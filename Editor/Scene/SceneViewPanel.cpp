@@ -2192,7 +2192,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 			}
 			Icons::SameLine();
 			if (Icons::Button("Snap", Icons::Icon::Trace, "Toggle transform snapping (Ctrl temporarily snaps)",
-			                  gizmoSnapSettings.enabled, true))
+			                  gizmoSnapSettings.enabled))
 			{
 				gizmoSnapSettings.enabled = !gizmoSnapSettings.enabled;
 				settingsChanged = true;
