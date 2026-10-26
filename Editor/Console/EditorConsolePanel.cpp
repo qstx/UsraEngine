@@ -375,12 +375,18 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 	Icons::SameLine();
 	ImGui::SetNextItemWidth(std::min(220.0f, ImGui::GetContentRegionAvail().x));
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
+	    (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::IsKeyPressed(ImGuiKey_F, false))
 	{
 		ImGui::SetKeyboardFocusHere();
 	}
 	ImGui::InputTextWithHint("##ConsoleSearch", "Search", searchText.data(), searchText.size(),
 	                         ImGuiInputTextFlags_EscapeClearsAll);
+	const bool searchInputActive = ImGui::IsItemActive();
+	bool focusConsoleRows = searchInputActive && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+	                                              ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
+	                                              ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
+	const bool navigateConsoleRows = focusConsoleRows && (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
+	                                                      ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
 	const auto counts = Counts(snapshot);
 	const char* labels[]{"Messages", "Warnings", "Errors"};
 	const Icons::Icon icons[]{Icons::Icon::Info, Icons::Icon::Warning, Icons::Icon::Error};
@@ -477,8 +483,9 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		}
 		Size keyboardTargetIndex = visibleRecords.size();
 		const ImGuiIO& consoleInput = ImGui::GetIO();
-		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !consoleInput.WantTextInput &&
-		    !consoleInput.KeyCtrl && !consoleInput.KeySuper && !consoleInput.KeyAlt && !ImGui::IsAnyItemActive())
+		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+		    (!consoleInput.WantTextInput || navigateConsoleRows) && !consoleInput.KeyCtrl && !consoleInput.KeySuper &&
+		    !consoleInput.KeyAlt && (!ImGui::IsAnyItemActive() || navigateConsoleRows))
 		{
 			const bool moveUp = ImGui::IsKeyPressed(ImGuiKey_UpArrow, false);
 			const bool moveDown = ImGui::IsKeyPressed(ImGuiKey_DownArrow, false);
@@ -534,6 +541,15 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			const LogRecord& record = *visible.record;
 			const bool keyboardSelected = visible.originalIndex == keyboardTargetIndex;
 			const bool selected = keyboardSelected || IsLogRecordSelected(selectedRecords, record);
+			if (focusConsoleRows &&
+			    (navigateConsoleRows ? keyboardSelected ||
+			                              (keyboardTargetIndex == visibleRecords.size() &&
+			                               (selected || visible.originalIndex == visibleRecords.front().originalIndex))
+			                         : selected || visible.originalIndex == visibleRecords.front().originalIndex))
+			{
+				ImGui::SetKeyboardFocusHere();
+				focusConsoleRows = false;
+			}
 			const ImVec2 cellPadding = ImGui::GetStyle().CellPadding;
 			const Float32 messageWidth =
 			    std::max(1.f, tableContentWidth - 142.f - 100.f - 110.f - 24.f - cellPadding.x * 2.f);
