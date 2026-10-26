@@ -253,6 +253,9 @@ void ProjectBrowserPanel::Reset()
 	expandedAssets.clear();
 	favoriteSearches.clear();
 	favoriteAssetPaths.clear();
+	assetClipboard.clear();
+	assetClipboardProject.clear();
+	assetClipboardCut = false;
 	settingsFiles = nullptr;
 	favoritesSettingsPath = {};
 	favoritesSettingsProject.clear();
@@ -362,6 +365,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	if (favoritesSettingsProject != projectKey)
 	{
 		favoritesSettingsProject = projectKey;
+		assetClipboard.clear();
+		assetClipboardProject = projectKey;
+		assetClipboardCut = false;
 		favoriteSearches.clear();
 		favoriteAssetPaths.clear();
 		twoColumnLayout = true;
@@ -575,6 +581,12 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	    !projectShortcuts.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_N, false) && !readOnly && actions.createFolder)
 	{
 		requestCreateFolder();
+	}
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !projectShortcuts.WantTextInput &&
+	    assetClipboardCut && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+	{
+		assetClipboard.clear();
+		assetClipboardCut = false;
 	}
 	ImGui::BeginDisabled(!model.CanNavigateBack());
 	if (ImGui::ArrowButton("ProjectNavigateBack", ImGuiDir_Left))
@@ -813,6 +825,117 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		auto duplicated = duplicateEntries(selection.entries);
 		diagnostic = duplicated ? String{} : duplicated.error;
+	}
+	const ImGuiIO& assetClipboardInput = ImGui::GetIO();
+	const bool projectClipboardFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	                                     !assetClipboardInput.WantTextInput &&
+	                                     (assetClipboardInput.KeyCtrl || assetClipboardInput.KeySuper) &&
+	                                     !assetClipboardInput.KeyAlt;
+	if (projectClipboardFocused &&
+	    (ImGui::IsKeyPressed(ImGuiKey_C, false) || ImGui::IsKeyPressed(ImGuiKey_X, false)))
+	{
+		Vector<VirtualPath> sources;
+		bool valid = !selection.entries.empty() && workspace.Database();
+		Set<String> seen;
+		for (const EditorSelectionEntry& entry : selection.entries)
+		{
+			if (entry.kind != EditorSelectionKind::Asset || entry.assetRole != EditorAssetSelectionRole::Source ||
+			    entry.assetLocalFileId || !entry.assetGuid || entry.IsMissing())
+			{
+				valid = false;
+				break;
+			}
+			auto source = workspace.Database()->SourcePath(entry.assetGuid);
+			if (!source || source.value != entry.assetPath || source.value.scheme != workspace.Database()->SourceScheme())
+			{
+				valid = false;
+				break;
+			}
+			if (seen.insert(source.value.ToString()).second)
+			{
+				sources.push_back(source.value);
+			}
+		}
+		if (valid)
+		{
+			for (Size index = 0; index < sources.size();)
+			{
+				bool nested = false;
+				for (const VirtualPath& candidate : sources)
+				{
+					if (candidate == sources[index])
+					{
+						continue;
+					}
+					auto metadata = workspace.Database()->Metadata(candidate);
+					if (metadata && metadata.value.folder &&
+					    sources[index].relative.size() > candidate.relative.size() &&
+					    sources[index].relative.compare(0, candidate.relative.size(), candidate.relative) == 0 &&
+					    sources[index].relative[candidate.relative.size()] == '/')
+					{
+						nested = true;
+						break;
+					}
+				}
+				if (nested)
+				{
+					sources.erase(sources.begin() + index);
+				}
+				else
+				{
+					++index;
+				}
+			}
+			assetClipboard = std::move(sources);
+			assetClipboardProject = projectKey;
+			assetClipboardCut = ImGui::IsKeyPressed(ImGuiKey_X, false);
+			diagnostic.clear();
+		}
+		else
+		{
+			diagnostic = "Project Copy and Cut require writable source assets";
+		}
+	}
+	if (projectClipboardFocused && ImGui::IsKeyPressed(ImGuiKey_V, false) &&
+	    !assetClipboard.empty() && assetClipboardProject == projectKey)
+	{
+		if (readOnly || !actions.pasteAssets)
+		{
+			diagnostic = "Project Paste is unavailable while the project is read-only";
+		}
+		else
+		{
+			auto pasted = actions.pasteAssets(assetClipboard,
+			                                  model.CurrentFolder(), assetClipboardCut);
+			diagnostic = pasted ? String{} : pasted.error;
+			if (pasted)
+			{
+				auto refreshed = model.Refresh(workspace);
+				diagnostic = refreshed ? String{} : refreshed.error;
+				if (refreshed)
+				{
+					Vector<EditorSelectionEntry> pastedEntries;
+					for (const VirtualPath& path : pasted.value)
+					{
+						if (const auto* asset = model.Find(path))
+						{
+							pastedEntries.push_back(AssetSelection(*asset));
+						}
+					}
+					if (!pastedEntries.empty())
+					{
+						model.SelectAsset(pastedEntries.front().assetPath);
+						selection.SelectEntries(std::move(pastedEntries), 0);
+					}
+					model.ReconcileSelection(selection);
+					if (assetClipboardCut)
+					{
+						assetClipboard.clear();
+						assetClipboardCut = false;
+					}
+				}
+			}
+		}
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    !selection.entries.empty() && ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&

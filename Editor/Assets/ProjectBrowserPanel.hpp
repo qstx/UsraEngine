@@ -23,6 +23,7 @@ struct ProjectBrowserActions
 	std::function<Result<void>(const Vector<VirtualPath>&)> deleteAssets;
 	std::function<Result<void>(const Vector<VirtualPath>&)> reimportAssets;
 	std::function<Result<Vector<VirtualPath>>(const Vector<VirtualPath>&)> duplicateAssets;
+	std::function<Result<Vector<VirtualPath>>(const Vector<VirtualPath>&, const String&, bool)> pasteAssets;
 	std::function<Result<void>(const ProjectBrowserEntry&)> openAsset;
 	std::function<Result<void>(const EditorDragSession&, const String&)> exportScenePrefabs;
 };
@@ -66,6 +67,9 @@ private:
 	Map<String, bool> expandedAssets;
 	Vector<String> favoriteSearches;
 	Vector<String> favoriteAssetPaths;
+	Vector<VirtualPath> assetClipboard;
+	String assetClipboardProject;
+	bool assetClipboardCut = false;
 	VirtualFileSystem* settingsFiles = nullptr;
 	VirtualPath favoritesSettingsPath;
 	String favoritesSettingsProject;

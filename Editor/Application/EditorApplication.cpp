@@ -4942,6 +4942,156 @@ Result<void> EditorApplication::OnGui()
 			RequestAssetImport();
 			return Result<Vector<VirtualPath>>::Success(std::move(destinations));
 		};
+		actions.pasteAssets = [this](const Vector<VirtualPath>& sources, const String& destinationFolder, bool move)
+		{
+			if (!workspace || !workspace->Database() || play.Active() || sources.empty())
+			{
+				return Result<Vector<VirtualPath>>::Failure("Paste project assets after opening a project and stopping Play mode");
+			}
+			auto* database = workspace->Database();
+			if (!destinationFolder.empty())
+			{
+				auto folder = VirtualPath::Parse(database->SourceScheme() + ":" + destinationFolder);
+				auto metadata = folder ? database->Metadata(folder.value)
+				                      : Result<AssetMetadata>::Failure(folder.error);
+				if (!metadata || !metadata.value.folder)
+				{
+					return Result<Vector<VirtualPath>>::Failure(
+					    metadata ? "Paste target is not a project folder" : metadata.error);
+				}
+			}
+			Vector<VirtualPath> destinations;
+			Vector<AssetMoveRequest> moves;
+			Set<String> reserved;
+			for (const VirtualPath& source : sources)
+			{
+				auto metadata = database->Metadata(source);
+				if (!metadata || source.scheme != database->SourceScheme())
+				{
+					return Result<Vector<VirtualPath>>::Failure(metadata ? "Only project source assets can be pasted"
+					                                                 : metadata.error);
+				}
+				auto writable = database->Filesystem().CheckWritable(source);
+				if (!writable)
+				{
+					return Result<Vector<VirtualPath>>::Failure(writable.error);
+				}
+				if (move && metadata.value.folder &&
+				    (destinationFolder == source.relative ||
+				     (destinationFolder.size() > source.relative.size() &&
+				      destinationFolder.compare(0, source.relative.size(), source.relative) == 0 &&
+				      destinationFolder[source.relative.size()] == '/')))
+				{
+					return Result<Vector<VirtualPath>>::Failure("Cannot move a folder into itself or one of its descendants");
+				}
+				const Size slash = source.relative.rfind('/');
+				const String filename = source.relative.substr(slash == String::npos ? 0 : slash + 1);
+				const String parent = destinationFolder.empty() ? String{} : destinationFolder + "/";
+				String candidateName = filename;
+				VirtualPath destination;
+				bool found = false;
+				for (UInt32 suffix = 0; suffix < 10000; ++suffix)
+				{
+					if (!move && suffix > 0)
+					{
+						Size dot = filename.rfind('.');
+						if (metadata.value.folder || dot == 0 || dot == String::npos)
+						{
+							dot = filename.size();
+						}
+						candidateName = filename.substr(0, dot) + " " + std::to_string(suffix).c_str() + filename.substr(dot);
+					}
+					const String relative = parent + candidateName;
+					if (move && relative == source.relative)
+					{
+						return Result<Vector<VirtualPath>>::Failure("Paste target is the asset's current location");
+					}
+					if (reserved.find(relative) != reserved.end())
+					{
+						if (move)
+						{
+							return Result<Vector<VirtualPath>>::Failure("Multiple cut assets have the same name in the target folder");
+						}
+						continue;
+					}
+					auto parsed = VirtualPath::Parse(source.scheme + ":" + relative);
+					if (!parsed)
+					{
+						return Result<Vector<VirtualPath>>::Failure(parsed.error);
+					}
+					auto exists = database->Filesystem().Exists(parsed.value);
+					auto sidecar = VirtualPath::Parse(parsed.value.ToString() + ".meta");
+					auto sidecarExists = sidecar ? database->Filesystem().Exists(sidecar.value)
+					                            : Result<bool>::Failure(sidecar.error);
+					if (!exists || !sidecarExists)
+					{
+						return Result<Vector<VirtualPath>>::Failure(!exists ? exists.error : sidecarExists.error);
+					}
+					if (move ? (!exists.value && !sidecarExists.value) : (!exists.value && !sidecarExists.value))
+					{
+						destination = std::move(parsed.value);
+						reserved.insert(relative);
+						found = true;
+						break;
+					}
+					if (move)
+					{
+						return Result<Vector<VirtualPath>>::Failure("Move target already exists: " + relative);
+					}
+				}
+				if (!found)
+				{
+					return Result<Vector<VirtualPath>>::Failure("Could not find an available paste name for " + source.ToString());
+				}
+				destinations.push_back(destination);
+				if (move)
+				{
+					moves.push_back({source, destination});
+				}
+			}
+			if (move)
+			{
+				auto moved = database->MoveBatch(moves);
+				if (!moved)
+				{
+					return Result<Vector<VirtualPath>>::Failure(moved.error);
+				}
+			}
+			else
+			{
+				Vector<VirtualPath> copied;
+				for (Size index = 0; index < sources.size(); ++index)
+				{
+					auto result = database->Copy(sources[index], destinations[index]);
+					if (!result)
+					{
+						if (!copied.empty())
+						{
+							auto rollback = database->RemoveBatch(copied);
+							return Result<Vector<VirtualPath>>::Failure(
+							    result.error + (rollback ? String{} : " (rollback failed: " + rollback.error + ")"));
+						}
+						return Result<Vector<VirtualPath>>::Failure(result.error);
+					}
+					copied.push_back(destinations[index]);
+				}
+			}
+			auto refreshed = workspace->Refresh();
+			if (!refreshed)
+			{
+				return Result<Vector<VirtualPath>>::Failure(refreshed.error);
+			}
+			if (move && documents)
+			{
+				refreshed = documents->FollowMovedSource();
+				if (!refreshed)
+				{
+					return Result<Vector<VirtualPath>>::Failure(refreshed.error);
+				}
+			}
+			RequestAssetImport();
+			return Result<Vector<VirtualPath>>::Success(std::move(destinations));
+		};
 		actions.moveAssets = [this](const Vector<AssetMoveRequest>& moves)
 		{
 			if (!workspace || !workspace->Database() || play.Active())
