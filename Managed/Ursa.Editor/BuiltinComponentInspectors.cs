@@ -40,11 +40,64 @@ internal static class BuiltinMeshInspectorGui
 [CanEditMultipleObjects]
 public sealed class GameObjectTransformInspector : Inspector
 {
+	private static Vector3? copiedPosition;
+	private static Quaternion? copiedRotation;
+	private static Vector3? copiedScale;
+
+	private void DrawTransformActions(SerializedProperty position, SerializedProperty rotation, SerializedProperty scale)
+	{
+		if (!EditorGui.BeginPopupButton("⋮##ManagedTransformActions", "ManagedTransformActions")) return;
+		try
+		{
+			if (EditorGui.BeginMenu("Copy"))
+			{
+				if (EditorGui.MenuItem("Position")) copiedPosition = position.Vector3Value;
+				if (EditorGui.MenuItem("Rotation")) copiedRotation = rotation.QuaternionValue;
+				if (EditorGui.MenuItem("Scale")) copiedScale = scale.Vector3Value;
+				EditorGui.EndMenu();
+			}
+			if (EditorGui.BeginMenu("Paste"))
+			{
+				bool changed = false;
+				if (EditorGui.MenuItem("Position", copiedPosition.HasValue))
+				{
+					position.Vector3Value = copiedPosition!.Value;
+					changed = true;
+				}
+				if (EditorGui.MenuItem("Rotation", copiedRotation.HasValue))
+				{
+					rotation.QuaternionValue = copiedRotation!.Value;
+					changed = true;
+				}
+				if (EditorGui.MenuItem("Scale", copiedScale.HasValue))
+				{
+					scale.Vector3Value = copiedScale!.Value;
+					changed = true;
+				}
+				if (changed) SerializedObject.ApplyModifiedProperties();
+				EditorGui.EndMenu();
+			}
+			EditorGui.Separator();
+			if (EditorGui.MenuItem("Reset"))
+			{
+				position.Vector3Value = new(0, 0, 0);
+				rotation.QuaternionValue = new(0, 0, 0, 1);
+				scale.Vector3Value = new(1, 1, 1);
+				SerializedObject.ApplyModifiedProperties();
+			}
+		}
+		finally { EditorGui.EndPopup(); }
+	}
+
 	public override void OnInspectorGUI()
 	{
-		EditorGui.PropertyField(SerializedObject.FindProperty("position"), "Position");
-		EditorGui.EulerAnglesField("Rotation", SerializedObject.FindProperty("rotation"));
-		EditorGui.PropertyField(SerializedObject.FindProperty("scale"), "Scale");
+		SerializedProperty position = SerializedObject.FindProperty("position");
+		SerializedProperty rotation = SerializedObject.FindProperty("rotation");
+		SerializedProperty scale = SerializedObject.FindProperty("scale");
+		DrawTransformActions(position, rotation, scale);
+		EditorGui.PropertyField(position, "Position");
+		EditorGui.EulerAnglesField("Rotation", rotation);
+		EditorGui.PropertyField(scale, "Scale");
 		SerializedObject.ApplyModifiedProperties();
 	}
 }

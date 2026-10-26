@@ -25,6 +25,20 @@ public static class EditorGui
 	public static void Text(string text) { _ = EditorApi.Generation; NativeEditorBindings.Text(text); }
 	public static bool Button(string label) { _ = EditorApi.Generation; return NativeEditorBindings.Button(label); }
 	public static bool SmallButton(string label) { _ = EditorApi.Generation; return NativeEditorBindings.SmallButton(label); }
+	public static bool BeginPopupButton(string label, string popupId)
+	{
+		_ = EditorApi.Generation;
+		ArgumentException.ThrowIfNullOrEmpty(popupId);
+		return NativeEditorBindings.BeginPopupButton(label, popupId);
+	}
+	public static void EndPopup() { _ = EditorApi.Generation; NativeEditorBindings.EndPopup(); }
+	public static bool BeginMenu(string label) { _ = EditorApi.Generation; return NativeEditorBindings.BeginMenu(label); }
+	public static void EndMenu() { _ = EditorApi.Generation; NativeEditorBindings.EndMenu(); }
+	public static bool MenuItem(string label, bool enabled = true)
+	{
+		_ = EditorApi.Generation;
+		return NativeEditorBindings.MenuItem(label, enabled);
+	}
 	public static int DragDropArrayElement(string id, int index, int count)
 	{
 		_ = EditorApi.Generation;

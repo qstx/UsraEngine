@@ -84,6 +84,16 @@ internal static partial class NativeEditorBindings
 	internal static partial bool Button(string label);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SmallButton")]
 	internal static partial bool SmallButton(string label);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::BeginPopupButton")]
+	internal static partial bool BeginPopupButton(string label, string popupId);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::EndPopup")]
+	internal static partial void EndPopup();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::BeginMenu")]
+	internal static partial bool BeginMenu(string label);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::EndMenu")]
+	internal static partial void EndMenu();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::MenuItem")]
+	internal static partial bool MenuItem(string label, bool enabled);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DragDropArrayElement")]
 	internal static partial int DragDropArrayElement(string id, int index, int count);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SameLine")]

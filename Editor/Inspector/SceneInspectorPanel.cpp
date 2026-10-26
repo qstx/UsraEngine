@@ -952,6 +952,7 @@ Result<bool> DrawGameObjectGroupProperties(
 	ImGui::SameLine();
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	const bool transformOpen = ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen);
+	const bool managedActionsVisible = transformOpen && static_cast<bool>(managedTransformInspector);
 	ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight());
 	if (Icons::Button("TransformActions", Icons::Icon::More, "Transform actions"))
 	{
@@ -964,27 +965,30 @@ Result<bool> DrawGameObjectGroupProperties(
 	bool resetTransform = false;
 	if (ImGui::BeginPopup("TransformActions"))
 	{
-		const auto copyValue = [&](const char* path, std::optional<SerializedJson>& clipboard)
-		{
-			auto value = group.DescribeProperty(path);
-			if (value)
-			{
-				clipboard = value.value.at("Value");
-			}
-		};
 		if (Icons::BeginMenu("Copy"))
 		{
-			if (Icons::MenuItem("Position"))
+			if (!managedActionsVisible)
 			{
-				copyValue("/Fields/position", copiedPosition);
-			}
-			if (Icons::MenuItem("Rotation"))
-			{
-				copyValue("/Fields/rotation", copiedRotation);
-			}
-			if (Icons::MenuItem("Scale"))
-			{
-				copyValue("/Fields/scale", copiedScale);
+				const auto copyValue = [&](const char* path, std::optional<SerializedJson>& clipboard)
+				{
+					auto value = group.DescribeProperty(path);
+					if (value)
+					{
+						clipboard = value.value.at("Value");
+					}
+				};
+				if (Icons::MenuItem("Position"))
+				{
+					copyValue("/Fields/position", copiedPosition);
+				}
+				if (Icons::MenuItem("Rotation"))
+				{
+					copyValue("/Fields/rotation", copiedRotation);
+				}
+				if (Icons::MenuItem("Scale"))
+				{
+					copyValue("/Fields/scale", copiedScale);
+				}
 			}
 			if (scene && sceneTargets && !sceneTargets->empty())
 			{
@@ -1005,27 +1009,30 @@ Result<bool> DrawGameObjectGroupProperties(
 		}
 		if (Icons::BeginMenu("Paste"))
 		{
-			const auto pasteValue = [&](const char* label, const char* path,
-			                            const std::optional<SerializedJson>& clipboard)
+			if (!managedActionsVisible)
 			{
-				ImGui::BeginDisabled(!clipboard.has_value());
-				if (Icons::MenuItem(label))
+				const auto pasteValue =
+				    [&](const char* label, const char* path, const std::optional<SerializedJson>& clipboard)
 				{
-					auto applied = SetAndApplyGroupValue(group, path, *clipboard, commitObserver);
-					if (!applied)
+					ImGui::BeginDisabled(!clipboard.has_value());
+					if (Icons::MenuItem(label))
 					{
-						diagnostic = applied.error;
+						auto applied = SetAndApplyGroupValue(group, path, *clipboard, commitObserver);
+						if (!applied)
+						{
+							diagnostic = applied.error;
+						}
+						else
+						{
+							changed |= applied.value;
+						}
 					}
-					else
-					{
-						changed |= applied.value;
-					}
-				}
-				ImGui::EndDisabled();
-			};
-			pasteValue("Position", "/Fields/position", copiedPosition);
-			pasteValue("Rotation", "/Fields/rotation", copiedRotation);
-			pasteValue("Scale", "/Fields/scale", copiedScale);
+					ImGui::EndDisabled();
+				};
+				pasteValue("Position", "/Fields/position", copiedPosition);
+				pasteValue("Rotation", "/Fields/rotation", copiedRotation);
+				pasteValue("Scale", "/Fields/scale", copiedScale);
+			}
 			if (scene && sceneTargets && allowWorldTransform)
 			{
 				ImGui::BeginDisabled(!copiedWorldTransform.has_value());
@@ -1048,8 +1055,8 @@ Result<bool> DrawGameObjectGroupProperties(
 					{
 						for (; appliedCount < sceneTargets->size(); ++appliedCount)
 						{
-							auto applied = ApplyGizmoWorldTransform(*scene, (*sceneTargets)[appliedCount],
-							                                       *copiedWorldTransform);
+							auto applied =
+							    ApplyGizmoWorldTransform(*scene, (*sceneTargets)[appliedCount], *copiedWorldTransform);
 							if (!applied)
 							{
 								diagnostic = applied.error;
@@ -1075,13 +1082,14 @@ Result<bool> DrawGameObjectGroupProperties(
 								diagnostic = local.error;
 								break;
 							}
-							for (const auto& item : {
-							         std::pair<const char*, SerializedJson>{"/Fields/position", {local.value.position.x,
-							                                                            local.value.position.y,
-							                                                            local.value.position.z}},
-							         {"/Fields/rotation", {local.value.rotation.x, local.value.rotation.y,
-							                              local.value.rotation.z, local.value.rotation.w}},
-							         {"/Fields/scale", {local.value.scale.x, local.value.scale.y, local.value.scale.z}}})
+							for (const auto& item :
+							     {std::pair<const char*, SerializedJson>{
+							          "/Fields/position",
+							          {local.value.position.x, local.value.position.y, local.value.position.z}},
+							      {"/Fields/rotation",
+							       {local.value.rotation.x, local.value.rotation.y, local.value.rotation.z,
+							        local.value.rotation.w}},
+							      {"/Fields/scale", {local.value.scale.x, local.value.scale.y, local.value.scale.z}}})
 							{
 								auto set = group.SetValue(item.first, item.second);
 								if (!set)
@@ -1094,8 +1102,8 @@ Result<bool> DrawGameObjectGroupProperties(
 						if (diagnostic.empty())
 						{
 							const auto pendingChanges = group.PendingTargetChanges();
-							const bool hasChanges =
-							    std::any_of(pendingChanges.begin(), pendingChanges.end(), [](bool value) { return value; });
+							const bool hasChanges = std::any_of(pendingChanges.begin(), pendingChanges.end(),
+							                                    [](bool value) { return value; });
 							auto committed = apply(ToUrsaString("/Fields/worldTransform"));
 							if (!committed)
 							{
@@ -1119,8 +1127,11 @@ Result<bool> DrawGameObjectGroupProperties(
 			}
 			ImGui::EndMenu();
 		}
-		ImGui::Separator();
-		resetTransform = Icons::MenuItem("Reset");
+		if (!managedActionsVisible)
+		{
+			ImGui::Separator();
+			resetTransform = Icons::MenuItem("Reset");
+		}
 		ImGui::EndPopup();
 	}
 	if (!diagnostic.empty())

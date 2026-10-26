@@ -149,6 +149,11 @@ struct EditorServices
 	static Result<void> Text(B::BindingCall& call, const B::Utf8View& text);
 	static Result<bool> Button(B::BindingCall& call, const B::Utf8View& label);
 	static Result<bool> SmallButton(B::BindingCall& call, const B::Utf8View& label);
+	static Result<bool> BeginPopupButton(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& popupId);
+	static Result<void> EndPopup(B::BindingCall& call);
+	static Result<bool> BeginMenu(B::BindingCall& call, const B::Utf8View& label);
+	static Result<void> EndMenu(B::BindingCall& call);
+	static Result<bool> MenuItem(B::BindingCall& call, const B::Utf8View& label, bool enabled);
 	static Result<Int32> DragDropArrayElement(B::BindingCall& call, const B::Utf8View& id, Int32 index, Int32 count);
 	static Result<void> SameLine(B::BindingCall& call);
 	static Result<void> NewLine(B::BindingCall& call);

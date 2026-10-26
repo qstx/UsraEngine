@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "44a741211ab3a8abcb4896c5d2626c463a386983fa5465452f729bd7e4896732",
+      "Hash": "8e5e89940e5fac0f471df9996c53a2ea296fdd3facfe6247b32b0d2fb62d98f8",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -118,6 +118,42 @@
           "Direction": "NativeMethod",
           "Return": "void",
           "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.BeginMenu",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.BeginPopupButton",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "popupId",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
           "Thread": 0,
           "NativeOnly": false
         },
@@ -384,6 +420,22 @@
         },
         {
           "Identity": "Ursa.Editor.NativeEditorBindings.EndGroup",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.EndMenu",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.EndPopup",
           "Direction": "NativeMethod",
           "Return": "void",
           "Parameters": [],
@@ -665,6 +717,27 @@
           "Direction": "NativeMethod",
           "Return": "void",
           "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.MenuItem",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "enabled",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
           "Thread": 0,
           "NativeOnly": false
         },

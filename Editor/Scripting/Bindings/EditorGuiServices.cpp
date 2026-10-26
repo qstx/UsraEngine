@@ -242,6 +242,44 @@ Result<bool> EditorServices::SmallButton(B::BindingCall& call, const B::Utf8View
 	return Result<bool>::Success(Edited(call, ImGui::SmallButton(GuiString(label).c_str())));
 }
 
+Result<bool> EditorServices::BeginPopupButton(B::BindingCall& call, const B::Utf8View& label,
+                                              const B::Utf8View& popupId)
+{
+	RequireGui(call);
+	const String id = GuiString(popupId);
+	if (ImGui::SmallButton(GuiString(label).c_str()))
+	{
+		ImGui::OpenPopup(id.c_str());
+	}
+	return Result<bool>::Success(ImGui::BeginPopup(id.c_str()));
+}
+
+Result<void> EditorServices::EndPopup(B::BindingCall& call)
+{
+	RequireGui(call);
+	ImGui::EndPopup();
+	return {};
+}
+
+Result<bool> EditorServices::BeginMenu(B::BindingCall& call, const B::Utf8View& label)
+{
+	RequireGui(call);
+	return Result<bool>::Success(ImGui::BeginMenu(GuiString(label).c_str()));
+}
+
+Result<void> EditorServices::EndMenu(B::BindingCall& call)
+{
+	RequireGui(call);
+	ImGui::EndMenu();
+	return {};
+}
+
+Result<bool> EditorServices::MenuItem(B::BindingCall& call, const B::Utf8View& label, bool enabled)
+{
+	RequireGui(call);
+	return Result<bool>::Success(ImGui::MenuItem(GuiString(label).c_str(), nullptr, false, enabled));
+}
+
 Result<Int32> EditorServices::DragDropArrayElement(B::BindingCall& call, const B::Utf8View& id, Int32 index,
                                                    Int32 count)
 {
