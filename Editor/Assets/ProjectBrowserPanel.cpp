@@ -1202,7 +1202,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		if (favoriteSearches.empty() && favoriteAssetPaths.empty())
 		{
-			ImGui::TextDisabled("Drag Project assets here or save a search.");
+			ImGui::TextDisabled("Drag Project folders here or save a search.");
 		}
 			for (Size index = 0; index < favoriteSearches.size();)
 			{
