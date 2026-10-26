@@ -1156,35 +1156,43 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				}
 				else
 				{
-					const bool projectAssets = !decoded.value.sources.empty() &&
-					                           std::all_of(decoded.value.sources.begin(), decoded.value.sources.end(),
-					                                       [&](const EditorDragSource& source)
-					                                       {
-						                                       return source.identity.kind == EditorSelectionKind::Asset &&
-						                                              !source.identity.IsMissing() &&
-						                                              source.identity.assetRole ==
-						                                                  EditorAssetSelectionRole::Source &&
-						                                              !source.identity.assetLocalFileId && workspace.Database() &&
-						                                              source.identity.assetPath.scheme ==
-						                                                  workspace.Database()->SourceScheme();
-					                                       });
-					if (projectAssets && payload->IsDelivery() && ClaimEditorDragDropDelivery(payload))
+					const bool projectFolders = !decoded.value.sources.empty() &&
+					                            std::all_of(decoded.value.sources.begin(), decoded.value.sources.end(),
+					                                        [&](const EditorDragSource& source)
+					                                        {
+						                                        const auto* asset = model.Find(source.identity.assetPath);
+						                                        return source.identity.kind == EditorSelectionKind::Asset &&
+						                                               !source.identity.IsMissing() &&
+						                                               source.identity.assetRole ==
+						                                                   EditorAssetSelectionRole::Source &&
+						                                               !source.identity.assetLocalFileId && workspace.Database() &&
+						                                               source.identity.assetPath.scheme ==
+						                                                   workspace.Database()->SourceScheme() &&
+						                                               asset && asset->folder;
+					                                        });
+					if (projectFolders)
 					{
-						bool changedFavorites = false;
-						for (const EditorDragSource& source : decoded.value.sources)
+						ImGui::GetWindowDrawList()->AddRectFilled(
+						    favoritesRect.Min, favoritesRect.Max,
+						    ImGui::GetColorU32(ImGuiCol_DragDropTarget, 0.3f));
+						if (payload->IsDelivery() && ClaimEditorDragDropDelivery(payload))
 						{
-							const String& path = source.identity.assetPath.relative;
-						if (std::find(favoriteAssetPaths.begin(), favoriteAssetPaths.end(), path) ==
-						    favoriteAssetPaths.end())
+							bool changedFavorites = false;
+							for (const EditorDragSource& source : decoded.value.sources)
 							{
-							favoriteAssetPaths.push_back(path);
-							changedFavorites = true;
+								const String& path = source.identity.assetPath.relative;
+								if (std::find(favoriteAssetPaths.begin(), favoriteAssetPaths.end(), path) ==
+								    favoriteAssetPaths.end())
+								{
+									favoriteAssetPaths.push_back(path);
+									changedFavorites = true;
+								}
 							}
-						}
-						if (changedFavorites)
-						{
-							saveProjectBrowserSettings();
-						}
+							if (changedFavorites)
+							{
+								saveProjectBrowserSettings();
+							}
+							}
 					}
 				}
 			}
