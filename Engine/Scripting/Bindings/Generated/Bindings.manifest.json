@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "8e5e89940e5fac0f471df9996c53a2ea296fdd3facfe6247b32b0d2fb62d98f8",
+      "Hash": "226426c542fb956e535a1b1d58deb0b749668c7650dbe420fb075d445c9c7475",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -697,6 +697,14 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.IsLastItemActive",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.IsLastItemEdited",
           "Direction": "NativeMethod",
           "Return": "bool",
@@ -1111,6 +1119,21 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.Editor.NativeEditorBindings.SetNextItemWidth",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "width",
+              "Type": "double",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.Editor.NativeEditorBindings.SetPreviewCamera",
           "Direction": "NativeMethod",
           "Return": "void",
@@ -1301,6 +1324,33 @@
         },
         {
           "Identity": "Ursa.Editor.NativeEditorBindings.Toggle",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mixedValue",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.Editor.NativeEditorBindings.ToggleLeft",
           "Direction": "NativeMethod",
           "Return": "bool",
           "Parameters": [

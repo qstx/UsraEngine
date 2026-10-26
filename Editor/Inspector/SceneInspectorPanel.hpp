@@ -14,11 +14,15 @@ class PrefabAsset;
 namespace Ursa::Editor
 {
 class EditorDocuments;
-using ManagedPropertyGroupCommit = std::function<Result<void>(SerializedObjectGroup&, const String&)>;
+using ManagedPropertyGroupCommit =
+    std::function<Result<void>(SerializedObjectGroup&, const String&, const Vector<bool>&)>;
 using ManagedTransformInspector =
     std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*,
                                ComponentLoadContext*, ManagedPropertyGroupCommit)>;
 using ManagedTransformActionsInspector =
+    std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*,
+                               ComponentLoadContext*, ManagedPropertyGroupCommit)>;
+using ManagedGameObjectHeaderInspector =
     std::function<Result<bool>(const Vector<GameObject::Ptr>&, Size, SerializedObject*, SerializedObjectGroup&, Scene*,
                                ComponentLoadContext*, ManagedPropertyGroupCommit)>;
 
@@ -58,7 +62,8 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
                                 EditorHierarchy::CutSelectionAction cutGameObjects = {},
                                 EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild = {},
                                 ManagedTransformInspector managedTransformInspector = {},
-                                ManagedTransformActionsInspector managedTransformActionsInspector = {});
+                                ManagedTransformActionsInspector managedTransformActionsInspector = {},
+                                ManagedGameObjectHeaderInspector managedGameObjectHeaderInspector = {});
 
 void DrawRuntimeSceneInspector(Scene& scene, EditorHierarchy& hierarchy, bool* inspectorOpen, String& diagnostic,
                                ProjectWorkspace* workspace = nullptr, ResourceSession* resources = nullptr,

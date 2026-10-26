@@ -50,10 +50,23 @@ public static class EditorGui
 	public static bool FoldoutHeader(string label) { _ = EditorApi.Generation; return NativeEditorBindings.FoldoutHeader(label); }
 	public static void EndFoldout() { _ = EditorApi.Generation; NativeEditorBindings.EndFoldout(); }
 	private static bool WasLastControlEdited() { _ = EditorApi.Generation; return NativeEditorBindings.IsLastItemEdited(); }
+	public static bool IsLastControlEdited => WasLastControlEdited();
+	public static bool IsLastControlActive() { _ = EditorApi.Generation; return NativeEditorBindings.IsLastItemActive(); }
 	public static bool Toggle(string label, bool value, bool mixedValue = false)
 	{
 		_ = EditorApi.Generation;
 		return NativeEditorBindings.Toggle(label, value, mixedValue);
+	}
+	public static bool ToggleLeft(string label, bool value, bool mixedValue = false)
+	{
+		_ = EditorApi.Generation;
+		return NativeEditorBindings.ToggleLeft(label, value, mixedValue);
+	}
+	public static void SetNextItemWidth(double width)
+	{
+		_ = EditorApi.Generation;
+		if (!double.IsFinite(width)) throw new ArgumentOutOfRangeException(nameof(width));
+		NativeEditorBindings.SetNextItemWidth(width);
 	}
 	public static long IntField(string label, long value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.IntField(label, value, mixedValue); }
 	public static ulong ULongField(string label, ulong value, bool mixedValue = false) { _ = EditorApi.Generation; return NativeEditorBindings.ULongField(label, value, mixedValue); }

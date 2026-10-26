@@ -358,6 +358,12 @@ Result<bool> EditorServices::IsLastItemEdited(B::BindingCall& call)
 	return Result<bool>::Success(Scope(call).lastControlEdited);
 }
 
+Result<bool> EditorServices::IsLastItemActive(B::BindingCall& call)
+{
+	RequireGui(call);
+	return Result<bool>::Success(ImGui::IsItemActive());
+}
+
 Result<void> EditorServices::BeginGroup(B::BindingCall& call)
 {
 	RequireGui(call);
@@ -385,6 +391,29 @@ Result<bool> EditorServices::Toggle(B::BindingCall& call, const B::Utf8View& lab
 	MixedValueScope mixed(mixedValue);
 	Edited(call, ImGui::Checkbox(GuiString(label).c_str(), &value));
 	return Result<bool>::Success(value);
+}
+
+Result<bool> EditorServices::ToggleLeft(B::BindingCall& call, const B::Utf8View& label, bool value, bool mixedValue)
+{
+	RequireGui(call);
+	MixedValueScope mixed(mixedValue);
+	const String id = "##ToggleLeft" + GuiString(label);
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(GuiString(label).c_str());
+	ImGui::SameLine();
+	Edited(call, ImGui::Checkbox(id.c_str(), &value));
+	return Result<bool>::Success(value);
+}
+
+Result<void> EditorServices::SetNextItemWidth(B::BindingCall& call, Float64 width)
+{
+	RequireGui(call);
+	if (!std::isfinite(width) || std::abs(width) > std::numeric_limits<Float32>::max())
+	{
+		throw std::runtime_error("Editor control width must be finite and representable");
+	}
+	ImGui::SetNextItemWidth(static_cast<Float32>(width));
+	return {};
 }
 
 Result<Int64> EditorServices::IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value, bool mixedValue)

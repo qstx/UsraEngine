@@ -740,6 +740,8 @@ Result<bool> EditorServices::ApplyProperties(B::BindingCall& call, UInt64 revisi
 	auto& scope = Scope(call);
 	scope.RequireProperties(revision);
 	const bool modified = HasPendingPropertyChanges(scope);
+	const Vector<bool> changedTargets =
+	    scope.propertyGroup ? scope.propertyGroup->PendingTargetChanges() : Vector<bool>{};
 	if (modified && !scope.source.canEditTarget)
 	{
 		return Result<bool>::Failure("This Editor target is read-only");
@@ -749,7 +751,7 @@ Result<bool> EditorServices::ApplyProperties(B::BindingCall& call, UInt64 revisi
 	{
 		for (const String& path : scope.pendingPropertyPaths)
 		{
-			B::CompleteBindingResult(scope.source.commitPropertyGroup(*scope.propertyGroup, path));
+			B::CompleteBindingResult(scope.source.commitPropertyGroup(*scope.propertyGroup, path, changedTargets));
 		}
 	}
 	if (modified)

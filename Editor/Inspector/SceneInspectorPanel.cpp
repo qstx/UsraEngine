@@ -535,7 +535,8 @@ Result<bool> DrawGameObjectGroupProperties(
     const Vector<GameObject::Ptr>* sceneTargets = nullptr, bool allowWorldTransform = false,
     const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedTransformInspector =
         {},
-    const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedTransformActions = {})
+    const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedTransformActions = {},
+    const std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>& managedGameObjectHeader = {})
 {
 	if (group.TargetCount() > 1)
 	{
@@ -543,6 +544,7 @@ Result<bool> DrawGameObjectGroupProperties(
 		ImGui::TextDisabled("Scene Gizmo edits all selected objects; the active object sets the Pivot handle.");
 	}
 	bool changed = false;
+	Icons::Inline(Icons::Icon::GameObject);
 	const auto apply = [&](const String& path) -> Result<void>
 	{
 		const auto changedTargets = group.PendingTargetChanges();
@@ -570,136 +572,150 @@ Result<bool> DrawGameObjectGroupProperties(
 		}
 		return false;
 	};
-	const auto name = group.DescribeProperty("/Fields/name");
-	if (!name)
+	bool managedHeaderDrawn = false;
+	if (managedGameObjectHeader)
 	{
-		return Result<bool>::Failure(name.error);
+		auto header = managedGameObjectHeader(
+		    group, [&](SerializedObjectGroup& currentGroup, const String& path, const Vector<bool>& changedTargets)
+		    { return commitObserver ? commitObserver(currentGroup, path, changedTargets) : Result<void>{}; });
+		if (!header)
+		{
+			return Result<bool>::Failure(header.error);
+		}
+		managedHeaderDrawn = header.value;
 	}
-	String nameValue = ToUrsaString(name.value.at("Value").get<std::string>());
+	if (!managedHeaderDrawn)
+	{
+		const auto name = group.DescribeProperty("/Fields/name");
+		if (!name)
+		{
+			return Result<bool>::Failure(name.error);
+		}
+		String nameValue = ToUrsaString(name.value.at("Value").get<std::string>());
 
-	struct NameEditState
-	{
-		String key;
-		Ursa::Array<char, 257> buffer{};
-		bool dirty = false;
-	};
+		struct NameEditState
+		{
+			String key;
+			Ursa::Array<char, 257> buffer{};
+			bool dirty = false;
+		};
 
-	static NameEditState nameEditState;
-	ImGui::PushID(nameEditKey.c_str());
-	const ImGuiID nameInputId = ImGui::GetID("##GameObjectName");
-	if (nameEditState.key != nameEditKey)
-	{
-		nameEditState.key = nameEditKey;
-		nameEditState.buffer.fill(0);
-		std::copy_n(nameValue.data(), std::min(nameValue.size(), nameEditState.buffer.size() - 1),
-		            nameEditState.buffer.data());
-		nameEditState.dirty = false;
-	}
-	const bool nameInputActive = ImGui::GetActiveID() == nameInputId;
-	if (!nameInputActive && nameEditState.dirty)
-	{
-		auto applied = SetAndApplyGroupValue(group, "/Fields/name", ToStdString(String(nameEditState.buffer.data())),
-		                                     commitObserver);
-		if (!applied)
+		static NameEditState nameEditState;
+		ImGui::PushID(nameEditKey.c_str());
+		const ImGuiID nameInputId = ImGui::GetID("##GameObjectName");
+		if (nameEditState.key != nameEditKey)
 		{
-			diagnostic = applied.error;
+			nameEditState.key = nameEditKey;
+			nameEditState.buffer.fill(0);
+			std::copy_n(nameValue.data(), std::min(nameValue.size(), nameEditState.buffer.size() - 1),
+			            nameEditState.buffer.data());
+			nameEditState.dirty = false;
+		}
+		const bool nameInputActive = ImGui::GetActiveID() == nameInputId;
+		if (!nameInputActive && nameEditState.dirty)
+		{
+			auto applied = SetAndApplyGroupValue(group, "/Fields/name",
+			                                     ToStdString(String(nameEditState.buffer.data())), commitObserver);
+			if (!applied)
+			{
+				diagnostic = applied.error;
+				ImGui::PopID();
+				return Result<bool>::Failure(diagnostic);
+			}
+			changed |= applied.value;
+			nameEditState.dirty = false;
+			nameValue = String(nameEditState.buffer.data());
+		}
+		if (!nameInputActive && !nameEditState.dirty)
+		{
+			nameEditState.buffer.fill(0);
+			std::copy_n(nameValue.data(), std::min(nameValue.size(), nameEditState.buffer.size() - 1),
+			            nameEditState.buffer.data());
+		}
+		const auto active = group.DescribeProperty("/Fields/active");
+		if (!active)
+		{
 			ImGui::PopID();
-			return Result<bool>::Failure(diagnostic);
+			return Result<bool>::Failure(active.error);
 		}
-		changed |= applied.value;
-		nameEditState.dirty = false;
-		nameValue = String(nameEditState.buffer.data());
-	}
-	if (!nameInputActive && !nameEditState.dirty)
-	{
-		nameEditState.buffer.fill(0);
-		std::copy_n(nameValue.data(), std::min(nameValue.size(), nameEditState.buffer.size() - 1),
-		            nameEditState.buffer.data());
-	}
-	const auto active = group.DescribeProperty("/Fields/active");
-	if (!active)
-	{
-		ImGui::PopID();
-		return Result<bool>::Failure(active.error);
-	}
-	const auto staticState = group.DescribeProperty("/Fields/static");
-	if (!staticState)
-	{
-		ImGui::PopID();
-		return Result<bool>::Failure(staticState.error);
-	}
-	bool activeValue = active.value.at("Value").get<bool>();
-	Icons::Inline(Icons::Icon::GameObject);
-	ImGui::SameLine();
-	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, active.value.value("HasMultipleDifferentValues", false));
-	const bool activeChanged = ImGui::Checkbox("##GameObjectActive", &activeValue);
-	ImGui::PopItemFlag();
-	if (ImGui::IsItemHovered())
-	{
-		ImGui::SetTooltip("Active");
-	}
-	if (activeChanged)
-	{
-		auto set = group.SetValue("/Fields/active", activeValue);
-		auto applied = set ? apply(ToUrsaString("/Fields/active")) : Result<void>::Failure(set.error);
-		if (!applied)
+		const auto staticState = group.DescribeProperty("/Fields/static");
+		if (!staticState)
 		{
-			diagnostic = applied.error;
-			return Result<bool>::Failure(diagnostic);
-		}
-		changed = true;
-	}
-	ImGui::SameLine();
-	ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - 52.0f);
-	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, name.value.value("HasMultipleDifferentValues", false));
-	const bool nameChanged = ImGui::InputText("##GameObjectName", nameEditState.buffer.data(),
-	                                          nameEditState.buffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
-	ImGui::PopItemFlag();
-	if (nameChanged)
-	{
-		auto applied = SetAndApplyGroupValue(group, "/Fields/name", ToStdString(String(nameEditState.buffer.data())),
-		                                     commitObserver);
-		if (!applied)
-		{
-			diagnostic = applied.error;
-			nameEditState.dirty = true;
 			ImGui::PopID();
-			return Result<bool>::Failure(diagnostic);
+			return Result<bool>::Failure(staticState.error);
 		}
-		changed |= applied.value;
-		nameEditState.dirty = false;
-		nameValue = String(nameEditState.buffer.data());
-	}
-	else if (ImGui::IsItemActive())
-	{
-		nameEditState.dirty = String(nameEditState.buffer.data()) != nameValue;
-	}
-	if (nameChanged)
-	{
-		changed = true;
-	}
-	ImGui::PopID();
-	ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight() - 48.0f);
-	ImGui::TextUnformatted("Static");
-	ImGui::SameLine();
-	bool isStatic = staticState.value.at("Value").get<bool>();
-	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, staticState.value.value("HasMultipleDifferentValues", false));
-	const bool staticChanged = ImGui::Checkbox("##GameObjectStatic", &isStatic);
-	ImGui::PopItemFlag();
-	if (ImGui::IsItemHovered())
-	{
-		ImGui::SetTooltip("Static");
-	}
-	if (staticChanged)
-	{
-		auto set = group.SetValue("/Fields/static", isStatic);
-		auto applied = set ? apply(ToUrsaString("/Fields/static")) : Result<void>::Failure(set.error);
-		if (!applied)
+		bool activeValue = active.value.at("Value").get<bool>();
+		ImGui::SameLine();
+		ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, active.value.value("HasMultipleDifferentValues", false));
+		const bool activeChanged = ImGui::Checkbox("##GameObjectActive", &activeValue);
+		ImGui::PopItemFlag();
+		if (ImGui::IsItemHovered())
 		{
-			diagnostic = applied.error;
-			return Result<bool>::Failure(diagnostic);
+			ImGui::SetTooltip("Active");
 		}
-		changed = true;
+		if (activeChanged)
+		{
+			auto set = group.SetValue("/Fields/active", activeValue);
+			auto applied = set ? apply(ToUrsaString("/Fields/active")) : Result<void>::Failure(set.error);
+			if (!applied)
+			{
+				diagnostic = applied.error;
+				return Result<bool>::Failure(diagnostic);
+			}
+			changed = true;
+		}
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - 52.0f);
+		ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, name.value.value("HasMultipleDifferentValues", false));
+		const bool nameChanged = ImGui::InputText("##GameObjectName", nameEditState.buffer.data(),
+		                                          nameEditState.buffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+		ImGui::PopItemFlag();
+		if (nameChanged)
+		{
+			auto applied = SetAndApplyGroupValue(group, "/Fields/name",
+			                                     ToStdString(String(nameEditState.buffer.data())), commitObserver);
+			if (!applied)
+			{
+				diagnostic = applied.error;
+				nameEditState.dirty = true;
+				ImGui::PopID();
+				return Result<bool>::Failure(diagnostic);
+			}
+			changed |= applied.value;
+			nameEditState.dirty = false;
+			nameValue = String(nameEditState.buffer.data());
+		}
+		else if (ImGui::IsItemActive())
+		{
+			nameEditState.dirty = String(nameEditState.buffer.data()) != nameValue;
+		}
+		if (nameChanged)
+		{
+			changed = true;
+		}
+		ImGui::PopID();
+		ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight() - 48.0f);
+		ImGui::TextUnformatted("Static");
+		ImGui::SameLine();
+		bool isStatic = staticState.value.at("Value").get<bool>();
+		ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, staticState.value.value("HasMultipleDifferentValues", false));
+		const bool staticChanged = ImGui::Checkbox("##GameObjectStatic", &isStatic);
+		ImGui::PopItemFlag();
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip("Static");
+		}
+		if (staticChanged)
+		{
+			auto set = group.SetValue("/Fields/static", isStatic);
+			auto applied = set ? apply(ToUrsaString("/Fields/static")) : Result<void>::Failure(set.error);
+			if (!applied)
+			{
+				diagnostic = applied.error;
+				return Result<bool>::Failure(diagnostic);
+			}
+			changed = true;
+		}
 	}
 	const auto tag = group.DescribeProperty("/Fields/tag");
 	if (!tag)
@@ -1130,19 +1146,9 @@ Result<bool> DrawGameObjectGroupProperties(
 		}
 		if (managedActionsVisible && managedTransformActions)
 		{
-			auto actions = managedTransformActions(group,
-			                                       [&](SerializedObjectGroup& currentGroup, const String& path)
-			                                       {
-				                                       const auto changedTargets = currentGroup.PendingTargetChanges();
-				                                       auto applied = currentGroup.Apply();
-				                                       if (!applied)
-				                                       {
-					                                       return applied;
-				                                       }
-				                                       return commitObserver
-				                                                  ? commitObserver(currentGroup, path, changedTargets)
-				                                                  : Result<void>{};
-			                                       });
+			auto actions = managedTransformActions(
+			    group, [&](SerializedObjectGroup& currentGroup, const String& path, const Vector<bool>& changedTargets)
+			    { return commitObserver ? commitObserver(currentGroup, path, changedTargets) : Result<void>{}; });
 			if (!actions)
 			{
 				diagnostic = actions.error;
@@ -1191,9 +1197,9 @@ Result<bool> DrawGameObjectGroupProperties(
 				}
 				checkpoints.emplace(path, std::move(values.value));
 			}
-			ManagedPropertyGroupCommit managedCommit =
-			    [commitObserver, checkpoints = std::move(checkpoints)](SerializedObjectGroup& currentGroup,
-			                                                           const String& path) -> Result<void>
+			ManagedPropertyGroupCommit managedCommit = [commitObserver, checkpoints = std::move(checkpoints)](
+			                                               SerializedObjectGroup& currentGroup, const String& path,
+			                                               const Vector<bool>& changedTargets) -> Result<void>
 			{
 				if (!commitObserver)
 				{
@@ -1209,12 +1215,14 @@ Result<bool> DrawGameObjectGroupProperties(
 				{
 					return Result<void>::Failure(values.error);
 				}
-				auto changedTargets = currentGroup.CompareTargetValues(path, checkpoint->second, values.value);
-				if (!changedTargets)
+				auto valueChanges = currentGroup.CompareTargetValues(path, checkpoint->second, values.value);
+				if (!valueChanges)
 				{
-					return Result<void>::Failure(changedTargets.error);
+					return Result<void>::Failure(valueChanges.error);
 				}
-				return commitObserver(currentGroup, path, changedTargets.value);
+				return commitObserver(currentGroup, path,
+				                      changedTargets.size() == valueChanges.value.size() ? changedTargets
+				                                                                         : valueChanges.value);
 			};
 			auto managed = managedTransformInspector(group, std::move(managedCommit));
 			if (!managed)
@@ -4567,7 +4575,8 @@ Result<bool> DrawSceneInspector(
     std::function<void(bool)> openTagLayerSettings, bool canCopyGameObjects, bool canPasteGameObjectsAsChild,
     EditorHierarchy::CopySelectionAction copyGameObjects, EditorHierarchy::CutSelectionAction cutGameObjects,
     EditorHierarchy::PasteAsChildAction pasteGameObjectsAsChild, ManagedTransformInspector managedTransformInspector,
-    ManagedTransformActionsInspector managedTransformActionsInspector)
+    ManagedTransformActionsInspector managedTransformActionsInspector,
+    ManagedGameObjectHeaderInspector managedGameObjectHeaderInspector)
 {
 	auto draft = document.Payload<SceneDraft>();
 	if (!draft)
@@ -5244,6 +5253,22 @@ Result<bool> DrawSceneInspector(
 						                  "Managed Transform action target group is inconsistent");
 					              }
 					              return managedTransformActionsInspector(
+					                  selectedObjects, primaryIndex, serializedTargets[primaryIndex].get(),
+					                  serializedGroup, &scene, &loadContext, std::move(managedCommit));
+				              })
+				        : std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>{},
+				    managedGameObjectHeaderInspector
+				        ? std::function<Result<bool>(SerializedObjectGroup&, ManagedPropertyGroupCommit)>(
+				              [&](SerializedObjectGroup& serializedGroup, ManagedPropertyGroupCommit managedCommit)
+				              {
+					              const Size primaryIndex = serializedGroup.PrimaryIndex();
+					              if (primaryIndex >= selectedObjects.size() ||
+					                  primaryIndex >= serializedTargets.size())
+					              {
+						              return Result<bool>::Failure(
+						                  "Managed GameObject header target group is inconsistent");
+					              }
+					              return managedGameObjectHeaderInspector(
 					                  selectedObjects, primaryIndex, serializedTargets[primaryIndex].get(),
 					                  serializedGroup, &scene, &loadContext, std::move(managedCommit));
 				              })

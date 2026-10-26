@@ -161,9 +161,12 @@ struct EditorServices
 	static Result<bool> FoldoutHeader(B::BindingCall& call, const B::Utf8View& label);
 	static Result<void> EndFoldout(B::BindingCall& call);
 	static Result<bool> IsLastItemEdited(B::BindingCall& call);
+	static Result<bool> IsLastItemActive(B::BindingCall& call);
 	static Result<void> BeginGroup(B::BindingCall& call);
 	static Result<void> EndGroup(B::BindingCall& call);
 	static Result<bool> Toggle(B::BindingCall& call, const B::Utf8View& label, bool value, bool mixedValue);
+	static Result<bool> ToggleLeft(B::BindingCall& call, const B::Utf8View& label, bool value, bool mixedValue);
+	static Result<void> SetNextItemWidth(B::BindingCall& call, Float64 width);
 	static Result<Int64> IntField(B::BindingCall& call, const B::Utf8View& label, Int64 value, bool mixedValue = false);
 	static Result<UInt64> ULongField(B::BindingCall& call, const B::Utf8View& label, UInt64 value,
 	                                 bool mixedValue = false);

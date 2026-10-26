@@ -108,12 +108,18 @@ internal static partial class NativeEditorBindings
 	internal static partial void EndFoldout();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IsLastItemEdited")]
 	internal static partial bool IsLastItemEdited();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IsLastItemActive")]
+	internal static partial bool IsLastItemActive();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::BeginGroup")]
 	internal static partial void BeginGroup();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::EndGroup")]
 	internal static partial void EndGroup();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Toggle")]
 	internal static partial bool Toggle(string label, bool value, bool mixedValue);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ToggleLeft")]
+	internal static partial bool ToggleLeft(string label, bool value, bool mixedValue);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetNextItemWidth")]
+	internal static partial void SetNextItemWidth(double width);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IntField")]
 	internal static partial long IntField(string label, long value, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ULongField")]

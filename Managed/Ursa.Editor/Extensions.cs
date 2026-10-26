@@ -54,12 +54,73 @@ public abstract class Inspector
 	internal Type TargetType { get; set; } = null!;
 	internal PreviewLifetime PreviewLifetime { get; } = new();
 	private InspectorTargetScope? targetScope;
+	private string gameObjectNameEditKey = string.Empty;
+	private string gameObjectNameDraft = string.Empty;
+	private bool gameObjectNameDirty;
 	public virtual object Target => (targetScope ??= InspectorTargetScope.Create(TargetType)).Target;
 	public virtual object[] Targets => (targetScope ??= InspectorTargetScope.Create(TargetType)).Targets;
 	internal virtual void SynchronizeTarget() => targetScope?.Synchronize();
 	internal void ReleaseTarget() { targetScope?.Dispose(); targetScope = null; }
 
 	public virtual void OnInspectorGUI() => DrawDefaultInspector();
+	public virtual void OnGameObjectHeaderGUI()
+	{
+		SerializedProperty active = SerializedObject.FindProperty("active");
+		SerializedProperty name = SerializedObject.FindProperty("name");
+		SerializedProperty isStatic = SerializedObject.FindProperty("static");
+		string originalName = name.StringValue ?? string.Empty;
+		string currentKey = string.Empty;
+		foreach (object target in SerializedObject.TargetObjects)
+			currentKey += ((GameObject)target).PersistentId + ";";
+		if (currentKey != gameObjectNameEditKey)
+		{
+			gameObjectNameEditKey = currentKey;
+			gameObjectNameDraft = originalName;
+			gameObjectNameDirty = false;
+		}
+		if (!gameObjectNameDirty) gameObjectNameDraft = originalName;
+		bool changed = false;
+
+		EditorGui.SameLine();
+		bool editedActive = EditorGui.Toggle("##GameObjectActive", active.BoolValue,
+			active.HasMultipleDifferentValues);
+		if (editedActive != active.BoolValue || active.HasMultipleDifferentValues && EditorGui.IsLastControlEdited)
+		{
+			active.BoolValue = editedActive;
+			changed = true;
+		}
+
+		EditorGui.SameLine();
+		EditorGui.SetNextItemWidth(-104);
+		string editedName = EditorGui.TextField("##GameObjectName", gameObjectNameDraft,
+			name.HasMultipleDifferentValues);
+		bool nameFieldActive = EditorGui.IsLastControlActive();
+		if (editedName != gameObjectNameDraft)
+		{
+			gameObjectNameDraft = editedName;
+			gameObjectNameDirty = true;
+		}
+		if (!nameFieldActive && gameObjectNameDirty)
+		{
+			name.StringValue = gameObjectNameDraft.Length == 0
+				? originalName
+				: gameObjectNameDraft[..Math.Min(gameObjectNameDraft.Length, 256)];
+			gameObjectNameDraft = name.StringValue ?? originalName;
+			gameObjectNameDirty = false;
+			changed = true;
+		}
+
+		EditorGui.SameLine();
+		bool editedStatic = EditorGui.ToggleLeft("Static", isStatic.BoolValue,
+			isStatic.HasMultipleDifferentValues);
+		if (editedStatic != isStatic.BoolValue || isStatic.HasMultipleDifferentValues && EditorGui.IsLastControlEdited)
+		{
+			isStatic.BoolValue = editedStatic;
+			changed = true;
+		}
+
+		if (changed) SerializedObject.ApplyModifiedProperties();
+	}
 	public virtual void OnTransformActionsGUI() { }
 	public virtual void OnEnable() { }
 	public virtual void OnDisable() { }
@@ -183,6 +244,12 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 			{
 				inspector.SerializedObject = CreateSerializedObject(inspector);
 				try { inspector.OnTransformActionsGUI(); inspector.SynchronizeTarget(); }
+				finally { inspector.ReleaseTarget(); }
+			});
+			callbacks.Add("inspector-header:" + target, () =>
+			{
+				inspector.SerializedObject = CreateSerializedObject(inspector);
+				try { inspector.OnGameObjectHeaderGUI(); inspector.SynchronizeTarget(); }
 				finally { inspector.ReleaseTarget(); }
 			});
 		}
