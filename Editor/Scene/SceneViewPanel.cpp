@@ -1700,11 +1700,14 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	const bool hasCustomSelection = selectedCustom != customPresets.end();
 	const Float32 postScaleControlsWidth = compactButtonWidth * 4.f + toolbarSpacing * 4.f;
 	const Float32 customActionsWidth = hasCustomSelection ? compactButtonWidth * 2.f + toolbarSpacing * 2.f : 0.f;
+	constexpr Float32 scaleLabelWidth = 40.f;
+	constexpr Float32 scaleValueWidth = 40.f;
 	const Float32 availableToolbarWidth = ImGui::GetContentRegionAvail().x;
 	const Float32 selectedValueWidth = ImGui::CalcTextSize(selectedLabel).x +
 	                                   ImGui::GetStyle().FramePadding.x * 2.f + compactButtonWidth;
 	const Float32 availableResolutionWidth =
-	    availableToolbarWidth - 80.f - postScaleControlsWidth - customActionsWidth;
+	    availableToolbarWidth - scaleLabelWidth - scaleValueWidth - toolbarSpacing * 2.f - postScaleControlsWidth -
+	    customActionsWidth;
 	const Float32 resolutionWidth = std::max(selectedValueWidth, std::min(220.f, availableResolutionWidth));
 	ImGui::SetNextItemWidth(resolutionWidth);
 	if (ImGui::BeginCombo("##GameResolution", selectedLabel))
@@ -1899,15 +1902,17 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 		ImGui::EndPopup();
 	}
 	Icons::SameLine();
+	ImGui::TextDisabled("Scale");
+	Icons::SameLine();
 	const Float32 scaleWidth = std::max(
-	    70.f, std::min(150.f, ImGui::GetContentRegionAvail().x - postScaleControlsWidth));
+	    30.f, std::min(150.f, ImGui::GetContentRegionAvail().x - postScaleControlsWidth - scaleValueWidth - toolbarSpacing));
 	const ImVec2 scaleDpi = CurrentViewportFramebufferScale();
 	const ImVec2 gameContent = ImGui::GetContentRegionAvail();
 	const Float32 viewHeight = std::max(0.f, gameContent.y - ImGui::GetFrameHeightWithSpacing());
 	const ViewportScaleLimits scaleLimits = GetViewportScaleLimits(
 	    {0.f, 0.f, gameContent.x, viewHeight}, scaleDpi.x, gameTarget.size);
 	ImGui::SetNextItemWidth(scaleWidth);
-	if (ImGui::SliderFloat("##GameScale", &gameScale, scaleLimits.minimum, scaleLimits.maximum, "%.2fx",
+	if (ImGui::SliderFloat("##GameScale", &gameScale, scaleLimits.minimum, scaleLimits.maximum, "",
 	                       ImGuiSliderFlags_Logarithmic))
 	{
 		gameScale = SnapViewportScale(gameScale, scaleLimits.minimum, scaleLimits.maximum);
@@ -1915,6 +1920,8 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 		gameFit = false;
 		settingsChanged = true;
 	}
+	Icons::SameLine();
+	ImGui::Text("%.2gx", gameScale);
 	Icons::SameLine();
 	if (Icons::Button("Fit", Icons::Icon::Fit, "Fit game view"))
 	{
