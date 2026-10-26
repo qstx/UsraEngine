@@ -515,7 +515,21 @@ Result<Vector<GameObject::Ptr>> SelectedSceneObjects(Scene& scene, const GameObj
 Result<bool> SetAndApplyGroupValue(SerializedObjectGroup& group, const String& path, SerializedJson value,
                                    const GroupCommitObserver& commitObserver);
 
-Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const String& primaryName, String& diagnostic,
+String GameObjectGroupEditKey(ResourceId documentId, const Vector<GameObject::Ptr>& targets)
+{
+	String key = documentId.ToString();
+	for (const auto& target : targets)
+	{
+		if (target)
+		{
+			key += ":" + target->Id().ToString();
+		}
+	}
+	return key;
+}
+
+Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const String& primaryName,
+                                           const String& nameEditKey, String& diagnostic,
                                            const ProjectTagLayerSettings& tagLayerSettings,
                                            const std::function<void(bool)>& openTagLayerSettings,
                                            const GroupCommitObserver& commitObserver = {}, Scene* scene = nullptr,
@@ -544,16 +558,56 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 		return Result<bool>::Failure(name.error);
 	}
 	String nameValue = ToUrsaString(name.value.at("Value").get<std::string>());
-	char nameBuffer[257]{};
-	std::memcpy(nameBuffer, nameValue.data(), std::min<Ursa::Size>(nameValue.size(), sizeof(nameBuffer) - 1));
+
+	struct NameEditState
+	{
+		String key;
+		Ursa::Array<char, 257> buffer{};
+		bool dirty = false;
+	};
+
+	static NameEditState nameEditState;
+	ImGui::PushID(nameEditKey.c_str());
+	const ImGuiID nameInputId = ImGui::GetID("##GameObjectName");
+	if (nameEditState.key != nameEditKey)
+	{
+		nameEditState.key = nameEditKey;
+		nameEditState.buffer.fill(0);
+		std::copy_n(nameValue.data(), std::min(nameValue.size(), nameEditState.buffer.size() - 1),
+		            nameEditState.buffer.data());
+		nameEditState.dirty = false;
+	}
+	const bool nameInputActive = ImGui::GetActiveID() == nameInputId;
+	if (!nameInputActive && nameEditState.dirty)
+	{
+		auto applied = SetAndApplyGroupValue(group, "/Fields/name", ToStdString(String(nameEditState.buffer.data())),
+		                                     commitObserver);
+		if (!applied)
+		{
+			diagnostic = applied.error;
+			ImGui::PopID();
+			return Result<bool>::Failure(diagnostic);
+		}
+		changed |= applied.value;
+		nameEditState.dirty = false;
+		nameValue = String(nameEditState.buffer.data());
+	}
+	if (!nameInputActive && !nameEditState.dirty)
+	{
+		nameEditState.buffer.fill(0);
+		std::copy_n(nameValue.data(), std::min(nameValue.size(), nameEditState.buffer.size() - 1),
+		            nameEditState.buffer.data());
+	}
 	const auto active = group.DescribeProperty("/Fields/active");
 	if (!active)
 	{
+		ImGui::PopID();
 		return Result<bool>::Failure(active.error);
 	}
 	const auto staticState = group.DescribeProperty("/Fields/static");
 	if (!staticState)
 	{
+		ImGui::PopID();
 		return Result<bool>::Failure(staticState.error);
 	}
 	bool activeValue = active.value.at("Value").get<bool>();
@@ -580,19 +634,33 @@ Result<bool> DrawGameObjectGroupProperties(SerializedObjectGroup& group, const S
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - 52.0f);
 	ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, name.value.value("HasMultipleDifferentValues", false));
-	const bool nameChanged = ImGui::InputText("##GameObjectName", nameBuffer, sizeof(nameBuffer));
+	const bool nameChanged = ImGui::InputText("##GameObjectName", nameEditState.buffer.data(),
+	                                          nameEditState.buffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::PopItemFlag();
 	if (nameChanged)
 	{
-		auto set = group.SetValue("/Fields/name", ToStdString(String(nameBuffer)));
-		auto applied = set ? apply(ToUrsaString("/Fields/name")) : Result<void>::Failure(set.error);
+		auto applied = SetAndApplyGroupValue(group, "/Fields/name", ToStdString(String(nameEditState.buffer.data())),
+		                                     commitObserver);
 		if (!applied)
 		{
 			diagnostic = applied.error;
+			nameEditState.dirty = true;
+			ImGui::PopID();
 			return Result<bool>::Failure(diagnostic);
 		}
+		changed |= applied.value;
+		nameEditState.dirty = false;
+		nameValue = String(nameEditState.buffer.data());
+	}
+	else if (ImGui::IsItemActive())
+	{
+		nameEditState.dirty = String(nameEditState.buffer.data()) != nameValue;
+	}
+	if (nameChanged)
+	{
 		changed = true;
 	}
+	ImGui::PopID();
 	ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight() - 48.0f);
 	ImGui::TextUnformatted("Static");
 	ImGui::SameLine();
@@ -4399,9 +4467,10 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 				inspectorContext.documentId = document.Id();
 				inspectorContext.loadContext = &loadContext;
 				auto objectName = object->Name();
-				auto groupProperties = DrawGameObjectGroupProperties(
-				    group.value, objectName ? objectName.value : String{}, diagnostic, tagLayerSettings,
-				    openTagLayerSettings);
+				auto groupProperties =
+				    DrawGameObjectGroupProperties(group.value, objectName ? objectName.value : String{},
+				                                  GameObjectGroupEditKey(document.Id(), selectedObjects), diagnostic,
+				                                  tagLayerSettings, openTagLayerSettings);
 				if (!groupProperties)
 				{
 					diagnostic = groupProperties.error;
@@ -4970,10 +5039,10 @@ Result<bool> DrawSceneInspector(EditorDocument& document, EditorHierarchy& hiera
 					diagnostic = overrideCommit.error;
 				}
 				auto groupProperties = DrawGameObjectGroupProperties(
-				    *objectGroup, primaryName ? primaryName.value : String{}, diagnostic, tagLayerSettings,
-				    openTagLayerSettings,
-				    overrideCommit ? overrideCommit.value : GroupCommitObserver{}, &scene, &selectedObjects,
-				    true);
+				    *objectGroup, primaryName ? primaryName.value : String{},
+				    GameObjectGroupEditKey(document.Id(), selectedObjects), diagnostic, tagLayerSettings,
+				    openTagLayerSettings, overrideCommit ? overrideCommit.value : GroupCommitObserver{}, &scene,
+				    &selectedObjects, true);
 				if (!groupProperties)
 				{
 					diagnostic = groupProperties.error;
