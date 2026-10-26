@@ -72,6 +72,10 @@ internal static partial class NativeEditorBindings
 	internal static partial string[] GetProjectLayers();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::OpenTagLayerSettings")]
 	internal static partial void OpenTagLayerSettings(bool layers);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetComponentMenuState")]
+	internal static partial uint GetComponentMenuState();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetComponentMenuCommand")]
+	internal static partial void SetComponentMenuCommand(uint command);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ResolveReference")]
 	internal static partial EditorReferenceValue ResolveReference(EditorReferenceKind kind, string id, NativeAssetReference? asset);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::MarkDirty")]

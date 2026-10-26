@@ -4746,55 +4746,103 @@ Result<bool> DrawSceneInspector(
 						bool pasteComponentAsNew = false;
 						const String stableType = scriptHeader ? "script:" + scriptHeader->TypeName()
 						                                       : "native:" + component->SerializationType();
+						const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+						const bool canReset = componentEditors.FindType(factoryType) != nullptr;
+						const bool canPasteValues =
+						    copiedComponentPayload && copiedComponentPayload->is_object() &&
+						    copiedComponentPayload->contains("type") && copiedComponentPayload->at("type").is_string() &&
+						    ToUrsaString(copiedComponentPayload->at("type").get<std::string>()) == stableType &&
+						    copiedComponentPayload->contains("fields") && copiedComponentPayload->at("fields").is_object();
+						const String copiedStableType =
+						    copiedComponentPayload && copiedComponentPayload->is_object() &&
+						            copiedComponentPayload->contains("type") &&
+						            copiedComponentPayload->at("type").is_string()
+						        ? ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
+						        : String{};
+						const String copiedFactoryType = copiedStableType.compare(0, 7, "native:") == 0 ||
+						                                        copiedStableType.compare(0, 7, "script:") == 0
+						                                    ? copiedStableType.substr(7)
+						                                    : String{};
+						const bool canPasteAsNew = !copiedFactoryType.empty() && copiedComponentPayload &&
+						                          copiedComponentPayload->is_object() &&
+						                          copiedComponentPayload->contains("fields") &&
+						                          copiedComponentPayload->at("fields").is_object() &&
+						                          componentEditors.FindType(copiedFactoryType) &&
+						                          static_cast<bool>(componentEditors.CanCreate(copiedFactoryType, inspectorContext));
+						const auto drawManagedComponentMenu = [&](UInt32 capabilities)
+						{
+							const auto* menuEditor = componentEditors.FindMenu(headerEditorType);
+							if (!menuEditor)
+							{
+								return false;
+							}
+							ComponentInspectorContext menuContext = inspectorContext;
+							menuContext.targets = {component};
+							menuContext.primaryIndex = 0;
+							auto command = (*menuEditor)(*component, menuContext, capabilities);
+							if (!command)
+							{
+								diagnostic = command.error;
+								return false;
+							}
+							switch (command.value)
+							{
+							case ComponentMenuCommand::Reset: resetComponent = true; break;
+							case ComponentMenuCommand::Copy: copyComponent = true; break;
+							case ComponentMenuCommand::PasteValues: pasteComponentValues = true; break;
+							case ComponentMenuCommand::PasteAsNew: pasteComponentAsNew = true; break;
+							case ComponentMenuCommand::MoveUp: moveComponentUp = true; break;
+							case ComponentMenuCommand::MoveDown: moveComponentDown = true; break;
+							case ComponentMenuCommand::Remove: removeFromHeader = true; break;
+							case ComponentMenuCommand::None: break;
+							}
+							return true;
+						};
 						if (ImGui::BeginPopupContextItem("ComponentHeaderActions"))
 						{
-							const String factoryType =
-							    scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
-							ImGui::BeginDisabled(componentEditors.FindType(factoryType) == nullptr);
-							resetComponent = Icons::MenuItem("Reset");
-							ImGui::EndDisabled();
-							ImGui::Separator();
-							copyComponent = Icons::MenuItem("Copy Component");
-							const bool canPasteValues =
-							    copiedComponentPayload && copiedComponentPayload->is_object() &&
-							    copiedComponentPayload->contains("type") &&
-							    copiedComponentPayload->at("type").is_string() &&
-							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>()) == stableType &&
-							    copiedComponentPayload->contains("fields") &&
-							    copiedComponentPayload->at("fields").is_object();
-							ImGui::BeginDisabled(!canPasteValues);
-							pasteComponentValues = Icons::MenuItem("Paste Component Values");
-							ImGui::EndDisabled();
-							const bool canPasteAsNew =
-							    copiedComponentPayload && copiedComponentPayload->is_object() &&
-							    copiedComponentPayload->contains("type") &&
-							    copiedComponentPayload->contains("fields") &&
-							    copiedComponentPayload->at("fields").is_object() &&
-							    componentEditors.FindType(
-							        ToUrsaString(copiedComponentPayload->at("type").get<std::string>()).substr(7)) &&
-							    static_cast<bool>(componentEditors.CanCreate(
-							        ToUrsaString(copiedComponentPayload->at("type").get<std::string>()).substr(7),
-							        inspectorContext));
-							ImGui::BeginDisabled(!canPasteAsNew);
-							pasteComponentAsNew = Icons::MenuItem("Paste Component As New");
-							ImGui::EndDisabled();
-							ImGui::Separator();
-							ImGui::BeginDisabled(componentIndex == 0);
-							moveComponentUp = Icons::MenuItem("Move Up");
-							ImGui::EndDisabled();
-							ImGui::BeginDisabled(componentIndex + 1 >= prefabComponents.size());
-							moveComponentDown = Icons::MenuItem("Move Down");
-							ImGui::EndDisabled();
-							ImGui::Separator();
-							removeFromHeader = ImGui::MenuItem("Remove Component");
+							const UInt32 menuCapabilities = ComponentMenuShowReset | ComponentMenuShowCopy |
+							                                ComponentMenuShowPasteValues | ComponentMenuShowPasteAsNew |
+							                                ComponentMenuShowMoveUp | ComponentMenuShowMoveDown |
+							                                ComponentMenuShowRemove |
+							                                (canReset ? ComponentMenuCanReset : 0) |
+							                                (canPasteValues ? ComponentMenuCanPasteValues : 0) |
+							                                (canPasteAsNew ? ComponentMenuCanPasteAsNew : 0) |
+							                                (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
+							                                (componentIndex + 1 < prefabComponents.size()
+							                                     ? ComponentMenuCanMoveDown
+							                                     : 0) |
+							                                ComponentMenuCanRemove;
+							if (!drawManagedComponentMenu(menuCapabilities))
+							{
+								ImGui::BeginDisabled(!canReset);
+								resetComponent = Icons::MenuItem("Reset");
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								copyComponent = Icons::MenuItem("Copy Component");
+								ImGui::BeginDisabled(!canPasteValues);
+								pasteComponentValues = Icons::MenuItem("Paste Component Values");
+								ImGui::EndDisabled();
+								ImGui::BeginDisabled(!canPasteAsNew);
+								pasteComponentAsNew = Icons::MenuItem("Paste Component As New");
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								ImGui::BeginDisabled(componentIndex == 0);
+								moveComponentUp = Icons::MenuItem("Move Up");
+								ImGui::EndDisabled();
+								ImGui::BeginDisabled(componentIndex + 1 >= prefabComponents.size());
+								moveComponentDown = Icons::MenuItem("Move Down");
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								removeFromHeader = ImGui::MenuItem("Remove Component");
+							}
 							ImGui::EndPopup();
 						}
 						if (resetComponent)
 						{
-							const String factoryType =
+							const String resetFactoryType =
 							    scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
 							auto reset =
-							    ResetComponentToDefaults(*component, factoryType, componentEditors, inspectorContext,
+							    ResetComponentToDefaults(*component, resetFactoryType, componentEditors, inspectorContext,
 							                             registry, loadContext, nullptr, nullptr);
 							diagnostic = reset ? String{} : reset.error;
 							changed |= reset && reset.value;
@@ -4885,10 +4933,10 @@ Result<bool> DrawSceneInspector(
 						}
 						if (pasteComponentAsNew && copiedComponentPayload)
 						{
-							const String copiedStableType =
+							const String pastedStableType =
 							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>());
 							auto pasted =
-							    PasteComponentAsNew(componentEditors, copiedStableType, *copiedComponentPayload,
+							    PasteComponentAsNew(componentEditors, pastedStableType, *copiedComponentPayload,
 							                        inspectorContext, registry, loadContext, nullptr);
 							diagnostic = pasted ? String{} : pasted.error;
 							changed |= static_cast<bool>(pasted);
@@ -4942,25 +4990,38 @@ Result<bool> DrawSceneInspector(
 						}
 						if (ImGui::BeginPopup("PrefabComponentActions"))
 						{
-							const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
-							ImGui::BeginDisabled(componentEditors.FindType(factoryType) == nullptr);
-							resetComponent = Icons::MenuItem("Reset") || resetComponent;
-							ImGui::EndDisabled();
-							ImGui::Separator();
-							ImGui::BeginDisabled(componentIndex == 0);
-							moveComponentUp = Icons::MenuItem("Move Up") || moveComponentUp;
-							ImGui::EndDisabled();
-							ImGui::BeginDisabled(componentIndex + 1 >= prefabComponents.size());
-							moveComponentDown = Icons::MenuItem("Move Down") || moveComponentDown;
-							ImGui::EndDisabled();
-							ImGui::Separator();
-							removeFromHeader = Icons::MenuItem("Remove Component") || removeFromHeader;
+							const String menuFactoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							const UInt32 menuCapabilities = ComponentMenuShowReset | ComponentMenuShowMoveUp |
+							                                ComponentMenuShowMoveDown | ComponentMenuShowRemove |
+							                                (componentEditors.FindType(menuFactoryType)
+							                                     ? ComponentMenuCanReset
+							                                     : 0) |
+							                                (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
+							                                (componentIndex + 1 < prefabComponents.size()
+							                                     ? ComponentMenuCanMoveDown
+							                                     : 0) |
+							                                ComponentMenuCanRemove;
+							if (!drawManagedComponentMenu(menuCapabilities))
+							{
+								ImGui::BeginDisabled(componentEditors.FindType(menuFactoryType) == nullptr);
+				resetComponent = Icons::MenuItem("Reset") || resetComponent;
+				ImGui::EndDisabled();
+				ImGui::Separator();
+				ImGui::BeginDisabled(componentIndex == 0);
+				moveComponentUp = Icons::MenuItem("Move Up") || moveComponentUp;
+				ImGui::EndDisabled();
+				ImGui::BeginDisabled(componentIndex + 1 >= prefabComponents.size());
+				moveComponentDown = Icons::MenuItem("Move Down") || moveComponentDown;
+				ImGui::EndDisabled();
+				ImGui::Separator();
+				removeFromHeader = ImGui::MenuItem("Remove Component") || removeFromHeader;
+			}
 							ImGui::EndPopup();
 						}
 						if (resetComponent)
 						{
-							const String factoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
-							auto reset = ResetComponentToDefaults(*component, factoryType, componentEditors, inspectorContext,
+							const String resetFactoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							auto reset = ResetComponentToDefaults(*component, resetFactoryType, componentEditors, inspectorContext,
 							                                    registry, loadContext, nullptr, nullptr);
 							diagnostic = reset ? String{} : reset.error;
 							changed |= reset && reset.value;
@@ -5583,56 +5644,99 @@ Result<bool> DrawSceneInspector(
 						const String componentType = scriptHeader
 						                                ? "script:" + scriptHeader->TypeName()
 						                                : "native:" + object->SerializationType();
+						const String factoryType = componentType.substr(componentType.find(':') + 1);
+						const bool canReset = componentEditors.FindType(factoryType) != nullptr;
+						const bool canPasteValues =
+						    copiedComponentPayload && copiedComponentPayload->is_object() &&
+						    copiedComponentPayload->contains("type") &&
+						    ToUrsaString(copiedComponentPayload->at("type").get<std::string>()) == componentType &&
+						    copiedComponentPayload->contains("fields") &&
+						    copiedComponentPayload->at("fields").is_object();
+						const String copiedStableType = copiedComponentPayload && copiedComponentPayload->is_object() &&
+						                                        copiedComponentPayload->contains("type") &&
+						                                        copiedComponentPayload->at("type").is_string()
+						                                    ? ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
+						                                    : String{};
+						const String copiedFactoryType = copiedStableType.compare(0, 7, "native:") == 0 ||
+						                                         copiedStableType.compare(0, 7, "script:") == 0
+						                                     ? copiedStableType.substr(7)
+						                                     : copiedStableType;
+						const bool canPasteAsNew = copiedComponentPayload && copiedComponentPayload->is_object() &&
+						                          copiedComponentPayload->contains("fields") &&
+						                          copiedComponentPayload->at("fields").is_object() &&
+						                          componentEditors.FindType(copiedFactoryType) &&
+						                          static_cast<bool>(componentEditors.CanCreate(copiedFactoryType, inspectorContext));
+						const auto drawManagedComponentMenu = [&](UInt32 capabilities)
+						{
+							const auto* menuEditor = componentEditors.FindMenu(componentType);
+							if (!menuEditor)
+							{
+								return false;
+							}
+							ComponentInspectorContext menuContext = inspectorContext;
+							menuContext.targets = {object};
+							menuContext.primaryIndex = 0;
+							auto command = (*menuEditor)(*object, menuContext, capabilities);
+							if (!command)
+							{
+								diagnostic = command.error;
+								return false;
+							}
+							switch (command.value)
+							{
+							case ComponentMenuCommand::Reset: resetComponent = true; break;
+							case ComponentMenuCommand::Copy: copyComponent = true; break;
+							case ComponentMenuCommand::PasteValues: pasteComponentValues = true; break;
+							case ComponentMenuCommand::PasteAsNew: pasteComponentAsNew = true; break;
+							case ComponentMenuCommand::MoveUp: moveComponentUp = true; break;
+							case ComponentMenuCommand::MoveDown: moveComponentDown = true; break;
+							case ComponentMenuCommand::Remove: remove = true; break;
+							case ComponentMenuCommand::None: break;
+							}
+							return true;
+						};
 						if (ImGui::BeginPopup("SceneComponentActions"))
 						{
-							const String factoryType = componentType.substr(componentType.find(':') + 1);
-							ImGui::BeginDisabled(componentEditors.FindType(factoryType) == nullptr);
-							resetComponent = Icons::MenuItem("Reset");
-							ImGui::EndDisabled();
-							ImGui::Separator();
-							copyComponent = Icons::MenuItem("Copy Component");
-							const bool canPasteComponent =
-							    copiedComponentPayload && copiedComponentPayload->is_object() &&
-							    copiedComponentPayload->contains("type") &&
-							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>()) == componentType &&
-							    copiedComponentPayload->contains("fields") &&
-							    copiedComponentPayload->at("fields").is_object();
-							ImGui::BeginDisabled(!canPasteComponent);
-							pasteComponentValues = Icons::MenuItem("Paste Component Values");
-							ImGui::EndDisabled();
-			const String copiedStableType = copiedComponentPayload && copiedComponentPayload->is_object() &&
-			                                        copiedComponentPayload->contains("type") &&
-			                                        copiedComponentPayload->at("type").is_string()
-			                                    ? ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
-			                                    : String{};
-			const String copiedFactoryType = copiedStableType.compare(0, 7, "native:") == 0 ||
-			                                         copiedStableType.compare(0, 7, "script:") == 0
-			                                     ? copiedStableType.substr(7)
-			                                     : copiedStableType;
-			const bool canPasteAsNew =
-							    copiedComponentPayload && copiedComponentPayload->is_object() &&
-							    copiedComponentPayload->contains("type") && copiedComponentPayload->contains("fields") &&
-							    copiedComponentPayload->at("fields").is_object() &&
-			    componentEditors.FindType(copiedFactoryType) &&
-			    static_cast<bool>(componentEditors.CanCreate(copiedFactoryType, inspectorContext));
-							ImGui::BeginDisabled(!canPasteAsNew);
-							pasteComponentAsNew = Icons::MenuItem("Paste Component As New");
-							ImGui::EndDisabled();
-							ImGui::Separator();
-							ImGui::BeginDisabled(componentIndex == 0);
-							moveComponentUp = Icons::MenuItem("Move Up");
-							ImGui::EndDisabled();
-							ImGui::BeginDisabled(componentIndex + 1 >= components.value.size());
-							moveComponentDown = Icons::MenuItem("Move Down");
-							ImGui::EndDisabled();
-							ImGui::Separator();
-							remove = Icons::MenuItem("Remove Component");
+							const UInt32 menuCapabilities = ComponentMenuShowReset | ComponentMenuShowCopy |
+							                                ComponentMenuShowPasteValues | ComponentMenuShowPasteAsNew |
+							                                ComponentMenuShowMoveUp | ComponentMenuShowMoveDown |
+							                                ComponentMenuShowRemove | (canReset ? ComponentMenuCanReset : 0) |
+							                                (canPasteValues ? ComponentMenuCanPasteValues : 0) |
+							                                (canPasteAsNew ? ComponentMenuCanPasteAsNew : 0) |
+							                                (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
+							                                (componentIndex + 1 < components.value.size()
+							                                     ? ComponentMenuCanMoveDown
+							                                     : 0) |
+							                                ComponentMenuCanRemove;
+							if (!drawManagedComponentMenu(menuCapabilities))
+							{
+								ImGui::BeginDisabled(!canReset);
+								resetComponent = Icons::MenuItem("Reset");
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								copyComponent = Icons::MenuItem("Copy Component");
+								ImGui::BeginDisabled(!canPasteValues);
+								pasteComponentValues = Icons::MenuItem("Paste Component Values");
+								ImGui::EndDisabled();
+								ImGui::BeginDisabled(!canPasteAsNew);
+								pasteComponentAsNew = Icons::MenuItem("Paste Component As New");
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								ImGui::BeginDisabled(componentIndex == 0);
+								moveComponentUp = Icons::MenuItem("Move Up");
+								ImGui::EndDisabled();
+								ImGui::BeginDisabled(componentIndex + 1 >= components.value.size());
+								moveComponentDown = Icons::MenuItem("Move Down");
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								remove = Icons::MenuItem("Remove Component");
+							}
 							ImGui::EndPopup();
 						}
 						if (resetComponent)
 						{
-							const String factoryType = componentType.substr(componentType.find(':') + 1);
-							auto reset = ResetComponentToDefaults(*object, factoryType, componentEditors, inspectorContext,
+							const String resetFactoryType = componentType.substr(componentType.find(':') + 1);
+							auto reset = ResetComponentToDefaults(*object, resetFactoryType, componentEditors, inspectorContext,
 							                                    registry, loadContext, draft.get(), &scene);
 							diagnostic = reset ? String{} : reset.error;
 							changed |= reset && reset.value;

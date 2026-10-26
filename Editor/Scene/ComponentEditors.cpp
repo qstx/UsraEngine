@@ -105,6 +105,12 @@ const ComponentHeaderEditor* ComponentEditors::FindHeader(const String& type) co
 	return found == headerEditors.end() ? nullptr : &found->second;
 }
 
+const ComponentMenuEditor* ComponentEditors::FindMenu(const String& type) const
+{
+	auto found = menuEditors.find(type);
+	return found == menuEditors.end() ? nullptr : &found->second;
+}
+
 bool ComponentEditors::SupportsMultipleObjects(const String& type) const
 {
 	const auto found = multipleObjectEditors.find(type);
@@ -133,6 +139,8 @@ Result<void> ComponentEditors::RegisterType(ComponentTypeDescriptor descriptor, 
 
 void ComponentEditors::ReplaceEditor(const String& type, ComponentEditor editor, bool supportsMultipleObjects)
 {
+	headerEditors.erase(type);
+	menuEditors.erase(type);
 	if (editor)
 	{
 		editors[type] = std::move(editor);
@@ -141,8 +149,19 @@ void ComponentEditors::ReplaceEditor(const String& type, ComponentEditor editor,
 	else
 	{
 		editors.erase(type);
-		headerEditors.erase(type);
 		multipleObjectEditors.erase(type);
+	}
+}
+
+void ComponentEditors::ReplaceMenuEditor(const String& type, ComponentMenuEditor editor)
+{
+	if (editor)
+	{
+		menuEditors[type] = std::move(editor);
+	}
+	else
+	{
+		menuEditors.erase(type);
 	}
 }
 
@@ -163,6 +182,7 @@ void ComponentEditors::UnregisterType(const String& type)
 	types.erase(type);
 	editors.erase(type);
 	headerEditors.erase(type);
+	menuEditors.erase(type);
 	multipleObjectEditors.erase(type);
 }
 

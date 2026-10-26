@@ -28,6 +28,8 @@ struct ManagedEditorContext
 	Vector<Component*> componentTargets;
 	Size componentPrimaryIndex = 0;
 	std::optional<bool> componentHeaderExpanded;
+	UInt32 componentMenuState = 0;
+	UInt32 componentMenuCommand = 0;
 	Vector<GameObject::Ptr> gameObjectTargets;
 	Size gameObjectPrimaryIndex = 0;
 	Vector<String> projectTags;

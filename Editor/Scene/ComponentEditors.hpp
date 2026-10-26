@@ -75,6 +75,38 @@ struct ComponentHeaderResult
 using ComponentHeaderEditor =
     std::function<Result<ComponentHeaderResult>(Component&, ComponentInspectorContext&, InspectorUI&)>;
 
+enum class ComponentMenuCommand : UInt32
+{
+	None,
+	Reset,
+	Copy,
+	PasteValues,
+	PasteAsNew,
+	MoveUp,
+	MoveDown,
+	Remove
+};
+
+enum ComponentMenuCapability : UInt32
+{
+	ComponentMenuShowReset = 1u << 0,
+	ComponentMenuCanReset = 1u << 1,
+	ComponentMenuShowCopy = 1u << 2,
+	ComponentMenuShowPasteValues = 1u << 3,
+	ComponentMenuCanPasteValues = 1u << 4,
+	ComponentMenuShowPasteAsNew = 1u << 5,
+	ComponentMenuCanPasteAsNew = 1u << 6,
+	ComponentMenuShowMoveUp = 1u << 7,
+	ComponentMenuCanMoveUp = 1u << 8,
+	ComponentMenuShowMoveDown = 1u << 9,
+	ComponentMenuCanMoveDown = 1u << 10,
+	ComponentMenuShowRemove = 1u << 11,
+	ComponentMenuCanRemove = 1u << 12
+};
+
+using ComponentMenuEditor =
+    std::function<Result<ComponentMenuCommand>(Component&, ComponentInspectorContext&, UInt32 capabilities)>;
+
 using ComponentFactory = std::function<Result<Component*>(ComponentInspectorContext&)>;
 
 using ComponentAvailability = std::function<Result<void>(const ComponentInspectorContext&)>;
@@ -99,11 +131,13 @@ public:
 
 	void ReplaceEditor(const String& type, ComponentEditor editor, bool supportsMultipleObjects = false);
 	void ReplaceHeaderEditor(const String& type, ComponentHeaderEditor editor);
+	void ReplaceMenuEditor(const String& type, ComponentMenuEditor editor);
 
 	void UnregisterType(const String& type);
 
 	const ComponentEditor* Find(const String& type) const;
 	const ComponentHeaderEditor* FindHeader(const String& type) const;
+	const ComponentMenuEditor* FindMenu(const String& type) const;
 	bool SupportsMultipleObjects(const String& type) const;
 
 	const ComponentTypeDescriptor* FindType(const String& type) const;
@@ -117,6 +151,7 @@ public:
 private:
 	Map<String, ComponentEditor> editors;
 	Map<String, ComponentHeaderEditor> headerEditors;
+	Map<String, ComponentMenuEditor> menuEditors;
 	Map<String, bool> multipleObjectEditors;
 	Map<String, ComponentTypeDescriptor> types;
 };

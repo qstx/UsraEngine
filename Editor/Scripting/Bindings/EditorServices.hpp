@@ -142,6 +142,8 @@ struct EditorServices
 	static Result<B::DataView> GetProjectTags(B::BindingCall& call);
 	static Result<B::DataView> GetProjectLayers(B::BindingCall& call);
 	static Result<void> OpenTagLayerSettings(B::BindingCall& call, bool layers);
+	static Result<UInt32> GetComponentMenuState(B::BindingCall& call);
+	static Result<void> SetComponentMenuCommand(B::BindingCall& call, UInt32 command);
 	static Result<Reference> ResolveReference(B::BindingCall& call, UInt32 kind, const B::Utf8View& id,
 	                                          const OptionalAsset& asset);
 	static Result<void> MarkDirty(B::BindingCall& call);

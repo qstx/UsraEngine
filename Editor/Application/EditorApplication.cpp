@@ -6524,6 +6524,38 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 				    }
 				    return Result<ComponentHeaderResult>::Success({true, *context.componentHeaderExpanded, changed});
 			    });
+			candidateEditors.ReplaceMenuEditor(
+			    target,
+			    [this, extensionId, sessionId](Component& component, ComponentInspectorContext& selection,
+			                                 UInt32 capabilities) -> Result<ComponentMenuCommand>
+			    {
+				    if (!managedHost || managedHost->IsSessionFaulted())
+				    {
+					    return Result<ComponentMenuCommand>::Failure("Managed Editor environment is unavailable");
+				    }
+				    ManagedEditorContext context;
+				    context.document = documents ? documents->Current() : nullptr;
+				    context.documents = documents.get();
+				    context.workspace = workspace.get();
+				    context.registry = &project->components;
+				    context.target = &component;
+				    context.componentTargets = selection.targets;
+				    context.componentPrimaryIndex = selection.primaryIndex;
+				    context.selection = selection;
+				    context.componentMenuState = capabilities;
+				    auto invoked = InvokeManagedEditorExtension(
+				        *managedHost, sessionId, "inspector-component-context-menu:" + extensionId.substr(10), context);
+				    if (!invoked)
+				    {
+					    return Result<ComponentMenuCommand>::Failure(invoked.error);
+				    }
+				    if (!invoked.value)
+				    {
+					    return Result<ComponentMenuCommand>::Failure("Managed Component Inspector menu is unavailable");
+				    }
+				    return Result<ComponentMenuCommand>::Success(
+				        static_cast<ComponentMenuCommand>(context.componentMenuCommand));
+			    });
 		}
 	}
 	managedEditorFallbacks = std::move(candidateFallbacks);

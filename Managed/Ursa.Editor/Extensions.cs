@@ -63,6 +63,34 @@ public abstract class Inspector
 	internal void ReleaseTarget() { targetScope?.Dispose(); targetScope = null; }
 
 	public virtual void OnInspectorGUI() => DrawDefaultInspector();
+	public virtual void OnComponentContextMenuGUI()
+	{
+		uint state = EditorContext.ComponentMenuState;
+		const uint showReset = 1u << 0, canReset = 1u << 1, showCopy = 1u << 2;
+		const uint showPasteValues = 1u << 3, canPasteValues = 1u << 4, showPasteAsNew = 1u << 5;
+		const uint canPasteAsNew = 1u << 6, showMoveUp = 1u << 7, canMoveUp = 1u << 8;
+		const uint showMoveDown = 1u << 9, canMoveDown = 1u << 10, showRemove = 1u << 11, canRemove = 1u << 12;
+		if ((state & showReset) != 0 && EditorGui.MenuItem("Reset", (state & canReset) != 0))
+			EditorContext.SetComponentMenuCommand(1);
+		if ((state & (showCopy | showPasteValues | showPasteAsNew)) != 0) EditorGui.Separator();
+		if ((state & showCopy) != 0 && EditorGui.MenuItem("Copy Component"))
+			EditorContext.SetComponentMenuCommand(2);
+		if ((state & showPasteValues) != 0 && EditorGui.MenuItem("Paste Component Values", (state & canPasteValues) != 0))
+			EditorContext.SetComponentMenuCommand(3);
+		if ((state & showPasteAsNew) != 0 && EditorGui.MenuItem("Paste Component As New", (state & canPasteAsNew) != 0))
+			EditorContext.SetComponentMenuCommand(4);
+		if ((state & (showMoveUp | showMoveDown)) != 0) EditorGui.Separator();
+		if ((state & showMoveUp) != 0 && EditorGui.MenuItem("Move Up", (state & canMoveUp) != 0))
+			EditorContext.SetComponentMenuCommand(5);
+		if ((state & showMoveDown) != 0 && EditorGui.MenuItem("Move Down", (state & canMoveDown) != 0))
+			EditorContext.SetComponentMenuCommand(6);
+		if ((state & showRemove) != 0)
+		{
+			EditorGui.Separator();
+			if (EditorGui.MenuItem("Remove Component", (state & canRemove) != 0))
+				EditorContext.SetComponentMenuCommand(7);
+		}
+	}
 	public virtual void OnComponentHeaderGUI()
 	{
 		if (Target is not Behaviour behaviour) return;
@@ -327,6 +355,12 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 			{
 				inspector.SerializedObject = CreateSerializedObject(inspector);
 				try { inspector.OnComponentHeaderGUI(); inspector.SynchronizeTarget(); }
+				finally { inspector.ReleaseTarget(); }
+			});
+			callbacks.Add("inspector-component-context-menu:" + target, () =>
+			{
+				inspector.SerializedObject = CreateSerializedObject(inspector);
+				try { inspector.OnComponentContextMenuGUI(); inspector.SynchronizeTarget(); }
 				finally { inspector.ReleaseTarget(); }
 			});
 		}

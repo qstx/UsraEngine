@@ -1109,6 +1109,21 @@ Result<void> EditorServices::OpenTagLayerSettings(B::BindingCall& call, bool lay
 	return {};
 }
 
+Result<UInt32> EditorServices::GetComponentMenuState(B::BindingCall& call)
+{
+	return Result<UInt32>::Success(Scope(call).source.componentMenuState);
+}
+
+Result<void> EditorServices::SetComponentMenuCommand(B::BindingCall& call, UInt32 command)
+{
+	if (command > static_cast<UInt32>(ComponentMenuCommand::Remove))
+	{
+		return Result<void>::Failure("Unknown component menu command");
+	}
+	Scope(call).source.componentMenuCommand = command;
+	return {};
+}
+
 Result<EditorServices::Reference> EditorServices::ResolveReference(B::BindingCall& call, UInt32 kind,
                                                                    const B::Utf8View& id, const OptionalAsset& asset)
 {
