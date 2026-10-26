@@ -4,6 +4,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <imgui.h>
 
 namespace Ursa::Editor
 {
@@ -127,8 +128,15 @@ Result<EditorDragPayload> BeginEditorDragSession(const Vector<EditorSelectionEnt
 Result<EditorDragPayload> BeginEditorDragSession(const EditorSelectionContext& selection,
                                                  const EditorSelectionEntry& clicked)
 {
+	const bool clickedSelected = selection.Contains(clicked);
+	const bool addToExistingSelection = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper;
 	Vector<EditorSelectionEntry> sources =
-	    selection.Contains(clicked) ? selection.entries : Vector<EditorSelectionEntry>{clicked};
+	    clickedSelected || addToExistingSelection ? selection.entries : Vector<EditorSelectionEntry>{};
+	if (std::none_of(sources.begin(), sources.end(),
+	                 [&](const EditorSelectionEntry& entry) { return entry.SameIdentity(clicked); }))
+	{
+		sources.push_back(clicked);
+	}
 	return BeginEditorDragSession(sources, selection.revision);
 }
 
