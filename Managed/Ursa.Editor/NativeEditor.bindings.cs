@@ -78,6 +78,8 @@ internal static partial class NativeEditorBindings
 	internal static partial void Text(string text);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Button")]
 	internal static partial bool Button(string label);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SmallButton")]
+	internal static partial bool SmallButton(string label);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SameLine")]
 	internal static partial void SameLine();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Separator")]
@@ -122,6 +124,8 @@ internal static partial class NativeEditorBindings
 	internal static partial void SetProperty(ulong revision, string path, SerializedValue value);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ResizeArray")]
 	internal static partial void ResizeArray(ulong revision, string path, int size);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::MoveArrayElement")]
+	internal static partial void MoveArrayElement(ulong revision, string path, int fromIndex, int toIndex);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::UpdateProperties")]
 	internal static partial ulong UpdateProperties();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::ApplyProperties")]

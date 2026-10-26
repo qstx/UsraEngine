@@ -597,6 +597,56 @@ Result<void> EditorServices::ResizeArray(B::BindingCall& call, UInt64 revision, 
 	return resized;
 }
 
+Result<void> EditorServices::MoveArrayElement(B::BindingCall& call, UInt64 revision, const B::Utf8View& path,
+                                              Int32 fromIndex, Int32 toIndex)
+{
+	RequireGui(call);
+	auto& scope = Scope(call);
+	scope.RequireProperties(revision);
+	const String fieldPath = B::ReadString(path);
+	const auto descriptor = Descriptor(scope, revision, fieldPath);
+	const auto type = PropertyType(descriptor);
+	if ((type != P::V_Array && type != P::V_List) || fromIndex < 0 || toIndex < 0)
+	{
+		throw std::runtime_error("Invalid serialized collection type or index");
+	}
+	if (scope.propertyGroup)
+	{
+		auto moved = scope.propertyGroup->MoveCollectionElement(fieldPath, static_cast<Size>(fromIndex),
+		                                                        static_cast<Size>(toIndex));
+		if (moved && std::find(scope.pendingPropertyPaths.begin(), scope.pendingPropertyPaths.end(), fieldPath) ==
+		                 scope.pendingPropertyPaths.end())
+		{
+			scope.pendingPropertyPaths.push_back(fieldPath);
+		}
+		return moved;
+	}
+	auto current = ReadPropertyJson(scope, fieldPath);
+	if (!current || !current.value.is_array() || static_cast<Size>(fromIndex) >= current.value.size() ||
+	    static_cast<Size>(toIndex) >= current.value.size())
+	{
+		return Result<void>::Failure(current ? "Collection reorder index is outside the array" : current.error);
+	}
+	Json values = std::move(current.value);
+	Json moved = std::move(values.at(static_cast<Size>(fromIndex)));
+	if (fromIndex < toIndex)
+	{
+		for (Int32 index = fromIndex; index < toIndex; ++index)
+		{
+			values[static_cast<Size>(index)] = std::move(values[static_cast<Size>(index + 1)]);
+		}
+	}
+	else
+	{
+		for (Int32 index = fromIndex; index > toIndex; --index)
+		{
+			values[static_cast<Size>(index)] = std::move(values[static_cast<Size>(index - 1)]);
+		}
+	}
+	values[static_cast<Size>(toIndex)] = std::move(moved);
+	return SetPropertyValue(scope, fieldPath, std::move(values));
+}
+
 Result<UInt64> EditorServices::UpdateProperties(B::BindingCall& call)
 {
 	auto& scope = Scope(call);

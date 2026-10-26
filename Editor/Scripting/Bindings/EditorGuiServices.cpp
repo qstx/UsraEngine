@@ -210,6 +210,12 @@ Result<bool> EditorServices::Button(B::BindingCall& call, const B::Utf8View& lab
 	return Result<bool>::Success(Edited(call, ImGui::Button(GuiString(label).c_str())));
 }
 
+Result<bool> EditorServices::SmallButton(B::BindingCall& call, const B::Utf8View& label)
+{
+	RequireGui(call);
+	return Result<bool>::Success(Edited(call, ImGui::SmallButton(GuiString(label).c_str())));
+}
+
 Result<void> EditorServices::SameLine(B::BindingCall& call)
 {
 	RequireGui(call);

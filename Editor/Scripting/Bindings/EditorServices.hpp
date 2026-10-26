@@ -143,6 +143,7 @@ struct EditorServices
 	static Result<void> SetActiveCamera(B::BindingCall& call);
 	static Result<void> Text(B::BindingCall& call, const B::Utf8View& text);
 	static Result<bool> Button(B::BindingCall& call, const B::Utf8View& label);
+	static Result<bool> SmallButton(B::BindingCall& call, const B::Utf8View& label);
 	static Result<void> SameLine(B::BindingCall& call);
 	static Result<void> Separator(B::BindingCall& call);
 	static Result<void> BeginGroup(B::BindingCall& call);
@@ -173,6 +174,8 @@ struct EditorServices
 	static Result<void> SetProperty(B::BindingCall& call, UInt64 revision, const B::Utf8View& path,
 	                                const PropertyValue& value);
 	static Result<void> ResizeArray(B::BindingCall& call, UInt64 revision, const B::Utf8View& path, Int32 size);
+	static Result<void> MoveArrayElement(B::BindingCall& call, UInt64 revision, const B::Utf8View& path,
+	                                     Int32 fromIndex, Int32 toIndex);
 	static Result<UInt64> UpdateProperties(B::BindingCall& call);
 	static Result<bool> ApplyProperties(B::BindingCall& call, UInt64 revision);
 	static Result<bool> HasModifiedProperties(B::BindingCall& call, UInt64 revision);

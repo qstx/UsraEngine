@@ -24,6 +24,7 @@ public static class EditorGui
 	}
 	public static void Text(string text) { _ = EditorApi.Generation; NativeEditorBindings.Text(text); }
 	public static bool Button(string label) { _ = EditorApi.Generation; return NativeEditorBindings.Button(label); }
+	public static bool SmallButton(string label) { _ = EditorApi.Generation; return NativeEditorBindings.SmallButton(label); }
 	public static void SameLine() { _ = EditorApi.Generation; NativeEditorBindings.SameLine(); }
 	public static void Separator() { _ = EditorApi.Generation; NativeEditorBindings.Separator(); }
 	public static bool Toggle(string label, bool value, bool mixedValue = false)
@@ -145,6 +146,37 @@ public static class EditorGui
 				Color editedColor = ColorField(caption, originalColor, hdr: property.Hdr);
 				if (!editedColor.Equals(originalColor)) property.ColorValue = editedColor;
 				break;
+			case SerializedPropertyType.Array:
+			case SerializedPropertyType.List:
+			{
+				int originalSize = property.ArraySize;
+				long editedSize = IntField(caption, originalSize);
+				if (editedSize >= 0 && editedSize <= int.MaxValue && editedSize != originalSize)
+					property.ArraySize = (int)editedSize;
+				for (int index = 0; index < property.ArraySize; ++index)
+				{
+					string elementIndex = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+					string elementId = property.PropertyPath + ".Array.data[" + elementIndex + "]";
+					if (index > 0 && SmallButton("^##" + elementId + ".up"))
+					{
+						property.MoveArrayElement(index, index - 1);
+						return;
+					}
+					if (index + 1 < property.ArraySize)
+					{
+						SameLine();
+						if (SmallButton("v##" + elementId + ".down"))
+						{
+							property.MoveArrayElement(index, index + 1);
+							return;
+						}
+					}
+					SameLine();
+					SerializedProperty element = property.GetArrayElementAtIndex(index);
+					PropertyField(element, "Element " + index + "##" + elementId + ".value");
+				}
+				break;
+			}
 			default:
 				NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, caption);
 				break;

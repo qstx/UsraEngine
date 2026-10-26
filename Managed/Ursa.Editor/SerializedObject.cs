@@ -182,6 +182,14 @@ public sealed class SerializedProperty
 		if ((uint)index >= (uint)ArraySize) throw new ArgumentOutOfRangeException(nameof(index));
 		return owner.FindProperty(PropertyPath + ".Array.data[" + index.ToString(CultureInfo.InvariantCulture) + "]");
 	}
+	public void MoveArrayElement(int fromIndex, int toIndex)
+	{
+		RequireValid();
+		if ((uint)fromIndex >= (uint)ArraySize || (uint)toIndex >= (uint)ArraySize)
+			throw new ArgumentOutOfRangeException(nameof(fromIndex));
+		if (fromIndex != toIndex)
+			NativeEditorBindings.MoveArrayElement(Revision, StoragePath, fromIndex, toIndex);
+	}
 	public SerializedProperty FindPropertyRelative(string relativePropertyPath)
 	{
 		RequireValid();
