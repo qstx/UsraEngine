@@ -94,6 +94,16 @@ public:
 		return searchText;
 	}
 
+	void RequestSearchFocus()
+	{
+		searchFocusRequested = true;
+	}
+
+	bool ConsumeSearchFocusRequest()
+	{
+		return std::exchange(searchFocusRequested, false);
+	}
+
 	bool IsDirectSearchMatch(ResourceId objectId) const
 	{
 		const auto match = directSearchMatches.find(objectId.ToString());
@@ -160,6 +170,7 @@ private:
 	Vector<EditorSelectionEntry> visibleSelectionRows;
 	ResourceId keyboardFocusTarget;
 	bool focusSelectionRequested = false;
+	bool searchFocusRequested = false;
 	Vector<std::pair<ResourceId, bool>> sceneVisibilityOverrides;
 	Vector<std::pair<ResourceId, bool>> scenePickabilityOverrides;
 	UInt64 sceneViewOverridesRevision = 0;

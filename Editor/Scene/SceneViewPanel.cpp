@@ -2170,11 +2170,9 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 			if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !sceneSearchInput.WantTextInput &&
 			    sceneSearchInput.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
 			{
-				ImGui::SetKeyboardFocusHere();
+				hierarchy.RequestSearchFocus();
+				ImGui::SetWindowFocus("Hierarchy");
 			}
-			ImGui::SetNextItemWidth(std::min(180.f, std::max(110.f, ImGui::GetContentRegionAvail().x * 0.34f)));
-			ImGui::InputTextWithHint("##SceneSearch", "Search (name or type)", hierarchy.SearchText().data(),
-			                         hierarchy.SearchText().size(), ImGuiInputTextFlags_EscapeClearsAll);
 			if (draft.Kind() == ResourceKind::Scene)
 			{
 				hierarchy.RefreshSceneSearchMatches(scene, document.Id());

@@ -396,9 +396,14 @@ void SetHierarchyDescendantsOpen(const GameObject::Ptr& parent, const char* node
 	}
 }
 
-bool DrawHierarchySearchField(std::array<char, 257>& searchText, Float32 trailingWidth = 0.f)
+bool DrawHierarchySearchField(std::array<char, 257>& searchText, Float32 trailingWidth = 0.f,
+                              bool requestFocus = false)
 {
 	Icons::Inline(Icons::Icon::Search);
+	if (requestFocus)
+	{
+		ImGui::SetKeyboardFocusHere();
+	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F))
 	{
@@ -1960,7 +1965,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 	ImGui::Begin("Hierarchy", open);
 	ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 14.f);
 	UpdateDragExpansionTracking();
-	const bool searchFieldActive = DrawHierarchySearchField(searchText);
+	const bool searchFieldActive = DrawHierarchySearchField(searchText, 0.f, ConsumeSearchFocusRequest());
 	AutoScrollHierarchyWhileDragging(ImGui::GetCursorScreenPos().y);
 	const String currentSearch(searchText.data());
 	const bool typeOnly = currentSearch.size() > 2 &&
@@ -3188,7 +3193,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		ImGui::EndPopup();
 	}
 	Icons::SameLine();
-	const bool searchFieldActive = DrawHierarchySearchField(searchText, 34.f);
+	const bool searchFieldActive = DrawHierarchySearchField(searchText, 34.f, ConsumeSearchFocusRequest());
 	Icons::SameLine();
 	if (Icons::SmallButton("..."))
 	{
