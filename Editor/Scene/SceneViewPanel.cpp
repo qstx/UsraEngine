@@ -3177,10 +3177,28 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						                                      (ImGui::IsKeyDown(ImGuiKey_LeftArrow) ? 1.f : 0.f),
 						                                  (ImGui::IsKeyDown(ImGuiKey_UpArrow) ? 1.f : 0.f) -
 						                                      (ImGui::IsKeyDown(ImGuiKey_DownArrow) ? 1.f : 0.f)};
+						const Float32 movementMagnitude =
+						    std::sqrt(arrowMovement.x * arrowMovement.x + arrowMovement.y * arrowMovement.y);
+						if (movementMagnitude > 0.f)
+						{
+							sceneFlythroughTargetSpeed =
+							    sceneFlythroughTargetSpeed < std::numeric_limits<Float32>::epsilon()
+							        ? 9.f
+							        : sceneFlythroughTargetSpeed * std::pow(1.8f, io.DeltaTime);
+						}
+						else
+						{
+							sceneFlythroughTargetSpeed = 0.f;
+						}
+						const Float32 easeProgress = std::clamp(io.DeltaTime / 0.4f, 0.f, 1.f);
+						const Float32 easeFactor = 1.f - std::pow(1.f - easeProgress, 4.f);
+						sceneFlythroughCurrentSpeed +=
+						    (sceneFlythroughTargetSpeed - sceneFlythroughCurrentSpeed) * easeFactor;
 						if (arrowMovement.x != 0.f || arrowMovement.y != 0.f)
 						{
 							clearSceneViewLock();
-							MoveSceneView(camera, arrowMovement, io.DeltaTime, sceneFlythroughSpeed * 0.5f, io.KeyShift,
+							MoveSceneView(camera, arrowMovement, io.DeltaTime,
+							              sceneFlythroughCurrentSpeed * sceneFlythroughSpeed, io.KeyShift,
 							              sceneView2DMode || camera.orthographic);
 						}
 					}

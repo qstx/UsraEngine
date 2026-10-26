@@ -259,7 +259,7 @@ void MoveSceneView(Camera& camera, ViewportPoint movement, Float32 deltaTime, Fl
 	{
 		direction = Scale(direction, 1.f / directionLength);
 	}
-	const Float32 moveScale = speed * deltaTime * (fast ? 3.f : 1.f);
+	const Float32 moveScale = speed * deltaTime * (fast ? 5.f : 1.f);
 	const Vec3 shift = Scale(direction, moveScale);
 	camera.position = Add(camera.position, shift);
 	camera.target = Add(camera.target, shift);
