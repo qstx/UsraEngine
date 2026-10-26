@@ -466,7 +466,9 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		ImGui::EndPopup();
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Enter, false) && selectedRecord && contextHandler &&
+	    !ImGui::IsAnyItemActive() && ImGui::IsAnyItemFocused() &&
+	    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
+	    selectedRecord && contextHandler &&
 	    (!selectedRecord->context.resourcePath.empty() || !selectedRecord->context.objectId.empty()))
 	{
 		auto located = contextHandler(*selectedRecord);
