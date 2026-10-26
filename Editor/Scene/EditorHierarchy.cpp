@@ -333,6 +333,30 @@ bool NavigateHierarchySelectionToEdge(const Vector<EditorSelectionEntry>& visibl
 	                            keyboardFocusTarget);
 }
 
+bool EnsureHierarchySelectionVisible(const Vector<EditorSelectionEntry>& visibleRows,
+                                     EditorSelectionContext* selection, ResourceId documentId, ResourceId& selected,
+                                     ResourceId& keyboardFocusTarget)
+{
+	if (visibleRows.empty())
+	{
+		return false;
+	}
+	const auto* primary = selection ? selection->PrimaryEntry() : nullptr;
+	const ResourceId activeId =
+	    primary && primary->kind == EditorSelectionKind::GameObject && primary->documentId == documentId
+	        ? primary->objectId
+	        : selected;
+	const auto active = std::find_if(visibleRows.begin(), visibleRows.end(),
+	                                 [&](const EditorSelectionEntry& entry)
+	                                 { return entry.objectId == activeId && entry.documentId == documentId; });
+	if (active != visibleRows.end())
+	{
+		keyboardFocusTarget = active->objectId;
+		return true;
+	}
+	return SelectHierarchyEntry(visibleRows.front(), visibleRows, selection, selected, false, keyboardFocusTarget);
+}
+
 bool IsHierarchyNodeOpen(const String& key, const char* nodeId)
 {
 	ImGui::PushID(key.c_str());
@@ -365,7 +389,7 @@ void SetHierarchyDescendantsOpen(const GameObject::Ptr& parent, const char* node
 	}
 }
 
-void DrawHierarchySearchField(std::array<char, 257>& searchText, Float32 trailingWidth = 0.f)
+bool DrawHierarchySearchField(std::array<char, 257>& searchText, Float32 trailingWidth = 0.f)
 {
 	Icons::Inline(Icons::Icon::Search);
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
@@ -376,6 +400,7 @@ void DrawHierarchySearchField(std::array<char, 257>& searchText, Float32 trailin
 	ImGui::SetNextItemWidth(trailingWidth > 0.f ? -trailingWidth : -1.f);
 	ImGui::InputTextWithHint("##HierarchySearch", "Search Hierarchy (t:Type)", searchText.data(), searchText.size(),
 	                         ImGuiInputTextFlags_EscapeClearsAll);
+	return ImGui::IsItemActive();
 }
 
 void DrawEyeGlyph(ImDrawList* drawList, ImVec2 center, Float32 size, bool visible, ImU32 color)
@@ -1846,7 +1871,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		return Result<bool>::Failure("PrefabAsset has no root GameObject");
 	}
 	ImGui::Begin("Hierarchy", open);
-	DrawHierarchySearchField(searchText);
+	const bool searchFieldActive = DrawHierarchySearchField(searchText);
 	const String currentSearch(searchText.data());
 	const bool typeOnly = currentSearch.size() > 2 &&
 	                      (currentSearch.compare(0, 2, "t:") == 0 || currentSearch.compare(0, 2, "T:") == 0);
@@ -1894,9 +1919,17 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 		SetLegacySelected(selection, selected);
 	}
 	const ImGuiIO& hierarchyInput = ImGui::GetIO();
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !hierarchyInput.WantTextInput)
+	const bool searchNavigationKey = searchFieldActive &&
+	                                 (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
+	                                  ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	    (!hierarchyInput.WantTextInput || searchNavigationKey))
 	{
-		if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, false))
+		if (searchNavigationKey)
+		{
+			EnsureHierarchySelectionVisible(visibleRows, selection, documentId, selected, keyboardFocusTarget);
+		}
+		else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, false))
 		{
 			NavigateHierarchySelection(visibleRows, selection, selected, 1, hierarchyInput.KeyShift,
 			                           keyboardFocusTarget);
@@ -2966,7 +2999,7 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		ImGui::EndPopup();
 	}
 	Icons::SameLine();
-	DrawHierarchySearchField(searchText, 34.f);
+	const bool searchFieldActive = DrawHierarchySearchField(searchText, 34.f);
 	Icons::SameLine();
 	if (Icons::SmallButton("..."))
 	{
@@ -3150,13 +3183,21 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		return {};
 	};
 	const ImGuiIO& hierarchyInput = ImGui::GetIO();
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !hierarchyInput.WantTextInput)
+	const bool searchNavigationKey = searchFieldActive &&
+	                                 (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
+	                                  ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	    (!hierarchyInput.WantTextInput || searchNavigationKey))
 	{
-		const bool toggleVisibility = !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
+		const bool toggleVisibility = !searchNavigationKey && !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
 		                              !hierarchyInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_H, false);
-		const bool togglePickability = !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
+		const bool togglePickability = !searchNavigationKey && !hierarchyInput.KeyCtrl && !hierarchyInput.KeyAlt &&
 		                               !hierarchyInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_L, false);
-		if ((toggleVisibility || togglePickability) && !playSession)
+		if (searchNavigationKey)
+		{
+			EnsureHierarchySelectionVisible(visibleRows, selection, documentId, selected, keyboardFocusTarget);
+		}
+		else if ((toggleVisibility || togglePickability) && !playSession)
 		{
 			Vector<GameObject::Ptr> selectedObjects;
 			bool validSelection = selection && !selection->entries.empty();
