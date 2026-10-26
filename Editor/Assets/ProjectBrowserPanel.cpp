@@ -265,6 +265,10 @@ void ProjectBrowserPanel::Reset()
 	folderName.fill(0);
 	createFolderRequested = false;
 	renameRequested = false;
+	renameEditing = false;
+	renameFocusRequested = false;
+	renameSourcePath.clear();
+	renameName.fill(0);
 	deleteRequested = false;
 	deleteTargets.clear();
 	backgroundMenuFolder.clear();
@@ -1020,29 +1024,34 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	if (renameRequested)
 	{
-		ImGui::OpenPopup("Rename Project Asset");
 		renameRequested = false;
-	}
-	if (ImGui::BeginPopupModal("Rename Project Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-	{
-		ImGui::Text("Rename %s", selection.assetPath.FileName().c_str());
-		ImGui::InputText("New path", destinationPath.data(), destinationPath.size());
-		if (Icons::Button("Rename") && actions.renameAsset)
+		const auto* primary = selection.PrimaryEntry();
+		const ProjectBrowserEntry* asset =
+		    primary && primary->kind == EditorSelectionKind::Asset && !primary->IsMissing() &&
+		            primary->assetRole == EditorAssetSelectionRole::Source && !primary->assetLocalFileId
+		        ? model.Find(primary->assetPath)
+		        : nullptr;
+		if (asset && actions.renameAsset && !readOnly)
 		{
-			auto renamed = RenameSelected(model, selection, actions);
-			diagnostic = renamed ? String{} : renamed.error;
-			if (renamed)
+			renameSourcePath = asset->path.relative;
+			String name = asset->name;
+			if (!asset->folder)
 			{
-				model.SelectAsset(selection.assetPath);
-				ImGui::CloseCurrentPopup();
+				const Size extension = name.rfind('.');
+				if (extension != String::npos && extension > 0)
+				{
+					name.resize(extension);
+				}
 			}
+			renameName.fill(0);
+			std::copy_n(name.data(), std::min(name.size(), renameName.size() - 1), renameName.data());
+			renameEditing = true;
+			renameFocusRequested = true;
 		}
-		Icons::SameLine();
-		if (Icons::Button("Cancel"))
+		else
 		{
-			ImGui::CloseCurrentPopup();
+			diagnostic = "Select one writable Project asset to rename";
 		}
-		ImGui::EndPopup();
 	}
 	ImGui::Separator();
 	const float availableWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
@@ -1574,6 +1583,83 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 		return accepted;
 	};
+	bool renameTargetRendered = false;
+	bool renameCommitRequested = false;
+	auto drawInlineRename = [&](const ProjectBrowserEntry& asset, ImVec2 minimum, ImVec2 maximum, bool grid)
+	{
+		if (!renameEditing || asset.path.relative != renameSourcePath)
+		{
+			return false;
+		}
+		renameTargetRendered = true;
+		const ImVec2 layoutCursor = ImGui::GetCursorScreenPos();
+		ImGuiWindow* window = ImGui::GetCurrentWindow();
+		const ImGuiWindowTempData layoutState = window->DC;
+		const ImVec2 inputPosition =
+		    grid ? ImVec2{minimum.x + 5.f, minimum.y + static_cast<Float32>(gridIconSize) + 10.f}
+		         : ImVec2{minimum.x + std::max(16.f, ImGui::GetFontSize()) + ImGui::GetStyle().ItemInnerSpacing.x,
+		                  minimum.y + (maximum.y - minimum.y - ImGui::GetFrameHeight()) * 0.5f};
+		ImGui::SetCursorScreenPos(inputPosition);
+		ImGui::SetNextItemWidth(std::max(72.f, maximum.x - inputPosition.x - (grid ? 10.f : 6.f)));
+		if (renameFocusRequested)
+		{
+			ImGui::SetKeyboardFocusHere();
+			renameFocusRequested = false;
+		}
+		if (ImGui::InputText("##ProjectAssetRename", renameName.data(), renameName.size(),
+		                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
+		{
+			renameCommitRequested = true;
+		}
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+		{
+			renameEditing = false;
+			renameFocusRequested = false;
+			renameSourcePath.clear();
+		}
+		window->DC = layoutState;
+		ImGui::SetCursorScreenPos(layoutCursor);
+		return true;
+	};
+	auto commitInlineRename = [&]
+	{
+		const ProjectBrowserEntry* asset = model.Find(renameSourcePath);
+		const String newName(renameName.data());
+		if (!asset || newName.empty() || newName.find_first_of("/\\") != String::npos || !actions.renameAsset)
+		{
+			diagnostic = "Enter a valid asset name";
+			return;
+		}
+		String name = newName;
+		if (!asset->folder && name.find('.') == String::npos)
+		{
+			const Size extension = asset->name.rfind('.');
+			if (extension != String::npos && extension > 0)
+			{
+				name += asset->name.substr(extension);
+			}
+		}
+		String relativePath = asset->path.relative;
+		const Size separator = relativePath.rfind('/');
+		relativePath = separator == String::npos ? name : relativePath.substr(0, separator + 1) + name;
+		auto destination = VirtualPath::Parse(asset->path.scheme + ":" + relativePath);
+		if (!destination)
+		{
+			diagnostic = destination.error;
+			return;
+		}
+		auto renamed = actions.renameAsset(asset->path, destination.value);
+		diagnostic = renamed ? String{} : renamed.error;
+		if (renamed)
+		{
+			model.SelectAsset(destination.value);
+			selection.SelectAsset(destination.value);
+			hierarchy.ClearSelection();
+			renameEditing = false;
+			renameFocusRequested = false;
+			renameSourcePath.clear();
+		}
+	};
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !projectInput.WantTextInput &&
 	    !projectInput.KeyCtrl && !projectInput.KeySuper && !projectInput.KeyAlt && !projectInput.KeyShift &&
 	    ImGui::IsKeyPressed(ImGuiKey_F, false) && selection.entries.size() == 1)
@@ -1780,11 +1866,15 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				            Icons::Color(icon));
 			}
 			const Float32 textTop = minimum.y + iconSize + 10.f;
-			ImGui::GetWindowDrawList()->PushClipRect({minimum.x + 4.f, textTop}, {maximum.x - 4.f, maximum.y - 2.f},
-			                                         true);
-			ImGui::RenderTextWrapped({minimum.x + 5.f, textTop}, label.c_str(), nullptr, tileWidth - 10.f);
-			ImGui::GetWindowDrawList()->PopClipRect();
-			if (clicked)
+			const bool editingName = !entry.assetLocalFileId && drawInlineRename(*asset, minimum, maximum, true);
+			if (!editingName)
+			{
+				ImGui::GetWindowDrawList()->PushClipRect({minimum.x + 4.f, textTop}, {maximum.x - 4.f, maximum.y - 2.f},
+				                                         true);
+				ImGui::RenderTextWrapped({minimum.x + 5.f, textTop}, label.c_str(), nullptr, tileWidth - 10.f);
+				ImGui::GetWindowDrawList()->PopClipRect();
+			}
+			if (clicked && !editingName)
 			{
 				const bool accepted = selectAsset(entry);
 				if (accepted && !entry.assetLocalFileId)
@@ -1806,8 +1896,11 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					}
 				}
 			}
-			DrawProjectAssetDragSource(selection, entry, label);
-			if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selection.Contains(entry))
+			if (!editingName)
+			{
+				DrawProjectAssetDragSource(selection, entry, label);
+			}
+			if (!editingName && ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selection.Contains(entry))
 			{
 				if (selection.SelectEntries({entry}, 0, entry))
 				{
@@ -1815,7 +1908,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					hierarchy.ClearSelection();
 				}
 			}
-			if (ImGui::BeginPopupContextItem("ProjectGridItemActions"))
+			if (!editingName && ImGui::BeginPopupContextItem("ProjectGridItemActions"))
 			{
 				if (entry.assetLocalFileId)
 				{
@@ -1829,7 +1922,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				}
 				else
 				{
-					if (Icons::MenuItem(isFavoriteAsset(asset->path.relative) ? "Remove from Favorites" : "Add to Favorites"))
+					if (Icons::MenuItem(isFavoriteAsset(asset->path.relative) ? "Remove from Favorites"
+					                                                          : "Add to Favorites"))
 					{
 						toggleFavoriteAsset(asset->path.relative);
 					}
@@ -1879,11 +1973,18 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			for (const ProjectBrowserEntry& folder : model.ChildFolders(currentFolder))
 			{
 				ImGui::PushID(folder.path.relative.c_str());
-				const bool folderClicked = Icons::Selectable(Icons::Icon::Folder, folder.name.c_str(),
-				                                             selection.Contains(AssetSelection(folder)),
-				                                             ImGuiSelectableFlags_AllowDoubleClick);
-				const ImRect folderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-				if (folderClicked)
+				const bool editingName = renameEditing && renameSourcePath == folder.path.relative;
+				const bool folderClicked = Icons::Selectable(
+				    Icons::Icon::Folder, editingName ? "" : folder.name.c_str(),
+				    selection.Contains(AssetSelection(folder)), ImGuiSelectableFlags_AllowDoubleClick);
+				const ImVec2 folderMinimum = ImGui::GetItemRectMin();
+				const ImVec2 folderMaximum = ImGui::GetItemRectMax();
+				const ImRect folderRect(folderMinimum, folderMaximum);
+				if (editingName)
+				{
+					drawInlineRename(folder, folderMinimum, folderMaximum, false);
+				}
+				if (folderClicked && !editingName)
 				{
 					if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 					{
@@ -1895,11 +1996,14 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 						model.SelectAsset(folder.path);
 					}
 				}
-				DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name);
+				if (!editingName)
+				{
+					DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name);
+				}
 				DrawProjectMoveDropTarget(folderRect, workspace, model, selection, folder.path.relative, readOnly,
 				                          diagnostic, actions);
 				bool contextSelectionAccepted = true;
-				if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+				if (!editingName && ImGui::IsItemClicked(ImGuiMouseButton_Right))
 				{
 					if (!selection.Contains(AssetSelection(folder)))
 					{
@@ -1915,9 +2019,10 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 						CaptureMenuContext("folder:" + folder.path.relative, selection);
 					}
 				}
-				if (contextSelectionAccepted && ImGui::BeginPopupContextItem("FolderActions"))
+				if (!editingName && contextSelectionAccepted && ImGui::BeginPopupContextItem("FolderActions"))
 				{
-					if (Icons::MenuItem(isFavoriteAsset(folder.path.relative) ? "Remove from Favorites" : "Add to Favorites"))
+					if (Icons::MenuItem(isFavoriteAsset(folder.path.relative) ? "Remove from Favorites"
+					                                                          : "Add to Favorites"))
 					{
 						toggleFavoriteAsset(folder.path.relative);
 					}
@@ -2138,8 +2243,18 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			const auto assetEntry = AssetSelection(asset);
 			const bool selected = selection.Contains(assetEntry);
 			const String label = search.empty() ? asset.name : asset.path.relative;
-			if (Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative),
-			                      label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick))
+			const bool editingName =
+			    !assetEntry.assetLocalFileId && renameEditing && renameSourcePath == asset.path.relative;
+			const bool assetClicked =
+			    Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative),
+			                      editingName ? "" : label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick);
+			const ImVec2 assetMinimum = ImGui::GetItemRectMin();
+			const ImVec2 assetMaximum = ImGui::GetItemRectMax();
+			if (editingName)
+			{
+				drawInlineRename(asset, assetMinimum, assetMaximum, false);
+			}
+			if (assetClicked && !editingName)
 			{
 				const bool accepted = selectAsset(assetEntry);
 				if (accepted)
@@ -2168,9 +2283,12 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					diagnostic = opened ? String{} : opened.error;
 				}
 			}
-			DrawProjectAssetDragSource(selection, assetEntry, asset.name);
+			if (!editingName)
+			{
+				DrawProjectAssetDragSource(selection, assetEntry, asset.name);
+			}
 			bool contextSelectionAccepted = true;
-			if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+			if (!editingName && ImGui::IsItemClicked(ImGuiMouseButton_Right))
 			{
 				if (!selection.Contains(assetEntry) && selection.SelectEntries({assetEntry}, 0, assetEntry))
 				{
@@ -2186,7 +2304,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					CaptureMenuContext("asset:" + asset.guid.ToString(), selection);
 				}
 			}
-			if (contextSelectionAccepted && ImGui::BeginPopupContextItem("AssetActions"))
+			if (!editingName && contextSelectionAccepted && ImGui::BeginPopupContextItem("AssetActions"))
 			{
 				if (Icons::MenuItem(isFavoriteAsset(asset.path.relative) ? "Remove from Favorites" : "Add to Favorites"))
 				{
@@ -2464,6 +2582,16 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			ImGui::PopID();
 		}
+	}
+	if (renameEditing && !renameTargetRendered)
+	{
+		renameEditing = false;
+		renameFocusRequested = false;
+		renameSourcePath.clear();
+	}
+	if (renameCommitRequested)
+	{
+		commitInlineRename();
 	}
 	const ImVec2 blankDropMin = ImGui::GetCursorScreenPos();
 	const ImRect contentWork = ImGui::GetCurrentWindow()->WorkRect;
@@ -2754,24 +2882,4 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	return {};
 }
 
-Result<void> ProjectBrowserPanel::RenameSelected(const ProjectBrowserModel& model, EditorSelectionContext& selection,
-                                                 const ProjectBrowserActions& actions)
-{
-	const VirtualPath& source = model.SelectedAsset();
-	if (source.scheme.empty() || selection.assetMissing || selection.assetLocalFileId || !actions.renameAsset)
-	{
-		return Result<void>::Failure("Select a writable Project asset to rename");
-	}
-	auto destination = VirtualPath::Parse(String(projectResourceScheme) + ":" + destinationPath.data());
-	if (!destination)
-	{
-		return Result<void>::Failure(destination.error);
-	}
-	auto renamed = actions.renameAsset(source, destination.value);
-	if (renamed)
-	{
-		selection.SelectAsset(destination.value);
-	}
-	return renamed;
-}
 } // namespace Ursa::Editor

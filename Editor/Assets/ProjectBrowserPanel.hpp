@@ -62,8 +62,6 @@ private:
 	ImTextureID ResolveTextureThumbnail(ProjectWorkspace& workspace, const ProjectBrowserEntry& asset, UInt32& width,
 	                                    UInt32& height);
 	void ClearTextureThumbnails();
-	Result<void> RenameSelected(const ProjectBrowserModel& model, EditorSelectionContext& selection,
-	                            const ProjectBrowserActions& actions);
 	void CaptureMenuContext(const String& key, const EditorSelectionContext& selection);
 	Result<void> ExecuteMenuCommand(const String& key, const String& commandId, const String& label,
 	                                const EditorSelectionContext& selection,
@@ -95,6 +93,10 @@ private:
 	Vector<VirtualPath> labelTargets;
 	String labelDiagnostic;
 	bool renameRequested = false;
+	bool renameEditing = false;
+	bool renameFocusRequested = false;
+	String renameSourcePath;
+	Ursa::Array<char, 256> renameName{};
 	bool deleteRequested = false;
 	Vector<EditorSelectionEntry> deleteTargets;
 	String deleteDiagnostic;
