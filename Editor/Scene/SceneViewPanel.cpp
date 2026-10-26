@@ -2076,10 +2076,15 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 			}
 			const ImGuiIO& sceneInput = ImGui::GetIO();
 			if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !sceneInput.WantTextInput &&
-			    !sceneInput.KeyCtrl && !sceneInput.KeyAlt && !sceneInput.KeyShift &&
+			    !sceneInput.KeyCtrl && !sceneInput.KeySuper && !sceneInput.KeyAlt && !sceneInput.KeyShift &&
 			    !sceneInput.MouseDown[ImGuiMouseButton_Right])
 			{
-				if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+				if (ImGui::IsKeyPressed(ImGuiKey_2, false))
+				{
+					sceneView2DModePending = true;
+					sceneView2DModePendingTarget = !sceneView2DMode;
+				}
+				else if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
 				{
 					sceneHandTool = true;
 				}
