@@ -2048,20 +2048,20 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 			    primary && primary->kind == EditorSelectionKind::GameObject && primary->documentId == documentId
 			        ? primary->objectId
 			        : selected;
-			std::function<GameObject::Ptr(const GameObject::Ptr&)> findObject =
-			    [&](const GameObject::Ptr& current) -> GameObject::Ptr
+			std::function<GameObject::Ptr(const GameObject::Ptr&, ResourceId)> findObject =
+			    [&](const GameObject::Ptr& current, ResourceId targetId) -> GameObject::Ptr
 			{
 				if (!current)
 				{
 					return {};
 				}
-				if (current->Id() == activeId)
+				if (current->Id() == targetId)
 				{
 					return current;
 				}
 				for (const auto& child : current->Children())
 				{
-					auto match = findObject(child);
+					auto match = findObject(child, targetId);
 					if (match)
 					{
 						return match;
@@ -2069,33 +2069,84 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 				}
 				return {};
 			};
-			auto object = findObject(asset.Root());
-			if (object)
+			if (selection && selection->entries.size() > 1)
 			{
-				const String key = object->Id().ToString();
-				const auto children = object->Children();
-				const bool nodeOpen = IsHierarchyNodeOpen(key, "##gameObject");
-				if (expand && !children.empty())
+				for (const EditorSelectionEntry& entry : selection->entries)
 				{
-					if (!nodeOpen && !filtering)
+					if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId || entry.IsMissing())
 					{
-						SetHierarchyNodeOpen(key, "##gameObject", true);
+						continue;
 					}
-					else
+					auto selectedObject = findObject(asset.Root(), entry.objectId);
+					if (selectedObject && !selectedObject->Children().empty() && !filtering)
 					{
-						NavigateHierarchySelection(visibleRows, selection, selected, 1, false, keyboardFocusTarget);
+						const String key = selectedObject->Id().ToString();
+						const bool nodeOpen = IsHierarchyNodeOpen(key, "##gameObject");
+						if (nodeOpen != expand)
+						{
+							SetHierarchyNodeOpen(key, "##gameObject", expand);
+							if (hierarchyInput.KeyAlt)
+							{
+								SetHierarchyDescendantsOpen(
+								    selectedObject, "##gameObject", expand,
+								    [](const GameObject::Ptr& child) { return child->Id().ToString(); });
+							}
+						}
 					}
 				}
-				else if (!expand)
+			}
+			else
+			{
+				auto object = findObject(asset.Root(), activeId);
+				if (object)
 				{
-					if (!children.empty() && nodeOpen && !filtering)
+					const String key = object->Id().ToString();
+					const auto children = object->Children();
+					const bool nodeOpen = IsHierarchyNodeOpen(key, "##gameObject");
+					if (expand && !children.empty() && !nodeOpen && !filtering)
 					{
-						SetHierarchyNodeOpen(key, "##gameObject", false);
+						SetHierarchyNodeOpen(key, "##gameObject", true);
+						if (hierarchyInput.KeyAlt)
+						{
+							SetHierarchyDescendantsOpen(
+							    object, "##gameObject", true,
+							    [](const GameObject::Ptr& child) { return child->Id().ToString(); });
+						}
 					}
-					else if (auto parent = object->Parent())
+					else if (expand)
 					{
-						const EditorSelectionEntry parentEntry = GameObjectSelection(documentId, parent->Id());
-						SelectHierarchyEntry(parentEntry, visibleRows, selection, selected, false, keyboardFocusTarget);
+						const auto current = std::find_if(visibleRows.begin(), visibleRows.end(),
+						                                 [&](const EditorSelectionEntry& row)
+						                                 { return row.objectId == activeId; });
+						for (auto row = current == visibleRows.end() ? visibleRows.end() : std::next(current);
+						     row != visibleRows.end(); ++row)
+						{
+							auto candidate = findObject(asset.Root(), row->objectId);
+							if (candidate && !candidate->Children().empty())
+							{
+								SelectHierarchyEntry(*row, visibleRows, selection, selected, false, keyboardFocusTarget);
+								break;
+							}
+						}
+					}
+					else if (!expand)
+					{
+						if (!children.empty() && nodeOpen && !filtering)
+						{
+							SetHierarchyNodeOpen(key, "##gameObject", false);
+							if (hierarchyInput.KeyAlt)
+							{
+								SetHierarchyDescendantsOpen(
+								    object, "##gameObject", false,
+								    [](const GameObject::Ptr& child) { return child->Id().ToString(); });
+							}
+						}
+						else if (auto parent = object->Parent())
+						{
+							const EditorSelectionEntry parentEntry = GameObjectSelection(documentId, parent->Id());
+							SelectHierarchyEntry(parentEntry, visibleRows, selection, selected, false,
+							                     keyboardFocusTarget);
+						}
 					}
 				}
 			}
@@ -3402,43 +3453,106 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 			                                    primary->documentId == documentId && primary->playSession == playSession
 			                                ? primary->objectId
 			                                : selected;
-			auto object = scene.GameObjectById(activeId);
-			if (object)
+			auto setSceneDescendantsOpen = [&scene](const GameObject::Ptr& object, bool open)
 			{
-				auto persistentId = scene.PersistentId(object.value);
-				auto children = scene.ChildrenOf(object.value);
-				if (persistentId && children)
+				auto keyForObject = [&scene](const GameObject::Ptr& child)
 				{
-					const String key = persistentId.value.ToString();
-					const bool nodeOpen = IsHierarchyNodeOpen(key, "##node");
-					if (expand && !children.value.empty())
+					auto childId = scene.PersistentId(child);
+					return childId ? childId.value.ToString() : String{};
+				};
+				SetHierarchyDescendantsOpen(object, "##node", open, keyForObject);
+			};
+			if (selection && selection->entries.size() > 1)
+			{
+				for (const EditorSelectionEntry& entry : selection->entries)
+				{
+					if (entry.kind != EditorSelectionKind::GameObject || entry.documentId != documentId ||
+					    entry.playSession != playSession || entry.IsMissing())
 					{
-						if (!nodeOpen && !filtering)
+						continue;
+					}
+					auto selectedObject = scene.GameObjectById(entry.objectId);
+					auto selectedChildren = selectedObject ? scene.ChildrenOf(selectedObject.value)
+					                                     : Result<Vector<GameObject::Ptr>>::Failure("Missing GameObject");
+					if (selectedObject && selectedChildren && !selectedChildren.value.empty() && !filtering)
+					{
+						auto selectedId = scene.PersistentId(selectedObject.value);
+						if (selectedId)
 						{
-							SetHierarchyNodeOpen(key, "##node", true);
-						}
-						else
-						{
-							NavigateHierarchySelection(visibleRows, selection, selected, 1, false, keyboardFocusTarget);
+							const String key = selectedId.value.ToString();
+							const bool nodeOpen = IsHierarchyNodeOpen(key, "##node");
+							if (nodeOpen != expand)
+							{
+								SetHierarchyNodeOpen(key, "##node", expand);
+								if (hierarchyInput.KeyAlt)
+								{
+									setSceneDescendantsOpen(selectedObject.value, expand);
+								}
+							}
 						}
 					}
-					else if (!expand)
+				}
+			}
+			else
+			{
+				auto object = scene.GameObjectById(activeId);
+				if (object)
+				{
+					auto persistentId = scene.PersistentId(object.value);
+					auto children = scene.ChildrenOf(object.value);
+					if (persistentId && children)
 					{
-						if (!children.value.empty() && nodeOpen && !filtering)
+						const String key = persistentId.value.ToString();
+						const bool nodeOpen = IsHierarchyNodeOpen(key, "##node");
+						if (expand && !children.value.empty() && !nodeOpen && !filtering)
 						{
-							SetHierarchyNodeOpen(key, "##node", false);
-						}
-						else
-						{
-							auto parent = scene.ParentOf(object.value);
-							auto parentId = parent && parent.value
-							                    ? scene.PersistentId(parent.value)
-							                    : Result<ResourceId>::Failure("GameObject has no parent");
-							if (parentId)
+							SetHierarchyNodeOpen(key, "##node", true);
+							if (hierarchyInput.KeyAlt)
 							{
-								const auto parentEntry = GameObjectSelection(documentId, parentId.value, playSession);
-								SelectHierarchyEntry(parentEntry, visibleRows, selection, selected, false,
-								                     keyboardFocusTarget);
+								setSceneDescendantsOpen(object.value, true);
+							}
+						}
+						else if (expand)
+						{
+							const auto current = std::find_if(visibleRows.begin(), visibleRows.end(),
+							                                 [&](const EditorSelectionEntry& row)
+							                                 { return row.objectId == activeId; });
+							for (auto row = current == visibleRows.end() ? visibleRows.end() : std::next(current);
+							     row != visibleRows.end(); ++row)
+							{
+								auto candidate = scene.GameObjectById(row->objectId);
+								auto candidateChildren = candidate ? scene.ChildrenOf(candidate.value)
+								                                  : Result<Vector<GameObject::Ptr>>::Failure("Missing GameObject");
+								if (candidateChildren && !candidateChildren.value.empty())
+								{
+									SelectHierarchyEntry(*row, visibleRows, selection, selected, false,
+									                     keyboardFocusTarget);
+									break;
+								}
+							}
+						}
+						else if (!expand)
+						{
+							if (!children.value.empty() && nodeOpen && !filtering)
+							{
+								SetHierarchyNodeOpen(key, "##node", false);
+								if (hierarchyInput.KeyAlt)
+								{
+									setSceneDescendantsOpen(object.value, false);
+								}
+							}
+							else
+							{
+								auto parent = scene.ParentOf(object.value);
+								auto parentId = parent && parent.value
+								                    ? scene.PersistentId(parent.value)
+								                    : Result<ResourceId>::Failure("GameObject has no parent");
+								if (parentId)
+								{
+									const auto parentEntry = GameObjectSelection(documentId, parentId.value, playSession);
+									SelectHierarchyEntry(parentEntry, visibleRows, selection, selected, false,
+									                     keyboardFocusTarget);
+								}
 							}
 						}
 					}
