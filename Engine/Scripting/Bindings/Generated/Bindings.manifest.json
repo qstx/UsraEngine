@@ -6,7 +6,7 @@
     {
       "Id": 381452714797066899,
       "Name": "Editor",
-      "Hash": "31631c34d7aaa9a134942030913ba423db00eaecee0885a581c9c0f6f0a8ea7f",
+      "Hash": "5848ccfcf79daf018ebe83ef20b7b060a1ed8a9802c5c908b4d472fe3380d19a",
       "CommandHash": "",
       "Required": false,
       "CallScoped": true,
@@ -634,6 +634,12 @@
             {
               "Name": "options",
               "Type": "string[]",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mixedValue",
+              "Type": "bool",
               "HandleKind": 0,
               "Session": false
             }

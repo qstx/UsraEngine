@@ -41,7 +41,11 @@ public static class EditorGui
 		return NativeEditorBindings.DragFloat(label, value, speed, minimum, maximum, format, mixedValue);
 	}
 	public static string TextField(string label, string value) { _ = EditorApi.Generation; return NativeEditorBindings.TextField(label, value); }
-	public static int Popup(string label, int selected, string[] options) { _ = EditorApi.Generation; return NativeEditorBindings.Popup(label, selected, options); }
+	public static int Popup(string label, int selected, string[] options, bool mixedValue = false)
+	{
+		_ = EditorApi.Generation;
+		return NativeEditorBindings.Popup(label, selected, options, mixedValue);
+	}
 	public static Vector2 Vector2Field(string label, Vector2 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector2Field(label, value); }
 	public static Vector3 Vector3Field(string label, Vector3 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector3Field(label, value); }
 	public static Vector4 Vector4Field(string label, Vector4 value) { _ = EditorApi.Generation; return NativeEditorBindings.Vector4Field(label, value); }

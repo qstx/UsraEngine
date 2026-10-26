@@ -14,34 +14,72 @@ public sealed class CameraComponentInspector : Inspector
 	public override void OnInspectorGUI()
 	{
 		SerializedProperty fieldOfView = SerializedObject.FindProperty("verticalFovRadians");
+		SerializedProperty orthographic = SerializedObject.FindProperty("orthographic");
+		SerializedProperty orthographicSize = SerializedObject.FindProperty("orthographicSize");
 		SerializedProperty nearPlane = SerializedObject.FindProperty("nearPlane");
 		SerializedProperty farPlane = SerializedObject.FindProperty("farPlane");
 
+		int originalProjection = orthographic.BoolValue ? 1 : 0;
+		int selectedProjection = EditorGui.Popup("Projection",
+			orthographic.HasMultipleDifferentValues ? -1 : originalProjection,
+			new[] { "Perspective", "Orthographic" }, orthographic.HasMultipleDifferentValues);
+		bool projectionChanged = selectedProjection >= 0 &&
+		                         (orthographic.HasMultipleDifferentValues || selectedProjection != originalProjection);
+		bool editedOrthographic = selectedProjection >= 0 ? selectedProjection == 1 : orthographic.BoolValue;
+		bool showProjectionSpecific = !orthographic.HasMultipleDifferentValues || selectedProjection >= 0;
+
 		double originalFieldOfView = (float)(fieldOfView.FloatValue * RadiansToDegrees);
+		double originalOrthographicSize = orthographicSize.FloatValue;
 		double originalNearPlane = nearPlane.FloatValue;
 		double originalFarPlane = farPlane.FloatValue;
-		double editedFieldOfView = EditorGui.DragFloat("Field of View", originalFieldOfView, 0.5, 1, 179, "%.1f°",
-			fieldOfView.HasMultipleDifferentValues);
+		double editedFieldOfView = originalFieldOfView;
+		double editedOrthographicSize = originalOrthographicSize;
+		if (showProjectionSpecific && editedOrthographic)
+		{
+			editedOrthographicSize = EditorGui.DragFloat("Size", originalOrthographicSize, 0.05, 0.001, 100000,
+				mixedValue: orthographicSize.HasMultipleDifferentValues);
+		}
+		else if (showProjectionSpecific)
+		{
+			editedFieldOfView = EditorGui.DragFloat("Field of View", originalFieldOfView, 0.5, 1, 179, "%.1f°",
+				fieldOfView.HasMultipleDifferentValues);
+		}
 		EditorGui.Text("Clipping Planes");
 		double editedNearPlane = EditorGui.DragFloat("Near", originalNearPlane, 0.01, 0.001, 10000, "%.3f",
 			nearPlane.HasMultipleDifferentValues);
 		double editedFarPlane = EditorGui.DragFloat("Far", originalFarPlane, 0.1, 0.002, 100000, "%.3f",
 			farPlane.HasMultipleDifferentValues);
 
-		bool changed = editedFieldOfView != originalFieldOfView ||
+		bool changed = projectionChanged || editedFieldOfView != originalFieldOfView ||
+		               editedOrthographicSize != originalOrthographicSize ||
 		               editedNearPlane != originalNearPlane ||
 		               editedFarPlane != originalFarPlane;
 		if (changed)
 		{
-			if (!double.IsFinite(editedFieldOfView) || !double.IsFinite(editedNearPlane) ||
-			    !double.IsFinite(editedFarPlane) || editedFieldOfView <= 0 || editedFieldOfView >= 180 ||
-			    editedNearPlane <= 0 || editedFarPlane <= editedNearPlane)
+			if ((showProjectionSpecific && !editedOrthographic &&
+			     (!double.IsFinite(editedFieldOfView) || editedFieldOfView <= 0 || editedFieldOfView >= 180)) ||
+			    (showProjectionSpecific && editedOrthographic &&
+			     (!double.IsFinite(editedOrthographicSize) || editedOrthographicSize <= 0)) ||
+			    !double.IsFinite(editedNearPlane) || !double.IsFinite(editedFarPlane) || editedNearPlane <= 0 ||
+			    editedFarPlane <= editedNearPlane)
 			{
-				EditorGui.Text("Camera requires 0 < FOV < 180 and 0 < Near < Far");
+				EditorGui.Text("Camera requires a valid projection and 0 < Near < Far");
 			}
 			else
 			{
-				fieldOfView.FloatValue = (float)(editedFieldOfView * DegreesToRadians);
+				if (projectionChanged)
+				{
+					orthographic.BoolValue = editedOrthographic;
+				}
+				if (showProjectionSpecific && editedOrthographic &&
+				    editedOrthographicSize != originalOrthographicSize)
+				{
+					orthographicSize.FloatValue = (float)editedOrthographicSize;
+				}
+				else if (showProjectionSpecific && !editedOrthographic && editedFieldOfView != originalFieldOfView)
+				{
+					fieldOfView.FloatValue = (float)(editedFieldOfView * DegreesToRadians);
+				}
 				nearPlane.FloatValue = (float)editedNearPlane;
 				farPlane.FloatValue = (float)editedFarPlane;
 				SerializedObject.ApplyModifiedProperties();

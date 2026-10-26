@@ -302,7 +302,7 @@ Result<B::Utf8View> EditorServices::TextField(B::BindingCall& call, const B::Utf
 }
 
 Result<Int32> EditorServices::Popup(B::BindingCall& call, const B::Utf8View& label, Int32 selected,
-                                    const B::DataView& options)
+                                    const B::DataView& options, bool mixedValue)
 {
 	RequireGui(call);
 	const auto names = B::ReadArray<B::Utf8View, String>(options, [](const auto& value) { return GuiString(value); });
@@ -311,7 +311,13 @@ Result<Int32> EditorServices::Popup(B::BindingCall& call, const B::Utf8View& lab
 	{
 		throw std::runtime_error("Popup selection is outside its options");
 	}
-	if (ImGui::BeginCombo(GuiString(label).c_str(), selected < 0 ? "" : names[static_cast<Size>(selected)].c_str()))
+	const String preview = selected < 0 ? mixedValue ? "— Mixed —" : "" : names[static_cast<Size>(selected)];
+	bool opened = false;
+	{
+		MixedValueScope mixed(mixedValue);
+		opened = ImGui::BeginCombo(GuiString(label).c_str(), preview.c_str());
+	}
+	if (opened)
 	{
 		ComboScope comboScope;
 		for (Size index = 0; index < names.size(); ++index)

@@ -97,7 +97,7 @@ internal static partial class NativeEditorBindings
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::TextField")]
 	internal static partial string TextField(string label, string value);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Popup")]
-	internal static partial int Popup(string label, int selected, string[] options);
+	internal static partial int Popup(string label, int selected, string[] options, bool mixedValue);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Vector2Field")]
 	internal static partial Vector2 Vector2Field(string label, Vector2 value);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::Vector3Field")]

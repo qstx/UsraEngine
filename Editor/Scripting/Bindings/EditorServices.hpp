@@ -154,7 +154,7 @@ struct EditorServices
 	                                 Float64 minimum, Float64 maximum, const B::Utf8View& format, bool mixedValue);
 	static Result<B::Utf8View> TextField(B::BindingCall& call, const B::Utf8View& label, const B::Utf8View& value);
 	static Result<Int32> Popup(B::BindingCall& call, const B::Utf8View& label, Int32 selected,
-	                           const B::DataView& options);
+	                           const B::DataView& options, bool mixedValue);
 	static Result<Vector2Value> Vector2Field(B::BindingCall& call, const B::Utf8View& label, const Vector2Value& value);
 	static Result<Vector3Value> Vector3Field(B::BindingCall& call, const B::Utf8View& label, const Vector3Value& value);
 	static Result<Vector4Value> Vector4Field(B::BindingCall& call, const B::Utf8View& label, const Vector4Value& value);

@@ -717,7 +717,8 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 					selected = static_cast<Int32>(index);
 				}
 			}
-			selected = B::TakeBindingResult(Popup(call, caption, selected, state.F_EnumNames));
+			selected = B::TakeBindingResult(
+			    Popup(call, caption, selected, state.F_EnumNames, state.F_HasMultipleDifferentValues != 0));
 			if (selected >= 0)
 			{
 				if (value.F_EnumUnsigned)
