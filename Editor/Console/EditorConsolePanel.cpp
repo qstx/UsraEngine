@@ -424,6 +424,7 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 	const char* labels[]{"Messages", "Warnings", "Errors"};
 	const Icons::Icon icons[]{Icons::Icon::Info, Icons::Icon::Warning, Icons::Icon::Error};
 	bool* filters[]{&showMessages, &showWarnings, &showErrors};
+	bool logFiltersChanged = false;
 	for (Size level = 0; level < 3; ++level)
 	{
 		const String label = String(labels[level]) + " " + ToUrsaString(std::to_string(counts[level]));
@@ -431,8 +432,16 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		if (Icons::Button(labels[level], icons[level], label.c_str(), *filters[level], true))
 		{
 			*filters[level] = !*filters[level];
+			logFiltersChanged = true;
 			settingsChanged = true;
 		}
+	}
+	if (logFiltersChanged)
+	{
+		selectedRecord.reset();
+		selectedRecords.clear();
+		selectionAnchor.reset();
+		searchRestoreRecord.reset();
 	}
 	Icons::SameLine();
 	if (Icons::Button("ConsoleOptions", Icons::Icon::More, "Console options"))
