@@ -1869,6 +1869,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	};
 	Vector<ImGuiID> projectContentRowIds;
 	projectContentRowIds.reserve(visibleRows.size());
+	constexpr Float32 projectListRowHeight = 16.f;
 	if (gridView)
 	{
 		const Float32 iconSize = static_cast<Float32>(gridIconSize);
@@ -2314,10 +2315,12 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			const bool hasChildren = !visibleObjects.empty();
 			if (hasChildren)
 			{
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {2.f, 1.5f});
 				if (ImGui::ArrowButton("##ImportedObjects", expanded ? ImGuiDir_Down : ImGuiDir_Right))
 				{
 					expanded = !expanded;
 				}
+				ImGui::PopStyleVar();
 				ImGui::SameLine();
 			}
 			const auto assetEntry = AssetSelection(asset);
@@ -2328,7 +2331,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			focusProjectEntry(assetEntry);
 			const bool assetClicked =
 			    Icons::Selectable(Icons::ForAsset(false, asset.kind, asset.importer, asset.path.relative),
-			                      editingName ? "" : label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick);
+			                      editingName ? "" : label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick,
+			                      {0.f, projectListRowHeight});
 			projectContentRowIds.push_back(ImGui::GetItemID());
 			const ImVec2 assetMinimum = ImGui::GetItemRectMin();
 			const ImVec2 assetMaximum = ImGui::GetItemRectMax();
@@ -2588,7 +2592,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					                                                   : std::nullopt,
 					                                      {}, {}),
 					                      objectLabel.c_str(),
-					                      selection.Contains(AssetSelection(asset, object.localFileId, object.kind))))
+					                      selection.Contains(AssetSelection(asset, object.localFileId, object.kind)), 0,
+					                      {0.f, projectListRowHeight}))
 					{
 						if (selectAsset(AssetSelection(asset, object.localFileId, object.kind)))
 						{

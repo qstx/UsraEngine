@@ -583,18 +583,20 @@ bool SmallButton(const char* label)
 	return Button(label);
 }
 
-bool Selectable(Icon icon, const char* label, bool selected, ImGuiSelectableFlags flags)
+bool Selectable(Icon icon, const char* label, bool selected, ImGuiSelectableFlags flags, ImVec2 size)
 {
 	if (!Available())
 	{
-		return ImGui::Selectable(label, selected, flags);
+		return ImGui::Selectable(label, selected, flags, size);
 	}
 	const auto origin = ImGui::GetCursorScreenPos();
 	ImGui::PushOverrideID(ImGui::GetID(label));
-	const bool clicked = ImGui::Selectable("", selected, flags);
+	const bool clicked = ImGui::Selectable("", selected, flags, size);
 	ImGui::PopID();
-	RowImage(icon, origin, 0);
-	const ImVec2 position{origin.x + Extent() + ImGui::GetStyle().ItemInnerSpacing.x, origin.y};
+	const Float32 rowHeight = size.y > 0.f ? size.y : ImGui::GetTextLineHeight();
+	Draw(icon, {origin.x, origin.y + (rowHeight - Extent()) * 0.5f}, Extent(), Color(icon));
+	const ImVec2 position{origin.x + Extent() + ImGui::GetStyle().ItemInnerSpacing.x,
+	                      origin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f};
 	const auto maximum = ImGui::GetItemRectMax();
 	ImGui::RenderTextClipped(position, maximum, label, ImGui::FindRenderedTextEnd(label), nullptr);
 	return clicked;
