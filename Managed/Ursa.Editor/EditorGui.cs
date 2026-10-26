@@ -99,6 +99,14 @@ public static class EditorGui
 	internal static void DrawHierarchyInput()
 	{
 		uint state = EditorContext.HierarchyInputState;
+		if ((state & (1u << 24)) != 0)
+		{
+			uint distanceToTop = (state >> 12) & 0xfffu;
+			uint distanceToBottom = state & 0xfffu;
+			uint zone = distanceToBottom <= 64u ? 3u : distanceToTop <= 64u ? 1u : 2u;
+			EditorContext.SetHierarchyInputCommand(zone);
+			return;
+		}
 		if ((state & (1u << 29)) != 0)
 		{
 			uint clickModifiers = KeyModifiers;

@@ -920,7 +920,7 @@ std::optional<HierarchyDropZone>
 DrawHierarchyRowDropFeedback(const ImRect& rect, ResourceId documentId, bool playSession,
                              const std::function<ResourceId(ResourceId)>& parentOf, bool allowDrop,
                              const std::function<void(const EditorDragSession&, HierarchyDropZone)>& onDrop,
-                             bool allowReorder = true)
+                             const EditorHierarchy::InputAction& inputAction, bool allowReorder = true)
 {
 	if (!allowDrop || !ImGui::GetDragDropPayload())
 	{
@@ -939,8 +939,26 @@ DrawHierarchyRowDropFeedback(const ImRect& rect, ResourceId documentId, bool pla
 		if (session && (NormalizeHierarchyDragSources(session.value, documentId, playSession, parentOf) ||
 		                (onDrop && IsHierarchyAssetDropSession(session.value))))
 		{
-			const HierarchyDropZone classified =
-			    ClassifyHierarchyDropZone(ImGui::GetIO().MousePos.y, rect.Min.y, rect.Max.y);
+			HierarchyDropZone classified;
+			if (inputAction)
+			{
+				const Float32 mouseY = ImGui::GetIO().MousePos.y;
+				const auto quantizeDistance = [](Float32 distance)
+				{
+					return static_cast<UInt32>(std::clamp(std::ceil(std::max(0.f, distance) * 16.f), 0.f, 4095.f));
+				};
+				const UInt32 distanceToTop = quantizeDistance(mouseY - rect.Min.y);
+				const UInt32 distanceToBottom = quantizeDistance(rect.Max.y - mouseY);
+				const UInt32 state = (1u << 24) | (distanceToTop << 12) | distanceToBottom;
+				auto managedZone = inputAction(state);
+				classified = managedZone && managedZone.value >= 1 && managedZone.value <= 3
+				                 ? static_cast<HierarchyDropZone>(managedZone.value - 1)
+				                 : ClassifyHierarchyDropZone(mouseY, rect.Min.y, rect.Max.y);
+			}
+			else
+			{
+				classified = ClassifyHierarchyDropZone(ImGui::GetIO().MousePos.y, rect.Min.y, rect.Max.y);
+			}
 			if (allowReorder || classified == HierarchyDropZone::Into)
 			{
 				zone = classified;
@@ -2387,7 +2405,7 @@ Result<bool> EditorHierarchy::Draw(PrefabAsset& asset, bool* open, EditorSelecti
 			auto parent = found ? found->Parent() : GameObject::Ptr{};
 			return parent ? parent->Id() : ResourceId{};
 		};
-		const auto dropZone = DrawHierarchyRowDropFeedback(rowRect, documentId, false, parentOf, false, {});
+		const auto dropZone = DrawHierarchyRowDropFeedback(rowRect, documentId, false, parentOf, false, {}, inputAction);
 		if (dropZone == HierarchyDropZone::Into && hasContent && hoveringIndentedContent &&
 		    ImGui::GetDragDropPayload())
 		{
@@ -2837,7 +2855,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		    changed |= static_cast<bool>(result);
 		    commandDiagnostic = result ? String{} : result.error;
 	    },
-	    !hierarchyAlphabeticalSort && !filtering);
+	    inputAction, !hierarchyAlphabeticalSort && !filtering);
 	if (dropZone == HierarchyDropZone::Into && hasChildren && hoveringIndentedContent &&
 	    ImGui::GetDragDropPayload())
 	{
