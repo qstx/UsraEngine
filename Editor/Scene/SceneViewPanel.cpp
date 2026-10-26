@@ -3290,9 +3290,9 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						const Float32 signedAxisDelta = sceneZoomUseYSign ? deltaY : deltaX;
 						const Float32 signedDelta = (signedAxisDelta < 0.f ? -1.f : 1.f) *
 						                            std::sqrt(deltaX * deltaX + deltaY * deltaY);
-						const Float32 acceleration = io.KeyShift ? 4.f : 1.f;
+						// Unity uses a 9:3 multiplier for Shift vs. normal drag zoom.
 						const Float32 zoomSensitivity = io.KeyShift ? 9.f : 3.f;
-						ZoomSceneViewByDrag(camera, signedDelta * acceleration * zoomSensitivity, sceneDragZoomStart,
+						ZoomSceneViewByDrag(camera, signedDelta * zoomSensitivity, sceneDragZoomStart,
 						                    sceneDragZoomSpeed, sceneDragZoomTotalMotion);
 					}
 					else if (sceneNavigationGesture == SceneNavigationGesture::Flythrough)
