@@ -180,7 +180,7 @@ void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint
 	if (!std::isfinite(distance) || distance <= MinimumDistance || !std::isfinite(mouseDelta.x) ||
 	    !std::isfinite(mouseDelta.y) || !std::isfinite(movement.x) || !std::isfinite(movement.y) ||
 	    !std::isfinite(verticalMovement) || !std::isfinite(deltaTime) || deltaTime <= 0.f || !std::isfinite(speed) ||
-	    speed <= 0.f)
+	    speed < 0.f)
 	{
 		return;
 	}
@@ -215,7 +215,7 @@ void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint
 	{
 		direction = Scale(direction, 1.f / directionLength);
 	}
-	const Float32 moveScale = speed * deltaTime * (fast ? 3.f : 1.f);
+	const Float32 moveScale = speed * deltaTime * (fast ? 5.f : 1.f);
 	camera.position = Add(camera.position, Scale(direction, moveScale));
 	camera.target = Add(camera.position, Scale(forward, distance));
 }

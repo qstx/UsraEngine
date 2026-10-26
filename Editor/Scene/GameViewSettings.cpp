@@ -109,7 +109,8 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 	try
 	{
 		const auto json = nlohmann::json::parse(ToStdString(text));
-		if (json.at("version").get<int>() != 1)
+		const int version = json.at("version").get<int>();
+		if (version != 1 && version != 2)
 		{
 			return Result<GameViewSettingsState>::Failure("Unsupported Game view settings version");
 		}
@@ -134,9 +135,15 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 		settings.snapMoveZ = json.value("snapMoveZ", 1.f);
 		settings.snapRotation = json.value("snapRotation", 15.f);
 		settings.snapScale = json.value("snapScale", 0.1f);
-		settings.sceneCameraSpeed = json.value("sceneCameraSpeed", 10.f);
+		settings.sceneCameraSpeed = json.value("sceneCameraSpeed", 1.f);
 		settings.sceneCameraSpeedMin = json.value("sceneCameraSpeedMin", 0.01f);
-		settings.sceneCameraSpeedMax = json.value("sceneCameraSpeedMax", 99.f);
+		settings.sceneCameraSpeedMax = json.value("sceneCameraSpeedMax", 2.f);
+		if (version == 1 && settings.sceneCameraSpeed == 10.f && settings.sceneCameraSpeedMin == 0.01f &&
+		    settings.sceneCameraSpeedMax == 99.f)
+		{
+			settings.sceneCameraSpeed = 1.f;
+			settings.sceneCameraSpeedMax = 2.f;
+		}
 		settings.sceneCameraFieldOfView = json.value("sceneCameraFieldOfView", 45.f);
 		settings.sceneCameraNearClip = json.value("sceneCameraNearClip", 0.1f);
 		settings.sceneCameraFarClip = json.value("sceneCameraFarClip", 100.f);
@@ -152,9 +159,9 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 		    !std::isfinite(settings.snapMoveZ) || settings.snapMoveZ <= 0.f || !std::isfinite(settings.snapRotation) ||
 		    settings.snapRotation <= 0.f || !std::isfinite(settings.snapScale) || settings.snapScale <= 0.f ||
 		    !std::isfinite(settings.sceneCameraSpeed) || !std::isfinite(settings.sceneCameraSpeedMin) ||
-		    !std::isfinite(settings.sceneCameraSpeedMax) || settings.sceneCameraSpeedMin < 0.01f ||
-		    settings.sceneCameraSpeedMin > 98.f || settings.sceneCameraSpeedMax < 0.02f ||
-		    settings.sceneCameraSpeedMax > 99.f || settings.sceneCameraSpeedMin >= settings.sceneCameraSpeedMax ||
+		    !std::isfinite(settings.sceneCameraSpeedMax) || settings.sceneCameraSpeedMin < 0.0001f ||
+		    settings.sceneCameraSpeedMin > 9999.f || settings.sceneCameraSpeedMax < 0.0002f ||
+		    settings.sceneCameraSpeedMax > 10000.f || settings.sceneCameraSpeedMin >= settings.sceneCameraSpeedMax ||
 		    !std::isfinite(settings.sceneCameraFieldOfView) || settings.sceneCameraFieldOfView < 1.f ||
 		    settings.sceneCameraFieldOfView > 179.f || !std::isfinite(settings.sceneCameraNearClip) ||
 		    settings.sceneCameraNearClip < 0.01f || !std::isfinite(settings.sceneCameraFarClip) ||
@@ -177,7 +184,7 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 
 String SerializeGameViewSettings(const GameViewSettingsState& settings)
 {
-	nlohmann::json json = {{"version", 1},
+	nlohmann::json json = {{"version", 2},
 	                       {"mode", ModeName(settings.mode)},
 	                       {"width", settings.width},
 	                       {"height", settings.height},

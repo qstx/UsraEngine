@@ -149,9 +149,11 @@ private:
 	bool sceneView2DModePending = false;
 	bool sceneView2DModePendingTarget = false;
 	bool sceneViewRotationLocked = false;
-	Float32 sceneFlythroughSpeed = 10.f;
+	Float32 sceneFlythroughSpeed = 1.f;
 	Float32 sceneFlythroughMinSpeed = 0.01f;
-	Float32 sceneFlythroughMaxSpeed = 99.f;
+	Float32 sceneFlythroughMaxSpeed = 2.f;
+	Float32 sceneFlythroughTargetSpeed = 0.f;
+	Float32 sceneFlythroughCurrentSpeed = 0.f;
 	Float32 sceneDragZoomStart = 0.f;
 	Float32 sceneDragZoomSpeed = 0.3f;
 	Float32 sceneDragZoomTotalMotion = 0.f;

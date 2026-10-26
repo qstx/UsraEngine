@@ -1429,9 +1429,9 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 	warnIfNoGameCamera = true;
 	clearEveryFrameInEditMode = true;
 	gizmoSnapSettings = {};
-	sceneFlythroughSpeed = 10.f;
+	sceneFlythroughSpeed = 1.f;
 	sceneFlythroughMinSpeed = 0.01f;
-	sceneFlythroughMaxSpeed = 99.f;
+	sceneFlythroughMaxSpeed = 2.f;
 	sceneCameraFieldOfView = 45.f;
 	sceneCameraNearClip = 0.1f;
 	sceneCameraFarClip = 100.f;
@@ -1465,9 +1465,9 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 		warnIfNoGameCamera = true;
 		clearEveryFrameInEditMode = true;
 		gizmoSnapSettings = {};
-		sceneFlythroughSpeed = 10.f;
+		sceneFlythroughSpeed = 1.f;
 		sceneFlythroughMinSpeed = 0.01f;
-		sceneFlythroughMaxSpeed = 99.f;
+		sceneFlythroughMaxSpeed = 2.f;
 		sceneCameraFieldOfView = 45.f;
 		sceneCameraNearClip = 0.1f;
 		sceneCameraFarClip = 100.f;
@@ -1497,9 +1497,9 @@ void SceneViewPanel::LoadSettings(VirtualFileSystem& userFiles, const String& pr
 			warnIfNoGameCamera = true;
 			clearEveryFrameInEditMode = true;
 			gizmoSnapSettings = {};
-			sceneFlythroughSpeed = 10.f;
+			sceneFlythroughSpeed = 1.f;
 			sceneFlythroughMinSpeed = 0.01f;
-			sceneFlythroughMaxSpeed = 99.f;
+			sceneFlythroughMaxSpeed = 2.f;
 			sceneCameraFieldOfView = 45.f;
 			sceneCameraNearClip = 0.1f;
 			sceneCameraFarClip = 100.f;
@@ -2079,39 +2079,39 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				ImGui::Separator();
 				ImGui::SetNextItemWidth(190.f);
 				if (ImGui::SliderFloat("Camera Speed", &sceneFlythroughSpeed, sceneFlythroughMinSpeed,
-				                      sceneFlythroughMaxSpeed, "%.2f", ImGuiSliderFlags_Logarithmic))
+				                       sceneFlythroughMaxSpeed, "%.2f"))
 				{
 					settingsChanged = true;
 				}
 				Float32 minimumSpeed = sceneFlythroughMinSpeed;
-				if (ImGui::DragFloat("Min", &minimumSpeed, 0.01f, 0.01f, 98.f, "%.2f"))
+				if (ImGui::DragFloat("Min", &minimumSpeed, 0.01f, 0.0001f, 9999.f, "%.4f"))
 				{
 					sceneFlythroughMinSpeed = minimumSpeed;
 					if (sceneFlythroughMinSpeed >= sceneFlythroughMaxSpeed)
 					{
-						sceneFlythroughMaxSpeed = std::min(99.f, sceneFlythroughMinSpeed + 0.01f);
+						sceneFlythroughMaxSpeed = std::min(10000.f, sceneFlythroughMinSpeed + 0.01f);
 					}
-					sceneFlythroughSpeed = std::clamp(sceneFlythroughSpeed, sceneFlythroughMinSpeed,
-					                                 sceneFlythroughMaxSpeed);
+					sceneFlythroughSpeed =
+					    std::clamp(sceneFlythroughSpeed, sceneFlythroughMinSpeed, sceneFlythroughMaxSpeed);
 					settingsChanged = true;
 				}
 				Float32 maximumSpeed = sceneFlythroughMaxSpeed;
-				if (ImGui::DragFloat("Max", &maximumSpeed, 0.01f, 0.02f, 99.f, "%.2f"))
+				if (ImGui::DragFloat("Max", &maximumSpeed, 0.01f, 0.001f, 10000.f, "%.4f"))
 				{
 					sceneFlythroughMaxSpeed = maximumSpeed;
 					if (sceneFlythroughMaxSpeed <= sceneFlythroughMinSpeed)
 					{
-						sceneFlythroughMinSpeed = std::max(0.01f, sceneFlythroughMaxSpeed - 0.01f);
+						sceneFlythroughMinSpeed = std::max(0.0001f, sceneFlythroughMaxSpeed - 0.01f);
 					}
-					sceneFlythroughSpeed = std::clamp(sceneFlythroughSpeed, sceneFlythroughMinSpeed,
-					                                 sceneFlythroughMaxSpeed);
+					sceneFlythroughSpeed =
+					    std::clamp(sceneFlythroughSpeed, sceneFlythroughMinSpeed, sceneFlythroughMaxSpeed);
 					settingsChanged = true;
 				}
 				if (Icons::Button("Reset Camera Settings"))
 				{
-					sceneFlythroughSpeed = 10.f;
+					sceneFlythroughSpeed = 1.f;
 					sceneFlythroughMinSpeed = 0.01f;
-					sceneFlythroughMaxSpeed = 99.f;
+					sceneFlythroughMaxSpeed = 2.f;
 					sceneCameraFieldOfView = 45.f;
 					sceneCameraNearClip = 0.1f;
 					sceneCameraFarClip = 100.f;
@@ -3128,9 +3128,11 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					{
 						if (io.MouseWheel != 0.f)
 						{
-							sceneFlythroughSpeed =
-				    std::clamp(sceneFlythroughSpeed * std::exp(io.MouseWheel * 0.15f), sceneFlythroughMinSpeed,
-				               sceneFlythroughMaxSpeed);
+							const Float32 speedRange = sceneFlythroughMaxSpeed - sceneFlythroughMinSpeed;
+							const Float32 normalizedSpeed = std::clamp(
+							    (sceneFlythroughSpeed - sceneFlythroughMinSpeed) / speedRange + io.MouseWheel * 0.01f,
+							    0.f, 1.f);
+							sceneFlythroughSpeed = sceneFlythroughMinSpeed + normalizedSpeed * speedRange;
 							settingsChanged = true;
 						}
 						const ViewportPoint movement{
@@ -3138,8 +3140,26 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						    (ImGui::IsKeyDown(ImGuiKey_W) ? 1.f : 0.f) - (ImGui::IsKeyDown(ImGuiKey_S) ? 1.f : 0.f)};
 						const Float32 verticalMovement =
 						    (ImGui::IsKeyDown(ImGuiKey_E) ? 1.f : 0.f) - (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.f : 0.f);
+						const Float32 movementMagnitude = std::sqrt(movement.x * movement.x + movement.y * movement.y +
+						                                            verticalMovement * verticalMovement);
+						if (movementMagnitude > 0.f)
+						{
+							sceneFlythroughTargetSpeed =
+							    sceneFlythroughTargetSpeed < std::numeric_limits<Float32>::epsilon()
+							        ? 9.f
+							        : sceneFlythroughTargetSpeed * std::pow(1.8f, io.DeltaTime);
+						}
+						else
+						{
+							sceneFlythroughTargetSpeed = 0.f;
+						}
+						const Float32 easeProgress = std::clamp(io.DeltaTime / 0.4f, 0.f, 1.f);
+						const Float32 easeFactor = 1.f - std::pow(1.f - easeProgress, 4.f);
+						sceneFlythroughCurrentSpeed +=
+						    (sceneFlythroughTargetSpeed - sceneFlythroughCurrentSpeed) * easeFactor;
 						FlythroughSceneView(camera, {io.MouseDelta.x, io.MouseDelta.y}, movement, verticalMovement,
-						                    io.DeltaTime, sceneFlythroughSpeed, io.KeyShift);
+						                    io.DeltaTime, sceneFlythroughCurrentSpeed * sceneFlythroughSpeed,
+						                    io.KeyShift);
 					}
 					if (sceneNavigationGesture == SceneNavigationGesture::None && imageHovered &&
 					    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput &&

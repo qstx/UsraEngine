@@ -35,9 +35,9 @@ struct GameViewSettingsState
 	Float32 snapMoveZ = 1.f;
 	Float32 snapRotation = 15.f;
 	Float32 snapScale = 0.1f;
-	Float32 sceneCameraSpeed = 10.f;
+	Float32 sceneCameraSpeed = 1.f;
 	Float32 sceneCameraSpeedMin = 0.01f;
-	Float32 sceneCameraSpeedMax = 99.f;
+	Float32 sceneCameraSpeedMax = 2.f;
 	Float32 sceneCameraFieldOfView = 45.f;
 	Float32 sceneCameraNearClip = 0.1f;
 	Float32 sceneCameraFarClip = 100.f;
