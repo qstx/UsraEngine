@@ -503,6 +503,13 @@ Result<EditorServices::PropertyState> EditorServices::GetProperty(B::BindingCall
 	result.F_DisplayName = call.arena.StringValue(
 	    ToUrsaString(descriptor.value("DisplayName", fallbackDisplayName)));
 	result.F_Hidden = descriptor.value("Hidden", false);
+	result.F_HasRange = descriptor.contains("Minimum") && descriptor.contains("Maximum");
+	if (result.F_HasRange)
+	{
+		result.F_Minimum = descriptor.at("Minimum").get<Float64>();
+		result.F_Maximum = descriptor.at("Maximum").get<Float64>();
+	}
+	result.F_Hdr = descriptor.value("HDR", false);
 	Vector<B::Utf8View> names;
 	Vector<Int64> signedValues;
 	Vector<UInt64> unsignedValues;

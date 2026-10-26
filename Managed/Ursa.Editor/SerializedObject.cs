@@ -119,6 +119,10 @@ public sealed class SerializedProperty
 	public string TypeName => State.TypeName;
 	public string DisplayName => State.DisplayName;
 	public bool Hidden => State.Hidden;
+	public bool HasRange => State.HasRange;
+	public double Minimum => State.Minimum;
+	public double Maximum => State.Maximum;
+	public bool Hdr => State.Hdr;
 	public EditorReferenceKind ReferenceKind => State.ReferenceKind;
 	public bool IsNull
 	{

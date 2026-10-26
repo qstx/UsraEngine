@@ -136,6 +136,10 @@ internal struct SerializedPropertyState
 	public string TypeName;
 	public string DisplayName;
 	public bool Hidden;
+	public bool HasRange;
+	public double Minimum;
+	public double Maximum;
+	public bool Hdr;
 	public string[] EnumNames;
 	public long[] EnumSignedValues;
 	public ulong[] EnumUnsignedValues;

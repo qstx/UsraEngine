@@ -69,7 +69,72 @@ public static class EditorGui
 	{
 		ArgumentNullException.ThrowIfNull(property);
 		property.RequireValid();
-		NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, label ?? property.PropertyPath);
+		string caption = label ?? property.DisplayName;
+		switch (property.PropertyType)
+		{
+			case SerializedPropertyType.Boolean:
+				if (property.HasMultipleDifferentValues) goto default;
+				bool originalBoolean = property.BoolValue;
+				bool editedBoolean = Toggle(caption, originalBoolean);
+				if (editedBoolean != originalBoolean) property.BoolValue = editedBoolean;
+				break;
+			case SerializedPropertyType.Integer:
+				if (property.HasMultipleDifferentValues) goto default;
+				long originalInteger = property.LongValue;
+				long editedInteger = IntField(caption, originalInteger);
+				if (editedInteger != originalInteger) property.LongValue = editedInteger;
+				break;
+			case SerializedPropertyType.Float:
+				if (property.HasMultipleDifferentValues || property.HasRange) goto default;
+				double originalFloat = property.DoubleValue;
+				double editedFloat = FloatField(caption, originalFloat);
+				if (editedFloat != originalFloat) property.DoubleValue = editedFloat;
+				break;
+			case SerializedPropertyType.String:
+				if (property.HasMultipleDifferentValues) goto default;
+				string originalText = property.StringValue ?? string.Empty;
+				string editedText = TextField(caption, originalText);
+				if (!StringComparer.Ordinal.Equals(editedText, originalText)) property.StringValue = editedText;
+				break;
+			case SerializedPropertyType.Enum:
+				int originalIndex = property.HasMultipleDifferentValues ? -1 : property.EnumValueIndex;
+				int editedIndex = Popup(caption, originalIndex, property.EnumNames, property.HasMultipleDifferentValues);
+				if (editedIndex >= 0 && editedIndex != originalIndex) property.EnumValueIndex = editedIndex;
+				break;
+			case SerializedPropertyType.Vector2:
+				if (property.HasMultipleDifferentValues) goto default;
+				Vector2 originalVector2 = property.Vector2Value;
+				Vector2 editedVector2 = Vector2Field(caption, originalVector2);
+				if (!editedVector2.Equals(originalVector2)) property.Vector2Value = editedVector2;
+				break;
+			case SerializedPropertyType.Vector3:
+				if (property.HasMultipleDifferentValues) goto default;
+				Vector3 originalVector3 = property.Vector3Value;
+				Vector3 editedVector3 = Vector3Field(caption, originalVector3);
+				if (!editedVector3.Equals(originalVector3)) property.Vector3Value = editedVector3;
+				break;
+			case SerializedPropertyType.Vector4:
+				if (property.HasMultipleDifferentValues) goto default;
+				Vector4 originalVector4 = property.Vector4Value;
+				Vector4 editedVector4 = Vector4Field(caption, originalVector4);
+				if (!editedVector4.Equals(originalVector4)) property.Vector4Value = editedVector4;
+				break;
+			case SerializedPropertyType.Quaternion:
+				if (property.HasMultipleDifferentValues) goto default;
+				Quaternion originalQuaternion = property.QuaternionValue;
+				Quaternion editedQuaternion = QuaternionField(caption, originalQuaternion);
+				if (!editedQuaternion.Equals(originalQuaternion)) property.QuaternionValue = editedQuaternion;
+				break;
+			case SerializedPropertyType.Color:
+				if (property.Hdr || property.HasMultipleDifferentValues) goto default;
+				Color originalColor = property.ColorValue;
+				Color editedColor = ColorField(caption, originalColor);
+				if (!editedColor.Equals(originalColor)) property.ColorValue = editedColor;
+				break;
+			default:
+				NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, caption);
+				break;
+		}
 	}
 	public static IDisposable Vertical()
 	{
