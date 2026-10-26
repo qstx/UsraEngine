@@ -3180,7 +3180,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						{
 							clearSceneViewLock();
 							MoveSceneView(camera, arrowMovement, io.DeltaTime, sceneFlythroughSpeed * 0.5f, io.KeyShift,
-							              sceneView2DMode);
+							              sceneView2DMode || camera.orthographic);
 						}
 					}
 					if (imageHovered && io.MouseWheel != 0.f &&
