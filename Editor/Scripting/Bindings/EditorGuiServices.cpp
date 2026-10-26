@@ -325,16 +325,22 @@ Result<void> EditorServices::SameLine(B::BindingCall& call)
 	return {};
 }
 
-Result<void> EditorServices::SameLineAt(B::BindingCall& call, Float64 offsetFromStartX)
+Result<void> EditorServices::SameLineAtContentX(B::BindingCall& call, Float64 offsetFromContentX)
 {
 	RequireGui(call);
-	if (!std::isfinite(offsetFromStartX) || offsetFromStartX < 0.0 ||
-	    offsetFromStartX > std::numeric_limits<Float32>::max())
+	if (!std::isfinite(offsetFromContentX) || offsetFromContentX < 0.0 ||
+	    offsetFromContentX > std::numeric_limits<Float32>::max())
 	{
-		throw std::runtime_error("Editor same-line offset must be finite, non-negative, and representable");
+		throw std::runtime_error("Editor content offset must be finite, non-negative, and representable");
 	}
-	ImGui::SameLine(static_cast<Float32>(offsetFromStartX), 0.0f);
+	ImGui::SameLine(ImGui::GetWindowContentRegionMin().x + static_cast<Float32>(offsetFromContentX), 0.0f);
 	return {};
+}
+
+Result<Float64> EditorServices::GetFontSize(B::BindingCall& call)
+{
+	RequireGui(call);
+	return Result<Float64>::Success(ImGui::GetFontSize());
 }
 
 Result<void> EditorServices::NewLine(B::BindingCall& call)

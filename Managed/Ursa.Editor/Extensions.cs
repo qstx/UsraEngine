@@ -81,7 +81,8 @@ public abstract class Inspector
 		if (!gameObjectNameDirty) gameObjectNameDraft = originalName;
 		bool changed = false;
 
-		EditorGui.SameLine(72);
+		double dpiScale = EditorGui.FontSize / 16;
+		EditorGui.SameLineAtContentX(66 * dpiScale);
 		bool editedActive = EditorGui.Toggle("##GameObjectActive", active.BoolValue,
 			active.HasMultipleDifferentValues);
 		if (editedActive != active.BoolValue || active.HasMultipleDifferentValues && EditorGui.IsLastControlEdited)
@@ -91,7 +92,7 @@ public abstract class Inspector
 		}
 
 		EditorGui.SameLine();
-		EditorGui.SetNextItemWidth(-104);
+		EditorGui.SetNextItemWidth(-104 * dpiScale);
 		string editedName = EditorGui.TextField("##GameObjectName", gameObjectNameDraft,
 			name.HasMultipleDifferentValues);
 		bool nameFieldActive = EditorGui.IsLastControlActive();
@@ -126,10 +127,12 @@ public abstract class Inspector
 		tagOptions[^1] = "Add Tag...";
 		int selectedTag = Array.IndexOf(tags, tag.StringValue ?? string.Empty);
 		EditorGui.NewLine();
-		EditorGui.Indent(34);
+		double tagLayerIndent = 34 * dpiScale;
+		EditorGui.Indent(tagLayerIndent);
 		try
 		{
-			double tagLayerWidth = Math.Max(60, (EditorGui.ContentRegionAvailableWidth - 72) * 0.5);
+			double tagLayerWidth = Math.Max(60 * dpiScale,
+				(EditorGui.ContentRegionAvailableWidth - 72 * dpiScale) * 0.5);
 			EditorGui.SetNextItemWidth(tagLayerWidth);
 			int editedTag = EditorGui.Popup("Tag", selectedTag, tagOptions, tag.HasMultipleDifferentValues);
 			if (editedTag == tags.Length)
@@ -166,7 +169,7 @@ public abstract class Inspector
 		}
 		finally
 		{
-			EditorGui.Unindent(34);
+			EditorGui.Unindent(tagLayerIndent);
 		}
 
 		if (changed) SerializedObject.ApplyModifiedProperties();
