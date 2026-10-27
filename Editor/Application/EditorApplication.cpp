@@ -4752,17 +4752,17 @@ Result<void> EditorApplication::OnGui()
 		    context.document = documents ? documents->Current() : nullptr;
 		    context.documents = documents.get();
 		    context.workspace = workspace.get();
-		    context.hierarchyInputState = capabilities;
-		    auto invoked = InvokeManagedEditorExtension(*managedHost, editingScriptSession, "hierarchy-input", context);
+		    context.editorInputState = capabilities;
+		    auto invoked = InvokeManagedEditorExtension(*managedHost, editingScriptSession, "editor-input", context);
 		    if (!invoked)
 		    {
 			    return Result<UInt32>::Failure(invoked.error);
 		    }
 		    if (!invoked.value)
 		    {
-			    return Result<UInt32>::Failure("Managed Hierarchy input handler is unavailable");
+			    return Result<UInt32>::Failure("Managed Editor input handler is unavailable");
 		    }
-		    return Result<UInt32>::Success(context.hierarchyInputCommand);
+		    return Result<UInt32>::Success(context.editorInputCommand);
 	    });
 	if (!pendingManagedAsset.scheme.empty())
 	{
@@ -5378,8 +5378,30 @@ Result<void> EditorApplication::OnGui()
 			pendingScenePrefabExports.emplace_back(session, folder);
 			return Result<void>{};
 		};
+		const EditorHierarchy::InputAction projectInputAction = [this](UInt32 state) -> Result<UInt32>
+		{
+			if (!managedHost || !editingScriptSession || managedHost->IsSessionFaulted())
+			{
+				return Result<UInt32>::Failure("Managed Editor environment is unavailable");
+			}
+			ManagedEditorContext context;
+			context.document = documents ? documents->Current() : nullptr;
+			context.documents = documents.get();
+			context.workspace = workspace.get();
+			context.editorInputState = state;
+			auto invoked = InvokeManagedEditorExtension(*managedHost, editingScriptSession, "editor-input", context);
+			if (!invoked)
+			{
+				return Result<UInt32>::Failure(invoked.error);
+			}
+			if (!invoked.value)
+			{
+				return Result<UInt32>::Failure("Managed Editor input handler is unavailable");
+			}
+			return Result<UInt32>::Success(context.editorInputCommand);
+		};
 		auto drawn = projectBrowserPanel.Draw(*workspace, projectBrowser, selectionContext, hierarchy, showProjectPanel,
-		                                      play.Active(), workspaceError, actions);
+		                                      play.Active(), workspaceError, actions, projectInputAction);
 		if (!drawn)
 		{
 			workspaceError = drawn.error;

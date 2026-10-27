@@ -308,21 +308,59 @@ Result<bool> EditorServices::IsKeyPressed(B::BindingCall& call, UInt32 key)
 	ImGuiKey nativeKey = ImGuiKey_None;
 	switch (key)
 	{
-	case 1: nativeKey = ImGuiKey_A; break;
-	case 2: nativeKey = ImGuiKey_C; break;
-	case 3: nativeKey = ImGuiKey_D; break;
-	case 4: nativeKey = ImGuiKey_I; break;
-	case 5: nativeKey = ImGuiKey_DownArrow; break;
-	case 6: nativeKey = ImGuiKey_UpArrow; break;
-	case 7: nativeKey = ImGuiKey_Home; break;
-	case 8: nativeKey = ImGuiKey_End; break;
-	case 9: nativeKey = ImGuiKey_PageDown; break;
-	case 10: nativeKey = ImGuiKey_PageUp; break;
-	case 11: nativeKey = ImGuiKey_LeftArrow; break;
-	case 12: nativeKey = ImGuiKey_RightArrow; break;
-	case 13: nativeKey = ImGuiKey_H; break;
-	case 14: nativeKey = ImGuiKey_L; break;
-	default: return Result<bool>::Failure("Unknown editor key");
+		case 1:
+			nativeKey = ImGuiKey_A;
+			break;
+		case 2:
+			nativeKey = ImGuiKey_C;
+			break;
+		case 3:
+			nativeKey = ImGuiKey_D;
+			break;
+		case 4:
+			nativeKey = ImGuiKey_I;
+			break;
+		case 5:
+			nativeKey = ImGuiKey_DownArrow;
+			break;
+		case 6:
+			nativeKey = ImGuiKey_UpArrow;
+			break;
+		case 7:
+			nativeKey = ImGuiKey_Home;
+			break;
+		case 8:
+			nativeKey = ImGuiKey_End;
+			break;
+		case 9:
+			nativeKey = ImGuiKey_PageDown;
+			break;
+		case 10:
+			nativeKey = ImGuiKey_PageUp;
+			break;
+		case 11:
+			nativeKey = ImGuiKey_LeftArrow;
+			break;
+		case 12:
+			nativeKey = ImGuiKey_RightArrow;
+			break;
+		case 13:
+			nativeKey = ImGuiKey_H;
+			break;
+		case 14:
+			nativeKey = ImGuiKey_L;
+			break;
+		case 15:
+			nativeKey = ImGuiKey_Escape;
+			break;
+		case 16:
+			nativeKey = ImGuiKey_N;
+			break;
+		case 17:
+			nativeKey = ImGuiKey_F;
+			break;
+		default:
+			return Result<bool>::Failure("Unknown editor key");
 	}
 	return Result<bool>::Success(ImGui::IsKeyPressed(nativeKey, false));
 }

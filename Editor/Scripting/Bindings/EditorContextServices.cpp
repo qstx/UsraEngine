@@ -1139,19 +1139,19 @@ Result<void> EditorServices::SetHierarchyMenuCommand(B::BindingCall& call, UInt3
 	return {};
 }
 
-Result<UInt32> EditorServices::GetHierarchyInputState(B::BindingCall& call)
+Result<UInt32> EditorServices::GetEditorInputState(B::BindingCall& call)
 {
-	return Result<UInt32>::Success(Scope(call).source.hierarchyInputState);
+	return Result<UInt32>::Success(Scope(call).source.editorInputState);
 }
 
-Result<void> EditorServices::SetHierarchyInputCommand(B::BindingCall& call, UInt32 command)
+Result<void> EditorServices::SetEditorInputCommand(B::BindingCall& call, UInt32 command)
 {
 	const UInt32 action = command & 0xffffu;
 	if (action > 16 || (command & ~0x7ffffu) != 0)
 	{
-		return Result<void>::Failure("Unknown Hierarchy input command");
+		return Result<void>::Failure("Unknown Editor input command");
 	}
-	Scope(call).source.hierarchyInputCommand = command;
+	Scope(call).source.editorInputCommand = command;
 	return {};
 }
 

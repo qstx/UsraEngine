@@ -337,7 +337,8 @@ Result<void> ProjectBrowserPanel::ExecuteMenuCommand(const String& key, const St
 
 Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrowserModel& model,
                                        EditorSelectionContext& selection, EditorHierarchy& hierarchy, bool& open,
-                                       bool readOnly, String& diagnostic, const ProjectBrowserActions& actions)
+                                       bool readOnly, String& diagnostic, const ProjectBrowserActions& actions,
+                                       const EditorHierarchy::InputAction& inputAction)
 {
 	Vector<ProjectBrowserFileDrop> externalDrops = actions.takeExternalFileDrops ? actions.takeExternalFileDrops()
 	                                                                            : Vector<ProjectBrowserFileDrop>{};
@@ -676,34 +677,87 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			hierarchy.ClearSelection();
 		}
 	};
-	const ImGuiIO& navigationInput = ImGui::GetIO();
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !navigationInput.WantTextInput &&
-	    navigationInput.KeyAlt && !navigationInput.KeyCtrl && !navigationInput.KeyShift)
-	{
-		if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) && model.CanNavigateBack())
-		{
-			navigateHistory(true);
-		}
-		else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, false) && model.CanNavigateForward())
-		{
-			navigateHistory(false);
-		}
-	}
 	auto requestCreateFolder = [&]
 	{
 		folderName.fill(0);
 		std::copy_n("New Folder", 11, folderName.data());
 		createFolderRequested = true;
 	};
-	const ImGuiIO& projectShortcuts = ImGui::GetIO();
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !projectShortcuts.WantTextInput &&
-	    (projectShortcuts.KeyCtrl || projectShortcuts.KeySuper) && projectShortcuts.KeyShift &&
-	    !projectShortcuts.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_N, false) && !readOnly && actions.createFolder)
+	UInt32 projectInputCommand = 0;
+	bool managedProjectInputHandled = false;
+	if (inputAction)
+	{
+		UInt32 state = 1u << 25;
+		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+		{
+			state |= 1u;
+		}
+		if (model.CanNavigateBack())
+		{
+			state |= 1u << 1;
+		}
+		if (model.CanNavigateForward())
+		{
+			state |= 1u << 2;
+		}
+		if (!readOnly && actions.createFolder)
+		{
+			state |= 1u << 3;
+		}
+		if (assetClipboardCut)
+		{
+			state |= 1u << 4;
+		}
+		if (selection.entries.size() == 1)
+		{
+			state |= 1u << 5;
+		}
+		auto command = inputAction(state);
+		managedProjectInputHandled = static_cast<bool>(command);
+		if (command)
+		{
+			projectInputCommand = command.value;
+		}
+	}
+	if (!managedProjectInputHandled)
+	{
+		const ImGuiIO& input = ImGui::GetIO();
+		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !input.WantTextInput)
+		{
+			if (input.KeyAlt && !input.KeyCtrl && !input.KeyShift && ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) &&
+			    model.CanNavigateBack())
+			{
+				projectInputCommand = 1;
+			}
+			else if (input.KeyAlt && !input.KeyCtrl && !input.KeyShift &&
+			         ImGui::IsKeyPressed(ImGuiKey_RightArrow, false) && model.CanNavigateForward())
+			{
+				projectInputCommand = 2;
+			}
+			else if ((input.KeyCtrl || input.KeySuper) && input.KeyShift && !input.KeyAlt &&
+			         ImGui::IsKeyPressed(ImGuiKey_N, false) && !readOnly && actions.createFolder)
+			{
+				projectInputCommand = 3;
+			}
+			else if (assetClipboardCut && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+			{
+				projectInputCommand = 4;
+			}
+		}
+	}
+	if (projectInputCommand == 1)
+	{
+		navigateHistory(true);
+	}
+	else if (projectInputCommand == 2)
+	{
+		navigateHistory(false);
+	}
+	else if (projectInputCommand == 3)
 	{
 		requestCreateFolder();
 	}
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !projectShortcuts.WantTextInput &&
-	    assetClipboardCut && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+	else if (projectInputCommand == 4)
 	{
 		assetClipboard.clear();
 		assetClipboardCut = false;
@@ -1708,9 +1762,12 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			renameSourcePath.clear();
 		}
 	};
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !projectInput.WantTextInput &&
-	    !projectInput.KeyCtrl && !projectInput.KeySuper && !projectInput.KeyAlt && !projectInput.KeyShift &&
-	    ImGui::IsKeyPressed(ImGuiKey_F, false) && selection.entries.size() == 1)
+	bool managedProjectFindHandled = managedProjectInputHandled && projectInputCommand == 5;
+	if ((managedProjectFindHandled ||
+	     (!managedProjectInputHandled && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	      !projectInput.WantTextInput && !projectInput.KeyCtrl && !projectInput.KeySuper && !projectInput.KeyAlt &&
+	      !projectInput.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false))) &&
+	    selection.entries.size() == 1)
 	{
 		const auto* primary = selection.PrimaryEntry();
 		const auto* asset = primary && primary->kind == EditorSelectionKind::Asset && !primary->IsMissing() &&

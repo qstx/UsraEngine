@@ -80,10 +80,10 @@ internal static partial class NativeEditorBindings
 	internal static partial uint GetHierarchyMenuState();
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetHierarchyMenuCommand")]
 	internal static partial void SetHierarchyMenuCommand(uint command);
-	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetHierarchyInputState")]
-	internal static partial uint GetHierarchyInputState();
-	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetHierarchyInputCommand")]
-	internal static partial void SetHierarchyInputCommand(uint command);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetEditorInputState")]
+	internal static partial uint GetEditorInputState();
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::SetEditorInputCommand")]
+	internal static partial void SetEditorInputCommand(uint command);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::IsKeyPressed")]
 	internal static partial bool IsKeyPressed(uint key);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::GetKeyModifiers")]

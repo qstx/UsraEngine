@@ -49,7 +49,7 @@ public:
 
 	Result<void> Draw(ProjectWorkspace& workspace, ProjectBrowserModel& model, EditorSelectionContext& selection,
 	                  EditorHierarchy& hierarchy, bool& open, bool readOnly, String& diagnostic,
-	                  const ProjectBrowserActions& actions);
+	                  const ProjectBrowserActions& actions, const EditorHierarchy::InputAction& inputAction = {});
 
 private:
 	enum class ColumnFocusRequest

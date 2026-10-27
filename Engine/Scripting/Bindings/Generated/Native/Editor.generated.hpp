@@ -39,8 +39,8 @@ struct Table
 	Int32 (*NativeEditorBindings_GetComponentPayload)(void*, const Wire::Value_Ursa_NativeHandle*, Utf8View*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetContentRegionAvailableWidth)(void*, Float64*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetDocument)(void*, Wire::Value_Ursa_Editor_EditorDocumentValue_*, BindingOutcome*) = nullptr;
+	Int32 (*NativeEditorBindings_GetEditorInputState)(void*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetFontSize)(void*, Float64*, BindingOutcome*) = nullptr;
-	Int32 (*NativeEditorBindings_GetHierarchyInputState)(void*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetHierarchyMenuState)(void*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetImporterInfo)(void*, Wire::Value_Ursa_Editor_EditorImporterInfo_*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetKeyModifiers)(void*, UInt32*, BindingOutcome*) = nullptr;
@@ -89,7 +89,7 @@ struct Table
 	Int32 (*NativeEditorBindings_Separator)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_SetActiveCamera)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_SetComponentMenuCommand)(void*, UInt32, BindingOutcome*) = nullptr;
-	Int32 (*NativeEditorBindings_SetHierarchyInputCommand)(void*, UInt32, BindingOutcome*) = nullptr;
+	Int32 (*NativeEditorBindings_SetEditorInputCommand)(void*, UInt32, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_SetHierarchyMenuCommand)(void*, UInt32, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_SetNextItemWidth)(void*, Float64, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_SetPreviewCamera)(void*, UInt64, const Wire::Value_Ursa_Editor_PreviewCamera*, BindingOutcome*) = nullptr;
@@ -598,6 +598,20 @@ inline Int32 NativeEditorBindings_GetDocument(void* context, Wire::Value_Ursa_Ed
 	});
 }
 #line 1 "Editor.generated.hpp"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:84
+#line 84 "Ursa.Editor/NativeEditor.bindings.cs"
+inline Int32 NativeEditorBindings_GetEditorInputState(void* context, UInt32* result, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		if (!result) throw std::runtime_error("Null binding output");
+		using TargetSignature = Result<UInt32> (*)(BindingCall&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::GetEditorInputState), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.GetEditorInputState");
+		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::GetEditorInputState(call));
+		Check_Wire_c3f2029bb0eab1c0(*result);
+	});
+}
+#line 1 "Editor.generated.hpp"
 // Contract: Ursa.Editor/NativeEditor.bindings.cs:132
 #line 132 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_GetFontSize(void* context, Float64* result, BindingOutcome* outcome) noexcept
@@ -609,20 +623,6 @@ inline Int32 NativeEditorBindings_GetFontSize(void* context, Float64* result, Bi
 		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::GetFontSize), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.GetFontSize");
 		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::GetFontSize(call));
 		Check_Wire_2ce06a9e7f8c3e6b(*result);
-	});
-}
-#line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:84
-#line 84 "Ursa.Editor/NativeEditor.bindings.cs"
-inline Int32 NativeEditorBindings_GetHierarchyInputState(void* context, UInt32* result, BindingOutcome* outcome) noexcept
-{
-	return Invoke(context, outcome, 0, [&](BindingCall& call)
-	{
-		if (!result) throw std::runtime_error("Null binding output");
-		using TargetSignature = Result<UInt32> (*)(BindingCall&);
-		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::GetHierarchyInputState), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.GetHierarchyInputState");
-		*result = TakeBindingResult(::Ursa::Editor::Bindings::EditorServices::GetHierarchyInputState(call));
-		Check_Wire_c3f2029bb0eab1c0(*result);
 	});
 }
 #line 1 "Editor.generated.hpp"
@@ -1360,14 +1360,14 @@ inline Int32 NativeEditorBindings_SetComponentMenuCommand(void* context, UInt32 
 #line 1 "Editor.generated.hpp"
 // Contract: Ursa.Editor/NativeEditor.bindings.cs:86
 #line 86 "Ursa.Editor/NativeEditor.bindings.cs"
-inline Int32 NativeEditorBindings_SetHierarchyInputCommand(void* context, UInt32 p_command, BindingOutcome* outcome) noexcept
+inline Int32 NativeEditorBindings_SetEditorInputCommand(void* context, UInt32 p_command, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
 	{
 		Check_Wire_c3f2029bb0eab1c0(p_command);
 		using TargetSignature = Result<void> (*)(BindingCall&, UInt32);
-		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::SetHierarchyInputCommand), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.SetHierarchyInputCommand");
-		CompleteBindingResult(::Ursa::Editor::Bindings::EditorServices::SetHierarchyInputCommand(call, p_command));
+		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::SetEditorInputCommand), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.SetEditorInputCommand");
+		CompleteBindingResult(::Ursa::Editor::Bindings::EditorServices::SetEditorInputCommand(call, p_command));
 	});
 }
 #line 1 "Editor.generated.hpp"
@@ -1723,8 +1723,8 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_GetComponentPayload,
 		&NativeEditorBindings_GetContentRegionAvailableWidth,
 		&NativeEditorBindings_GetDocument,
+		&NativeEditorBindings_GetEditorInputState,
 		&NativeEditorBindings_GetFontSize,
-		&NativeEditorBindings_GetHierarchyInputState,
 		&NativeEditorBindings_GetHierarchyMenuState,
 		&NativeEditorBindings_GetImporterInfo,
 		&NativeEditorBindings_GetKeyModifiers,
@@ -1773,7 +1773,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_Separator,
 		&NativeEditorBindings_SetActiveCamera,
 		&NativeEditorBindings_SetComponentMenuCommand,
-		&NativeEditorBindings_SetHierarchyInputCommand,
+		&NativeEditorBindings_SetEditorInputCommand,
 		&NativeEditorBindings_SetHierarchyMenuCommand,
 		&NativeEditorBindings_SetNextItemWidth,
 		&NativeEditorBindings_SetPreviewCamera,
@@ -1794,7 +1794,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_Vector4Field,
 		&NativeEditorBindings_WantsTextInput,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 101, &table, &ValidateBindingContext, {0x40, 0xb4, 0xb1, 0x7b, 0xa0, 0x6a, 0x4b, 0x1a, 0x79, 0x7e, 0x1a, 0x8e, 0x5c, 0x1f, 0xac, 0x99, 0x26, 0xbe, 0x97, 0x5b, 0x6f, 0xac, 0xa4, 0x9c, 0xf8, 0x6a, 0x93, 0xc1, 0xdc, 0x15, 0xa8, 0xfc}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 101, &table, &ValidateBindingContext, {0xdd, 0x5f, 0x09, 0x2a, 0x4d, 0xde, 0x1d, 0x60, 0xdc, 0xe4, 0x56, 0xa1, 0x87, 0xbb, 0xbe, 0xc4, 0x46, 0xa1, 0xca, 0x06, 0x13, 0x92, 0x12, 0x1f, 0x88, 0x87, 0x83, 0xa4, 0x2b, 0xe6, 0x82, 0x28}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Editor

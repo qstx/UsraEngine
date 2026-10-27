@@ -264,7 +264,7 @@ internal sealed class ExtensionRegistry : IEditorExtensionSession
 		try
 		{
 			registry.callbacks.Add("hierarchy-context-menu", EditorGui.DrawHierarchyContextMenu);
-			registry.callbacks.Add("hierarchy-input", EditorGui.DrawHierarchyInput);
+			registry.callbacks.Add("editor-input", EditorGui.DrawEditorInput);
 			foreach (Type type in types)
 			{
 				foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly))

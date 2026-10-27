@@ -23,11 +23,11 @@ public static class EditorContext
 		_ = EditorApi.Generation;
 		NativeEditorBindings.SetHierarchyMenuCommand(command);
 	}
-	internal static uint HierarchyInputState { get { _ = EditorApi.Generation; return NativeEditorBindings.GetHierarchyInputState(); } }
-	internal static void SetHierarchyInputCommand(uint command)
+	internal static uint EditorInputState { get { _ = EditorApi.Generation; return NativeEditorBindings.GetEditorInputState(); } }
+	internal static void SetEditorInputCommand(uint command)
 	{
 		_ = EditorApi.Generation;
-		NativeEditorBindings.SetHierarchyInputCommand(command);
+		NativeEditorBindings.SetEditorInputCommand(command);
 	}
 	public static void OpenTagLayerSettings(bool layers) { _ = EditorApi.Generation; NativeEditorBindings.OpenTagLayerSettings(layers); }
 	public static EditorReference ResolveObject(EditorReferenceKind kind, string persistentId)

@@ -32,8 +32,8 @@ struct ManagedEditorContext
 	UInt32 componentMenuCommand = 0;
 	UInt32 hierarchyMenuState = 0;
 	UInt32 hierarchyMenuCommand = 0;
-	UInt32 hierarchyInputState = 0;
-	UInt32 hierarchyInputCommand = 0;
+	UInt32 editorInputState = 0;
+	UInt32 editorInputCommand = 0;
 	Vector<GameObject::Ptr> gameObjectTargets;
 	Size gameObjectPrimaryIndex = 0;
 	Vector<String> projectTags;

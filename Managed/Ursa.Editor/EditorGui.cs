@@ -44,7 +44,7 @@ public static class EditorGui
 		_ = EditorApi.Generation;
 		return NativeEditorBindings.MenuItem(label, enabled);
 	}
-	internal static bool IsHierarchyKeyPressed(uint key)
+	internal static bool IsEditorKeyPressed(uint key)
 	{
 		_ = EditorApi.Generation;
 		return NativeEditorBindings.IsKeyPressed(key);
@@ -96,15 +96,37 @@ public static class EditorGui
 		Item(state, 14, "Rename", "F2", Enabled(state, 14));
 		Item(state, 15, "Delete", "Delete", Enabled(state, 15));
 	}
-	internal static void DrawHierarchyInput()
+	internal static void DrawEditorInput()
 	{
-		uint state = EditorContext.HierarchyInputState;
+		uint state = EditorContext.EditorInputState;
+		if ((state & (1u << 25)) != 0)
+		{
+			bool focused = (state & 1u) != 0;
+			if (!focused || WantsTextInput) return;
+			uint projectModifiers = KeyModifiers;
+			bool projectControl = (projectModifiers & 9u) != 0;
+			bool projectShift = (projectModifiers & 2u) != 0;
+			bool projectAlt = (projectModifiers & 4u) != 0;
+			uint projectCommand = 0;
+			if (projectAlt && !projectControl && !projectShift && IsEditorKeyPressed(11) && (state & (1u << 1)) != 0)
+				projectCommand = 1;
+			else if (projectAlt && !projectControl && !projectShift && IsEditorKeyPressed(12) && (state & (1u << 2)) != 0)
+				projectCommand = 2;
+			else if (projectControl && projectShift && !projectAlt && IsEditorKeyPressed(16) && (state & (1u << 3)) != 0)
+				projectCommand = 3;
+			else if ((state & (1u << 4)) != 0 && IsEditorKeyPressed(15))
+				projectCommand = 4;
+			else if (!projectControl && !projectShift && !projectAlt && IsEditorKeyPressed(17) && (state & (1u << 5)) != 0)
+				projectCommand = 5;
+			if (projectCommand != 0) EditorContext.SetEditorInputCommand(projectCommand);
+			return;
+		}
 		if ((state & (1u << 24)) != 0)
 		{
 			uint distanceToTop = (state >> 12) & 0xfffu;
 			uint distanceToBottom = state & 0xfffu;
 			uint zone = distanceToBottom <= 64u ? 3u : distanceToTop <= 64u ? 1u : 2u;
-			EditorContext.SetHierarchyInputCommand(zone);
+			EditorContext.SetEditorInputCommand(zone);
 			return;
 		}
 		if ((state & (1u << 29)) != 0)
@@ -120,7 +142,7 @@ public static class EditorGui
 			bool editable = (state & (1u << 27)) != 0;
 			bool doubleClick = (state & (1u << 26)) != 0;
 			if (label && editable && !clickControl && !clickShift && !clickAlt && !doubleClick) clickCommand |= 4u;
-			EditorContext.SetHierarchyInputCommand(clickCommand);
+			EditorContext.SetEditorInputCommand(clickCommand);
 			return;
 		}
 		bool hierarchyFocused = (state & (1u << 31)) != 0;
@@ -134,31 +156,31 @@ public static class EditorGui
 		uint command = 0;
 		if (searchFocused)
 		{
-			if (IsHierarchyKeyPressed(5) && (state & (1u << 14)) != 0) command = 15;
-			else if (IsHierarchyKeyPressed(6) && (state & (1u << 15)) != 0) command = 16;
+			if (IsEditorKeyPressed(5) && (state & (1u << 14)) != 0) command = 15;
+			else if (IsEditorKeyPressed(6) && (state & (1u << 15)) != 0) command = 16;
 		}
 		else if (hierarchyFocused)
 		{
-			if (control && IsHierarchyKeyPressed(1) && (state & 1u) != 0) command = 1;
-			else if (shift && IsHierarchyKeyPressed(3) && (state & 2u) != 0) command = 2;
-			else if (control && !shift && IsHierarchyKeyPressed(4) && (state & 4u) != 0) command = 3;
-			else if (shift && IsHierarchyKeyPressed(2) && (state & 8u) != 0) command = 4;
-			else if (IsHierarchyKeyPressed(5) && (state & (1u << 4)) != 0) command = 5;
-			else if (IsHierarchyKeyPressed(6) && (state & (1u << 5)) != 0) command = 6;
-			else if (IsHierarchyKeyPressed(7) && (state & (1u << 6)) != 0) command = 7;
-			else if (IsHierarchyKeyPressed(8) && (state & (1u << 7)) != 0) command = 8;
-			else if (IsHierarchyKeyPressed(9) && (state & (1u << 8)) != 0) command = 9;
-			else if (IsHierarchyKeyPressed(10) && (state & (1u << 9)) != 0) command = 10;
-			else if (IsHierarchyKeyPressed(11) && (state & (1u << 10)) != 0) command = 11;
-			else if (IsHierarchyKeyPressed(12) && (state & (1u << 11)) != 0) command = 12;
-			else if (!control && !shift && !alt && IsHierarchyKeyPressed(13) && (state & (1u << 12)) != 0) command = 13;
-			else if (!control && !shift && !alt && IsHierarchyKeyPressed(14) && (state & (1u << 13)) != 0) command = 14;
+			if (control && IsEditorKeyPressed(1) && (state & 1u) != 0) command = 1;
+			else if (shift && IsEditorKeyPressed(3) && (state & 2u) != 0) command = 2;
+			else if (control && !shift && IsEditorKeyPressed(4) && (state & 4u) != 0) command = 3;
+			else if (shift && IsEditorKeyPressed(2) && (state & 8u) != 0) command = 4;
+			else if (IsEditorKeyPressed(5) && (state & (1u << 4)) != 0) command = 5;
+			else if (IsEditorKeyPressed(6) && (state & (1u << 5)) != 0) command = 6;
+			else if (IsEditorKeyPressed(7) && (state & (1u << 6)) != 0) command = 7;
+			else if (IsEditorKeyPressed(8) && (state & (1u << 7)) != 0) command = 8;
+			else if (IsEditorKeyPressed(9) && (state & (1u << 8)) != 0) command = 9;
+			else if (IsEditorKeyPressed(10) && (state & (1u << 9)) != 0) command = 10;
+			else if (IsEditorKeyPressed(11) && (state & (1u << 10)) != 0) command = 11;
+			else if (IsEditorKeyPressed(12) && (state & (1u << 11)) != 0) command = 12;
+			else if (!control && !shift && !alt && IsEditorKeyPressed(13) && (state & (1u << 12)) != 0) command = 13;
+			else if (!control && !shift && !alt && IsEditorKeyPressed(14) && (state & (1u << 13)) != 0) command = 14;
 		}
 		if (command != 0)
 		{
 			if (shift) command |= 1u << 16;
 			if (alt) command |= 1u << 17;
-			EditorContext.SetHierarchyInputCommand(command);
+			EditorContext.SetEditorInputCommand(command);
 		}
 	}
 	public static int DragDropArrayElement(string id, int index, int count)
