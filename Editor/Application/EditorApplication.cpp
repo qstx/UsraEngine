@@ -1,6 +1,7 @@
 #include <Ui/EditorIcons.hpp>
 #include <Core/Types.hpp>
 #include <Application/EditorApplication.hpp>
+#include <Assets/ExternalProjectImport.hpp>
 #include <EditorIcon.hpp>
 #include <stb_image.h>
 #include <Assets/AssetImportPipeline.hpp>
@@ -3251,127 +3252,8 @@ Result<void> EditorApplication::ImportExternalProjectFiles(const Vector<String>&
 	{
 		return Result<void>::Failure("Drop files into Project after opening a project and stopping Play mode");
 	}
-	const std::filesystem::path assetsRoot = workspace->AssetsRoot().lexically_normal();
-	const std::filesystem::path destination = (assetsRoot / ToStdString(destinationFolder)).lexically_normal();
-	const std::filesystem::path relativeDestination = destination.lexically_relative(assetsRoot);
-	if (relativeDestination.empty() || relativeDestination.is_absolute() ||
-	    *relativeDestination.begin() == std::filesystem::path(".."))
-	{
-		return Result<void>::Failure("The Project drop destination is outside the Assets folder");
-	}
-	std::error_code error;
-	std::filesystem::create_directories(destination, error);
-	if (error)
-	{
-		return Result<void>::Failure("Could not create the Project drop folder: " + ToUrsaString(error.message()));
-	}
-	const auto canonicalAssetsRoot = std::filesystem::weakly_canonical(assetsRoot, error);
-	const auto canonicalDestination = std::filesystem::weakly_canonical(destination, error);
-	if (error || canonicalDestination.lexically_relative(canonicalAssetsRoot).empty() ||
-	    *canonicalDestination.lexically_relative(canonicalAssetsRoot).begin() == std::filesystem::path(".."))
-	{
-		return Result<void>::Failure("The Project drop destination resolves outside the Assets folder");
-	}
-	auto uniquePath = [](const std::filesystem::path& requested)
-	{
-		if (!std::filesystem::exists(requested))
-		{
-			return requested;
-		}
-		const auto parent = requested.parent_path();
-		const auto extension = requested.has_extension() ? requested.extension() : std::filesystem::path{};
-		const auto stem = requested.has_extension() ? requested.stem() : requested.filename();
-		for (UInt32 suffix = 1;; ++suffix)
-		{
-			const auto candidate = parent / (stem.string() + " (" + std::to_string(suffix) + ")" + extension.string());
-			if (!std::filesystem::exists(candidate))
-			{
-				return candidate;
-			}
-		}
-	};
-	for (const String& droppedPath : paths)
-	{
-		const std::filesystem::path source = std::filesystem::path(ToStdString(droppedPath)).lexically_normal();
-		const auto sourceStatus = std::filesystem::symlink_status(source, error);
-		if (error || std::filesystem::is_symlink(sourceStatus))
-		{
-			return Result<void>::Failure("Could not read dropped path: " + droppedPath);
-		}
-		if (std::filesystem::is_regular_file(sourceStatus))
-		{
-			const auto target = uniquePath(destination / source.filename());
-			std::filesystem::copy_file(source, target, std::filesystem::copy_options::none, error);
-			if (error)
-			{
-				return Result<void>::Failure("Could not import " + droppedPath + ": " + ToUrsaString(error.message()));
-			}
-			continue;
-		}
-		if (!std::filesystem::is_directory(sourceStatus))
-		{
-			continue;
-		}
-		const auto targetRoot = uniquePath(destination / source.filename());
-		std::filesystem::create_directories(targetRoot, error);
-		if (error)
-		{
-			return Result<void>::Failure("Could not create imported folder: " + ToUrsaString(error.message()));
-		}
-		for (std::filesystem::recursive_directory_iterator iterator(source,
-		                                                           std::filesystem::directory_options::skip_permission_denied,
-		                                                           error),
-		     end;
-		     iterator != end; iterator.increment(error))
-		{
-			if (error)
-			{
-				error.clear();
-				continue;
-			}
-			const auto status = iterator->symlink_status(error);
-			if (error || std::filesystem::is_symlink(status))
-			{
-				iterator.disable_recursion_pending();
-				error.clear();
-				continue;
-			}
-			const auto relative = std::filesystem::relative(iterator->path(), source, error);
-			if (error)
-			{
-				return Result<void>::Failure("Could not resolve imported folder contents: " + ToUrsaString(error.message()));
-			}
-			const auto target = targetRoot / relative;
-			if (std::filesystem::is_directory(status))
-			{
-				std::filesystem::create_directories(target, error);
-			}
-			else if (std::filesystem::is_regular_file(status))
-			{
-				std::filesystem::create_directories(target.parent_path(), error);
-				if (!error)
-				{
-					std::filesystem::copy_file(iterator->path(), target, std::filesystem::copy_options::none, error);
-				}
-			}
-			if (error)
-			{
-				return Result<void>::Failure("Could not import folder contents: " + ToUrsaString(error.message()));
-			}
-		}
-	}
-	RequestAssetImport();
-	auto refreshed = workspace->Refresh();
-	if (!refreshed)
-	{
-		return refreshed;
-	}
-	refreshed = projectBrowser.Refresh(*workspace);
-	if (refreshed)
-	{
-		projectBrowser.ReconcileSelection(selectionContext);
-	}
-	return refreshed;
+	return Ursa::Editor::ImportExternalProjectFiles(*workspace, projectBrowser, selectionContext, paths,
+	                                                destinationFolder, [this] { RequestAssetImport(); });
 }
 
 Result<void> EditorApplication::CreateProjectAsset(ResourceKind kind, MaterialType materialType,

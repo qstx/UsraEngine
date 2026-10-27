@@ -88,6 +88,8 @@ public:
 
 	Result<void> Deserialize(const ArchiveReader& reader, SerializationContext& context) override;
 
+	Result<ShaderAsset> CopyWithIdentity(ResourceId newId) const;
+
 	ResourceId id;
 	String name;
 	String customEditor;

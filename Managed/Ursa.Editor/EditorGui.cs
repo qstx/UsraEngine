@@ -278,6 +278,11 @@ public static class EditorGui
 		ArgumentNullException.ThrowIfNull(property);
 		if (property.PropertyType != SerializedPropertyType.Quaternion)
 			throw new ArgumentException("Euler angle fields require a Quaternion property.", nameof(property));
+		if (property.SerializedObject.IsEditingMultipleObjects)
+		{
+			NativeEditorBindings.EulerAnglesPropertyField(property.Revision, property.StoragePath, label);
+			return;
+		}
 		Quaternion original = property.QuaternionValue;
 		Vector3 euler = ToEulerAngles(original);
 		Vector3 edited = Vector3Field(label, euler, property.HasMultipleDifferentValues);
@@ -393,28 +398,40 @@ public static class EditorGui
 				if (editedIndex >= 0 && editedIndex != originalIndex) property.EnumValueIndex = editedIndex;
 				break;
 			case SerializedPropertyType.Vector2:
+				if (property.SerializedObject.IsEditingMultipleObjects)
+				{
+					NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, caption);
+					break;
+				}
 				Vector2 originalVector2 = property.Vector2Value;
 				Vector2 editedVector2 = Vector2Field(caption, originalVector2, property.HasMultipleDifferentValues);
 				if (!editedVector2.Equals(originalVector2) ||
 				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.Vector2Value = editedVector2;
 				break;
 			case SerializedPropertyType.Vector3:
+				if (property.SerializedObject.IsEditingMultipleObjects)
+				{
+					NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, caption);
+					break;
+				}
 				Vector3 originalVector3 = property.Vector3Value;
 				Vector3 editedVector3 = Vector3Field(caption, originalVector3, property.HasMultipleDifferentValues);
 				if (!editedVector3.Equals(originalVector3) ||
 				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.Vector3Value = editedVector3;
 				break;
 			case SerializedPropertyType.Vector4:
+				if (property.SerializedObject.IsEditingMultipleObjects)
+				{
+					NativeEditorBindings.PropertyField(property.Revision, property.StoragePath, caption);
+					break;
+				}
 				Vector4 originalVector4 = property.Vector4Value;
 				Vector4 editedVector4 = Vector4Field(caption, originalVector4, property.HasMultipleDifferentValues);
 				if (!editedVector4.Equals(originalVector4) ||
 				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.Vector4Value = editedVector4;
 				break;
 			case SerializedPropertyType.Quaternion:
-				Quaternion originalQuaternion = property.QuaternionValue;
-				Quaternion editedQuaternion = QuaternionField(caption, originalQuaternion, property.HasMultipleDifferentValues);
-				if (!editedQuaternion.Equals(originalQuaternion) ||
-				    property.HasMultipleDifferentValues && WasLastControlEdited()) property.QuaternionValue = editedQuaternion;
+				EulerAnglesField(caption, property);
 				break;
 			case SerializedPropertyType.Color:
 				Color originalColor = property.ColorValue;

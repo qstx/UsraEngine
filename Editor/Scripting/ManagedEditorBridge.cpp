@@ -4,15 +4,77 @@
 #if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/Bindings/EditorServices.hpp>
 #include <Editor.generated.hpp>
+#include <imgui.h>
+#include <imgui_internal.h>
 
 namespace Ursa::Editor
 {
+String ManagedInspectorSelectionKey(const ManagedEditorContext& context)
+{
+	if (context.componentTargets.size() <= 1 && context.gameObjectTargets.size() <= 1)
+	{
+		return {};
+	}
+	String key = "managed-inspector-selection:";
+	if (context.document)
+	{
+		key += context.document->Id().ToString();
+	}
+	key += ":components:" + ToUrsaString(std::to_string(context.componentPrimaryIndex));
+	for (const auto* component : context.componentTargets)
+	{
+		key += ":";
+		if (component)
+		{
+			key += component->PersistentId().ToString();
+		}
+	}
+	key += ":objects:" + ToUrsaString(std::to_string(context.gameObjectPrimaryIndex));
+	for (const auto& object : context.gameObjectTargets)
+	{
+		key += ":";
+		if (object)
+		{
+			key += object->Id().ToString();
+		}
+	}
+	return key;
+}
+
+namespace
+{
+struct InspectorSelectionIdScope
+{
+	bool pushed = false;
+
+	InspectorSelectionIdScope(const String& extensionId, const ManagedEditorContext& context)
+	{
+		const String key = ManagedInspectorSelectionKey(context);
+		if (extensionId.rfind("inspector", 0) == 0 && !key.empty() && ImGui::GetCurrentContext() &&
+		    ImGui::GetCurrentContext()->CurrentWindow)
+		{
+			ImGui::PushID(key.c_str());
+			pushed = true;
+		}
+	}
+
+	~InspectorSelectionIdScope()
+	{
+		if (pushed)
+		{
+			ImGui::PopID();
+		}
+	}
+};
+} // namespace
+
 Result<bool> InvokeManagedEditorExtension(Scripting::DotNetHost& host, UInt64 sessionId, const String& extensionId,
                                           ManagedEditorContext& context)
 {
 	try
 	{
 		Bindings::EditorInvocation invocation(context, sessionId);
+		InspectorSelectionIdScope selectionId(extensionId, context);
 		invocation.hostToken = host.Token();
 		const Scripting::Bindings::BindingModuleReference capability{Scripting::Bindings::Editor::moduleId,
 		                                                             &Scripting::Bindings::Editor::NativeDescriptor(),

@@ -22,11 +22,18 @@ Vec3 Cross(Vec3 a, Vec3 b)
 
 Vec3 Normalized(Vec3 value)
 {
-	const Ursa::Float32 length = std::sqrt(Dot(value, value));
-	if (length <= 0.000001f)
+	if (!std::isfinite(value.x) || !std::isfinite(value.y) || !std::isfinite(value.z))
+	{
+		throw std::invalid_argument("Cannot normalize a non-finite vector");
+	}
+	const double length = std::hypot(std::hypot(static_cast<double>(value.x), static_cast<double>(value.y)),
+	                                 static_cast<double>(value.z));
+	if (length <= 0.000001)
 	{
 		throw std::invalid_argument("Cannot normalize a zero-length vector");
 	}
-	return {value.x / length, value.y / length, value.z / length};
+	return {static_cast<Ursa::Float32>(static_cast<double>(value.x) / length),
+	        static_cast<Ursa::Float32>(static_cast<double>(value.y) / length),
+	        static_cast<Ursa::Float32>(static_cast<double>(value.z) / length)};
 }
 } // namespace Ursa

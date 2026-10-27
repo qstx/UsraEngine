@@ -158,15 +158,21 @@ void TestClickedSourceDoesNotChangeSelection()
 	EditorSelectionContext selection;
 	Expect(selection.SelectEntries({primary, secondary}, 0), "Could not establish the current Project selection");
 	const auto before = selection;
-	const auto selectedDrag = Take(BeginEditorDragSession(selection, primary));
+	const auto selectedDrag = Take(BeginEditorDragSession(selection, primary, false));
 	const auto selectedSources = Take(ResolveEditorDragSession(selectedDrag, before.revision));
 	Expect(selectedSources.sources.size() == 2 && selectedSources.sources[0].identity.SameIdentity(primary) &&
 	           selectedSources.sources[1].identity.SameIdentity(secondary),
 	       "Dragging a selected Project item did not preserve the selected source set");
-	const auto unselectedDrag = Take(BeginEditorDragSession(selection, unselected));
+	const auto unselectedDrag = Take(BeginEditorDragSession(selection, unselected, false));
 	const auto unselectedSources = Take(ResolveEditorDragSession(unselectedDrag, before.revision));
 	Expect(unselectedSources.sources.size() == 1 && unselectedSources.sources.front().identity.SameIdentity(unselected),
 	       "Dragging an unselected Project item incorrectly used the previous selection set");
+	const auto modifiedDrag = Take(BeginEditorDragSession(selection, unselected, true));
+	const auto modifiedSources = Take(ResolveEditorDragSession(modifiedDrag, before.revision));
+	Expect(modifiedSources.sources.size() == 3 && modifiedSources.sources[0].identity.SameIdentity(primary) &&
+	           modifiedSources.sources[1].identity.SameIdentity(secondary) &&
+	           modifiedSources.sources[2].identity.SameIdentity(unselected),
+	       "Modified drag did not retain the selected items and add the clicked source");
 	Expect(selection.revision == before.revision && selection.entries.size() == before.entries.size() &&
 	           selection.entries[0].SameIdentity(primary) && selection.entries[1].SameIdentity(secondary),
 	       "Starting a Project drag changed the Inspector selection target set");

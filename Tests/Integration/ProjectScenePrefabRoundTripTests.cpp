@@ -154,21 +154,68 @@ int main(int count, char** arguments)
 		auto linked = Take(LoadLinkedSceneResource(filesystem, scenePath, registry, sceneContext));
 		const ResourceId sceneId = linked.id;
 		auto root = linked.scene->RootGameObjects().front();
+		Expect(Take(root->Tag()) == "Untagged" && !Take(root->IsStatic()),
+		       "Legacy Scene did not default missing GameObject Tag and Static fields");
+		Expect(!root->SetTag("") && Take(root->Tag()) == "Untagged",
+		       "An invalid GameObject Tag was accepted or replaced the prior value");
+		Done(root->SetTag("SceneRoundTrip"));
+		Done(root->SetStatic(true));
 		Expect(root->Id().ToString() == "75727361-0000-0000-0100-000000000001", "Snake Scene root ID changed");
 		ValidateController(ScriptComponent(root, "Ursa.Demo.SnakeController, Ursa.Game"));
 		Expect(linked.document.value("instances", nlohmann::json::array()).size() == 1,
 		       "Snake Scene lost its Board Prefab reference");
 		ValidatePresentation(*linked.scene);
+		const ResourceId prefabInstance = Take(ResourceId::Parse(
+		    ToUrsaString(linked.document["instances"][0]["id"].get<std::string>())));
+		const auto instanceScope = linked.scopedIds.find(prefabInstance.ToString());
+		Expect(instanceScope != linked.scopedIds.end() && !instanceScope->second.empty(),
+		       "Loaded Board Prefab instance has no source-to-instance object map");
+		String overriddenSourceObject;
+		Float32 savedPrefabPositionX = 0.f;
+		for (const auto& [sourceObjectText, instanceObjectText] : instanceScope->second)
+		{
+			auto instanceObjectId = ResourceId::Parse(instanceObjectText);
+			if (!instanceObjectId)
+			{
+				continue;
+			}
+			auto instanceObject = linked.scene->GameObjectById(instanceObjectId.value);
+			if (!instanceObject)
+			{
+				continue;
+			}
+			auto localTransform = linked.scene->GetLocalTransform(instanceObject.value);
+			if (!localTransform)
+			{
+				continue;
+			}
+			localTransform.value.position.x += 0.125f;
+			Done(linked.scene->SetLocalTransform(instanceObject.value, localTransform.value));
+			overriddenSourceObject = sourceObjectText;
+			savedPrefabPositionX = localTransform.value.position.x;
+			break;
+		}
+		Expect(!overriddenSourceObject.empty(), "Could not edit an instantiated Board Prefab object");
 		Done(SaveLinkedSceneResource(filesystem, scenePath, linked, registry));
+		const auto& positionOverride =
+		    linked.document["instances"][0]["overrides"]["properties"][ToStdString(overriddenSourceObject)]
+		                   ["/localTransform/position/0"];
+		Expect(positionOverride.is_number() &&
+		           std::abs(positionOverride.get<Float32>() - savedPrefabPositionX) < 0.00001f,
+		       "Saving an edited Prefab instance did not persist its local-position delta");
 		linked.scene->Clear();
 
 		ComponentLoadContext prefabContext(*resources);
 		auto prefab = Take(LoadPrefabResource(filesystem, prefabPath, registry, prefabContext));
 		Expect(prefab.id.ToString() == "75727361-0000-0000-0300-000000000001",
 		       "Snake Board Prefab resource ID changed");
-		ValidateBoard(prefab.scene->RootGameObjects().front());
-		Done(SavePrefabResource(filesystem, prefabPath, prefab.id, *prefab.scene,
-		                        prefab.scene->RootGameObjects().front(), registry));
+		auto board = prefab.scene->RootGameObjects().front();
+		Expect(Take(board->Tag()) == "Untagged" && !Take(board->IsStatic()),
+		       "Legacy Prefab did not default missing GameObject Tag and Static fields");
+		Done(board->SetTag("PrefabRoundTrip"));
+		Done(board->SetStatic(true));
+		ValidateBoard(board);
+		Done(SavePrefabResource(filesystem, prefabPath, prefab.id, *prefab.scene, board, registry));
 		prefab.scene->Clear();
 
 		ComponentLoadContext reloadedSceneContext(*resources);
@@ -176,16 +223,33 @@ int main(int count, char** arguments)
 		Expect(reloadedScene.id == sceneId && reloadedScene.scene->RootGameObjects().front()->Id().ToString() ==
 		                                          "75727361-0000-0000-0100-000000000001",
 		       "Snake Scene IDs changed after saving and reopening");
+		auto reloadedRoot = reloadedScene.scene->RootGameObjects().front();
+		Expect(Take(reloadedRoot->Tag()) == "SceneRoundTrip" && Take(reloadedRoot->IsStatic()),
+		       "GameObject Tag or Static state changed after saving and reopening a Scene");
 		ValidateController(
 		    ScriptComponent(reloadedScene.scene->RootGameObjects().front(), "Ursa.Demo.SnakeController, Ursa.Game"));
 		ValidatePresentation(*reloadedScene.scene);
+		const auto reloadedScope = reloadedScene.scopedIds.find(prefabInstance.ToString());
+		Expect(reloadedScope != reloadedScene.scopedIds.end(), "Reopened Scene lost its Prefab instance scope");
+		const auto reloadedObjectMapping = reloadedScope->second.find(overriddenSourceObject);
+		Expect(reloadedObjectMapping != reloadedScope->second.end(),
+		       "Reopened Scene lost the Prefab source-to-instance object mapping");
+		const ResourceId reloadedInstanceObjectId = Take(ResourceId::Parse(reloadedObjectMapping->second));
+		auto reloadedInstanceObject = Take(reloadedScene.scene->GameObjectById(reloadedInstanceObjectId));
+		const LocalTransform reloadedInstanceTransform =
+		    Take(reloadedScene.scene->GetLocalTransform(reloadedInstanceObject));
+		Expect(std::abs(reloadedInstanceTransform.position.x - savedPrefabPositionX) < 0.00001f,
+		       "Reopened Scene did not reapply the saved Prefab instance position delta");
 		reloadedScene.scene->Clear();
 
 		ComponentLoadContext reloadedPrefabContext(*resources);
 		auto reloadedPrefab = Take(LoadPrefabResource(filesystem, prefabPath, registry, reloadedPrefabContext));
 		Expect(reloadedPrefab.id.ToString() == "75727361-0000-0000-0300-000000000001",
 		       "Snake Prefab ID changed after saving and reopening");
-		ValidateBoard(reloadedPrefab.scene->RootGameObjects().front());
+		auto reloadedBoard = reloadedPrefab.scene->RootGameObjects().front();
+		Expect(Take(reloadedBoard->Tag()) == "PrefabRoundTrip" && Take(reloadedBoard->IsStatic()),
+		       "GameObject Tag or Static state changed after saving and reopening a Prefab");
+		ValidateBoard(reloadedBoard);
 		reloadedPrefab.scene->Clear();
 		std::cout << "C# Snake Scene and Board Prefab round-trip passed.\n";
 		return 0;

@@ -230,6 +230,8 @@ struct EditorServices
 	static Result<B::DataView> GetPropertyPaths(B::BindingCall& call, UInt64 revision);
 	static Result<void> PropertyField(B::BindingCall& call, UInt64 revision, const B::Utf8View& path,
 	                                  const B::Utf8View& label);
+	static Result<void> EulerAnglesPropertyField(B::BindingCall& call, UInt64 revision, const B::Utf8View& path,
+	                                             const B::Utf8View& label);
 	static Result<bool> DrawDefaultInspector(B::BindingCall& call, UInt64 revision);
 };
 } // namespace Ursa::Editor::Bindings

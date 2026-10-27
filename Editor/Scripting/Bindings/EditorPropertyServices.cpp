@@ -1,7 +1,10 @@
 #include <Scripting/Bindings/EditorServices.hpp>
 #include <Scripting/Bindings/BindingAssets.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
+#include <Scripting/Bindings/MixedScalarInput.hpp>
+#include <Scene/EditorRotation.hpp>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <algorithm>
 #include <limits>
 
@@ -137,7 +140,7 @@ Result<Json> ReadPropertyJson(EditorInvocation& scope, const String& path)
 {
 	if (scope.propertyGroup)
 	{
-		return scope.propertyGroup->TargetValue(scope.source.componentPrimaryIndex, path);
+		return scope.propertyGroup->TargetValue(scope.propertyGroup->PrimaryIndex(), path);
 	}
 	auto property = scope.properties->FindProperty(path);
 	return property ? property.value.Value() : Result<Json>::Failure(property.error);
@@ -165,7 +168,12 @@ Result<void> SetPropertyValue(EditorInvocation& scope, const String& path, Json 
 
 Vector<String> PropertyPaths(EditorInvocation& scope)
 {
-	return scope.propertyGroup ? scope.propertyGroup->CommonPropertyPaths() : scope.properties->PropertyPaths();
+	auto paths = scope.propertyGroup ? scope.propertyGroup->CommonPropertyPaths() : scope.properties->PropertyPaths();
+	const Size fieldPrefixLength = String("/Fields/").size();
+	paths.erase(std::remove_if(paths.begin(), paths.end(), [fieldPrefixLength](const String& path)
+	                           { return path.find('/', fieldPrefixLength) != String::npos; }),
+	            paths.end());
+	return paths;
 }
 
 bool HasPendingPropertyChanges(EditorInvocation& scope)
@@ -805,6 +813,59 @@ void EditorServices::DrawProperty(B::BindingCall& call, const String& path, cons
 	auto value = state.F_Value;
 	ImGui::PushID(path.c_str());
 	PropertyIdScope idScope;
+	if (scope.propertyGroup &&
+	    (state.F_Type == P::V_Vector2 || state.F_Type == P::V_Vector3 || state.F_Type == P::V_Vector4))
+	{
+		const int count = state.F_Type == P::V_Vector2 ? 2 : state.F_Type == P::V_Vector3 ? 3 : 4;
+		Vector<PropertyState> components;
+		for (int index = 0; index < count; ++index)
+		{
+			const String componentPath = path + "/" + ToUrsaString(std::to_string(index));
+			components.push_back(
+			    B::TakeBindingResult(GetProperty(call, scope.revision, call.arena.StringValue(componentPath))));
+		}
+		Vector<std::pair<String, Float32>> edits;
+		ImGui::BeginGroup();
+		ImGui::PushID(label.c_str());
+		ImGui::PushMultiItemsWidths(count, ImGui::CalcItemWidth());
+		for (int index = 0; index < count; ++index)
+		{
+			ImGui::PushID(index);
+			if (index > 0)
+			{
+				ImGui::SameLine(0.f, ImGui::GetStyle().ItemInnerSpacing.x);
+			}
+			Float32 component = static_cast<Float32>(components[index].F_Value.F_Float);
+			const bool mixed = components[index].F_HasMultipleDifferentValues != 0;
+			const bool explicitSameValue = mixed && ExplicitMixedFloatInput(ImGui::GetID(""), component);
+			ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, mixed);
+			const bool edited = ImGui::DragFloat("", &component, 0.05f);
+			const bool committedSameValue = MixedFloatInputCommitted(explicitSameValue);
+			if (edited || committedSameValue)
+			{
+				edits.emplace_back(path + "/" + ToUrsaString(std::to_string(index)), component);
+			}
+			ImGui::PopItemFlag();
+			ImGui::PopID();
+			ImGui::PopItemWidth();
+		}
+		ImGui::PopID();
+		const char* labelEnd = ImGui::FindRenderedTextEnd(label.c_str());
+		if (labelEnd != label.c_str())
+		{
+			ImGui::SameLine(0.f, ImGui::GetStyle().ItemInnerSpacing.x);
+			ImGui::TextUnformatted(label.c_str(), labelEnd);
+		}
+		ImGui::EndGroup();
+		for (const auto& [componentPath, component] : edits)
+		{
+			PropertyValue edited;
+			edited.F_Type = P::V_Float;
+			edited.F_Float = component;
+			B::CompleteBindingResult(SetProperty(call, scope.revision, call.arena.StringValue(componentPath), edited));
+		}
+		return;
+	}
 	switch (state.F_Type)
 	{
 		case P::V_Boolean:
@@ -1028,6 +1089,99 @@ Result<void> EditorServices::PropertyField(B::BindingCall& call, UInt64 revision
 	scope.RequireProperties(revision);
 	DrawProperty(call, B::ReadString(path), B::ReadString(label));
 	return {};
+}
+
+Result<void> EditorServices::EulerAnglesPropertyField(B::BindingCall& call, UInt64 revision, const B::Utf8View& path,
+                                                      const B::Utf8View& label)
+{
+	RequireGui(call);
+	auto& scope = Scope(call);
+	scope.RequireProperties(revision);
+	if (!scope.propertyGroup)
+	{
+		return Result<void>::Failure("Euler multi-object editing requires a property group");
+	}
+	const String fieldPath = B::ReadString(path);
+	if (PropertyType(Descriptor(scope, revision, fieldPath)) != P::V_Quaternion)
+	{
+		return Result<void>::Failure("Euler editing requires a Quaternion property");
+	}
+	const Json values = B::TakeBindingResult(scope.propertyGroup->TargetValues(fieldPath));
+	Vector<Vec3> targetAngles;
+	for (const auto& value : values)
+	{
+		if (!value.is_array() || value.size() != 4)
+		{
+			return Result<void>::Failure("Quaternion property has an invalid value");
+		}
+		targetAngles.push_back(UnityEulerAngles(
+		    {value[0].get<Float32>(), value[1].get<Float32>(), value[2].get<Float32>(), value[3].get<Float32>()}));
+	}
+	const Vec3 primary = targetAngles[scope.propertyGroup->PrimaryIndex()];
+	Float32 edited[3] = {primary.x, primary.y, primary.z};
+	bool changed[3]{};
+	const String caption = B::ReadString(label);
+	ImGui::BeginGroup();
+	ImGui::PushID(caption.c_str());
+	ImGui::PushMultiItemsWidths(3, ImGui::CalcItemWidth());
+	for (int axis = 0; axis < 3; ++axis)
+	{
+		ImGui::PushID(axis);
+		if (axis > 0)
+		{
+			ImGui::SameLine(0.f, ImGui::GetStyle().ItemInnerSpacing.x);
+		}
+		const bool mixed = std::any_of(targetAngles.begin(), targetAngles.end(),
+		                               [&](Vec3 angle)
+		                               {
+			                               const Float32 values[] = {angle.x, angle.y, angle.z};
+			                               return std::abs(std::remainder(values[axis] - edited[axis], 360.f)) > 0.001f;
+		                               });
+		const bool explicitSameValue = mixed && ExplicitMixedFloatInput(ImGui::GetID(""), edited[axis]);
+		ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, mixed);
+		const bool modified = ImGui::DragFloat("", &edited[axis], 0.05f);
+		changed[axis] = (modified || MixedFloatInputCommitted(explicitSameValue)) && std::isfinite(edited[axis]);
+		ImGui::PopItemFlag();
+		ImGui::PopID();
+		ImGui::PopItemWidth();
+	}
+	ImGui::PopID();
+	const char* labelEnd = ImGui::FindRenderedTextEnd(caption.c_str());
+	if (labelEnd != caption.c_str())
+	{
+		ImGui::SameLine(0.f, ImGui::GetStyle().ItemInnerSpacing.x);
+		ImGui::TextUnformatted(caption.c_str(), labelEnd);
+	}
+	ImGui::EndGroup();
+	if (!changed[0] && !changed[1] && !changed[2])
+	{
+		return {};
+	}
+	Json candidates = Json::array();
+	for (Vec3 angle : targetAngles)
+	{
+		if (changed[0])
+		{
+			angle.x = edited[0];
+		}
+		if (changed[1])
+		{
+			angle.y = edited[1];
+		}
+		if (changed[2])
+		{
+			angle.z = edited[2];
+		}
+		const Quat rotation = UnityEulerQuaternion(angle);
+		candidates.push_back({rotation.x, rotation.y, rotation.z, rotation.w});
+	}
+	auto staged = scope.propertyGroup->SetTargetValues(fieldPath, candidates);
+	if (staged && std::find(scope.pendingPropertyPaths.begin(), scope.pendingPropertyPaths.end(), fieldPath) ==
+	                  scope.pendingPropertyPaths.end())
+	{
+		scope.pendingPropertyPaths.push_back(fieldPath);
+	}
+	return staged;
 }
 
 Result<bool> EditorServices::DrawDefaultInspector(B::BindingCall& call, UInt64 revision)

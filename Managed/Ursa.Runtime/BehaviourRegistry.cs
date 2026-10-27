@@ -18,6 +18,7 @@ internal static class BehaviourRegistry
 	[ThreadStatic] internal static Func<string, Type?>? typeResolver;
 	[ThreadStatic] internal static Func<IEnumerable<Assembly>>? assemblyResolver;
 	[ThreadStatic] internal static Func<Type, ScriptIdentity>? identityResolver;
+	[ThreadStatic] internal static Func<Type, bool>? identityAvailable;
 
 	internal static ScriptIdentity IdentityFor(Type type) => identityResolver != null
 		? identityResolver(type)

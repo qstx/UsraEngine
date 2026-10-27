@@ -12,6 +12,7 @@
 #include <Serialization/SerializedObject.hpp>
 #include <Scene/ComponentEditors.hpp>
 #include <Scene/EditorGizmo.hpp>
+#include <Scene/EditorRotation.hpp>
 #include <Scene/EditorHierarchy.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
@@ -38,61 +39,38 @@ using GroupCommitObserver =
 constexpr Float32 DegreesToRadians = 0.01745329251994329577f;
 constexpr Float32 RadiansToDegrees = 57.295779513082320876f;
 
-Float32 PositiveDegrees(Float32 radians)
-{
-	Float32 degrees = std::fmod(radians * RadiansToDegrees, 360.f);
-	return degrees < 0.f ? degrees + 360.f : degrees;
-}
-
-Vec3 UnityEulerAngles(Quat rotation)
-{
-	const Float32 lengthSquared =
-	    rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w;
-	if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-12f)
-	{
-		return {};
-	}
-	const Float32 inverseLength = 1.f / std::sqrt(lengthSquared);
-	rotation.x *= inverseLength;
-	rotation.y *= inverseLength;
-	rotation.z *= inverseLength;
-	rotation.w *= inverseLength;
-	const Float32 r13 = 2.f * (rotation.x * rotation.z + rotation.w * rotation.y);
-	const Float32 r23 = 2.f * (rotation.y * rotation.z - rotation.w * rotation.x);
-	const Float32 r21 = 2.f * (rotation.x * rotation.y + rotation.w * rotation.z);
-	const Float32 r22 = 1.f - 2.f * (rotation.x * rotation.x + rotation.z * rotation.z);
-	const Float32 r31 = 2.f * (rotation.x * rotation.z - rotation.w * rotation.y);
-	const Float32 r11 = 1.f - 2.f * (rotation.y * rotation.y + rotation.z * rotation.z);
-	const Float32 x = std::asin(std::clamp(-r23, -1.f, 1.f));
-	const Float32 cosineX = std::cos(x);
-	const Float32 y = std::abs(cosineX) > 1.0e-5f
-	                      ? std::atan2(r13, 1.f - 2.f * (rotation.x * rotation.x + rotation.y * rotation.y))
-	                      : std::atan2(-r31, r11);
-	const Float32 z = std::abs(cosineX) > 1.0e-5f ? std::atan2(r21, r22) : 0.f;
-	return {PositiveDegrees(x), PositiveDegrees(y), PositiveDegrees(z)};
-}
-
-Quat UnityEulerQuaternion(Vec3 degrees)
-{
-	const Float32 halfX = degrees.x * DegreesToRadians * 0.5f;
-	const Float32 halfY = degrees.y * DegreesToRadians * 0.5f;
-	const Float32 halfZ = degrees.z * DegreesToRadians * 0.5f;
-	const Float32 sx = std::sin(halfX);
-	const Float32 cx = std::cos(halfX);
-	const Float32 sy = std::sin(halfY);
-	const Float32 cy = std::cos(halfY);
-	const Float32 sz = std::sin(halfZ);
-	const Float32 cz = std::cos(halfZ);
-	return {cy * sx * cz + sy * cx * sz, sy * cx * cz - cy * sx * sz, cy * cx * sz - sy * sx * cz,
-	        cy * cx * cz + sy * sx * sz};
-}
-
 bool DrawInspectorComponentFoldout(Icons::Icon icon, const char* label)
 {
 	Icons::Inline(icon);
 	ImGui::SameLine();
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	return ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
+}
+
+bool IsComponentMenuCommandAllowed(ComponentMenuCommand command, UInt32 capabilities)
+{
+	const auto has = [capabilities](ComponentMenuCapability capability)
+	{ return (capabilities & static_cast<UInt32>(capability)) != 0; };
+	switch (command)
+	{
+		case ComponentMenuCommand::None:
+			return true;
+		case ComponentMenuCommand::Reset:
+			return has(ComponentMenuShowReset) && has(ComponentMenuCanReset);
+		case ComponentMenuCommand::Copy:
+			return has(ComponentMenuShowCopy);
+		case ComponentMenuCommand::PasteValues:
+			return has(ComponentMenuShowPasteValues) && has(ComponentMenuCanPasteValues);
+		case ComponentMenuCommand::PasteAsNew:
+			return has(ComponentMenuShowPasteAsNew) && has(ComponentMenuCanPasteAsNew);
+		case ComponentMenuCommand::MoveUp:
+			return has(ComponentMenuShowMoveUp) && has(ComponentMenuCanMoveUp);
+		case ComponentMenuCommand::MoveDown:
+			return has(ComponentMenuShowMoveDown) && has(ComponentMenuCanMoveDown);
+		case ComponentMenuCommand::Remove:
+			return has(ComponentMenuShowRemove) && has(ComponentMenuCanRemove);
+	}
+	return false;
 }
 
 bool DrawCameraInspectorFields(CameraComponent& camera, String& diagnostic)
@@ -2010,9 +1988,8 @@ Result<Component*> PasteComponentAsNew(ComponentEditors& componentEditors, const
 	{
 		return Result<Component*>::Failure("Copied component data has no serialized fields");
 	}
-	const String factoryType = type.compare(0, 7, "native:") == 0 || type.compare(0, 7, "script:") == 0
-	                               ? type.substr(7)
-	                               : type;
+	const String factoryType =
+	    type.compare(0, 7, "native:") == 0 || type.compare(0, 7, "script:") == 0 ? type.substr(7) : type;
 	auto created = componentEditors.Create(factoryType, context);
 	if (!created)
 	{
@@ -2056,6 +2033,7 @@ Result<Component*> PasteComponentAsNew(ComponentEditors& componentEditors, const
 		rollback();
 		return Result<Component*>::Failure(current ? "New component has no writable serialized fields" : current.error);
 	}
+	const auto editablePaths = group.value.CommonPropertyPaths();
 	for (auto field = payload["fields"].begin(); field != payload["fields"].end(); ++field)
 	{
 		if (!current.value["Fields"].contains(field.key()))
@@ -2071,7 +2049,12 @@ Result<Component*> PasteComponentAsNew(ComponentEditors& componentEditors, const
 		{
 			escapedField.replace(offset, 1, "~1");
 		}
-		auto set = group.value.SetValue("/Fields/" + escapedField, field.value());
+		const String path = "/Fields/" + escapedField;
+		if (std::find(editablePaths.begin(), editablePaths.end(), path) == editablePaths.end())
+		{
+			continue;
+		}
+		auto set = group.value.SetValue(path, field.value());
 		if (!set)
 		{
 			rollback();
@@ -2111,7 +2094,7 @@ Result<bool> ResetComponentToDefaults(Component& component, const String& type, 
 	if (!defaultsComponent || !defaultsComponent.value)
 	{
 		return Result<bool>::Failure(defaultsComponent ? "Component factory returned no default component"
-		                                              : defaultsComponent.error);
+		                                               : defaultsComponent.error);
 	}
 
 	SerializedJson defaultFields;
@@ -2152,6 +2135,7 @@ Result<bool> ResetComponentToDefaults(Component& component, const String& type, 
 	}
 
 	Vector<String> changedPaths;
+	const auto editablePaths = group.value.CommonPropertyPaths();
 	for (auto field = defaultFields.begin(); field != defaultFields.end(); ++field)
 	{
 		if (!current.value.at("Fields").contains(field.key()))
@@ -2168,6 +2152,10 @@ Result<bool> ResetComponentToDefaults(Component& component, const String& type, 
 			escapedField.replace(offset, 1, "~1");
 		}
 		const String path = "/Fields/" + escapedField;
+		if (std::find(editablePaths.begin(), editablePaths.end(), path) == editablePaths.end())
+		{
+			continue;
+		}
 		auto set = group.value.SetValue(path, field.value());
 		if (!set)
 		{
@@ -2176,6 +2164,17 @@ Result<bool> ResetComponentToDefaults(Component& component, const String& type, 
 		changedPaths.push_back(path);
 	}
 	const auto changedTargets = group.value.PendingTargetChanges();
+	GroupCommitObserver commitObserver;
+	if (!changedPaths.empty())
+	{
+		Vector<Component*> componentTargets{&component};
+		auto commit = MakePrefabOverrideCommit(draft, scene, {}, &componentTargets);
+		if (!commit)
+		{
+			return Result<bool>::Failure(commit.error);
+		}
+		commitObserver = std::move(commit.value);
+	}
 	auto applied = group.value.Apply();
 	if (!applied)
 	{
@@ -2192,23 +2191,20 @@ Result<bool> ResetComponentToDefaults(Component& component, const String& type, 
 	}
 	if (!changedPaths.empty())
 	{
-		Vector<Component*> componentTargets{&component};
-		auto commit = MakePrefabOverrideCommit(draft, scene, {}, &componentTargets);
-		if (!commit)
+		if (commitObserver)
 		{
-			return Result<bool>::Failure(commit.error);
-		}
-		for (const String& path : changedPaths)
-		{
-			auto committed = commit.value(group.value, path, changedTargets);
-			if (!committed)
+			for (const String& path : changedPaths)
 			{
-				return Result<bool>::Failure(committed.error);
+				auto committed = commitObserver(group.value, path, changedTargets);
+				if (!committed)
+				{
+					return Result<bool>::Failure(committed.error);
+				}
 			}
 		}
 	}
-	return Result<bool>::Success(enabledChanged ||
-	                             std::any_of(changedTargets.begin(), changedTargets.end(), [](bool value) { return value; }));
+	return Result<bool>::Success(
+	    enabledChanged || std::any_of(changedTargets.begin(), changedTargets.end(), [](bool value) { return value; }));
 }
 
 bool DrawSerializedReference(nlohmann::json& value, const String& kind, const String& expectedType,
@@ -4785,33 +4781,50 @@ Result<bool> DrawSceneInspector(
 								diagnostic = command.error;
 								return false;
 							}
+							if (!IsComponentMenuCommandAllowed(command.value, capabilities))
+							{
+								diagnostic = "The requested component menu action is unavailable for this target";
+								return true;
+							}
 							switch (command.value)
 							{
-							case ComponentMenuCommand::Reset: resetComponent = true; break;
-							case ComponentMenuCommand::Copy: copyComponent = true; break;
-							case ComponentMenuCommand::PasteValues: pasteComponentValues = true; break;
-							case ComponentMenuCommand::PasteAsNew: pasteComponentAsNew = true; break;
-							case ComponentMenuCommand::MoveUp: moveComponentUp = true; break;
-							case ComponentMenuCommand::MoveDown: moveComponentDown = true; break;
-							case ComponentMenuCommand::Remove: removeFromHeader = true; break;
-							case ComponentMenuCommand::None: break;
+								case ComponentMenuCommand::Reset:
+									resetComponent = true;
+									break;
+								case ComponentMenuCommand::Copy:
+									copyComponent = true;
+									break;
+								case ComponentMenuCommand::PasteValues:
+									pasteComponentValues = true;
+									break;
+								case ComponentMenuCommand::PasteAsNew:
+									pasteComponentAsNew = true;
+									break;
+								case ComponentMenuCommand::MoveUp:
+									moveComponentUp = true;
+									break;
+								case ComponentMenuCommand::MoveDown:
+									moveComponentDown = true;
+									break;
+								case ComponentMenuCommand::Remove:
+									removeFromHeader = true;
+									break;
+								case ComponentMenuCommand::None:
+									break;
 							}
 							return true;
 						};
 						if (ImGui::BeginPopupContextItem("ComponentHeaderActions"))
 						{
-							const UInt32 menuCapabilities = ComponentMenuShowReset | ComponentMenuShowCopy |
-							                                ComponentMenuShowPasteValues | ComponentMenuShowPasteAsNew |
-							                                ComponentMenuShowMoveUp | ComponentMenuShowMoveDown |
-							                                ComponentMenuShowRemove |
-							                                (canReset ? ComponentMenuCanReset : 0) |
-							                                (canPasteValues ? ComponentMenuCanPasteValues : 0) |
-							                                (canPasteAsNew ? ComponentMenuCanPasteAsNew : 0) |
-							                                (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
-							                                (componentIndex + 1 < prefabComponents.size()
-							                                     ? ComponentMenuCanMoveDown
-							                                     : 0) |
-							                                ComponentMenuCanRemove;
+							const UInt32 menuCapabilities =
+							    ComponentMenuShowReset | ComponentMenuShowCopy | ComponentMenuShowPasteValues |
+							    ComponentMenuShowPasteAsNew | ComponentMenuShowMoveUp | ComponentMenuShowMoveDown |
+							    ComponentMenuShowRemove | (canReset ? ComponentMenuCanReset : 0) |
+							    (canPasteValues ? ComponentMenuCanPasteValues : 0) |
+							    (canPasteAsNew ? ComponentMenuCanPasteAsNew : 0) |
+							    (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
+							    (componentIndex + 1 < prefabComponents.size() ? ComponentMenuCanMoveDown : 0) |
+							    ComponentMenuCanRemove;
 							if (!drawManagedComponentMenu(menuCapabilities))
 							{
 								ImGui::BeginDisabled(!canReset);
@@ -4894,6 +4907,7 @@ Result<bool> DrawSceneInspector(
 									}
 									else
 									{
+										const auto editablePaths = grouped.value.CommonPropertyPaths();
 										for (auto field = copiedComponentPayload->at("fields").begin();
 										     field != copiedComponentPayload->at("fields").end(); ++field)
 										{
@@ -4913,6 +4927,11 @@ Result<bool> DrawSceneInspector(
 												escapedField.replace(offset, 1, "~1");
 											}
 											const String path = "/Fields/" + escapedField;
+											if (std::find(editablePaths.begin(), editablePaths.end(), path) ==
+											    editablePaths.end())
+											{
+												continue;
+											}
 											auto set = grouped.value.SetValue(path, field.value());
 											if (!set)
 											{
@@ -4990,32 +5009,42 @@ Result<bool> DrawSceneInspector(
 						}
 						if (ImGui::BeginPopup("PrefabComponentActions"))
 						{
-							const String menuFactoryType = scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
-							const UInt32 menuCapabilities = ComponentMenuShowReset | ComponentMenuShowMoveUp |
-							                                ComponentMenuShowMoveDown | ComponentMenuShowRemove |
-							                                (componentEditors.FindType(menuFactoryType)
-							                                     ? ComponentMenuCanReset
-							                                     : 0) |
-							                                (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
-							                                (componentIndex + 1 < prefabComponents.size()
-							                                     ? ComponentMenuCanMoveDown
-							                                     : 0) |
-							                                ComponentMenuCanRemove;
+							const String menuFactoryType =
+							    scriptHeader ? scriptHeader->TypeName() : component->SerializationType();
+							const UInt32 menuCapabilities =
+							    ComponentMenuShowReset | ComponentMenuShowCopy | ComponentMenuShowPasteValues |
+							    ComponentMenuShowPasteAsNew | ComponentMenuShowMoveUp | ComponentMenuShowMoveDown |
+							    ComponentMenuShowRemove |
+							    (componentEditors.FindType(menuFactoryType) ? ComponentMenuCanReset : 0) |
+							    (canPasteValues ? ComponentMenuCanPasteValues : 0) |
+							    (canPasteAsNew ? ComponentMenuCanPasteAsNew : 0) |
+							    (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
+							    (componentIndex + 1 < prefabComponents.size() ? ComponentMenuCanMoveDown : 0) |
+							    ComponentMenuCanRemove;
 							if (!drawManagedComponentMenu(menuCapabilities))
 							{
 								ImGui::BeginDisabled(componentEditors.FindType(menuFactoryType) == nullptr);
-				resetComponent = Icons::MenuItem("Reset") || resetComponent;
-				ImGui::EndDisabled();
-				ImGui::Separator();
-				ImGui::BeginDisabled(componentIndex == 0);
-				moveComponentUp = Icons::MenuItem("Move Up") || moveComponentUp;
-				ImGui::EndDisabled();
-				ImGui::BeginDisabled(componentIndex + 1 >= prefabComponents.size());
-				moveComponentDown = Icons::MenuItem("Move Down") || moveComponentDown;
-				ImGui::EndDisabled();
-				ImGui::Separator();
-				removeFromHeader = ImGui::MenuItem("Remove Component") || removeFromHeader;
-			}
+								resetComponent = Icons::MenuItem("Reset") || resetComponent;
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								copyComponent = Icons::MenuItem("Copy Component") || copyComponent;
+								ImGui::BeginDisabled(!canPasteValues);
+								pasteComponentValues =
+								    Icons::MenuItem("Paste Component Values") || pasteComponentValues;
+								ImGui::EndDisabled();
+								ImGui::BeginDisabled(!canPasteAsNew);
+								pasteComponentAsNew = Icons::MenuItem("Paste Component As New") || pasteComponentAsNew;
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								ImGui::BeginDisabled(componentIndex == 0);
+								moveComponentUp = Icons::MenuItem("Move Up") || moveComponentUp;
+								ImGui::EndDisabled();
+								ImGui::BeginDisabled(componentIndex + 1 >= prefabComponents.size());
+								moveComponentDown = Icons::MenuItem("Move Down") || moveComponentDown;
+								ImGui::EndDisabled();
+								ImGui::Separator();
+								removeFromHeader = ImGui::MenuItem("Remove Component") || removeFromHeader;
+							}
 							ImGui::EndPopup();
 						}
 						if (resetComponent)
@@ -5652,20 +5681,22 @@ Result<bool> DrawSceneInspector(
 						    ToUrsaString(copiedComponentPayload->at("type").get<std::string>()) == componentType &&
 						    copiedComponentPayload->contains("fields") &&
 						    copiedComponentPayload->at("fields").is_object();
-						const String copiedStableType = copiedComponentPayload && copiedComponentPayload->is_object() &&
-						                                        copiedComponentPayload->contains("type") &&
-						                                        copiedComponentPayload->at("type").is_string()
-						                                    ? ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
-						                                    : String{};
+						const String copiedStableType =
+						    copiedComponentPayload && copiedComponentPayload->is_object() &&
+						            copiedComponentPayload->contains("type") &&
+						            copiedComponentPayload->at("type").is_string()
+						        ? ToUrsaString(copiedComponentPayload->at("type").get<std::string>())
+						        : String{};
 						const String copiedFactoryType = copiedStableType.compare(0, 7, "native:") == 0 ||
 						                                         copiedStableType.compare(0, 7, "script:") == 0
 						                                     ? copiedStableType.substr(7)
 						                                     : copiedStableType;
-						const bool canPasteAsNew = copiedComponentPayload && copiedComponentPayload->is_object() &&
-						                          copiedComponentPayload->contains("fields") &&
-						                          copiedComponentPayload->at("fields").is_object() &&
-						                          componentEditors.FindType(copiedFactoryType) &&
-						                          static_cast<bool>(componentEditors.CanCreate(copiedFactoryType, inspectorContext));
+						const bool canPasteAsNew =
+						    copiedComponentPayload && copiedComponentPayload->is_object() &&
+						    copiedComponentPayload->contains("fields") &&
+						    copiedComponentPayload->at("fields").is_object() &&
+						    componentEditors.FindType(copiedFactoryType) &&
+						    static_cast<bool>(componentEditors.CanCreate(copiedFactoryType, inspectorContext));
 						const auto drawManagedComponentMenu = [&](UInt32 capabilities)
 						{
 							const auto* menuEditor = componentEditors.FindMenu(componentType);
@@ -5682,32 +5713,50 @@ Result<bool> DrawSceneInspector(
 								diagnostic = command.error;
 								return false;
 							}
+							if (!IsComponentMenuCommandAllowed(command.value, capabilities))
+							{
+								diagnostic = "The requested component menu action is unavailable for this target";
+								return true;
+							}
 							switch (command.value)
 							{
-							case ComponentMenuCommand::Reset: resetComponent = true; break;
-							case ComponentMenuCommand::Copy: copyComponent = true; break;
-							case ComponentMenuCommand::PasteValues: pasteComponentValues = true; break;
-							case ComponentMenuCommand::PasteAsNew: pasteComponentAsNew = true; break;
-							case ComponentMenuCommand::MoveUp: moveComponentUp = true; break;
-							case ComponentMenuCommand::MoveDown: moveComponentDown = true; break;
-							case ComponentMenuCommand::Remove: remove = true; break;
-							case ComponentMenuCommand::None: break;
+								case ComponentMenuCommand::Reset:
+									resetComponent = true;
+									break;
+								case ComponentMenuCommand::Copy:
+									copyComponent = true;
+									break;
+								case ComponentMenuCommand::PasteValues:
+									pasteComponentValues = true;
+									break;
+								case ComponentMenuCommand::PasteAsNew:
+									pasteComponentAsNew = true;
+									break;
+								case ComponentMenuCommand::MoveUp:
+									moveComponentUp = true;
+									break;
+								case ComponentMenuCommand::MoveDown:
+									moveComponentDown = true;
+									break;
+								case ComponentMenuCommand::Remove:
+									remove = true;
+									break;
+								case ComponentMenuCommand::None:
+									break;
 							}
 							return true;
 						};
 						if (ImGui::BeginPopup("SceneComponentActions"))
 						{
-							const UInt32 menuCapabilities = ComponentMenuShowReset | ComponentMenuShowCopy |
-							                                ComponentMenuShowPasteValues | ComponentMenuShowPasteAsNew |
-							                                ComponentMenuShowMoveUp | ComponentMenuShowMoveDown |
-							                                ComponentMenuShowRemove | (canReset ? ComponentMenuCanReset : 0) |
-							                                (canPasteValues ? ComponentMenuCanPasteValues : 0) |
-							                                (canPasteAsNew ? ComponentMenuCanPasteAsNew : 0) |
-							                                (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
-							                                (componentIndex + 1 < components.value.size()
-							                                     ? ComponentMenuCanMoveDown
-							                                     : 0) |
-							                                ComponentMenuCanRemove;
+							const UInt32 menuCapabilities =
+							    ComponentMenuShowReset | ComponentMenuShowCopy | ComponentMenuShowPasteValues |
+							    ComponentMenuShowPasteAsNew | ComponentMenuShowMoveUp | ComponentMenuShowMoveDown |
+							    ComponentMenuShowRemove | (canReset ? ComponentMenuCanReset : 0) |
+							    (canPasteValues ? ComponentMenuCanPasteValues : 0) |
+							    (canPasteAsNew ? ComponentMenuCanPasteAsNew : 0) |
+							    (componentIndex > 0 ? ComponentMenuCanMoveUp : 0) |
+							    (componentIndex + 1 < components.value.size() ? ComponentMenuCanMoveDown : 0) |
+							    ComponentMenuCanRemove;
 							if (!drawManagedComponentMenu(menuCapabilities))
 							{
 								ImGui::BeginDisabled(!canReset);
@@ -5787,10 +5836,12 @@ Result<bool> DrawSceneInspector(
 									if (!current || !current.value.contains("Fields") ||
 									    !current.value.at("Fields").is_object())
 									{
-										diagnostic = current ? "Component has no writable serialized fields" : current.error;
+										diagnostic =
+										    current ? "Component has no writable serialized fields" : current.error;
 									}
 									else
 									{
+										const auto editablePaths = grouped.value.CommonPropertyPaths();
 										for (auto field = copiedComponentPayload->at("fields").begin();
 										     field != copiedComponentPayload->at("fields").end(); ++field)
 										{
@@ -5799,17 +5850,22 @@ Result<bool> DrawSceneInspector(
 												continue;
 											}
 											String escapedField = ToUrsaString(field.key());
-											for (Size offset = 0; (offset = escapedField.find('~', offset)) != String::npos;
-											     offset += 2)
+											for (Size offset = 0;
+											     (offset = escapedField.find('~', offset)) != String::npos; offset += 2)
 											{
 												escapedField.replace(offset, 1, "~0");
 											}
-											for (Size offset = 0; (offset = escapedField.find('/', offset)) != String::npos;
-											     offset += 2)
+											for (Size offset = 0;
+											     (offset = escapedField.find('/', offset)) != String::npos; offset += 2)
 											{
 												escapedField.replace(offset, 1, "~1");
 											}
 											const String path = "/Fields/" + escapedField;
+											if (std::find(editablePaths.begin(), editablePaths.end(), path) ==
+											    editablePaths.end())
+											{
+												continue;
+											}
 											auto set = grouped.value.SetValue(path, field.value());
 											if (!set)
 											{
@@ -5822,34 +5878,39 @@ Result<bool> DrawSceneInspector(
 									if (diagnostic.empty() && !copiedFields.empty())
 									{
 										const auto changedTargets = grouped.value.PendingTargetChanges();
-										auto applied = grouped.value.Apply();
-										if (!applied)
+										Vector<Component*> componentTargets{object};
+										auto commit =
+										    MakePrefabOverrideCommit(draft.get(), &scene, {}, &componentTargets);
+										if (!commit)
 										{
-											diagnostic = applied.error;
+											diagnostic = commit.error;
 										}
 										else
 										{
-											Vector<Component*> componentTargets{object};
-											auto commit = MakePrefabOverrideCommit(draft.get(), &scene, {}, &componentTargets);
-											if (!commit)
+											auto applied = grouped.value.Apply();
+											if (!applied)
 											{
-												diagnostic = commit.error;
+												diagnostic = applied.error;
 											}
 											else
 											{
-												for (const String& path : copiedFields)
+												if (commit.value)
 												{
-													auto committed = commit.value(grouped.value, path, changedTargets);
-													if (!committed)
+													for (const String& path : copiedFields)
 													{
-														diagnostic = committed.error;
-														break;
+														auto committed =
+														    commit.value(grouped.value, path, changedTargets);
+														if (!committed)
+														{
+															diagnostic = committed.error;
+															break;
+														}
 													}
 												}
 											}
 										}
 										changed |= std::any_of(changedTargets.begin(), changedTargets.end(),
-										                      [](bool value) { return value; });
+										                       [](bool value) { return value; });
 									}
 								}
 							}
@@ -5859,7 +5920,7 @@ Result<bool> DrawSceneInspector(
 							const String copiedType =
 							    ToUrsaString(copiedComponentPayload->at("type").get<std::string>());
 							auto pasted = PasteComponentAsNew(componentEditors, copiedType, *copiedComponentPayload,
-							                                 inspectorContext, registry, loadContext, &scene);
+							                                  inspectorContext, registry, loadContext, &scene);
 							diagnostic = pasted ? String{} : pasted.error;
 							changed |= static_cast<bool>(pasted);
 						}

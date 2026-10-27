@@ -38,7 +38,13 @@ struct GameViewSettingsState
 	Float32 sceneCameraSpeed = 1.f;
 	Float32 sceneCameraSpeedMin = 0.01f;
 	Float32 sceneCameraSpeedMax = 2.f;
-	Float32 sceneCameraFieldOfView = 45.f;
+	Float32 sceneCameraSpeedModifier = 5.f;
+	bool sceneCameraEasingEnabled = true;
+	Float32 sceneCameraEasingDuration = 0.4f;
+	bool sceneCameraAccelerationEnabled = true;
+	Float32 sceneCameraAccelerationSpeed = 0.8f;
+	bool sceneCameraDynamicClipping = true;
+	Float32 sceneCameraFieldOfView = 60.f;
 	Float32 sceneCameraNearClip = 0.1f;
 	Float32 sceneCameraFarClip = 100.f;
 	bool showSceneGrid = true;

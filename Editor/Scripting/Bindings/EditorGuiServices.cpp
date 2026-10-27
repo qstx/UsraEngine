@@ -4,6 +4,7 @@
 #include <Assets/AssetPreviewContent.hpp>
 #include <Inspector/ReferencePicker.hpp>
 #include <Scripting/Bindings/BindingCollections.hpp>
+#include <Scripting/Bindings/MixedScalarInput.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Scene/Scene.hpp>
 #include <imgui.h>
@@ -638,9 +639,12 @@ Result<Float64> EditorServices::DragFloat(B::BindingCall& call, const B::Utf8Vie
 		throw std::runtime_error("DragFloat requires finite, representable values and ordered bounds");
 	}
 	Float32 editedValue = static_cast<Float32>(value);
-	Edited(call,
-	       ImGui::DragFloat(GuiString(label).c_str(), &editedValue, static_cast<Float32>(speed),
-	                        static_cast<Float32>(minimum), static_cast<Float32>(maximum), GuiString(format).c_str()));
+	const String caption = GuiString(label);
+	const bool explicitSameValue = mixedValue && ExplicitMixedFloatInput(ImGui::GetID(caption.c_str()), editedValue);
+	const bool changed =
+	    ImGui::DragFloat(caption.c_str(), &editedValue, static_cast<Float32>(speed), static_cast<Float32>(minimum),
+	                     static_cast<Float32>(maximum), GuiString(format).c_str());
+	Edited(call, changed || MixedFloatInputCommitted(explicitSameValue));
 	return Result<Float64>::Success(editedValue);
 }
 
@@ -652,8 +656,13 @@ Result<B::Utf8View> EditorServices::TextField(B::BindingCall& call, const B::Utf
 	const String text = B::ReadString(value);
 	Vector<char> buffer(text.size() + 4096, 0);
 	std::memcpy(buffer.data(), text.data(), text.size());
-	const bool edited = Edited(call, ImGui::InputText(GuiString(label).c_str(), buffer.data(), buffer.size()));
-	return Result<B::Utf8View>::Success(call.arena.StringValue(edited ? String(buffer.data()) : text));
+	const String caption = GuiString(label);
+	const ImGuiID id = ImGui::GetID(caption.c_str());
+	const bool changed = ImGui::InputText(caption.c_str(), buffer.data(), buffer.size());
+	const ImGuiInputTextState* input = ImGui::GetInputTextState(id);
+	const bool explicitMixedEdit = mixedValue && ImGui::IsItemActive() && input && input->EditedThisFrame;
+	Edited(call, changed || explicitMixedEdit);
+	return Result<B::Utf8View>::Success(call.arena.StringValue(changed ? String(buffer.data()) : text));
 }
 
 Result<Int32> EditorServices::Popup(B::BindingCall& call, const B::Utf8View& label, Int32 selected,

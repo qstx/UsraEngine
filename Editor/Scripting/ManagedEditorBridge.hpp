@@ -68,6 +68,7 @@ struct ManagedEditorContext
 };
 
 #if defined(URSA_ENABLE_DOTNET)
+String ManagedInspectorSelectionKey(const ManagedEditorContext& context);
 Result<bool> InvokeManagedEditorExtension(Scripting::DotNetHost& host, UInt64 sessionId, const String& extensionId,
                                           ManagedEditorContext& context);
 Result<Scripting::ManagedPreviewResult> InvokeManagedEditorPreview(Scripting::DotNetHost& host, UInt64 sessionId,

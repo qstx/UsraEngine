@@ -32,22 +32,135 @@ EditorSelectionEntry AssetSelection(const ProjectBrowserEntry& asset, UInt64 loc
 	return entry;
 }
 
+bool IsProjectRenameShortcutPressed()
+{
+	const ImGuiIO& io = ImGui::GetIO();
+	if (io.KeyShift || io.KeyCtrl || io.KeyAlt || io.KeySuper)
+	{
+		return false;
+	}
+#if defined(__APPLE__)
+	return ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+#else
+	return ImGui::IsKeyPressed(ImGuiKey_F2, false);
+#endif
+}
+
+const char* ProjectRenameShortcutLabel()
+{
+#if defined(__APPLE__)
+	return "Enter";
+#else
+	return "F2";
+#endif
+}
+
+bool IsProjectOpenShortcutPressed()
+{
+#if defined(__APPLE__)
+	return false;
+#else
+	return ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+#endif
+}
+
+bool IsProjectParentFolderShortcutPressed(bool twoColumnLayout)
+{
+	if (!twoColumnLayout)
+	{
+		return false;
+	}
+#if defined(__APPLE__)
+	const ImGuiIO& io = ImGui::GetIO();
+	return io.KeySuper && !io.KeyCtrl && !io.KeyAlt && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_UpArrow, false);
+#else
+	return ImGui::IsKeyPressed(ImGuiKey_Backspace, false);
+#endif
+}
+
 void DrawProjectAssetDragSource(const EditorSelectionContext& selection, const EditorSelectionEntry& entry,
-                                const String& label, const EditorHierarchy::InputAction& inputAction)
+                                const String& label, const EditorHierarchy::InputAction& inputAction,
+                                const Vector<EditorSelectionEntry>* visibleRows = nullptr)
 {
 	if (ImGui::BeginDragDropSource())
 	{
-		bool includeSelection = selection.Contains(entry) || ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper;
+		if (const ImGuiPayload* active = ImGui::GetDragDropPayload();
+		    active && active->IsDataType(editorDragSessionPayloadType))
+		{
+			auto session = DecodeEditorDragPayload(active->DataType, active->Data, static_cast<Size>(active->DataSize));
+			if (session &&
+			    std::any_of(session.value.sources.begin(), session.value.sources.end(),
+			                [&](const EditorDragSource& source) { return source.identity.SameIdentity(entry); }))
+			{
+				ImGui::SetDragDropPayload(editorDragSessionPayloadType, active->Data,
+				                          static_cast<Size>(active->DataSize));
+				ImGui::TextUnformatted(label.c_str());
+				ImGui::EndDragDropSource();
+				return;
+			}
+		}
+		const ImGuiIO& io = ImGui::GetIO();
+		const bool clickedSelected = selection.Contains(entry);
+		const bool control = io.KeyCtrl || io.KeySuper;
+		Vector<EditorSelectionEntry> dragEntries;
+		if (io.KeyShift && visibleRows)
+		{
+			const auto anchor = selection.rangeAnchor
+			                        ? std::find_if(visibleRows->begin(), visibleRows->end(), [&](const auto& candidate)
+			                                       { return candidate.SameIdentity(*selection.rangeAnchor); })
+			                        : visibleRows->end();
+			const auto target = std::find_if(visibleRows->begin(), visibleRows->end(),
+			                                 [&](const auto& candidate) { return candidate.SameIdentity(entry); });
+			if (anchor != visibleRows->end() && target != visibleRows->end())
+			{
+				if (control)
+				{
+					dragEntries = selection.entries;
+				}
+				if (anchor == target)
+				{
+					dragEntries = selection.entries;
+				}
+				else
+				{
+					for (auto row = std::min(anchor, target); row != std::max(anchor, target) + 1; ++row)
+					{
+						if (std::none_of(dragEntries.begin(), dragEntries.end(),
+						                 [&](const auto& candidate) { return candidate.SameIdentity(*row); }))
+						{
+							dragEntries.push_back(*row);
+						}
+					}
+				}
+			}
+		}
+		if (dragEntries.empty())
+		{
+			if (clickedSelected || control)
+			{
+				dragEntries = selection.entries;
+			}
+			if (std::none_of(dragEntries.begin(), dragEntries.end(),
+			                 [&](const auto& candidate) { return candidate.SameIdentity(entry); }))
+			{
+				dragEntries.push_back(entry);
+			}
+		}
 		if (inputAction)
 		{
-			UInt32 state = (1u << 26) | (selection.Contains(entry) ? 1u : 0u);
+			UInt32 state = (1u << 26) | (clickedSelected ? 1u : 0u);
 			auto managedDecision = inputAction(state);
 			if (managedDecision)
 			{
-				includeSelection = managedDecision.value == 1;
+				dragEntries.clear();
+				if (managedDecision.value == 1)
+				{
+					dragEntries = selection.entries;
+				}
+				dragEntries.push_back(entry);
 			}
 		}
-		const auto drag = BeginEditorDragSession(selection, entry, includeSelection);
+		const auto drag = BeginEditorDragSession(dragEntries, selection.revision);
 		if (drag)
 		{
 			ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value, sizeof(drag.value));
@@ -350,8 +463,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
                                        bool readOnly, String& diagnostic, const ProjectBrowserActions& actions,
                                        const EditorHierarchy::InputAction& inputAction)
 {
-	Vector<ProjectBrowserFileDrop> externalDrops = actions.takeExternalFileDrops ? actions.takeExternalFileDrops()
-	                                                                            : Vector<ProjectBrowserFileDrop>{};
+	Vector<ProjectBrowserFileDrop> externalDrops =
+	    actions.takeExternalFileDrops ? actions.takeExternalFileDrops() : Vector<ProjectBrowserFileDrop>{};
 	if (!open)
 	{
 		return {};
@@ -389,7 +502,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		favoriteSearches.clear();
 		favoriteAssetPaths.clear();
 		twoColumnLayout = true;
-		favoritesSettingsPath = VirtualPath::Parse("user:Settings/ProjectBrowserFavorites/" + projectKey + ".json").value;
+		favoritesSettingsPath =
+		    VirtualPath::Parse("user:Settings/ProjectBrowserFavorites/" + projectKey + ".json").value;
 		if (settingsFiles->IsMounted("user"))
 		{
 			auto exists = settingsFiles->Exists(favoritesSettingsPath);
@@ -410,7 +524,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					for (const auto& query : document.at("searches"))
 					{
 						const String value = ToUrsaString(query.get<std::string>());
-						if (!value.empty() && std::find(favoriteSearches.begin(), favoriteSearches.end(), value) == favoriteSearches.end())
+						if (!value.empty() && std::find(favoriteSearches.begin(), favoriteSearches.end(), value) ==
+						                          favoriteSearches.end())
 						{
 							favoriteSearches.push_back(value);
 						}
@@ -420,8 +535,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 						for (const auto& asset : document.at("assets"))
 						{
 							const String path = ToUrsaString(asset.get<std::string>());
-						if (!path.empty() &&
-						    std::find(favoriteAssetPaths.begin(), favoriteAssetPaths.end(), path) == favoriteAssetPaths.end())
+							if (!path.empty() && std::find(favoriteAssetPaths.begin(), favoriteAssetPaths.end(),
+							                               path) == favoriteAssetPaths.end())
 							{
 								favoriteAssetPaths.push_back(path);
 							}
@@ -454,18 +569,18 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		{
 			assets.push_back(ToStdString(favorite));
 		}
-		const std::string serialized = nlohmann::json{{"searches", std::move(searches)}, {"assets", std::move(assets)},
-		                                             {"twoColumnLayout", twoColumnLayout}}
-		                                   .dump(2);
+		const std::string serialized = nlohmann::json{
+		    {"searches", std::move(searches)},
+		    {"assets", std::move(assets)},
+		    {"twoColumnLayout",
+		     twoColumnLayout}}.dump(2);
 		const auto* begin = reinterpret_cast<const UInt8*>(serialized.data());
 		Vector<UInt8> bytes(begin, begin + serialized.size());
 		auto saved = settingsFiles->WriteAtomic(favoritesSettingsPath, bytes);
 		diagnostic = saved ? String{} : "Could not save Project browser settings: " + saved.error;
 	};
 	auto isFavoriteAsset = [&](const String& path)
-	{
-		return std::find(favoriteAssetPaths.begin(), favoriteAssetPaths.end(), path) != favoriteAssetPaths.end();
-	};
+	{ return std::find(favoriteAssetPaths.begin(), favoriteAssetPaths.end(), path) != favoriteAssetPaths.end(); };
 	auto toggleFavoriteAsset = [&](const String& path)
 	{
 		const auto favorite = std::find(favoriteAssetPaths.begin(), favoriteAssetPaths.end(), path);
@@ -524,7 +639,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				return Result<void>::Failure("Duplicate accepts only project source assets and folders");
 			}
 			auto source = workspace.Database()->SourcePath(entry.assetGuid);
-			if (!source || source.value != entry.assetPath || source.value.scheme != workspace.Database()->SourceScheme())
+			if (!source || source.value != entry.assetPath ||
+			    source.value.scheme != workspace.Database()->SourceScheme())
 			{
 				return Result<void>::Failure("A selected source changed or disappeared before duplication");
 			}
@@ -576,7 +692,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				return Result<void>::Failure("Project Copy and Cut accept only source assets and folders");
 			}
 			auto source = workspace.Database()->SourcePath(entry.assetGuid);
-			if (!source || source.value != entry.assetPath || source.value.scheme != workspace.Database()->SourceScheme())
+			if (!source || source.value != entry.assetPath ||
+			    source.value.scheme != workspace.Database()->SourceScheme())
 			{
 				return Result<void>::Failure("A selected source changed or disappeared before copying");
 			}
@@ -595,8 +712,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					continue;
 				}
 				auto metadata = workspace.Database()->Metadata(candidate);
-				if (metadata && metadata.value.folder &&
-				    sources[index].relative.size() > candidate.relative.size() &&
+				if (metadata && metadata.value.folder && sources[index].relative.size() > candidate.relative.size() &&
 				    sources[index].relative.compare(0, candidate.relative.size(), candidate.relative) == 0 &&
 				    sources[index].relative[candidate.relative.size()] == '/')
 				{
@@ -665,11 +781,11 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		return !selection.entries.empty() &&
 		       std::all_of(selection.entries.begin(), selection.entries.end(),
 		                   [](const EditorSelectionEntry& entry)
-	                   {
-		                   return entry.kind == EditorSelectionKind::Asset &&
-		                          entry.assetRole == EditorAssetSelectionRole::Source && !entry.assetLocalFileId &&
-		                          entry.assetGuid && !entry.IsMissing();
-	                   });
+		                   {
+			                   return entry.kind == EditorSelectionKind::Asset &&
+			                          entry.assetRole == EditorAssetSelectionRole::Source && !entry.assetLocalFileId &&
+			                          entry.assetGuid && !entry.IsMissing();
+		                   });
 	};
 	bool pasteRequestedFromMenu = false;
 	String pasteMenuDestination;
@@ -841,18 +957,20 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			{
 				const ProjectBrowserEntry* asset = model.Find(path);
 				const Size separator = path.rfind('/');
-				const String label = asset ? asset->name : separator == String::npos ? path : path.substr(separator + 1);
+				const String label = asset                       ? asset->name
+				                     : separator == String::npos ? path
+				                                                 : path.substr(separator + 1);
 				ImGui::BeginDisabled(!asset);
 				const bool selected = ImGui::MenuItem(label.c_str());
 				ImGui::EndDisabled();
 				if (selected && asset)
 				{
 					std::fill(searchText.begin(), searchText.end(), '\0');
-					const String destination = asset->folder
-					                               ? asset->path.relative
-					                               : asset->path.relative.substr(0, asset->path.relative.rfind('/') == String::npos
-				                                                                             ? 0
-				                                                                             : asset->path.relative.rfind('/'));
+					const String destination =
+					    asset->folder ? asset->path.relative
+					                  : asset->path.relative.substr(0, asset->path.relative.rfind('/') == String::npos
+					                                                       ? 0
+					                                                       : asset->path.relative.rfind('/'));
 					auto navigated = model.NavigateTo(destination);
 					diagnostic = navigated ? String{} : navigated.error;
 					if (navigated)
@@ -861,8 +979,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 						if (!asset->folder)
 						{
 							const auto entry = AssetSelection(*asset);
-						selection.SelectEntries({entry}, 0, entry);
-						model.SelectAsset(asset->path);
+							selection.SelectEntries({entry}, 0, entry);
+							model.SelectAsset(asset->path);
 						}
 						else
 						{
@@ -969,14 +1087,13 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		ImGui::EndPopup();
 	}
 	if (contentRowKeyboardFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	    !ImGui::GetIO().WantTextInput &&
-	    ImGui::IsKeyPressed(ImGuiKey_F2))
+	    !ImGui::GetIO().WantTextInput && IsProjectRenameShortcutPressed())
 	{
 		const auto captured = EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision);
 		const auto current = EditorCommandContext::Capture(selection, selection.activeDocumentId, selection.revision);
 		EditorCommands commands;
 		auto registered =
-		    commands.Register({"project.rename", "Rename", "F2",
+		    commands.Register({"project.rename", "Rename", ProjectRenameShortcutLabel(),
 		                       [readOnly, &actions](const EditorCommandContext& context)
 		                       {
 			                       const auto* primary = context.selection.PrimaryEntry();
@@ -1006,32 +1123,29 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 	}
 	if (contentRowKeyboardFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	    !ImGui::GetIO().WantTextInput &&
-	    ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false) && !selection.entries.empty())
+	    !ImGui::GetIO().WantTextInput && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false) &&
+	    !selection.entries.empty())
 	{
 		auto duplicated = duplicateEntries(selection.entries);
 		diagnostic = duplicated ? String{} : duplicated.error;
 	}
 	const ImGuiIO& assetClipboardInput = ImGui::GetIO();
-	const bool projectClipboardFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	                                     !assetClipboardInput.WantTextInput &&
-	                                     (assetClipboardInput.KeyCtrl || assetClipboardInput.KeySuper) &&
-	                                     !assetClipboardInput.KeyAlt;
-	if (projectClipboardFocused &&
-	    (ImGui::IsKeyPressed(ImGuiKey_C, false) || ImGui::IsKeyPressed(ImGuiKey_X, false)))
+	const bool projectClipboardFocused =
+	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !assetClipboardInput.WantTextInput &&
+	    (assetClipboardInput.KeyCtrl || assetClipboardInput.KeySuper) && !assetClipboardInput.KeyAlt;
+	if (projectClipboardFocused && (ImGui::IsKeyPressed(ImGuiKey_C, false) || ImGui::IsKeyPressed(ImGuiKey_X, false)))
 	{
 		auto copied = setAssetClipboard(selection.entries, ImGui::IsKeyPressed(ImGuiKey_X, false));
 		diagnostic = copied ? String{} : copied.error;
 	}
-	if (projectClipboardFocused && ImGui::IsKeyPressed(ImGuiKey_V, false) &&
-	    !assetClipboard.empty() && assetClipboardProject == projectKey)
+	if (projectClipboardFocused && ImGui::IsKeyPressed(ImGuiKey_V, false) && !assetClipboard.empty() &&
+	    assetClipboardProject == projectKey)
 	{
 		auto pasted = pasteAssetClipboard(model.CurrentFolder());
 		diagnostic = pasted ? String{} : pasted.error;
 	}
 	if (contentRowKeyboardFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	    !ImGui::GetIO().WantTextInput &&
-	    !selection.entries.empty() && ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&
+	    !ImGui::GetIO().WantTextInput && !selection.entries.empty() && ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&
 	    std::all_of(selection.entries.begin(), selection.entries.end(),
 	                [](const EditorSelectionEntry& entry)
 	                {
@@ -1041,8 +1155,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		if (ImGui::GetIO().KeyShift)
 		{
-			auto plan = workspace.Database() ? PlanProjectSourceDelete(*workspace.Database(), selection.entries, readOnly)
-			                                : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
+			auto plan = workspace.Database()
+			                ? PlanProjectSourceDelete(*workspace.Database(), selection.entries, readOnly)
+			                : Result<Vector<VirtualPath>>::Failure("Project AssetDatabase is unavailable");
 			if (!plan)
 			{
 				diagnostic = plan.error;
@@ -1204,18 +1319,18 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		{
 			columnFocusRequest = ColumnFocusRequest::Contents;
 		}
-	const bool favoritesOpen = Icons::TreeNode("Favorites", ImGuiTreeNodeFlags_DefaultOpen |
-		                                                                       ImGuiTreeNodeFlags_SpanAvailWidth,
-	                                          Icons::Icon::Favorite, "Favorites", 16.f);
-	const ImRect favoritesRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-	if (ImGui::BeginDragDropTargetCustom(favoritesRect, ImGui::GetID("##favoriteAssetDropTarget")))
+		const bool favoritesOpen =
+		    Icons::TreeNode("Favorites", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth,
+		                    Icons::Icon::Favorite, "Favorites", 16.f);
+		const ImRect favoritesRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+		if (ImGui::BeginDragDropTargetCustom(favoritesRect, ImGui::GetID("##favoriteAssetDropTarget")))
 		{
-			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
-			        editorDragSessionPayloadType, ImGuiDragDropFlags_AcceptNoDrawDefaultRect |
-			                                                                ImGuiDragDropFlags_AcceptBeforeDelivery))
+			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(editorDragSessionPayloadType,
+			                                                               ImGuiDragDropFlags_AcceptNoDrawDefaultRect |
+			                                                                   ImGuiDragDropFlags_AcceptBeforeDelivery))
 			{
 				auto decoded = DecodeEditorDragPayload(payload->DataType, payload->Data,
-				                                      static_cast<Size>(payload->DataSize), selection.revision);
+				                                       static_cast<Size>(payload->DataSize), selection.revision);
 				if (!decoded)
 				{
 					if (payload->IsDelivery())
@@ -1225,25 +1340,24 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				}
 				else
 				{
-					const bool projectFolders = !decoded.value.sources.empty() &&
-					                            std::all_of(decoded.value.sources.begin(), decoded.value.sources.end(),
-					                                        [&](const EditorDragSource& source)
-					                                        {
-						                                        const auto* asset = model.Find(source.identity.assetPath);
-						                                        return source.identity.kind == EditorSelectionKind::Asset &&
-						                                               !source.identity.IsMissing() &&
-						                                               source.identity.assetRole ==
-						                                                   EditorAssetSelectionRole::Source &&
-						                                               !source.identity.assetLocalFileId && workspace.Database() &&
-						                                               source.identity.assetPath.scheme ==
-						                                                   workspace.Database()->SourceScheme() &&
-						                                               asset && asset->folder;
-					                                        });
+					const bool projectFolders =
+					    !decoded.value.sources.empty() &&
+					    std::all_of(decoded.value.sources.begin(), decoded.value.sources.end(),
+					                [&](const EditorDragSource& source)
+					                {
+						                const auto* asset = model.Find(source.identity.assetPath);
+						                return source.identity.kind == EditorSelectionKind::Asset &&
+						                       !source.identity.IsMissing() &&
+						                       source.identity.assetRole == EditorAssetSelectionRole::Source &&
+						                       !source.identity.assetLocalFileId && workspace.Database() &&
+						                       source.identity.assetPath.scheme ==
+						                           workspace.Database()->SourceScheme() &&
+						                       asset && asset->folder;
+					                });
 					if (projectFolders)
 					{
-						ImGui::GetWindowDrawList()->AddRectFilled(
-						    favoritesRect.Min, favoritesRect.Max,
-						    ImGui::GetColorU32(ImGuiCol_DragDropTarget, 0.3f));
+						ImGui::GetWindowDrawList()->AddRectFilled(favoritesRect.Min, favoritesRect.Max,
+						                                          ImGui::GetColorU32(ImGuiCol_DragDropTarget, 0.3f));
 						if (payload->IsDelivery() && ClaimEditorDragDropDelivery(payload))
 						{
 							bool changedFavorites = false;
@@ -1261,18 +1375,18 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 							{
 								saveProjectBrowserSettings();
 							}
-							}
+						}
 					}
 				}
 			}
 			ImGui::EndDragDropTarget();
 		}
-	if (favoritesOpen)
-	{
-		if (favoriteSearches.empty() && favoriteAssetPaths.empty())
+		if (favoritesOpen)
 		{
-			ImGui::TextDisabled("Drag Project folders here or save a search.");
-		}
+			if (favoriteSearches.empty() && favoriteAssetPaths.empty())
+			{
+				ImGui::TextDisabled("Drag Project folders here or save a search.");
+			}
 			for (Size index = 0; index < favoriteSearches.size();)
 			{
 				const String query = favoriteSearches[index];
@@ -1305,15 +1419,16 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				const String path = favoriteAssetPaths[index];
 				const ProjectBrowserEntry* asset = model.Find(path);
 				const Size separator = path.rfind('/');
-				const String label = asset ? asset->name : separator == String::npos ? path : path.substr(separator + 1);
-				const Icons::Icon icon = asset
-				                             ? Icons::ForAsset(asset->folder, asset->kind, asset->importer,
-				                                               asset->path.relative)
-				                             : Icons::Icon::Folder;
+				const String label = asset                       ? asset->name
+				                     : separator == String::npos ? path
+				                                                 : path.substr(separator + 1);
+				const Icons::Icon icon =
+				    asset ? Icons::ForAsset(asset->folder, asset->kind, asset->importer, asset->path.relative)
+				          : Icons::Icon::Folder;
 				ImGui::PushID(static_cast<Int32>(favoriteSearches.size() + index));
 				ImGui::BeginDisabled(!asset);
-				const bool clicked = Icons::Selectable(icon, label.c_str(),
-				                                       asset && selection.Contains(AssetSelection(*asset)));
+				const bool clicked =
+				    Icons::Selectable(icon, label.c_str(), asset && selection.Contains(AssetSelection(*asset)));
 				ImGui::EndDisabled();
 				if (clicked)
 				{
@@ -1334,86 +1449,87 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				ImGui::PopID();
 				++index;
 			}
-		ImGui::TreePop();
-	}
-	auto setFolderNodeSubtreeOpen = [&](const ProjectBrowserEntry& entry, bool expanded, auto&& self) -> void
-	{
-		ImGui::PushID(entry.path.relative.c_str());
-		const ImGuiID nodeId = ImGui::GetID("##folder");
-		ImGui::GetStateStorage()->SetInt(nodeId, expanded ? 1 : 0);
-		ImGui::PushID(nodeId);
-		for (const ProjectBrowserEntry& child : model.ChildFolders(entry.path.relative))
-		{
-			self(child, expanded, self);
+			ImGui::TreePop();
 		}
-		ImGui::PopID();
-		ImGui::PopID();
-	};
-	const bool assetsOpen = Icons::TreeNode("Assets",
-	                                        ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
-	                                            (currentFolder.empty() ? ImGuiTreeNodeFlags_Selected : 0),
-	                                        Icons::Icon::Folder, "Assets", 16.f);
-	const bool recursivelyToggleAssets = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
-	if (assetsOpen)
-	{
-		if (ImGui::IsItemClicked())
+		auto setFolderNodeSubtreeOpen = [&](const ProjectBrowserEntry& entry, bool expanded, auto&& self) -> void
 		{
-			selectFolder({});
-		}
-		const ImRect rootFolderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-		recordExternalDropFolder(rootFolderRect, {});
-		DrawProjectMoveDropTarget(rootFolderRect, workspace, model, selection, {}, readOnly, diagnostic, actions);
-		std::function<void(const ProjectBrowserEntry&)> drawFolder = [&](const ProjectBrowserEntry& folder)
-		{
-			ImGui::PushID(folder.path.relative.c_str());
-			ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow |
-			                           ImGuiTreeNodeFlags_OpenOnDoubleClick;
-			if (folder.path.relative == currentFolder)
+			ImGui::PushID(entry.path.relative.c_str());
+			const ImGuiID nodeId = ImGui::GetID("##folder");
+			ImGui::GetStateStorage()->SetInt(nodeId, expanded ? 1 : 0);
+			ImGui::PushID(nodeId);
+			for (const ProjectBrowserEntry& child : model.ChildFolders(entry.path.relative))
 			{
-				flags |= ImGuiTreeNodeFlags_Selected;
-			}
-			const bool folderOpen = Icons::TreeNode("##folder", flags, Icons::Icon::Folder, folder.name.c_str(), 16.f);
-			const bool recursivelyToggleChildren = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
-			if (ImGui::IsItemClicked())
-			{
-				selectFolder(folder.path.relative);
-			}
-			const ImRect folderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-			recordExternalDropFolder(folderRect, folder.path.relative);
-			DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name, inputAction);
-			DrawProjectMoveDropTarget(folderRect, workspace, model, selection, folder.path.relative, readOnly,
-			                          diagnostic, actions);
-			if (folderOpen)
-			{
-				for (const ProjectBrowserEntry& child : model.ChildFolders(folder.path.relative))
-				{
-					drawFolder(child);
-				}
-				ImGui::TreePop();
+				self(child, expanded, self);
 			}
 			ImGui::PopID();
-			if (recursivelyToggleChildren)
-			{
-				setFolderNodeSubtreeOpen(folder, folderOpen, setFolderNodeSubtreeOpen);
-			}
+			ImGui::PopID();
 		};
-		for (const ProjectBrowserEntry& folder : model.ChildFolders({}))
+		const bool assetsOpen = Icons::TreeNode("Assets",
+		                                        ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+		                                            (currentFolder.empty() ? ImGuiTreeNodeFlags_Selected : 0),
+		                                        Icons::Icon::Folder, "Assets", 16.f);
+		const bool recursivelyToggleAssets = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
+		if (assetsOpen)
 		{
-			drawFolder(folder);
+			if (ImGui::IsItemClicked())
+			{
+				selectFolder({});
+			}
+			const ImRect rootFolderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+			recordExternalDropFolder(rootFolderRect, {});
+			DrawProjectMoveDropTarget(rootFolderRect, workspace, model, selection, {}, readOnly, diagnostic, actions);
+			std::function<void(const ProjectBrowserEntry&)> drawFolder = [&](const ProjectBrowserEntry& folder)
+			{
+				ImGui::PushID(folder.path.relative.c_str());
+				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow |
+				                           ImGuiTreeNodeFlags_OpenOnDoubleClick;
+				if (folder.path.relative == currentFolder)
+				{
+					flags |= ImGuiTreeNodeFlags_Selected;
+				}
+				const bool folderOpen =
+				    Icons::TreeNode("##folder", flags, Icons::Icon::Folder, folder.name.c_str(), 16.f);
+				const bool recursivelyToggleChildren = ImGui::IsItemToggledOpen() && ImGui::GetIO().KeyAlt;
+				if (ImGui::IsItemClicked())
+				{
+					selectFolder(folder.path.relative);
+				}
+				const ImRect folderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+				recordExternalDropFolder(folderRect, folder.path.relative);
+				DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name, inputAction);
+				DrawProjectMoveDropTarget(folderRect, workspace, model, selection, folder.path.relative, readOnly,
+				                          diagnostic, actions);
+				if (folderOpen)
+				{
+					for (const ProjectBrowserEntry& child : model.ChildFolders(folder.path.relative))
+					{
+						drawFolder(child);
+					}
+					ImGui::TreePop();
+				}
+				ImGui::PopID();
+				if (recursivelyToggleChildren)
+				{
+					setFolderNodeSubtreeOpen(folder, folderOpen, setFolderNodeSubtreeOpen);
+				}
+			};
+			for (const ProjectBrowserEntry& folder : model.ChildFolders({}))
+			{
+				drawFolder(folder);
+			}
+			ImGui::TreePop();
 		}
-		ImGui::TreePop();
-	}
-	if (recursivelyToggleAssets)
-	{
-		const ImGuiID assetsId = ImGui::GetID("Assets");
-		ImGui::GetStateStorage()->SetInt(assetsId, assetsOpen ? 1 : 0);
-		ImGui::PushID(assetsId);
-		for (const ProjectBrowserEntry& folder : model.ChildFolders({}))
+		if (recursivelyToggleAssets)
 		{
-			setFolderNodeSubtreeOpen(folder, assetsOpen, setFolderNodeSubtreeOpen);
+			const ImGuiID assetsId = ImGui::GetID("Assets");
+			ImGui::GetStateStorage()->SetInt(assetsId, assetsOpen ? 1 : 0);
+			ImGui::PushID(assetsId);
+			for (const ProjectBrowserEntry& folder : model.ChildFolders({}))
+			{
+				setFolderNodeSubtreeOpen(folder, assetsOpen, setFolderNodeSubtreeOpen);
+			}
+			ImGui::PopID();
 		}
-		ImGui::PopID();
-	}
 		ImGui::PopStyleVar();
 		ImGui::EndChild();
 		Icons::SameLine();
@@ -1477,7 +1593,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	{
 		ImGui::SetKeyboardFocusHere();
 	}
-	ImGui::InputTextWithHint("##ProjectSearch", "Search Assets (t:Type, l:Label)", searchText.data(), searchText.size());
+	ImGui::InputTextWithHint("##ProjectSearch", "Search Assets (t:Type, l:Label)", searchText.data(),
+	                         searchText.size());
 	const bool projectSearchActive = ImGui::IsItemActive();
 	ImGui::SameLine();
 	auto foldSearchToken = [](String value)
@@ -1559,11 +1676,10 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	if (ImGui::BeginPopup("ProjectSearchTypeFilter"))
 	{
-		Vector<std::pair<String, String>> types{{"Folder", "folder"},     {"Scene", "scene"},
-		                                        {"Prefab", "prefab"},     {"Material", "material"},
-		                                        {"Shader", "shader"},     {"Mesh", "mesh"},
-		                                        {"Texture", "texture"},   {"Texture 2D", "texture2d"},
-		                                        {"Script", "script"}};
+		Vector<std::pair<String, String>> types{
+		    {"Folder", "folder"},     {"Scene", "scene"},          {"Prefab", "prefab"},
+		    {"Material", "material"}, {"Shader", "shader"},        {"Mesh", "mesh"},
+		    {"Texture", "texture"},   {"Texture 2D", "texture2d"}, {"Script", "script"}};
 		if (const auto* database = workspace.Database())
 		{
 			for (const ImportedArtifactRecord& object : database->VisibleImportedObjects())
@@ -1579,8 +1695,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				}
 			}
 		}
-		std::sort(types.begin() + 9, types.end(), [](const auto& left, const auto& right)
-		          { return left.first < right.first; });
+		std::sort(types.begin() + 9, types.end(),
+		          [](const auto& left, const auto& right) { return left.first < right.first; });
 		for (const auto& type : types)
 		{
 			const String filter = String("t:") + type.second;
@@ -1634,8 +1750,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	ImGui::SameLine();
 	const String currentSearch(searchText.data());
-	const bool isFavorite = !currentSearch.empty() &&
-	                        std::find(favoriteSearches.begin(), favoriteSearches.end(), currentSearch) != favoriteSearches.end();
+	const bool isFavorite = !currentSearch.empty() && std::find(favoriteSearches.begin(), favoriteSearches.end(),
+	                                                            currentSearch) != favoriteSearches.end();
 	if (ImGui::SmallButton(isFavorite ? "★" : "☆") && !currentSearch.empty() && !isFavorite)
 	{
 		favoriteSearches.push_back(currentSearch);
@@ -1693,7 +1809,6 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			return false;
 		}
 		renameTargetRendered = true;
-		const ImVec2 layoutCursor = ImGui::GetCursorScreenPos();
 		ImGuiWindow* window = ImGui::GetCurrentWindow();
 		const ImGuiWindowTempData layoutState = window->DC;
 		const ImVec2 inputPosition =
@@ -1703,9 +1818,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		if (!grid)
 		{
 			const ImVec2 framePadding = ImGui::GetStyle().FramePadding;
-			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-			                    {framePadding.x,
-			                     std::max(0.f, (maximum.y - minimum.y - ImGui::GetTextLineHeight()) * 0.5f)});
+			ImGui::PushStyleVar(
+			    ImGuiStyleVar_FramePadding,
+			    {framePadding.x, std::max(0.f, (maximum.y - minimum.y - ImGui::GetTextLineHeight()) * 0.5f)});
 		}
 		ImGui::SetCursorScreenPos(inputPosition);
 		ImGui::SetNextItemWidth(std::max(72.f, maximum.x - inputPosition.x - (grid ? 10.f : 6.f)));
@@ -1730,7 +1845,6 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			renameSourcePath.clear();
 		}
 		window->DC = layoutState;
-		ImGui::SetCursorScreenPos(layoutCursor);
 		return true;
 	};
 	auto commitInlineRename = [&]
@@ -1799,10 +1913,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 		}
 	}
-	const bool searchNavigationKey = projectSearchActive && !projectInput.KeyCtrl && !projectInput.KeySuper &&
-	                                 !projectInput.KeyAlt &&
-	                                 (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
-	                                  ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
+	const bool searchNavigationKey =
+	    projectSearchActive && !projectInput.KeyCtrl && !projectInput.KeySuper && !projectInput.KeyAlt &&
+	    (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) || ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
 	std::optional<EditorSelectionEntry> projectKeyboardFocusTarget;
 	if (ImGui::IsWindowFocused() && (!projectInput.WantTextInput || searchNavigationKey) && !projectInput.KeyAlt &&
 	    !visibleRows.empty())
@@ -1819,8 +1932,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		{
 			const auto* primary = selection.PrimaryEntry();
 			const auto current = primary ? std::find_if(visibleRows.begin(), visibleRows.end(),
-			                                           [&](const auto& entry) { return entry.SameIdentity(*primary); })
-			                           : visibleRows.end();
+			                                            [&](const auto& entry) { return entry.SameIdentity(*primary); })
+			                             : visibleRows.end();
 			if (current != visibleRows.end())
 			{
 				projectKeyboardFocusTarget = *current;
@@ -2055,7 +2168,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			if (!editingName)
 			{
-				DrawProjectAssetDragSource(selection, entry, label, inputAction);
+				DrawProjectAssetDragSource(selection, entry, label, inputAction, &visibleRows);
 			}
 			if (!editingName && ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selection.Contains(entry))
 			{
@@ -2133,9 +2246,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				const bool editingName = renameEditing && renameSourcePath == folder.path.relative;
 				const auto folderEntry = AssetSelection(folder);
 				focusProjectEntry(folderEntry);
-				const bool folderClicked = Icons::Selectable(
-				    Icons::Icon::Folder, editingName ? "" : folder.name.c_str(),
-				    selection.Contains(folderEntry), ImGuiSelectableFlags_AllowDoubleClick);
+				const bool folderClicked =
+				    Icons::Selectable(Icons::Icon::Folder, editingName ? "" : folder.name.c_str(),
+				                      selection.Contains(folderEntry), ImGuiSelectableFlags_AllowDoubleClick);
 				projectContentRowIds.push_back(ImGui::GetItemID());
 				const ImVec2 folderMinimum = ImGui::GetItemRectMin();
 				const ImVec2 folderMaximum = ImGui::GetItemRectMax();
@@ -2323,8 +2436,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 					                                    [](const EditorSelectionEntry& entry)
 					                                    {
 						                                    return entry.kind == EditorSelectionKind::Asset &&
-						                                                   entry.assetRole == EditorAssetSelectionRole::Source &&
-						                                                   !entry.assetLocalFileId && !entry.IsMissing();
+						                                           entry.assetRole ==
+						                                               EditorAssetSelectionRole::Source &&
+						                                           !entry.assetLocalFileId && !entry.IsMissing();
 					                                    })))
 					{
 						auto duplicated = duplicateEntries(selection.entries);
@@ -2451,7 +2565,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			if (!editingName)
 			{
-				DrawProjectAssetDragSource(selection, assetEntry, asset.name, inputAction);
+				DrawProjectAssetDragSource(selection, assetEntry, asset.name, inputAction, &visibleRows);
 			}
 			bool contextSelectionAccepted = true;
 			if (!editingName && ImGui::IsItemClicked(ImGuiMouseButton_Right))
@@ -2472,7 +2586,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			if (!editingName && contextSelectionAccepted && ImGui::BeginPopupContextItem("AssetActions"))
 			{
-				if (Icons::MenuItem(isFavoriteAsset(asset.path.relative) ? "Remove from Favorites" : "Add to Favorites"))
+				if (Icons::MenuItem(isFavoriteAsset(asset.path.relative) ? "Remove from Favorites"
+				                                                         : "Add to Favorites"))
 				{
 					toggleFavoriteAsset(asset.path.relative);
 				}
@@ -2680,7 +2795,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 						}
 					}
 					projectContentRowIds.push_back(ImGui::GetItemID());
-					DrawProjectAssetDragSource(selection, objectEntry, objectLabel, inputAction);
+					DrawProjectAssetDragSource(selection, objectEntry, objectLabel, inputAction, &visibleRows);
 					bool contextObjectSelectionAccepted = true;
 					if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selection.Contains(objectEntry))
 					{
@@ -2744,9 +2859,9 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 	}
 	const ImGuiID focusedItemId = ImGui::GetFocusID();
-	const bool projectContentRowFocused = focusedItemId != 0 &&
-	                                      std::find(projectContentRowIds.begin(), projectContentRowIds.end(),
-	                                                focusedItemId) != projectContentRowIds.end();
+	const bool projectContentRowFocused =
+	    focusedItemId != 0 && std::find(projectContentRowIds.begin(), projectContentRowIds.end(), focusedItemId) !=
+	                              projectContentRowIds.end();
 	contentRowKeyboardFocused = projectContentRowFocused;
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && projectContentRowFocused &&
 	    !projectInput.WantTextInput && !ImGui::IsAnyItemActive() && projectInput.KeyCtrl &&
@@ -2759,8 +2874,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && projectContentRowFocused &&
-	    !projectInput.WantTextInput && !ImGui::IsAnyItemActive() &&
-	    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
+	    !projectInput.WantTextInput && !ImGui::IsAnyItemActive() && IsProjectOpenShortcutPressed() &&
 	    selection.entries.size() == 1 && actions.openAsset)
 	{
 		const auto* primary = selection.PrimaryEntry();
@@ -2768,7 +2882,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		    primary && primary->kind == EditorSelectionKind::Asset && !primary->IsMissing() &&
 		    primary->assetRole == EditorAssetSelectionRole::Source && !primary->assetLocalFileId &&
 		    std::any_of(visibleRows.begin(), visibleRows.end(),
-			            [&](const EditorSelectionEntry& row) { return row.SameIdentity(*primary); });
+		                [&](const EditorSelectionEntry& row) { return row.SameIdentity(*primary); });
 		const auto* asset = visibleSelection ? model.Find(primary->assetPath) : nullptr;
 		if (asset && asset->folder)
 		{
@@ -2792,24 +2906,35 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	if (!readOnly && actions.importExternalFiles)
 	{
+		bool acceptedDrop = false;
+		String dropErrors;
 		for (Size index = 0; index < externalDropPositions.size(); ++index)
 		{
 			if (!externalDropAccepted[index])
 			{
 				continue;
 			}
+			acceptedDrop = true;
 			auto imported = actions.importExternalFiles(externalDrops[index].paths, externalDropDestinations[index]);
 			if (!imported)
 			{
-				diagnostic = imported.error;
+				if (!dropErrors.empty())
+				{
+					dropErrors += "\n";
+				}
+				dropErrors += imported.error;
 			}
+		}
+		if (acceptedDrop)
+		{
+			diagnostic = std::move(dropErrors);
 		}
 	}
 	const ImVec2 blankDropMin = ImGui::GetCursorScreenPos();
 	const ImRect contentWork = ImGui::GetCurrentWindow()->WorkRect;
-	if (twoColumnLayout && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-	    !ImGui::GetIO().WantTextInput &&
-	    ImGui::IsKeyPressed(ImGuiKey_Backspace, false))
+	if (contentRowKeyboardFocused && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+	    !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive() &&
+	    IsProjectParentFolderShortcutPressed(twoColumnLayout))
 	{
 		const String path = model.CurrentFolder();
 		if (!path.empty())
@@ -2819,8 +2944,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 		}
 	}
 	if (!selection.entries.empty() && !ImGui::IsAnyItemHovered() &&
-	    ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
-	    ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload() && selection.Clear())
+	    ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+	    !ImGui::GetDragDropPayload() && selection.Clear())
 	{
 		model.ClearAssetSelection();
 		hierarchy.ClearSelection();
@@ -2948,8 +3073,8 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 	}
 	ImGui::Separator();
 	String footerPath = currentFolder.empty() ? String("Assets") : String("Assets/") + currentFolder;
-	if (const auto* primary = selection.PrimaryEntry(); primary && primary->kind == EditorSelectionKind::Asset &&
-	    !primary->assetPath.relative.empty())
+	if (const auto* primary = selection.PrimaryEntry();
+	    primary && primary->kind == EditorSelectionKind::Asset && !primary->assetPath.relative.empty())
 	{
 		footerPath = primary->assetPath.relative;
 	}

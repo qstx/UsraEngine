@@ -3,6 +3,9 @@
 
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceFile.hpp>
+#include <Serialization/JsonArchiveInterop.hpp>
+#include <Shader/ShaderAssetResource.hpp>
+#include <Vfs/MemoryFileProvider.hpp>
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
@@ -149,6 +152,101 @@ Result<std::optional<ResourceId>> EmbeddedGuid(const VirtualFileSystem& filesyst
 	auto header = ReadResourceHeader(filesystem, path);
 	return header ? Result<std::optional<ResourceId>>::Success(header.value.id)
 	              : Result<std::optional<ResourceId>>::Failure(header.error);
+}
+
+Result<Vector<UInt8>> RewriteResourceIdentity(const VirtualPath& path, const Vector<UInt8>& source, ResourceId id)
+{
+	auto kind = ResourceKindForPath(path);
+	if (!kind)
+	{
+		return Result<Vector<UInt8>>::Success(source);
+	}
+	Vector<UInt8> bytes = source;
+	if (kind.value == ResourceKind::Texture)
+	{
+		if (bytes.size() < 28)
+		{
+			return Result<Vector<UInt8>>::Failure("Truncated resource header at " + path.ToString());
+		}
+		std::copy(id.bytes.begin(), id.bytes.end(), bytes.begin() + 12);
+		return Result<Vector<UInt8>>::Success(std::move(bytes));
+	}
+	if (kind.value == ResourceKind::Shader)
+	{
+		VirtualFileSystem staging;
+		auto mounted = staging.MountProvider("mem", std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite);
+		if (!mounted)
+		{
+			return Result<Vector<UInt8>>::Failure(mounted.error);
+		}
+		const VirtualPath stagingPath{"mem", "source.ursashaderasset"};
+		auto stored = staging.WriteAtomic(stagingPath, source);
+		auto shader = stored ? Shader::LoadShaderAssetResource(staging, stagingPath)
+		                     : Result<Shader::ShaderAsset>::Failure(stored.error);
+		if (!shader || source.size() < 28 ||
+		    !std::equal(shader.value.id.bytes.begin(), shader.value.id.bytes.end(), source.begin() + 12))
+		{
+			return Result<Vector<UInt8>>::Failure(
+			    shader ? "Shader envelope and payload identities disagree at " + path.ToString()
+			           : "Cannot read Shader at " + path.ToString() + ": " + shader.error);
+		}
+		auto copied = shader.value.CopyWithIdentity(id);
+		if (!copied)
+		{
+			return Result<Vector<UInt8>>::Failure(copied.error);
+		}
+		auto saved = Shader::SaveShaderAssetResource(staging, stagingPath, copied.value);
+		return saved ? staging.Read(stagingPath) : Result<Vector<UInt8>>::Failure(saved.error);
+	}
+	if (kind.value == ResourceKind::Mesh && !bytes.empty() && bytes[0] == 'U')
+	{
+		if (bytes.size() < 40)
+		{
+			return Result<Vector<UInt8>>::Failure("Truncated Mesh resource at " + path.ToString());
+		}
+		Vector<UInt8> payload(bytes.begin() + 40, bytes.end());
+		auto reader = BinaryArchive::Decode(payload, maxMeshResourceBytes);
+		auto document = reader ? ArchiveToJson(reader.value) : Result<Json>::Failure(reader.error);
+		if (!document || !document.value.is_object() || !document.value.contains("id") ||
+		    !document.value["id"].is_string())
+		{
+			return Result<Vector<UInt8>>::Failure("Cannot change identity of invalid binary Mesh at " +
+			                                      path.ToString());
+		}
+		ResourceId previous;
+		std::copy(bytes.begin() + 12, bytes.begin() + 28, previous.bytes.begin());
+		if (document.value["id"].get<std::string>() != ToStdString(previous.ToString()))
+		{
+			return Result<Vector<UInt8>>::Failure("Mesh envelope and payload identities disagree at " +
+			                                      path.ToString());
+		}
+		document.value["id"] = ToStdString(id.ToString());
+		ArchiveWriter writer;
+		auto populated = ArchiveWriteJson(writer, document.value);
+		auto encoded = populated ? BinaryArchive::Encode(writer) : Result<Vector<UInt8>>::Failure(populated.error);
+		if (!encoded || encoded.value.size() > maxMeshResourceBytes - 40)
+		{
+			return Result<Vector<UInt8>>::Failure(encoded ? "Mesh resource exceeds size limit at " + path.ToString()
+			                                              : encoded.error);
+		}
+		bytes.resize(40);
+		std::copy(id.bytes.begin(), id.bytes.end(), bytes.begin() + 12);
+		for (Size index = 0; index < 8; ++index)
+		{
+			bytes[28 + index] = UInt8(UInt64(encoded.value.size()) >> (index * 8));
+		}
+		bytes.insert(bytes.end(), encoded.value.begin(), encoded.value.end());
+		return Result<Vector<UInt8>>::Success(std::move(bytes));
+	}
+	const std::string text(bytes.begin(), bytes.end());
+	auto document = Json::parse(text, nullptr, false);
+	if (document.is_discarded() || !document.is_object() || !document.contains("id") || !document["id"].is_string())
+	{
+		return Result<Vector<UInt8>>::Failure("Cannot change the identity of an invalid resource at " +
+		                                      path.ToString());
+	}
+	document["id"] = ToStdString(id.ToString());
+	return Result<Vector<UInt8>>::Success(BytesOf(document.dump(2)));
 }
 
 String WithoutMetaSuffix(const String& path)
@@ -694,13 +792,56 @@ Result<void> AssetDatabase::Refresh()
 		}
 
 		const String guid = metadata.guid.ToString();
-		if (candidatePathsByGuid.find(guid) != candidatePathsByGuid.end())
+		const auto previousOwner = pathsByGuid.find(guid);
+		bool reservedForPreviousOwner = false;
+		if (previousOwner != pathsByGuid.end() && previousOwner->second != path.value.ToString())
+		{
+			const auto ownerPath = VirtualPath::Parse(previousOwner->second);
+			if (ownerPath)
+			{
+				const auto ownerMetadata = existingMetadata.find(ownerPath.value.relative);
+				reservedForPreviousOwner = candidates.find(ownerPath.value.relative) != candidates.end() &&
+				                           ownerMetadata != existingMetadata.end() &&
+				                           ownerMetadata->second.guid == metadata.guid;
+			}
+		}
+		if (reservedForPreviousOwner || candidatePathsByGuid.find(guid) != candidatePathsByGuid.end())
 		{
 			metadata.guid = ResourceId::Generate();
 			metadata.scriptTypes = Json::object();
+			Vector<UInt8> original;
+			if (!metadata.folder && ResourceKindForPath(path.value))
+			{
+				auto validHeader = ReadResourceHeader(filesystem, path.value);
+				auto bytes = filesystem.Read(path.value);
+				if (!validHeader || !bytes)
+				{
+					return Result<void>::Failure(!validHeader ? validHeader.error : bytes.error);
+				}
+				original = std::move(bytes.value);
+				auto rewritten = RewriteResourceIdentity(path.value, original, metadata.guid);
+				if (!rewritten)
+				{
+					return Result<void>::Failure(rewritten.error);
+				}
+				auto saved = filesystem.WriteAtomic(path.value, rewritten.value);
+				if (!saved)
+				{
+					return Result<void>::Failure(saved.error);
+				}
+			}
 			auto written = WriteMetadata(path.value, metadata);
 			if (!written)
 			{
+				if (!original.empty())
+				{
+					auto restored = filesystem.WriteAtomic(path.value, original);
+					if (!restored)
+					{
+						return Result<void>::Failure("Cannot repair duplicate GUID at " + path.value.ToString() + ": " +
+						                             written.error + "; source restoration failed: " + restored.error);
+					}
+				}
 				return Result<void>::Failure("Cannot repair duplicate GUID at " + path.value.ToString() + ": " +
 				                             written.error);
 			}
@@ -1768,6 +1909,17 @@ AssetDatabase::StageTransfer(const VirtualPath& source, const VirtualPath& desti
 
 Result<void> AssetDatabase::CommitTransfer(Vector<FileTransfer> files, bool regenerateGuids)
 {
+	Map<String, ResourceId> copiedIds;
+	if (regenerateGuids)
+	{
+		for (const FileTransfer& file : files)
+		{
+			if (EndsWith(file.source.relative, ".meta"))
+			{
+				copiedIds.emplace(WithoutMetaSuffix(file.destination.relative), ResourceId::Generate());
+			}
+		}
+	}
 	Vector<VirtualPath> written;
 	const auto rollback = [&]()
 	{
@@ -1799,7 +1951,7 @@ Result<void> AssetDatabase::CommitTransfer(Vector<FileTransfer> files, bool rege
 				const String compensation = rollback();
 				return Result<void>::Failure(metadata.error + compensation);
 			}
-			metadata.value.guid = ResourceId::Generate();
+			metadata.value.guid = copiedIds.find(WithoutMetaSuffix(file.destination.relative))->second;
 			metadata.value.scriptTypes = Json::object();
 			auto encoded = EncodeMetadata(metadata.value);
 			if (!encoded)
@@ -1808,6 +1960,23 @@ Result<void> AssetDatabase::CommitTransfer(Vector<FileTransfer> files, bool rege
 				return Result<void>::Failure(encoded.error + compensation);
 			}
 			bytes = BytesOf(ToStdString(encoded.value));
+		}
+		else if (regenerateGuids && ResourceKindForPath(file.source))
+		{
+			const auto id = copiedIds.find(file.destination.relative);
+			if (id == copiedIds.end())
+			{
+				return Result<void>::Failure("Native resource copy has no metadata: " + file.source.ToString() +
+				                             rollback());
+			}
+			auto validHeader = ReadResourceHeader(filesystem, file.source);
+			auto rewritten = validHeader ? RewriteResourceIdentity(file.source, bytes, id->second)
+			                             : Result<Vector<UInt8>>::Failure(validHeader.error);
+			if (!rewritten)
+			{
+				return Result<void>::Failure(rewritten.error + rollback());
+			}
+			bytes = std::move(rewritten.value);
 		}
 		auto saved = filesystem.WriteAtomic(file.destination, bytes);
 		if (!saved)

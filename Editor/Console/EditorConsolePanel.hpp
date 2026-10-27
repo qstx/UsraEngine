@@ -18,7 +18,9 @@ public:
 	{
 		String message;
 		ImVec2 messageCenter{};
+		ImGuiID messageItem = 0;
 		bool messageHovered = false;
+		bool messageSelected = false;
 		ImVec2 copyCenter{};
 		bool copyHovered = false;
 		ImVec2 locateCenter{};

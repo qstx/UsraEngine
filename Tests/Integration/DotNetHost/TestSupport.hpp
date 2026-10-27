@@ -58,6 +58,7 @@ void TestManagedRenderingComponentSerialization(DotNetHost& host, VirtualFileSys
                                                 const VirtualPath& contentPath);
 #if defined(URSA_DOTNET_TEST_EDITOR)
 void TestManagedImporterRegistration(DotNetHost& host, VirtualFileSystem& filesystem, const VirtualPath& content);
-void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std::filesystem::path& root);
+void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std::filesystem::path& root,
+                          bool builtinInspectorOnly = false);
 #endif
 } // namespace Ursa::Test

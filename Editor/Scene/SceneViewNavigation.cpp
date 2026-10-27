@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace Ursa::Editor
 {
@@ -10,6 +11,7 @@ namespace
 constexpr Float32 OrbitRadiansPerPixel = 0.003f;
 constexpr Float32 MinimumDistance = 0.05f;
 constexpr Float32 MaximumDistance = 1'000'000.f;
+constexpr Float32 MaximumFarClip = 2'000'000'000.f;
 constexpr Float32 Pi = 3.14159265358979323846f;
 
 Vec3 Add(Vec3 left, Vec3 right)
@@ -27,6 +29,53 @@ Float32 Length(Vec3 value)
 	return std::sqrt(Dot(value, value));
 }
 
+bool IsSceneCameraPoseValid(const Camera& camera)
+{
+	const auto finite = [](Vec3 value)
+	{ return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z); };
+	if (!finite(camera.position) || !finite(camera.target) || !finite(camera.up))
+	{
+		return false;
+	}
+	const Vec3 view = camera.target - camera.position;
+	const Float32 distance = Length(view);
+	if (!std::isfinite(distance) || distance <= 1.0e-5f)
+	{
+		return false;
+	}
+	const Float32 rightLength = Length(Cross(Scale(view, 1.f / distance), camera.up));
+	return std::isfinite(rightLength) && rightLength > 1.0e-5f;
+}
+
+bool IsSceneCameraProjectionValid(const Camera& camera)
+{
+	constexpr Float32 minimumFov = Pi / 180.f;
+	constexpr Float32 maximumFov = 179.f * Pi / 180.f;
+	return std::isfinite(camera.verticalFovRadians) && camera.verticalFovRadians >= minimumFov &&
+	       camera.verticalFovRadians <= maximumFov && std::isfinite(camera.orthographicSize) &&
+	       camera.orthographicSize > 0.f && camera.orthographicSize <= MaximumDistance * 2.f &&
+	       std::isfinite(camera.nearPlane) && camera.nearPlane >= 1.0e-5f && camera.nearPlane <= 99'999.f &&
+	       std::isfinite(camera.farPlane) && camera.farPlane > camera.nearPlane && camera.farPlane <= MaximumFarClip;
+}
+
+struct CameraPoseGuard
+{
+	Camera& camera;
+	Camera original;
+
+	explicit CameraPoseGuard(Camera& value) : camera(value), original(value)
+	{
+	}
+
+	~CameraPoseGuard()
+	{
+		if (!IsSceneViewCameraValid(camera))
+		{
+			camera = original;
+		}
+	}
+};
+
 void SetOrbitPosition(Camera& camera, Float32 yaw, Float32 pitch, Float32 distance)
 {
 	const Float32 horizontal = std::cos(pitch) * distance;
@@ -35,8 +84,101 @@ void SetOrbitPosition(Camera& camera, Float32 yaw, Float32 pitch, Float32 distan
 }
 } // namespace
 
+bool IsSceneViewCameraValid(const Camera& camera)
+{
+	return IsSceneCameraPoseValid(camera) && IsSceneCameraProjectionValid(camera);
+}
+
+bool RecoverSceneViewCamera(Camera& camera)
+{
+	const bool valid = IsSceneViewCameraValid(camera);
+	if (valid)
+	{
+		return false;
+	}
+	const Camera fallback;
+	if (!IsSceneCameraPoseValid(camera))
+	{
+		camera.position = fallback.position;
+		camera.target = fallback.target;
+		camera.up = fallback.up;
+	}
+	constexpr Float32 minimumFov = Pi / 180.f;
+	constexpr Float32 maximumFov = 179.f * Pi / 180.f;
+	if (!std::isfinite(camera.verticalFovRadians) || camera.verticalFovRadians < minimumFov ||
+	    camera.verticalFovRadians > maximumFov)
+	{
+		camera.verticalFovRadians = fallback.verticalFovRadians;
+	}
+	if (!std::isfinite(camera.orthographicSize) || camera.orthographicSize <= 0.f ||
+	    camera.orthographicSize > MaximumDistance * 2.f)
+	{
+		camera.orthographicSize = fallback.orthographicSize;
+	}
+	if (!std::isfinite(camera.nearPlane) || camera.nearPlane < 1.0e-5f || camera.nearPlane > 99'999.f ||
+	    !std::isfinite(camera.farPlane) || camera.farPlane <= camera.nearPlane || camera.farPlane > MaximumFarClip)
+	{
+		camera.nearPlane = fallback.nearPlane;
+		camera.farPlane = fallback.farPlane;
+	}
+	return true;
+}
+
+void AdvanceSceneViewMovementSpeed(bool moving, Float32 deltaTime, Float32& targetSpeed, Float32& currentSpeed,
+	                              bool accelerationEnabled, Float32 accelerationSpeed, bool easingEnabled,
+	                              Float32 easingDuration)
+{
+	constexpr Float32 maximumSpeed = 1'000'000.f;
+	if (!std::isfinite(deltaTime) || deltaTime < 0.f || !std::isfinite(accelerationSpeed) ||
+	    accelerationSpeed < 0.1f || accelerationSpeed > 4.f || !std::isfinite(easingDuration) ||
+	    easingDuration < 0.1f || easingDuration > 2.f)
+	{
+		targetSpeed = 0.f;
+		currentSpeed = 0.f;
+		return;
+	}
+	if (!std::isfinite(targetSpeed) || targetSpeed < 0.f)
+	{
+		targetSpeed = 0.f;
+	}
+	if (!std::isfinite(currentSpeed) || currentSpeed < 0.f)
+	{
+		currentSpeed = 0.f;
+	}
+	if (moving)
+	{
+		if (accelerationEnabled)
+		{
+			const Float32 accelerated = targetSpeed < std::numeric_limits<Float32>::epsilon()
+			                                ? 9.f
+			                                : targetSpeed * std::pow(accelerationSpeed + 1.f, deltaTime);
+			targetSpeed = std::isfinite(accelerated) ? std::min(accelerated, maximumSpeed) : maximumSpeed;
+		}
+		else
+		{
+			targetSpeed = 9.f;
+		}
+	}
+	else
+	{
+		targetSpeed = 0.f;
+	}
+	currentSpeed = std::min(currentSpeed, maximumSpeed);
+	if (easingEnabled)
+	{
+		const Float32 progress = std::clamp(deltaTime / easingDuration, 0.f, 1.f);
+		const Float32 ease = 1.f - std::pow(1.f - progress, 4.f);
+		currentSpeed += (targetSpeed - currentSpeed) * ease;
+	}
+	else
+	{
+		currentSpeed = targetSpeed;
+	}
+}
+
 void OrbitSceneView(Camera& camera, ViewportPoint mouseDelta)
 {
+	CameraPoseGuard guard(camera);
 	const Vec3 offset = camera.position - camera.target;
 	const Float32 distance = Length(offset);
 	if (!std::isfinite(distance) || distance <= MinimumDistance || !std::isfinite(mouseDelta.x) ||
@@ -53,6 +195,7 @@ void OrbitSceneView(Camera& camera, ViewportPoint mouseDelta)
 
 void PanSceneView(Camera& camera, ViewportPoint mouseDelta, Float32 viewportHeight)
 {
+	CameraPoseGuard guard(camera);
 	const Vec3 viewDirection = camera.target - camera.position;
 	const Float32 distance = Length(viewDirection);
 	if (!std::isfinite(distance) || distance <= MinimumDistance || !std::isfinite(viewportHeight) ||
@@ -92,6 +235,7 @@ void PanSceneView(Camera& camera, ViewportPoint mouseDelta, Float32 viewportHeig
 
 void ZoomSceneView(Camera& camera, Float32 wheelDelta, ViewportPoint mousePosition, ViewportPoint viewportSize)
 {
+	CameraPoseGuard guard(camera);
 	const Vec3 offset = camera.position - camera.target;
 	const Float32 distance = Length(offset);
 	if (!std::isfinite(distance) || distance <= 0.f || !std::isfinite(wheelDelta) || !std::isfinite(mousePosition.x) ||
@@ -152,6 +296,7 @@ void ZoomSceneViewByWheel(Camera& camera, Float32 wheelDelta, ViewportPoint mous
 
 void ZoomSceneViewByDrag(Camera& camera, Float32 zoomDelta, Float32 startZoom, Float32 zoomSpeed, Float32& totalMotion)
 {
+	CameraPoseGuard guard(camera);
 	if (!std::isfinite(zoomDelta) || !std::isfinite(startZoom) || !std::isfinite(zoomSpeed) || zoomSpeed <= 0.f ||
 	    !std::isfinite(totalMotion))
 	{
@@ -176,24 +321,33 @@ void ZoomSceneViewByDrag(Camera& camera, Float32 zoomDelta, Float32 startZoom, F
 	{
 		return;
 	}
-	totalMotion += zoomDelta;
+	const Float32 nextMotion = totalMotion + zoomDelta;
+	if (!std::isfinite(nextMotion))
+	{
+		return;
+	}
 	const Float32 size = distance * std::sin(camera.verticalFovRadians * 0.5f);
 	const Float32 nextSize =
-	    totalMotion < 0.f ? startZoom * (1.f + totalMotion * 0.001f) : size + zoomDelta * zoomSpeed * 0.003f;
+	    nextMotion < 0.f ? startZoom * (1.f + nextMotion * 0.001f) : size + zoomDelta * zoomSpeed * 0.003f;
 	const Float32 nextDistance = nextSize / std::sin(camera.verticalFovRadians * 0.5f);
 	const Float32 clampedDistance = std::clamp(nextDistance, MinimumDistance, MaximumDistance);
 	camera.position = Add(camera.target, Scale(offset, clampedDistance / distance));
+	if (IsSceneViewCameraValid(camera))
+	{
+		totalMotion = nextMotion;
+	}
 }
 
 void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint movement, Float32 verticalMovement,
-                         Float32 deltaTime, Float32 speed, bool fast)
+	                     Float32 deltaTime, Float32 speed, bool fast, Float32 fastSpeedModifier)
 {
+	CameraPoseGuard guard(camera);
 	const Vec3 view = camera.target - camera.position;
 	Float32 distance = Length(view);
 	if (!std::isfinite(distance) || distance <= MinimumDistance || !std::isfinite(mouseDelta.x) ||
 	    !std::isfinite(mouseDelta.y) || !std::isfinite(movement.x) || !std::isfinite(movement.y) ||
 	    !std::isfinite(verticalMovement) || !std::isfinite(deltaTime) || deltaTime <= 0.f || !std::isfinite(speed) ||
-	    speed < 0.f)
+	    speed < 0.f || !std::isfinite(fastSpeedModifier) || fastSpeedModifier < 1.1f || fastSpeedModifier > 25.f)
 	{
 		return;
 	}
@@ -211,13 +365,14 @@ void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint
 		}
 		const Vec3 right = Scale(rightVector, 1.f / rightLength);
 		const Vec3 screenUp = Normalized(Cross(right, forward));
-		Vec3 direction = Add(Add(Scale(right, movement.x), Scale(forward, movement.y)), Scale(screenUp, verticalMovement));
+		Vec3 direction =
+		    Add(Add(Scale(right, movement.x), Scale(forward, movement.y)), Scale(screenUp, verticalMovement));
 		const Float32 directionLength = Length(direction);
 		if (directionLength > 1.f)
 		{
 			direction = Scale(direction, 1.f / directionLength);
 		}
-		const Float32 moveScale = speed * deltaTime * (fast ? 5.f : 1.f);
+		const Float32 moveScale = speed * deltaTime * (fast ? fastSpeedModifier : 1.f);
 		const Vec3 shift = Scale(direction, moveScale);
 		camera.position = Add(camera.position, shift);
 		camera.target = Add(camera.target, shift);
@@ -241,19 +396,20 @@ void FlythroughSceneView(Camera& camera, ViewportPoint mouseDelta, ViewportPoint
 	{
 		direction = Scale(direction, 1.f / directionLength);
 	}
-	const Float32 moveScale = speed * deltaTime * (fast ? 5.f : 1.f);
+	const Float32 moveScale = speed * deltaTime * (fast ? fastSpeedModifier : 1.f);
 	camera.position = Add(camera.position, Scale(direction, moveScale));
 	camera.target = Add(camera.position, Scale(forward, distance));
 }
 
 void MoveSceneView(Camera& camera, ViewportPoint movement, Float32 deltaTime, Float32 speed, bool fast,
-                   bool panVerticalInOrthographic)
+	           bool panVerticalInOrthographic, Float32 fastSpeedModifier)
 {
+	CameraPoseGuard guard(camera);
 	const Vec3 view = camera.target - camera.position;
 	const Float32 distance = Length(view);
 	if (!std::isfinite(distance) || distance <= MinimumDistance || !std::isfinite(movement.x) ||
 	    !std::isfinite(movement.y) || !std::isfinite(deltaTime) || deltaTime <= 0.f || !std::isfinite(speed) ||
-	    speed <= 0.f)
+	    speed <= 0.f || !std::isfinite(fastSpeedModifier) || fastSpeedModifier < 1.1f || fastSpeedModifier > 25.f)
 	{
 		return;
 	}
@@ -265,14 +421,15 @@ void MoveSceneView(Camera& camera, ViewportPoint movement, Float32 deltaTime, Fl
 		return;
 	}
 	const Vec3 right = Scale(rightVector, 1.f / rightLength);
-	const Vec3 vertical = camera.orthographic && panVerticalInOrthographic ? Normalized(Cross(right, forward)) : forward;
+	const Vec3 vertical =
+	    camera.orthographic && panVerticalInOrthographic ? Normalized(Cross(right, forward)) : forward;
 	Vec3 direction = Add(Scale(right, movement.x), Scale(vertical, movement.y));
 	const Float32 directionLength = Length(direction);
 	if (directionLength > 1.f)
 	{
 		direction = Scale(direction, 1.f / directionLength);
 	}
-	const Float32 moveScale = speed * deltaTime * (fast ? 5.f : 1.f);
+	const Float32 moveScale = speed * deltaTime * (fast ? fastSpeedModifier : 1.f);
 	const Vec3 shift = Scale(direction, moveScale);
 	camera.position = Add(camera.position, shift);
 	camera.target = Add(camera.target, shift);
@@ -280,10 +437,10 @@ void MoveSceneView(Camera& camera, ViewportPoint movement, Float32 deltaTime, Fl
 
 void FocusSceneView(Camera& camera, Vec3 target, Float32 radius, Float32 aspect)
 {
+	CameraPoseGuard guard(camera);
 	if (!std::isfinite(target.x) || !std::isfinite(target.y) || !std::isfinite(target.z) || !std::isfinite(radius) ||
 	    !std::isfinite(aspect) || aspect <= 0.f || !std::isfinite(camera.verticalFovRadians) ||
-	    camera.verticalFovRadians <= 0.f ||
-	    camera.verticalFovRadians >= Pi)
+	    camera.verticalFovRadians <= 0.f || camera.verticalFovRadians >= Pi)
 	{
 		return;
 	}

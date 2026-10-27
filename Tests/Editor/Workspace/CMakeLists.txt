@@ -43,6 +43,7 @@ if(URSA_BUILD_EDITOR)
   target_link_libraries(UrsaProjectWorkspaceTests PRIVATE Ursa::Editor)
 
   add_test(NAME UrsaProjectWorkspaceTests COMMAND UrsaProjectWorkspaceTests)
+  ursa_require_test_content(UrsaProjectWorkspaceTests UrsaProjectWorkspaceTests)
 
   ursa_add_test_executable(UrsaEditorDocumentsTests EditorDocumentsTests.cpp)
   target_link_libraries(UrsaEditorDocumentsTests PRIVATE Ursa::Editor)

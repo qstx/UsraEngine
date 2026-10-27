@@ -912,6 +912,34 @@ Result<void> ShaderAsset::Deserialize(const ArchiveReader& reader, Serialization
 	return {};
 }
 
+Result<ShaderAsset> ShaderAsset::CopyWithIdentity(ResourceId newId) const
+{
+	if (!newId)
+	{
+		return Result<ShaderAsset>::Failure("Shader copy requires a nonzero identity");
+	}
+	ShaderAsset copy = *this;
+	copy.id = newId;
+	for (UInt32 subIndex = 0; subIndex < copy.subShaders.size(); ++subIndex)
+	{
+		for (UInt32 passIndex = 0; passIndex < copy.subShaders[subIndex].passes.size(); ++passIndex)
+		{
+			auto& pass = copy.subShaders[subIndex].passes[passIndex];
+			pass.identity = PassIdentity(copy.id, subIndex, passIndex, pass.name);
+			for (auto& variant : pass.variants)
+			{
+				auto layout = LayoutIdentity(copy, variant);
+				if (!layout)
+				{
+					return Result<ShaderAsset>::Failure(layout.error);
+				}
+				variant.layoutIdentity = std::move(layout.value);
+			}
+		}
+	}
+	return Result<ShaderAsset>::Success(std::move(copy));
+}
+
 Result<ShaderAsset> BuildShaderAsset(const ShaderSourceAsset& source, const ShaderSourceLibrary& library,
                                      const ShaderDependencyReport& dependencies, const String& sourceHash,
                                      const String& compilerVersion, const Vector<ShaderPassCompilation>& compilations)

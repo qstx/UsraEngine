@@ -5,7 +5,8 @@ using Ursa;
 
 namespace Ursa.Editor;
 
-internal readonly record struct InspectorRegistration(Type Inspector, CustomEditorAttribute Declaration);
+internal readonly record struct InspectorRegistration(Type Inspector, CustomEditorAttribute Declaration,
+	bool Builtin = false, bool CanEditMultipleObjects = false);
 
 internal static class InspectorTargetMatching
 {
@@ -13,12 +14,13 @@ internal static class InspectorTargetMatching
 		typeof(ScriptableObject).IsAssignableFrom(type) || typeof(AssetImporter).IsAssignableFrom(type) ||
 		typeof(Material).IsAssignableFrom(type) || typeof(Mesh).IsAssignableFrom(type) || typeof(Texture).IsAssignableFrom(type);
 
-	internal static Type? Select(Type actual, IEnumerable<InspectorRegistration> registrations)
+	internal static Type? Select(Type actual, IEnumerable<InspectorRegistration> registrations, bool multiEdit = false)
 	{
-		var selected = new List<Type>();
+		var selected = new List<InspectorRegistration>();
 		int nearest = int.MaxValue;
 		foreach (InspectorRegistration registration in registrations)
 		{
+			if (multiEdit && !registration.CanEditMultipleObjects) continue;
 			Type expected = registration.Declaration.InspectedType;
 			int distance = 0;
 			for (Type? current = actual; current != null && current != expected; current = current.BaseType) ++distance;
@@ -26,11 +28,17 @@ internal static class InspectorTargetMatching
 			if (distance > nearest) continue;
 			if (distance < nearest) selected.Clear();
 			nearest = distance;
-			selected.Add(registration.Inspector);
+			if (selected.Count > 0 && selected[0].Builtin != registration.Builtin)
+			{
+				if (registration.Builtin) continue;
+				selected.Clear();
+			}
+			selected.Add(registration);
 		}
 		if (selected.Count > 1)
-			throw new InvalidOperationException($"Ambiguous CustomEditor for '{actual.FullName}': {string.Join(", ", selected.Select(type => type.FullName).Order(StringComparer.Ordinal))}.");
-		return selected.SingleOrDefault();
+			throw new InvalidOperationException(
+				$"Ambiguous CustomEditor for '{actual.FullName}': {string.Join(", ", selected.Select(item => item.Inspector.FullName).Order(StringComparer.Ordinal))}.");
+		return selected.Count == 0 ? null : selected[0].Inspector;
 	}
 
 	internal static string Identity(Type actual)

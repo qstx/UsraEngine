@@ -4,11 +4,13 @@
 #include <Core/Containers.hpp>
 #include <Core/StringInterop.hpp>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <algorithm>
 #include <cctype>
 #include <ctime>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <utility>
 
 namespace Ursa::Editor
 {
@@ -147,7 +149,9 @@ EditorConsolePanel::EditorConsolePanel() : state(std::make_shared<State>())
 		    if (auto sharedState = weakState.lock())
 		    {
 			    std::lock_guard<std::mutex> lock(sharedState->mutex);
-			    sharedState->records.push_back(record);
+			    LogRecord entry = record;
+			    entry.compilerMessage = false;
+			    sharedState->records.push_back(std::move(entry));
 			    if (sharedState->records.size() > maximumLogRecords)
 			    {
 				    sharedState->records.pop_front();
@@ -465,15 +469,6 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		}
 		ImGui::EndPopup();
 	}
-	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
-	    !ImGui::IsAnyItemActive() && ImGui::IsAnyItemFocused() &&
-	    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
-	    selectedRecord && contextHandler &&
-	    (!selectedRecord->context.resourcePath.empty() || !selectedRecord->context.objectId.empty()))
-	{
-		auto located = contextHandler(*selectedRecord);
-		diagnostic = located ? String{} : located.error;
-	}
 	struct VisibleRecord
 	{
 		const LogRecord* record = nullptr;
@@ -525,7 +520,14 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 	const Float32 tableContentWidth = ImGui::GetContentRegionAvail().x;
 	const Float32 detailHeight =
 	    selectedRecord ? std::clamp(ImGui::GetContentRegionAvail().y * 0.3f, 88.f, 180.f) : 0.f;
-	if (!(visibleRecords.empty() && !searchQuery.empty()) && ImGui::BeginTable("ConsoleEntries", 4,
+	const ImGuiIO& consoleInput = ImGui::GetIO();
+	const bool openConsoleRow =
+	    ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !consoleInput.WantTextInput &&
+	    !ImGui::IsAnyItemActive() &&
+	    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+	const LogRecord* returnTargetRecord = nullptr;
+	if (!(visibleRecords.empty() && !searchQuery.empty()) &&
+	    ImGui::BeginTable("ConsoleEntries", 4,
 	                      ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
 	                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp,
 	                      {0.f, selectedRecord ? -detailHeight : 0.f}))
@@ -541,7 +543,6 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 		ImGui::TableHeadersRow();
 
 		Size keyboardTargetIndex = visibleRecords.size();
-		const ImGuiIO& consoleInput = ImGui::GetIO();
 		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
 		    (!consoleInput.WantTextInput || navigateConsoleRows) && !consoleInput.KeyCtrl && !consoleInput.KeySuper &&
 		    !consoleInput.KeyAlt && (!ImGui::IsAnyItemActive() || navigateConsoleRows))
@@ -667,6 +668,10 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			const bool rowClicked = ImGui::Selectable(
 			    "##ConsoleEntry", selected, ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_SpanAllColumns,
 			    {0.f, messageHeight});
+			if (openConsoleRow && ImGui::IsItemFocused())
+			{
+				returnTargetRecord = &record;
+			}
 			const ImVec2 rowMinimum = ImGui::GetItemRectMin();
 			const ImVec2 rowMaximum = ImGui::GetItemRectMax();
 			if (rowClicked)
@@ -760,7 +765,9 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			{
 				contextProbe->messageCenter = {(rowMinimum.x + rowMaximum.x) * 0.5f,
 				                               (rowMinimum.y + rowMaximum.y) * 0.5f};
+				contextProbe->messageItem = ImGui::GetItemID();
 				contextProbe->messageHovered = ImGui::IsItemHovered();
+				contextProbe->messageSelected = IsLogRecordSelected(selectedRecords, record);
 			}
 			if (ImGui::BeginPopupContextItem("ConsoleEntryActions"))
 			{
@@ -847,6 +854,12 @@ void EditorConsolePanel::Draw(bool& open, String& diagnostic, const ContextHandl
 			ImGui::PopID();
 		}
 		ImGui::EndTable();
+	}
+	if (returnTargetRecord && contextHandler &&
+	    (!returnTargetRecord->context.resourcePath.empty() || !returnTargetRecord->context.objectId.empty()))
+	{
+		auto located = contextHandler(*returnTargetRecord);
+		diagnostic = located ? String{} : located.error;
 	}
 	if (selectedRecord)
 	{

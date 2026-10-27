@@ -27,7 +27,7 @@ internal static class CustomEditorRegistrationTests
 	[CustomEditor(typeof(Material))]
 	public sealed class MaterialInspector : Inspector { public override void OnInspectorGUI() { } }
 	[CustomEditor(typeof(GameObject))]
-	public sealed class PrefabInspector : Inspector { public override void OnInspectorGUI() { } }
+	public sealed class GameObjectInspector : Inspector { public override void OnInspectorGUI() { } }
 	[CustomEditor(typeof(TextureImporter))]
 	public sealed class ImporterInspector : Inspector { public override void OnInspectorGUI() { } }
 	[CustomEditor(typeof(CatalogAsset))]
@@ -81,9 +81,9 @@ internal static class CustomEditorRegistrationTests
 				EditorExtensionInfo[] descriptors = session.Describe();
 				if (descriptors.Length != 7 || !descriptors.Any(item => item.Target == stableId && item.Id == "inspector:" + stableId && item.CanEditMultipleObjects) ||
 					!descriptors.Any(item => item.Target == "ursa.Camera" && item.Id == "inspector:ursa.Camera") ||
-					descriptors.Single(item => item.Target == "ursa.Camera").CanEditMultipleObjects ||
-					!new[] { "asset:ursa.Material", "asset:ursa.Prefab", "asset:test.catalog-asset", "importer:ursa.Texture" }.All(target => descriptors.Any(item => item.Target == target)))
-					throw new InvalidOperationException("Typed Inspectors did not resolve current script and native component identities.");
+					!descriptors.Single(item => item.Target == "ursa.Camera").CanEditMultipleObjects ||
+					!new[] { "asset:ursa.Material", "scene:ursa.GameObject", "asset:test.catalog-asset", "importer:ursa.Texture" }.All(target => descriptors.Any(item => item.Target == target)))
+					throw new InvalidOperationException("Typed Inspectors did not resolve target identities or retain the built-in Camera multi-edit fallback.");
 				var window = descriptors.Single(item => item.Kind == EditorExtensionKind.Window);
 				StateProbeWindow.LastDrawCount = 0;
 				var callbacks = (Dictionary<string, Action>)session.GetType()

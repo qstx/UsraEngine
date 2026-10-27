@@ -207,6 +207,7 @@ internal static class ScriptSessions
 		BehaviourRegistry.typeResolver = session.context.ResolveType;
 		BehaviourRegistry.identityResolver = type => session.identities.TryGetValue(type.FullName ?? type.Name, out ScriptIdentity identity)
 			? identity : throw new InvalidOperationException($"Script type is missing from the active catalog: {type.FullName}");
+		BehaviourRegistry.identityAvailable = type => session.identities.ContainsKey(type.FullName ?? type.Name);
 		BehaviourRegistry.assemblyResolver = () => session.context.assemblies.Values
 			.Append(typeof(Behaviour).Assembly)
 			.Append(typeof(Ursa.Rendering.RenderContextToken).Assembly)
@@ -417,7 +418,10 @@ internal static class ScriptSessions
 		if (session.extensions != null) throw new InvalidOperationException("This editing session already owns its extension registrations.");
 		Type registry = sharedEditorAssembly.GetType("Ursa.Editor.ExtensionRegistry", throwOnError: true)!;
 		MethodInfo factory = registry.GetMethod("Create", BindingFlags.Static | BindingFlags.NonPublic)!;
-		session.extensions = (IEditorExtensionSession)factory.Invoke(null, new object[] { session.context.assemblies.Values.ToArray() })!;
+		session.extensions = (IEditorExtensionSession)factory.Invoke(null, new object[]
+		{
+			session.context.assemblies.Values.Append(sharedEditorAssembly).Distinct().ToArray()
+		})!;
 	}
 
 	internal static EditorExtensionInfo[] DescribeExtensions(ulong id)
@@ -611,6 +615,7 @@ internal static class ScriptSessions
 		BehaviourRegistry.typeResolver = null;
 		BehaviourRegistry.assemblyResolver = null;
 		BehaviourRegistry.identityResolver = null;
+		BehaviourRegistry.identityAvailable = null;
 		BehaviourRegistry.currentSession = 0;
 		ScriptableObjectRegistry.SelectSession(0);
 		BindingRegistry.Invalidate(session.bindings);
@@ -670,6 +675,7 @@ internal static class ScriptSessions
 		BehaviourRegistry.typeResolver = null;
 		BehaviourRegistry.assemblyResolver = null;
 		BehaviourRegistry.identityResolver = null;
+		BehaviourRegistry.identityAvailable = null;
 		BehaviourRegistry.currentSession = 0;
 		ScriptableObjectRegistry.SelectSession(0);
 		legacyContext?.assemblies.Clear();

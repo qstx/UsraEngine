@@ -206,6 +206,8 @@ internal static partial class NativeEditorBindings
 	internal static partial string[] GetPropertyPaths(ulong revision);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::PropertyField")]
 	internal static partial void PropertyField(ulong revision, string path, string label);
+	[NativeMethod("Ursa::Editor::Bindings::EditorServices::EulerAnglesPropertyField")]
+	internal static partial void EulerAnglesPropertyField(ulong revision, string path, string label);
 	[NativeMethod("Ursa::Editor::Bindings::EditorServices::DrawDefaultInspector")]
 	internal static partial bool DrawDefaultInspector(ulong revision);
 }

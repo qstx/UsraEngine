@@ -51,11 +51,11 @@ int main()
 	try
 	{
 		{
-			Expect(Editor::ClassifyHierarchyDropZone(5.0f, 0.0f, 40.0f) == Editor::HierarchyDropZone::Above,
+			Expect(Editor::ClassifyHierarchyDropZone(2.0f, 0.0f, 40.0f) == Editor::HierarchyDropZone::Above,
 			       "The upper hierarchy row zone was classified incorrectly");
 			Expect(Editor::ClassifyHierarchyDropZone(20.0f, 0.0f, 40.0f) == Editor::HierarchyDropZone::Into,
 			       "The center hierarchy row zone was classified incorrectly");
-			Expect(Editor::ClassifyHierarchyDropZone(35.0f, 0.0f, 40.0f) == Editor::HierarchyDropZone::Below,
+			Expect(Editor::ClassifyHierarchyDropZone(38.0f, 0.0f, 40.0f) == Editor::HierarchyDropZone::Below,
 			       "The lower hierarchy row zone was classified incorrectly");
 			const auto document = ResourceId::Generate();
 			const auto parent = ResourceId::Generate();
@@ -417,21 +417,89 @@ int main()
 			return std::make_tuple(workMin, workMax, ImGui::GetFrameHeight());
 		};
 		auto row = drawInputFrame({-10, -10}, false);
-		const ImVec2 rowCenter{std::get<0>(row).x + 100.0f, std::get<0>(row).y + std::get<2>(row) * 1.5f};
+		auto* hierarchyWindow = ImGui::FindWindowByName("Hierarchy");
+		const String firstKey = firstId.ToString();
+		const ImGuiID firstRowId = ImHashStr("##node", 0, ImHashStr(firstKey.c_str(), 0, hierarchyWindow->ID));
+		Float32 firstRowY = -1.f;
+		for (Float32 y = std::get<0>(row).y; y < std::get<0>(row).y + 120.f; y += 1.f)
+		{
+			drawInputFrame({std::get<0>(row).x + 60.f, y}, std::nullopt);
+			if (ImGui::GetCurrentContext()->HoveredId == firstRowId)
+			{
+				firstRowY = y;
+				break;
+			}
+		}
+		Expect(firstRowY >= 0.f, "The first visible Hierarchy row could not be located for input testing");
+		const ImVec2 rowCenter{std::get<0>(row).x + 60.0f, firstRowY + std::get<2>(row) * 0.5f};
+		const String secondKey = secondId.ToString();
+		const ImGuiID secondRowId = ImHashStr("##node", 0, ImHashStr(secondKey.c_str(), 0, hierarchyWindow->ID));
+		Float32 secondRowY = -1.f;
+		for (Float32 y = std::get<0>(row).y; y < std::get<0>(row).y + 120.f; y += 1.f)
+		{
+			drawInputFrame({std::get<0>(row).x + 60.f, y}, std::nullopt);
+			if (ImGui::GetCurrentContext()->HoveredId == secondRowId)
+			{
+				secondRowY = y;
+				break;
+			}
+		}
+		Expect(secondRowY >= 0.f, "The second visible Hierarchy row could not be located for input testing");
+		const ImVec2 secondRowCenter{std::get<0>(row).x + 60.0f, secondRowY + std::get<2>(row) * 0.5f};
+		drawInputFrame(rowCenter, std::nullopt);
+		drawInputFrame(rowCenter, std::nullopt);
 		drawInputFrame(rowCenter, true);
-		Expect(sharedSelection.objectId == secondId,
-		       "Hierarchy published a selection before click or drag was resolved");
-		drawInputFrame({rowCenter.x + 80, rowCenter.y}, std::nullopt);
-		Expect(draggedGameObject && draggedGameObject->sources.size() == 1 &&
-		           draggedGameObject->sources.front().identity.documentId == selectionDocument &&
-		           draggedGameObject->sources.front().identity.objectId == firstId,
-		       "Dragging a Hierarchy row did not publish its document-scoped GameObject reference");
-		drawInputFrame({rowCenter.x + 80, rowCenter.y}, false);
+		if (sharedSelection.objectId != secondId)
+		{
+			throw std::runtime_error("Hierarchy published selection " + ToStdString(sharedSelection.objectId.ToString()) +
+			                         " on mouse-down; expected " + ToStdString(secondId.ToString()));
+		}
+		drawInputFrame({rowCenter.x + 25, rowCenter.y}, std::nullopt);
+		if (!draggedGameObject || draggedGameObject->sources.size() != 1 ||
+		    draggedGameObject->sources.front().identity.documentId != selectionDocument ||
+		    draggedGameObject->sources.front().identity.objectId != firstId)
+		{
+			throw std::runtime_error("Dragging a Hierarchy row did not publish its document-scoped GameObject reference " +
+			                         std::string("(hoveredId=") + std::to_string(ImGui::GetCurrentContext()->HoveredId) +
+				                         ", expectedRowId=" + std::to_string(firstRowId) +
+					                         ", activeId=" + std::to_string(ImGui::GetCurrentContext()->ActiveId) +
+			                         ", dragActive=" + std::to_string(ImGui::GetCurrentContext()->DragDropActive) +
+			                         ", mouseDown=" +
+				                         std::to_string(ImGui::GetIO().MouseDown[ImGuiMouseButton_Left]) +
+				                         ", dragDistance=" +
+				                         std::to_string(ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Left]) + ")");
+		}
+		drawInputFrame({rowCenter.x + 25, rowCenter.y}, false);
 		Expect(sharedSelection.objectId == secondId, "Dragging a hierarchy row changed the shared selection");
 		drawInputFrame(rowCenter, true);
 		Expect(sharedSelection.objectId == secondId, "Hierarchy click changed selection on mouse-down");
 		drawInputFrame(rowCenter, false);
 		Expect(sharedSelection.objectId == firstId, "A completed hierarchy click did not publish its selection");
+		ImGui::SetWindowFocus("Hierarchy");
+		ImGui::SetNavID(firstRowId, ImGuiNavLayer_Main, 0,
+		                hierarchyWindow->NavRectRel[ImGuiNavLayer_Main]);
+		const ImGuiKey renameShortcut =
+#ifdef __APPLE__
+		    ImGuiKey_Enter;
+#else
+		    ImGuiKey_F2;
+#endif
+		ImGui::GetIO().AddKeyEvent(renameShortcut, true);
+		drawInputFrame(rowCenter, std::nullopt);
+		ImGui::GetIO().AddKeyEvent(renameShortcut, false);
+		drawInputFrame(rowCenter, std::nullopt);
+		drawInputFrame(rowCenter, std::nullopt);
+		Expect(ImGui::GetCurrentContext()->ActiveId != 0 &&
+		           ImGui::GetCurrentContext()->NavId != firstRowId,
+		       "The platform rename shortcut did not focus the selected Hierarchy row editor");
+		ImGui::GetIO().AddInputCharactersUTF8("Shortcut Renamed");
+		drawInputFrame(rowCenter, std::nullopt);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+		drawInputFrame(rowCenter, std::nullopt);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+		drawInputFrame(rowCenter, std::nullopt);
+		Expect(Take(loaded.scene->GameObjectName(Take(loaded.scene->GameObjectById(firstId)))) == "Shortcut Renamed",
+		       "The platform rename shortcut did not commit the edited Hierarchy name");
 		Expect(sharedSelection.SelectGameObject(selectionDocument, secondId),
 		       "Cannot reset hierarchy context selection");
 		Editor::EditorSelectionEntry firstContextEntry;
@@ -445,10 +513,14 @@ int main()
 		draggedGameObject.reset();
 		drawInputFrame(rowCenter, true);
 		drawInputFrame({rowCenter.x + 80, rowCenter.y}, std::nullopt);
-		Expect(draggedGameObject && draggedGameObject->sources.size() == 2 &&
-		           draggedGameObject->sources[0].identity.objectId == firstId &&
-		           draggedGameObject->sources[1].identity.objectId == secondId,
-		       "Dragging a selected Hierarchy row did not preserve the ordered selection group");
+		if (!draggedGameObject || draggedGameObject->sources.size() != 2 ||
+		    draggedGameObject->sources[0].identity.objectId != secondId ||
+		    draggedGameObject->sources[1].identity.objectId != firstId)
+		{
+			throw std::runtime_error("Dragging a selected Hierarchy row did not preserve the ordered selection group " +
+			                         std::string("(sources=") +
+			                         std::to_string(draggedGameObject ? draggedGameObject->sources.size() : 0) + ")");
+		}
 		drawInputFrame({rowCenter.x + 80, rowCenter.y}, false);
 		Expect(sharedSelection.objectId == firstId,
 		       "Dragging a selected Hierarchy group changed its primary selection");
@@ -472,19 +544,19 @@ int main()
 		Expect(sharedSelection.SelectGameObject(selectionDocument, firstId),
 		       "Cannot seed hierarchy context selection rejection");
 		sharedSelection.beforeChange = [](const auto&) { return false; };
-		drawInputFrame(rowCenter, std::nullopt, true);
+		drawInputFrame(secondRowCenter, std::nullopt, true);
 		Expect(sharedSelection.objectId == firstId,
 		       "A rejected hierarchy selection change still changed the selection");
 		Expect(ImGui::GetCurrentContext()->OpenPopupStack.empty(),
 		       "A rejected hierarchy selection change still opened a context menu");
-		drawInputFrame(rowCenter, std::nullopt, false);
+		drawInputFrame(secondRowCenter, std::nullopt, false);
 		sharedSelection.beforeChange = {};
-		drawInputFrame(rowCenter, std::nullopt, true);
+		drawInputFrame(secondRowCenter, std::nullopt, true);
 		Expect(sharedSelection.objectId == secondId, "Right-clicking an unselected hierarchy row did not target it");
 		Expect(!ImGui::GetCurrentContext()->OpenPopupStack.empty(),
 		       "Right-clicking a hierarchy row opened no context menu");
 		ImGui::ClosePopupToLevel(0, true);
-		drawInputFrame(rowCenter, std::nullopt, false);
+		drawInputFrame(secondRowCenter, std::nullopt, false);
 		Expect(sharedSelection.SelectEntries({secondContextEntry, firstContextEntry}, 1, firstContextEntry),
 		       "Cannot seed multi-object context selection");
 		drawInputFrame(rowCenter, std::nullopt, true);

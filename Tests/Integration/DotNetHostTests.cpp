@@ -58,7 +58,8 @@ int main(int argumentCount, char** arguments)
 		Expect(argumentCount == 3 ||
 		           (argumentCount == 4 && (std::string(arguments[3]) == "--import-only" ||
 		                                   std::string(arguments[3]) == "--importer-registration-only" ||
-		                                   std::string(arguments[3]) == "--editor-only")),
+		                                   std::string(arguments[3]) == "--editor-only" ||
+		                                   std::string(arguments[3]) == "--builtin-inspector-only")),
 		       "Managed host test requires managed output, writable cache and optional --import-only");
 		const auto managedOutput = std::filesystem::u8path(arguments[1]);
 		const auto packageRoot = root / "package";
@@ -306,6 +307,10 @@ int main(int argumentCount, char** arguments)
 			{
 				TestEditorExtensions(*host, filesystem, root);
 			}
+			else if (std::string(arguments[3]) == "--builtin-inspector-only")
+			{
+				TestEditorExtensions(*host, filesystem, root, true);
+			}
 			else if (std::string(arguments[3]) == "--importer-registration-only")
 			{
 				TestManagedImporterRegistration(*host, filesystem, sessionContentPath);
@@ -316,7 +321,9 @@ int main(int argumentCount, char** arguments)
 				TestManagedImportSession(*host, filesystem, files, sessionContentPath);
 			}
 			Done(host->CloseEndpoint());
-			std::cout << "Managed Import session passed without a window or GPU\n";
+			std::cout << (std::string(arguments[3]) == "--builtin-inspector-only"
+			                  ? "Built-in managed multi-object Inspector checks passed\n"
+			                  : "Managed Import session passed without a window or GPU\n");
 			return 0;
 		}
 		ManagedScriptRuntime scriptRuntime(scene, *host, sceneApi);

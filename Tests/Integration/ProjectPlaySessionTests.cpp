@@ -102,6 +102,8 @@ int main()
 		const auto scenePath = Take(VirtualPath::Parse("prj:Snake/Snake.ursascene"));
 		auto draft = Take(SceneDraft::Load(filesystem, scenePath, ResourceKind::Scene, registry, *resources));
 		auto root = draft->GetScene().RootGameObjects().front();
+		Done(root->SetTag("AuthorOnly"));
+		Done(root->SetStatic(true));
 		auto* controller = root->FindComponent<ScriptBehaviourComponent>();
 		Expect(controller && controller->TypeName() == "Ursa.Demo.SnakeController, Ursa.Game",
 		       "Snake Scene does not contain its managed controller");
@@ -169,6 +171,13 @@ int main()
 		const Size authoredObjects = CountObjects(root);
 		PlaySession play;
 		Done(play.Start(*draft, sceneId, registry, *resources, setup));
+		auto playingRoot = play.GetScene()->RootGameObjects().front();
+		Expect(Take(playingRoot->Tag()) == "AuthorOnly" && Take(playingRoot->IsStatic()),
+		       "Play mode clone lost the authored GameObject Tag or Static state");
+		Done(playingRoot->SetTag("RuntimeOnly"));
+		Done(playingRoot->SetStatic(false));
+		Expect(Take(root->Tag()) == "AuthorOnly" && Take(root->IsStatic()),
+		       "Play mode Tag or Static edits changed the author Scene");
 		const Float32 delta = 1.0f / 60.0f;
 		Done(play.Tick(delta, nullptr, {}));
 		if (services->title.find("Score: 1") == String::npos)

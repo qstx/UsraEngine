@@ -12,6 +12,7 @@
 #include <Vfs/PakBuilder.hpp>
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -323,19 +324,19 @@ void TestConsoleFilters(const DevicePtr& device)
 		Expect(table != nullptr, "Console table was not submitted");
 		if (frame == 1)
 		{
-			Expect(table->CurrentRow == 4, "Default filters should hide Trace only");
+			Expect(table->CurrentRow == 5, "Default Console filters should show all retained log groups");
 			ImGui::FocusWindow(window);
-			ImGui::ActivateItemByID(ImHashStr("Trace", 0, window->ID));
+			ImGui::ActivateItemByID(ImHashStr("Messages", 0, window->ID));
 		}
 		if (frame == 2)
 		{
-			Expect(table->CurrentRow == 5, "Trace filter did not enable its own level");
-			ImGui::ActivateItemByID(ImHashStr("Debug", 0, window->ID));
+			Expect(table->CurrentRow == 2, "The Messages filter did not hide message-level records");
+			ImGui::ActivateItemByID(ImHashStr("Warnings", 0, window->ID));
 		}
 		if (frame == 3)
 		{
-			Expect(table->CurrentRow == 4, "Debug filter affected a different level");
-			Expect(EditorConsolePanel::Counts(panel.Records()) == Array<Size, 5>{1, 1, 1, 1, 1},
+			Expect(table->CurrentRow == 1, "The Warnings filter did not hide warning records");
+			Expect(EditorConsolePanel::Counts(panel.Records()) == Array<Size, 3>{3, 1, 1},
 			       "Filtering mutated retained severity counts");
 			ImGui::ActivateItemByID(ImHashStr("Clear", 0, window->ID));
 		}
@@ -359,14 +360,24 @@ void TestConsoleCounts()
 		records.push_back(record);
 	}
 	const auto counts = EditorConsolePanel::Counts(records);
-	Expect(counts == Array<Size, 5>{1, 1, 1, 1, 2},
-	       "Five filter counts must include Critical with Error and exclude Off");
-	Expect(EditorConsolePanel::Counts({}) == Array<Size, 5>{}, "Empty history counts must be zero");
+	Expect(counts == Array<Size, 3>{3, 1, 2}, "Message, Warning, and Error counts must include their levels and exclude Off");
+	Expect(EditorConsolePanel::Counts({}) == Array<Size, 3>{}, "Empty history counts must be zero");
 	EditorConsolePanel panel;
 	Log::Write(LogLevel::Info, "IconTests", u8"资源图标验收");
 	Expect(!panel.Records().empty(), "Console did not receive diagnostic");
 	panel.Clear();
-	Expect(panel.Records().empty(), "Clear did not remove in-memory history");
+	const auto clearedRecords = panel.Records();
+	if (std::any_of(clearedRecords.begin(), clearedRecords.end(),
+	                [](const LogRecord& record) { return record.category == "IconTests"; }))
+	{
+		String diagnostic = "Clear retained IconTests log entry:";
+		for (const auto& record : clearedRecords)
+		{
+			diagnostic += " [" + record.category + ":" + record.message + ", compiler=" +
+			              (record.compilerMessage ? "true" : "false") + "]";
+		}
+		throw std::runtime_error(ToStdString(diagnostic));
+	}
 	const auto originalLevel = Log::Level();
 	Log::SetLevel(LogLevel::Trace);
 	std::thread writer(
@@ -392,10 +403,10 @@ void TestConsoleCounts()
 	Log::SetLevel(originalLevel);
 	const auto bounded = panel.Records();
 	Expect(bounded.size() == 10000 &&
-	           EditorConsolePanel::Counts(bounded) == Array<Size, 5>{2000, 2000, 2000, 2000, 2000},
+	           EditorConsolePanel::Counts(bounded) == Array<Size, 3>{6000, 2000, 2000},
 	       "Evicted log entries still contribute to filter counts");
 	panel.Clear();
-	Expect(EditorConsolePanel::Counts(panel.Records()) == Array<Size, 5>{}, "Clear retained severity counts");
+	Expect(EditorConsolePanel::Counts(panel.Records()) == Array<Size, 3>{}, "Clear retained severity counts");
 }
 
 void TestPanelContextClose(const DevicePtr& device)
@@ -585,6 +596,83 @@ void TestConsoleContextLocate(const DevicePtr& device)
 	Expect(ImGui::GetCurrentContext()->OpenPopupStack.empty(), "Console Locate navigation left an unrelated menu open");
 }
 
+void TestConsoleKeyboardFocus(const DevicePtr& device)
+{
+	auto bridge = Take(ImGuiBridge::Create(device));
+	EditorConsolePanel panel;
+	EditorConsolePanel::ContextActionProbe probe;
+	probe.message = "Keyboard Console Focus Sentinel";
+	LogContext context;
+	context.resourcePath = "prj:KeyboardFocus.ursascene";
+	context.objectId = "00000000000000000000000000000001";
+	Log::Write(LogLevel::Info, "ConsoleKeyboardFocusProbe", probe.message, context);
+	bool open = true;
+	String diagnostic;
+	Int32 locateCount = 0;
+	const EditorConsolePanel::ContextHandler handler = [&](const LogRecord& record)
+	{
+		++locateCount;
+		Expect(record.message == probe.message && record.context.resourcePath == context.resourcePath,
+		       "Console keyboard navigation did not locate the selected log record");
+		return Result<void>{};
+	};
+	const auto frame = [&]
+	{
+		Done(bridge->BeginFrame(1.f / 60.f, 900, 400));
+		ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+		ImGui::SetNextWindowSize({900, 400}, ImGuiCond_Always);
+		panel.Draw(open, diagnostic, handler, &probe);
+		Done(bridge->EndFrame());
+	};
+	frame();
+	frame();
+	Expect(probe.messageCenter.x > 0 && probe.messageCenter.y > 0,
+	       "The Console keyboard test could not locate its log row");
+	auto& io = ImGui::GetIO();
+	io.AddMousePosEvent(probe.messageCenter.x, probe.messageCenter.y);
+	frame();
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	frame();
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	frame();
+	Expect(probe.messageSelected, "Clicking the Console row did not retain its selection");
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_F, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_F, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	frame();
+	auto* window = ImGui::FindWindowByName("Console");
+	const ImGuiID searchInput = window->GetID("##ConsoleSearch");
+	Expect(ImGui::GetCurrentContext()->ActiveId == searchInput,
+	       "Console Ctrl+F did not move keyboard focus into Search");
+	io.AddInputCharactersUTF8("Keyboard Console Focus Sentinel");
+	frame();
+	io.AddKeyEvent(ImGuiKey_Escape, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_Escape, false);
+	frame();
+	frame();
+	Expect(probe.messageSelected && ImGui::GetFocusID() == probe.messageItem,
+	       "Escape did not restore the selected Console row and keyboard focus");
+	io.AddKeyEvent(ImGuiKey_Enter, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_Enter, false);
+	frame();
+	if (locateCount != 1)
+	{
+		const auto* imgui = ImGui::GetCurrentContext();
+		throw std::runtime_error("Escape did not restore the selected Console row for keyboard navigation and Enter " +
+		                         std::string("(locateCount=") + std::to_string(locateCount) +
+		                         ", navId=" + std::to_string(imgui->NavId) +
+		                         ", activeId=" + std::to_string(imgui->ActiveId) +
+		                         ", searchId=" + std::to_string(searchInput) +
+		                         ", navWindow=" + (imgui->NavWindow ? imgui->NavWindow->Name : "<none>") + ")");
+	}
+	Expect(diagnostic.empty() && ImGui::GetCurrentContext()->OpenPopupStack.empty(),
+	       "Console keyboard navigation left a diagnostic or popup behind");
+}
+
 } // namespace
 
 int main()
@@ -598,6 +686,7 @@ int main()
 		TestPanelContextClose(device);
 		TestConsoleContextCopy(device);
 		TestConsoleContextLocate(device);
+		TestConsoleKeyboardFocus(device);
 		for (Float32 dpi : {1.f, 1.5f, 2.f})
 		{
 			CaptureGallery(device, dpi);

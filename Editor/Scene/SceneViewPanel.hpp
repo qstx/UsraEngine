@@ -22,12 +22,21 @@ struct SceneDropPoint
 	bool hitGeometry = false;
 };
 
+struct SceneCameraAspectState
+{
+	String key;
+	const Camera* camera = nullptr;
+	Float32 aspectFactor = 1.f;
+};
+
 Result<SceneDropPoint> ResolveSceneDropPoint(const Camera& camera, Float32 aspect, const ViewportLayout& layout,
                                              ViewportPoint screenPosition,
                                              const Vector<Rendering::RenderObject>& renderObjects);
 
 class SceneViewPanel final
 {
+friend struct SceneViewPanelTestAccess;
+
 public:
 	static Result<std::unique_ptr<SceneViewPanel>> Create(Rhi::DevicePtr device, ImGuiBridge& gui);
 
@@ -141,6 +150,7 @@ private:
 	String selectedCustomPreset;
 	String loadedProjectKey;
 	String loadedSceneViewStateKey;
+	Vector<SceneCameraAspectState> sceneCameraAspectStates;
 	UInt64 savedSceneViewOverridesRevision = 0;
 	bool globalSettingsLoaded = false;
 	bool projectSettingsLoaded = false;
@@ -166,13 +176,19 @@ private:
 	Float32 sceneFlythroughSpeed = 1.f;
 	Float32 sceneFlythroughMinSpeed = 0.01f;
 	Float32 sceneFlythroughMaxSpeed = 2.f;
+	Float32 sceneFlythroughSpeedModifier = 5.f;
+	bool sceneFlythroughEasingEnabled = true;
+	Float32 sceneFlythroughEasingDuration = 0.4f;
+	bool sceneFlythroughAccelerationEnabled = true;
+	Float32 sceneFlythroughAccelerationSpeed = 0.8f;
+	bool sceneCameraDynamicClipping = true;
 	Float32 sceneFlythroughTargetSpeed = 0.f;
 	Float32 sceneFlythroughCurrentSpeed = 0.f;
 	Float32 sceneDragZoomStart = 0.f;
 	Float32 sceneDragZoomSpeed = 0.3f;
 	Float32 sceneDragZoomTotalMotion = 0.f;
 	bool sceneZoomUseYSign = false;
-	Float32 sceneCameraFieldOfView = 45.f;
+	Float32 sceneCameraFieldOfView = 60.f;
 	bool showSceneGrid = true;
 	Float32 sceneGridSize = 1.f;
 	bool showSceneGizmos = true;
@@ -185,6 +201,7 @@ private:
 	Float32 sceneCameraFarClip = 100.f;
 	SceneNavigationGesture sceneNavigationGesture = SceneNavigationGesture::None;
 	bool sceneRightClickMenuCandidate = false;
+	bool sceneFlythroughPending = false;
 	FocusTransition sceneFocusTransition;
 	std::shared_ptr<Window> sceneNavigationWindow;
 	bool sceneCursorCaptured = false;

@@ -156,6 +156,7 @@ public:
 	Result<Vector<bool>> CompareTargetValues(const String& path, const nlohmann::json& checkpoint,
 	                                         const nlohmann::json& candidate) const;
 	Result<void> SetValue(const String& path, nlohmann::json value);
+	Result<void> SetTargetValues(const String& path, const nlohmann::json& values);
 	Result<void> RestoreTargetValues(const String& path, const nlohmann::json& values);
 	Result<bool> SetTargetFields(Size targetIndex, const nlohmann::json& fields);
 	Result<void> ResizeCollection(const String& path, Size newSize);

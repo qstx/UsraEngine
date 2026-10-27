@@ -128,6 +128,11 @@ public:
 
 	void RefreshSceneSearchMatches(const Scene& scene, ResourceId documentId);
 
+	void RequestFocusSelection()
+	{
+		focusSelectionRequested = true;
+	}
+
 	bool ConsumeFocusSelectionRequest()
 	{
 		return std::exchange(focusSelectionRequested, false);

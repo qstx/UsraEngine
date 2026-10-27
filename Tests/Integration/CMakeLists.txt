@@ -73,6 +73,9 @@ if(URSA_ENABLE_DOTNET)
       "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ManagedImportSession" --import-only)
     add_test(NAME UrsaManagedImporterInspectorTests COMMAND UrsaDotNetHostTests
       "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ManagedImporterInspector" --editor-only)
+    add_test(NAME UrsaManagedBuiltinInspectorMultiObjectTests COMMAND UrsaDotNetHostTests
+      "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ManagedBuiltinInspectorMultiObject" --builtin-inspector-only)
+    ursa_require_test_content(UrsaManagedBuiltinInspectorMultiObjectTests UrsaDotNetHostTests)
 	add_test(NAME UrsaManagedAssetPreviewCallbacksTests COMMAND UrsaDotNetHostTests
 	  "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ManagedAssetPreview" --editor-only)
     add_test(NAME UrsaScriptedAssetImporterTests COMMAND UrsaDotNetHostTests

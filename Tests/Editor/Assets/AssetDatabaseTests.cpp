@@ -1,6 +1,8 @@
 #include <Assets/AssetDatabase.hpp>
 #include <Core/StringInterop.hpp>
 #include <Serialization/ResourceId.hpp>
+#include <Serialization/ResourceFile.hpp>
+#include <Shader/ShaderAssetResource.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <chrono>
@@ -381,6 +383,80 @@ void TestDuplicateGuidRepair(const std::filesystem::path& root)
 	       "Duplicate repair changed the first asset or failed to assign a fresh GUID to the copy");
 }
 
+void TestNativeDuplicateRepairCompensation()
+{
+	auto provider = std::make_shared<FailingMemoryProvider>();
+	VirtualFileSystem filesystem;
+	Expect(static_cast<bool>(filesystem.MountProvider(projectScheme, provider, MountAccess::ReadWrite)),
+	       "Cannot mount duplicate native asset fixture");
+	const auto id = ResourceId::Generate();
+	const auto content =
+	    nlohmann::json{{"format", "UrsaMaterial"}, {"version", 1}, {"id", ToStdString(id.ToString())}}.dump();
+	const auto metadata = MetadataDocument(id, false).dump();
+	const Vector<UInt8> sourceBytes = Bytes(content.c_str());
+	const Vector<UInt8> metadataBytes = Bytes(metadata.c_str());
+	Expect(static_cast<bool>(filesystem.WriteAtomic(Path("prj:Z.ursamat"), sourceBytes)) &&
+	           static_cast<bool>(filesystem.WriteAtomic(Path("prj:Z.ursamat.meta"), metadataBytes)),
+	       "Cannot seed original native asset");
+	auto database = AssetDatabase::Open(filesystem);
+	Expect(database && static_cast<bool>(database.value->Refresh()), "Cannot index original native asset");
+	Expect(static_cast<bool>(filesystem.WriteAtomic(Path("prj:A.ursamat"), sourceBytes)) &&
+	           static_cast<bool>(filesystem.WriteAtomic(Path("prj:A.ursamat.meta"), metadataBytes)),
+	       "Cannot seed conflicting native asset");
+	provider->FailWriteOn(2);
+	const auto failed = database.value->Refresh();
+	Expect(!failed && filesystem.Read(Path("prj:A.ursamat")).value == sourceBytes &&
+	           filesystem.Read(Path("prj:A.ursamat.meta")).value == metadataBytes &&
+	           TakeMetadata(*database.value, "prj:Z.ursamat").guid == id,
+	       "Failed metadata rewrite did not restore the copied resource and preserve the index");
+	Expect(static_cast<bool>(database.value->Refresh()), "Native duplicate repair did not succeed on retry");
+	const auto repaired = TakeMetadata(*database.value, "prj:A.ursamat").guid;
+	const auto header = ReadResourceHeader(filesystem, Path("prj:A.ursamat"));
+	Expect(repaired != id && header && header.value.id == repaired &&
+	           TakeMetadata(*database.value, "prj:Z.ursamat").guid == id,
+	       "Retry did not preserve the original GUID and synchronize the repaired header");
+}
+
+void TestShaderDuplicateRepairCompensation()
+{
+	auto provider = std::make_shared<FailingMemoryProvider>();
+	VirtualFileSystem filesystem;
+	Expect(static_cast<bool>(filesystem.MountProvider(projectScheme, provider, MountAccess::ReadWrite)),
+	       "Cannot mount duplicate Shader fixture");
+	Shader::ShaderAsset shader;
+	shader.id = ResourceId::Generate();
+	shader.name = "Tests/ShaderCopy";
+	shader.sourcePath = "prj:source.ursashader";
+	shader.sourceHash = "fixture";
+	shader.compilerVersion = "fixture";
+	const auto originalPath = Path("prj:Z.ursashaderasset");
+	const auto copyPath = Path("prj:A.ursashaderasset");
+	Expect(static_cast<bool>(Shader::SaveShaderAssetResource(filesystem, originalPath, shader)),
+	       "Cannot create compiled Shader fixture");
+	const auto metadata = MetadataDocument(shader.id, false).dump();
+	const auto metadataBytes = Bytes(metadata.c_str());
+	Expect(static_cast<bool>(filesystem.WriteAtomic(Path("prj:Z.ursashaderasset.meta"), metadataBytes)),
+	       "Cannot write compiled Shader metadata");
+	auto database = AssetDatabase::Open(filesystem);
+	Expect(database && static_cast<bool>(database.value->Refresh()), "Cannot index original compiled Shader");
+	const auto original = filesystem.Read(originalPath).value;
+	Expect(static_cast<bool>(filesystem.WriteAtomic(copyPath, original)) &&
+	           static_cast<bool>(filesystem.WriteAtomic(Path("prj:A.ursashaderasset.meta"), metadataBytes)),
+	       "Cannot seed duplicate compiled Shader");
+	provider->FailWriteOn(2);
+	const auto failed = database.value->Refresh();
+	Expect(!failed && filesystem.Read(copyPath).value == original &&
+	           filesystem.Read(Path("prj:A.ursashaderasset.meta")).value == metadataBytes &&
+	           TakeMetadata(*database.value, "prj:Z.ursashaderasset").guid == shader.id,
+	       "Failed Shader metadata rewrite did not restore its file or preserve the original identity");
+	Expect(static_cast<bool>(database.value->Refresh()), "Shader duplicate repair did not succeed on retry");
+	const auto repaired = TakeMetadata(*database.value, "prj:A.ursashaderasset").guid;
+	const auto loaded = Shader::LoadShaderAssetResource(filesystem, copyPath);
+	Expect(repaired != shader.id && loaded && loaded.value.id == repaired &&
+	           TakeMetadata(*database.value, "prj:Z.ursashaderasset").guid == shader.id,
+	       "Retried Shader repair did not load under its new identity");
+}
+
 void TestBatchMoveAndRemoveCompensation()
 {
 	auto provider = std::make_shared<FailingMemoryProvider>();
@@ -673,6 +749,8 @@ int main()
 		TestDirectoryBatchCompensation(root / "DirectoryTransactions" / "Assets");
 		TestScriptDiscoveryAndGrouping(root / "Scripts");
 		TestDuplicateGuidRepair(root / "Duplicate");
+		TestNativeDuplicateRepairCompensation();
+		TestShaderDuplicateRepairCompensation();
 		TestReadOnlyAndInvalidMetadata(root / "Validation");
 		TestImportCache(root / "ImportCache");
 		std::filesystem::remove_all(root);

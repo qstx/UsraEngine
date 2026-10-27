@@ -205,26 +205,34 @@ public sealed class CameraComponentInspector : Inspector
 		double originalFarPlane = farPlane.FloatValue;
 		double editedFieldOfView = originalFieldOfView;
 		double editedOrthographicSize = originalOrthographicSize;
+		bool fieldOfViewChanged = false;
+		bool orthographicSizeChanged = false;
 		if (showProjectionSpecific && editedOrthographic)
 		{
 			editedOrthographicSize = EditorGui.DragFloat("Size", originalOrthographicSize, 0.05, 0.001, 100000,
 				mixedValue: orthographicSize.HasMultipleDifferentValues);
+			orthographicSizeChanged = editedOrthographicSize != originalOrthographicSize ||
+			                          orthographicSize.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		}
 		else if (showProjectionSpecific)
 		{
 			editedFieldOfView = EditorGui.DragFloat("Field of View", originalFieldOfView, 0.5, 1, 179, "%.1f°",
 				fieldOfView.HasMultipleDifferentValues);
+			fieldOfViewChanged = editedFieldOfView != originalFieldOfView ||
+			                     fieldOfView.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		}
 		EditorGui.Text("Clipping Planes");
 		double editedNearPlane = EditorGui.DragFloat("Near", originalNearPlane, 0.01, 0.001, 10000, "%.3f",
 			nearPlane.HasMultipleDifferentValues);
+		bool nearPlaneChanged = editedNearPlane != originalNearPlane ||
+		                        nearPlane.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		double editedFarPlane = EditorGui.DragFloat("Far", originalFarPlane, 0.1, 0.002, 100000, "%.3f",
 			farPlane.HasMultipleDifferentValues);
+		bool farPlaneChanged = editedFarPlane != originalFarPlane ||
+		                       farPlane.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 
-		bool changed = projectionChanged || editedFieldOfView != originalFieldOfView ||
-		               editedOrthographicSize != originalOrthographicSize ||
-		               editedNearPlane != originalNearPlane ||
-		               editedFarPlane != originalFarPlane;
+		bool changed = projectionChanged || fieldOfViewChanged || orthographicSizeChanged || nearPlaneChanged ||
+		               farPlaneChanged;
 		if (changed)
 		{
 			if ((showProjectionSpecific && !editedOrthographic &&
@@ -242,17 +250,16 @@ public sealed class CameraComponentInspector : Inspector
 				{
 					orthographic.BoolValue = editedOrthographic;
 				}
-				if (showProjectionSpecific && editedOrthographic &&
-				    editedOrthographicSize != originalOrthographicSize)
+				if (orthographicSizeChanged)
 				{
 					orthographicSize.FloatValue = (float)editedOrthographicSize;
 				}
-				else if (showProjectionSpecific && !editedOrthographic && editedFieldOfView != originalFieldOfView)
+				if (fieldOfViewChanged)
 				{
 					fieldOfView.FloatValue = (float)(editedFieldOfView * DegreesToRadians);
 				}
-				nearPlane.FloatValue = (float)editedNearPlane;
-				farPlane.FloatValue = (float)editedFarPlane;
+				if (nearPlaneChanged) nearPlane.FloatValue = (float)editedNearPlane;
+				if (farPlaneChanged) farPlane.FloatValue = (float)editedFarPlane;
 				SerializedObject.ApplyModifiedProperties();
 			}
 		}
@@ -281,39 +288,50 @@ public sealed class DirectionalLightComponentInspector : Inspector
 
 		Color originalColor = colorProperty.ColorValue;
 		Color editedColor = EditorGui.ColorField("Color", originalColor, colorProperty.HasMultipleDifferentValues);
+		bool colorChanged = !editedColor.Equals(originalColor) ||
+		                    colorProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		float originalIntensity = intensityProperty.FloatValue;
 		double editedIntensity = EditorGui.DragFloat("Intensity", originalIntensity, 0.05, 0, 10000,
 			mixedValue: intensityProperty.HasMultipleDifferentValues);
+		bool intensityChanged = editedIntensity != originalIntensity ||
+		                        intensityProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		bool originalCastsShadows = castsShadowsProperty.BoolValue;
 		bool editedCastsShadows = EditorGui.Toggle("Casts Shadows", originalCastsShadows,
 			castsShadowsProperty.HasMultipleDifferentValues);
+		bool castsShadowsChanged = editedCastsShadows != originalCastsShadows ||
+		                           castsShadowsProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		float originalShadowStrength = shadowStrengthProperty.FloatValue;
 		double editedShadowStrength = EditorGui.DragFloat("Shadow Strength", originalShadowStrength, 0.01, 0, 1,
 			mixedValue: shadowStrengthProperty.HasMultipleDifferentValues);
+		bool shadowStrengthChanged = editedShadowStrength != originalShadowStrength ||
+		                             shadowStrengthProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		float originalShadowBias = shadowBiasProperty.FloatValue;
 		double editedShadowBias = EditorGui.DragFloat("Shadow Bias", originalShadowBias, 0.0001, 0, 1,
 			mixedValue: shadowBiasProperty.HasMultipleDifferentValues);
+		bool shadowBiasChanged = editedShadowBias != originalShadowBias ||
+		                         shadowBiasProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		float originalShadowNormalBias = shadowNormalBiasProperty.FloatValue;
 		double editedShadowNormalBias = EditorGui.DragFloat("Shadow Normal Bias", originalShadowNormalBias, 0.001, 0,
 			10, mixedValue: shadowNormalBiasProperty.HasMultipleDifferentValues);
+		bool shadowNormalBiasChanged = editedShadowNormalBias != originalShadowNormalBias ||
+		                               shadowNormalBiasProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		bool originalSoftShadows = softShadowsProperty.BoolValue;
 		bool editedSoftShadows = EditorGui.Toggle("Soft Shadows (3x3 PCF)", originalSoftShadows,
 			softShadowsProperty.HasMultipleDifferentValues);
+		bool softShadowsChanged = editedSoftShadows != originalSoftShadows ||
+		                          softShadowsProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 
-		bool changed = editedColor.R != originalColor.R || editedColor.G != originalColor.G ||
-		               editedColor.B != originalColor.B || editedColor.A != originalColor.A ||
-		               editedIntensity != originalIntensity || editedCastsShadows != originalCastsShadows ||
-		               editedShadowStrength != originalShadowStrength || editedShadowBias != originalShadowBias ||
-		               editedShadowNormalBias != originalShadowNormalBias || editedSoftShadows != originalSoftShadows;
+		bool changed = colorChanged || intensityChanged || castsShadowsChanged || shadowStrengthChanged ||
+		               shadowBiasChanged || shadowNormalBiasChanged || softShadowsChanged;
 		if (changed)
 		{
-			colorProperty.ColorValue = editedColor;
-			intensityProperty.FloatValue = (float)editedIntensity;
-			castsShadowsProperty.BoolValue = editedCastsShadows;
-			shadowStrengthProperty.FloatValue = (float)editedShadowStrength;
-			shadowBiasProperty.FloatValue = (float)editedShadowBias;
-			shadowNormalBiasProperty.FloatValue = (float)editedShadowNormalBias;
-			softShadowsProperty.BoolValue = editedSoftShadows;
+			if (colorChanged) colorProperty.ColorValue = editedColor;
+			if (intensityChanged) intensityProperty.FloatValue = (float)editedIntensity;
+			if (castsShadowsChanged) castsShadowsProperty.BoolValue = editedCastsShadows;
+			if (shadowStrengthChanged) shadowStrengthProperty.FloatValue = (float)editedShadowStrength;
+			if (shadowBiasChanged) shadowBiasProperty.FloatValue = (float)editedShadowBias;
+			if (shadowNormalBiasChanged) shadowNormalBiasProperty.FloatValue = (float)editedShadowNormalBias;
+			if (softShadowsChanged) softShadowsProperty.BoolValue = editedSoftShadows;
 			SerializedObject.ApplyModifiedProperties();
 		}
 	}
@@ -332,21 +350,25 @@ public sealed class PointLightComponentInspector : Inspector
 
 		Color originalColor = colorProperty.ColorValue;
 		Color editedColor = EditorGui.ColorField("Color", originalColor, colorProperty.HasMultipleDifferentValues);
+		bool colorChanged = !editedColor.Equals(originalColor) ||
+		                    colorProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		float originalIntensity = intensityProperty.FloatValue;
 		double editedIntensity = EditorGui.DragFloat("Intensity", originalIntensity, 0.05, 0, 10000,
 			mixedValue: intensityProperty.HasMultipleDifferentValues);
+		bool intensityChanged = editedIntensity != originalIntensity ||
+		                        intensityProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 		float originalRange = rangeProperty.FloatValue;
 		double editedRange = EditorGui.DragFloat("Range", originalRange, 0.05, 0.001, 10000,
 			mixedValue: rangeProperty.HasMultipleDifferentValues);
+		bool rangeChanged = editedRange != originalRange ||
+		                    rangeProperty.HasMultipleDifferentValues && EditorGui.IsLastControlEdited;
 
-		bool changed = editedColor.R != originalColor.R || editedColor.G != originalColor.G ||
-		               editedColor.B != originalColor.B || editedColor.A != originalColor.A ||
-	               editedIntensity != originalIntensity || editedRange != originalRange;
+		bool changed = colorChanged || intensityChanged || rangeChanged;
 		if (changed)
 		{
-			colorProperty.ColorValue = editedColor;
-			intensityProperty.FloatValue = (float)editedIntensity;
-			rangeProperty.FloatValue = (float)editedRange;
+			if (colorChanged) colorProperty.ColorValue = editedColor;
+			if (intensityChanged) intensityProperty.FloatValue = (float)editedIntensity;
+			if (rangeChanged) rangeProperty.FloatValue = (float)editedRange;
 			SerializedObject.ApplyModifiedProperties();
 		}
 	}

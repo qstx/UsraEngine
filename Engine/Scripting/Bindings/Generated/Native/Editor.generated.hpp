@@ -32,6 +32,7 @@ struct Table
 	Int32 (*NativeEditorBindings_EndMenu)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_EndPopup)(void*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_EndPreview)(void*, UInt64, BindingOutcome*) = nullptr;
+	Int32 (*NativeEditorBindings_EulerAnglesPropertyField)(void*, UInt64, const Utf8View*, const Utf8View*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_FloatField)(void*, const Utf8View*, Float64, UInt32, Float64*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_FoldoutHeader)(void*, const Utf8View*, UInt32*, BindingOutcome*) = nullptr;
 	Int32 (*NativeEditorBindings_GetAssets)(void*, DataView*, BindingOutcome*) = nullptr;
@@ -376,8 +377,8 @@ inline Int32 NativeEditorBindings_DragFloat(void* context, const Utf8View* p_lab
 	});
 }
 #line 1 "Editor.generated.hpp"
-// Contract: Ursa.Editor/NativeEditor.bindings.cs:210
-#line 210 "Ursa.Editor/NativeEditor.bindings.cs"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:212
+#line 212 "Ursa.Editor/NativeEditor.bindings.cs"
 inline Int32 NativeEditorBindings_DrawDefaultInspector(void* context, UInt64 p_revision, UInt32* result, BindingOutcome* outcome) noexcept
 {
 	return Invoke(context, outcome, 0, [&](BindingCall& call)
@@ -485,6 +486,23 @@ inline Int32 NativeEditorBindings_EndPreview(void* context, UInt64 p_utility, Bi
 		using TargetSignature = Result<void> (*)(BindingCall&, UInt64);
 		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::EndPreview), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.EndPreview");
 		CompleteBindingResult(::Ursa::Editor::Bindings::EditorServices::EndPreview(call, p_utility));
+	});
+}
+#line 1 "Editor.generated.hpp"
+// Contract: Ursa.Editor/NativeEditor.bindings.cs:210
+#line 210 "Ursa.Editor/NativeEditor.bindings.cs"
+inline Int32 NativeEditorBindings_EulerAnglesPropertyField(void* context, UInt64 p_revision, const Utf8View* p_path, const Utf8View* p_label, BindingOutcome* outcome) noexcept
+{
+	return Invoke(context, outcome, 0, [&](BindingCall& call)
+	{
+		Check_Wire_6ccc44e523c092e7(p_revision);
+		if (!p_path) throw std::runtime_error("Null binding parameter: path");
+		Check_Wire_473287f8298dba71(*p_path);
+		if (!p_label) throw std::runtime_error("Null binding parameter: label");
+		Check_Wire_473287f8298dba71(*p_label);
+		using TargetSignature = Result<void> (*)(BindingCall&, UInt64, const Utf8View&, const Utf8View&);
+		static_assert(std::is_same_v<decltype(&::Ursa::Editor::Bindings::EditorServices::EulerAnglesPropertyField), TargetSignature>, "Native binding target signature mismatch: Ursa.Editor.NativeEditorBindings.EulerAnglesPropertyField");
+		CompleteBindingResult(::Ursa::Editor::Bindings::EditorServices::EulerAnglesPropertyField(call, p_revision, *p_path, *p_label));
 	});
 }
 #line 1 "Editor.generated.hpp"
@@ -1716,6 +1734,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_EndMenu,
 		&NativeEditorBindings_EndPopup,
 		&NativeEditorBindings_EndPreview,
+		&NativeEditorBindings_EulerAnglesPropertyField,
 		&NativeEditorBindings_FloatField,
 		&NativeEditorBindings_FoldoutHeader,
 		&NativeEditorBindings_GetAssets,
@@ -1794,7 +1813,7 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		&NativeEditorBindings_Vector4Field,
 		&NativeEditorBindings_WantsTextInput,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 101, &table, &ValidateBindingContext, {0xdd, 0x5f, 0x09, 0x2a, 0x4d, 0xde, 0x1d, 0x60, 0xdc, 0xe4, 0x56, 0xa1, 0x87, 0xbb, 0xbe, 0xc4, 0x46, 0xa1, 0xca, 0x06, 0x13, 0x92, 0x12, 0x1f, 0x88, 0x87, 0x83, 0xa4, 0x2b, 0xe6, 0x82, 0x28}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 102, &table, &ValidateBindingContext, {0x6c, 0xe9, 0x4e, 0xfb, 0xff, 0xd7, 0xb6, 0xb1, 0x53, 0xec, 0x10, 0xd5, 0xb9, 0xd0, 0xbb, 0x17, 0xa3, 0x32, 0x22, 0xb4, 0xdc, 0xb9, 0x54, 0x6d, 0xd0, 0x71, 0x7e, 0xb8, 0x3f, 0x4a, 0xb8, 0x00}};
 	return descriptor;
 }
 } // namespace Ursa::Scripting::Bindings::Editor

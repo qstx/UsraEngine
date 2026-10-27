@@ -4,6 +4,7 @@
 #include <Serialization/ResourceId.hpp>
 #include <Serialization/RenderResourceReferences.hpp>
 #include <Scene/MeshFilterComponent.hpp>
+#include <Scene/Lighting.hpp>
 #include <Scene/RendererComponent.hpp>
 #include <Scene/SkinnedMeshRendererComponent.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
@@ -175,6 +176,13 @@ Json DescribeNativePayload(const Json& data)
 Json DescribeNativeComponentPayload(const Component& component, const Json& data)
 {
 	Json payload = DescribeNativePayload(data);
+	if ((dynamic_cast<const DirectionalLightComponent*>(&component) ||
+	     dynamic_cast<const PointLightComponent*>(&component)) &&
+	    payload["FieldTypes"].contains("color"))
+	{
+		payload["FieldTypes"]["color"] = {
+		    {"Kind", "Color"}, {"ElementKind", "Unsupported"}, {"TypeName", "Ursa.Color"}};
+	}
 	if (dynamic_cast<const MeshFilterComponent*>(&component) && payload["FieldTypes"].contains("mesh"))
 	{
 		payload["FieldTypes"]["mesh"] = {
@@ -1669,6 +1677,37 @@ Result<void> SerializedObjectGroup::SetValue(const String& path, Json value)
 			{
 				targets[index]->pendingPayload = std::move(previousPayloads[index]);
 				targets[index]->modifiedProperties = std::move(previousModifications[index]);
+			}
+			return edited;
+		}
+	}
+	return {};
+}
+
+Result<void> SerializedObjectGroup::SetTargetValues(const String& path, const Json& values)
+{
+	const auto common = CommonPropertyPaths();
+	if (std::find(common.begin(), common.end(), path) == common.end() || !values.is_array() ||
+	    values.size() != targets.size())
+	{
+		return Result<void>::Failure("Serialized per-target values do not match the common property group: " + path);
+	}
+	Vector<Json> previousPayloads;
+	Vector<Map<String, Json>> previousModifications;
+	for (const SerializedObject* target : targets)
+	{
+		previousPayloads.push_back(target->pendingPayload);
+		previousModifications.push_back(target->modifiedProperties);
+	}
+	for (Size index = 0; index < targets.size(); ++index)
+	{
+		auto edited = targets[index]->SetPropertyValue(path, values[index]);
+		if (!edited)
+		{
+			for (Size restore = 0; restore < targets.size(); ++restore)
+			{
+				targets[restore]->pendingPayload = std::move(previousPayloads[restore]);
+				targets[restore]->modifiedProperties = std::move(previousModifications[restore]);
 			}
 			return edited;
 		}

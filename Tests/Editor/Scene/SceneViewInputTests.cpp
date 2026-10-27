@@ -2,6 +2,7 @@
 #include <Core/StringInterop.hpp>
 #include <Scene/SceneViewNavigation.hpp>
 #include <Scene/SceneViewPanel.hpp>
+#include <Scene/EditorScenePreview.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <imgui_internal.h>
 #include <algorithm>
@@ -9,6 +10,42 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+
+namespace Ursa::Editor
+{
+struct SceneViewPanelTestAccess
+{
+	static Camera& CameraOf(SceneViewPanel& panel)
+	{
+		return panel.sceneTarget.preview->GetCamera();
+	}
+
+	static void StartFocus(SceneViewPanel& panel, const Camera& from, const Camera& to)
+	{
+		panel.StartFocusTransition(from, to);
+	}
+
+	static void AdvanceFocus(SceneViewPanel& panel, Camera& camera, Float32 deltaTime)
+	{
+		panel.AdvanceFocusTransition(camera, deltaTime);
+	}
+
+	static Float32 TargetSpeed(const SceneViewPanel& panel)
+	{
+		return panel.sceneFlythroughTargetSpeed;
+	}
+
+	static void Set2D(SceneViewPanel& panel, bool enabled)
+	{
+		panel.sceneView2DMode = enabled;
+	}
+
+	static bool FocusActive(const SceneViewPanel& panel)
+	{
+		return panel.sceneFocusTransition.active;
+	}
+};
+} // namespace Ursa::Editor
 
 namespace
 {
@@ -91,9 +128,9 @@ struct Harness
 		std::filesystem::remove_all(root);
 	}
 
-	void Frame()
+	void Frame(Float32 deltaTime = 1.f / 60.f)
 	{
-		Done(gui->BeginFrame(1.f / 60.f, 1100, 800));
+		Done(gui->BeginFrame(deltaTime, 1100, 800));
 		ImGui::SetNextWindowPos({970, 0}, ImGuiCond_Always);
 		ImGui::SetNextWindowSize({120, 200}, ImGuiCond_Always);
 		ImGui::Begin("Other");
@@ -247,6 +284,49 @@ void TestSceneRightClick()
 	Expect(!h.documents->Current()->Dirty(), "Scene navigation changed authoring Dirty state");
 }
 
+void TestMiddleClickAndPan()
+{
+	Harness h;
+	auto focusTarget = Take(h.draft->GetScene().CreateGameObject("Focus target"));
+	Camera& camera = SceneViewPanelTestAccess::CameraOf(*h.views);
+	camera.position = {0.f, 0.f, 5.f};
+	camera.target = {};
+	camera.up = {0.f, 1.f, 0.f};
+	auto& io = ImGui::GetIO();
+	const auto& rect = h.views->SceneLayout().displayRect;
+	const ImVec2 point{rect.x + rect.width * 0.5f, rect.y + rect.height * 0.5f};
+	io.AddMousePosEvent(point.x, point.y);
+	h.Frame();
+	const Vec3 beforeClick = camera.position;
+	io.AddMouseButtonEvent(ImGuiMouseButton_Middle, true);
+	h.Frame();
+	io.AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
+	h.Frame();
+	Expect(!SceneViewPanelTestAccess::FocusActive(*h.views), "A middle click started focusing instead of staying idle");
+	for (int frame = 0; frame < 30; ++frame)
+	{
+		h.Frame();
+	}
+	Expect(Dot(camera.position - beforeClick, camera.position - beforeClick) < 1.0e-8f,
+	       "A middle click changed the Scene camera");
+	Done(h.hierarchy.Select(h.draft->GetScene(), focusTarget));
+	h.hierarchy.RequestFocusSelection();
+	io.AddMouseButtonEvent(ImGuiMouseButton_Middle, true);
+	h.Frame();
+	io.AddMousePosEvent(point.x + 10.f, point.y);
+	h.Frame();
+	const Vec3 afterPan = camera.position;
+	io.AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
+	h.Frame();
+	Expect(!SceneViewPanelTestAccess::FocusActive(*h.views), "Releasing a middle drag started a focus transition");
+	for (int frame = 0; frame < 30; ++frame)
+	{
+		h.Frame();
+	}
+	Expect(Dot(camera.position - afterPan, camera.position - afterPan) < 1.0e-8f,
+	       "The Scene camera moved after releasing a middle drag");
+}
+
 void TestPanPrecision()
 {
 	Camera camera;
@@ -266,6 +346,85 @@ void TestPanPrecision()
 	Expect(Dot(camera.position - initialPosition, camera.position - initialPosition) == 0.f,
 	       "An unrepresentable pan changed the camera");
 }
+
+void TestSceneCameraRecovery()
+{
+	Harness h;
+	Camera& camera = SceneViewPanelTestAccess::CameraOf(*h.views);
+	camera.position = {-7.24953254e37f, -1.11738583e38f, -1.98268038e38f};
+	camera.target = camera.position;
+	camera.up = {0.f, 1.f, 0.f};
+	Expect(!IsSceneViewCameraValid(camera), "The captured collapsed camera was considered valid");
+	h.Frame();
+	Expect(IsSceneViewCameraValid(camera) && h.diagnostic.find("camera") != String::npos &&
+	           !h.documents->Current()->Dirty(),
+	       "Scene rendering did not recover the captured collapsed camera without authoring changes");
+	(void)camera.ViewProjection(1.f);
+	SceneViewPanelTestAccess::Set2D(*h.views, true);
+	camera.orthographic = true;
+	camera.position = {-7.24953254e37f, -1.11738583e38f, -1.98268038e38f};
+	camera.target = camera.position;
+	h.Frame();
+	Expect(IsSceneViewCameraValid(camera) && camera.orthographic && camera.position.x == 0.f &&
+	           camera.position.y == 0.f && camera.position.z > 0.f,
+	       "Scene camera recovery did not preserve the 2D view orientation");
+	SceneViewPanelTestAccess::Set2D(*h.views, false);
+	camera.orthographic = false;
+	const ImVec2 pointer = h.Point();
+	ImGui::GetIO().AddMousePosEvent(pointer.x, pointer.y);
+	h.refocus = true;
+	h.Frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_UpArrow, true);
+	h.Frame();
+	h.Frame(1000.f);
+	h.Frame(1000.f);
+	Expect(SceneViewPanelTestAccess::TargetSpeed(*h.views) > 0.f &&
+	           std::isfinite(SceneViewPanelTestAccess::TargetSpeed(*h.views)) && IsSceneViewCameraValid(camera),
+	       "Prolonged keyboard navigation produced an invalid Scene camera or speed");
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_UpArrow, false);
+	h.Frame();
+	Expect(!h.documents->Current()->Dirty(), "Scene camera recovery or navigation changed authoring state");
+	Camera start;
+	start.position = {0.f, 0.f, 1.f};
+	start.target = {};
+	Camera end = start;
+	end.position.z = -1.f;
+	SceneViewPanelTestAccess::StartFocus(*h.views, start, end);
+	Camera transitioning = start;
+	SceneViewPanelTestAccess::AdvanceFocus(*h.views, transitioning, 0.25f * (1.f - std::cbrt(0.5f)));
+	Expect(IsSceneViewCameraValid(transitioning), "An opposing focus transition collapsed the camera");
+	(void)transitioning.View();
+}
+
+void TestNavigationPrecision()
+{
+	const auto check = [](const char* operation, const auto& navigate)
+	{
+		Camera camera;
+		camera.position = {1.f, 1.f, 1.f};
+		camera.target = {};
+		navigate(camera);
+		try
+		{
+			(void)camera.View();
+		}
+		catch (const std::exception& error)
+		{
+			throw std::runtime_error(std::string(operation) + " produced an invalid camera: " + error.what());
+		}
+	};
+	check("keyboard move", [](Camera& camera) { MoveSceneView(camera, {1.f, 1.f}, 1.f, 1.0e38f, false); });
+	check("flythrough", [](Camera& camera) { FlythroughSceneView(camera, {}, {1.f, 1.f}, 1.f, 1.f, 1.0e38f, false); });
+	check("pointer zoom", [](Camera& camera) { ZoomSceneView(camera, 1.f, {1.0e20f, 1.0e20f}, {100.f, 100.f}); });
+	check("focus", [](Camera& camera) { FocusSceneView(camera, {1.0e38f, 1.0e38f, 1.0e38f}, 1.f, 1.f); });
+	Float32 targetSpeed = 9.f;
+	Float32 currentSpeed = 9.f;
+	AdvanceSceneViewMovementSpeed(true, 1000.f, targetSpeed, currentSpeed);
+	Expect(std::isfinite(targetSpeed) && std::isfinite(currentSpeed) && targetSpeed <= 1.0e6f && currentSpeed <= 1.0e6f,
+	       "Prolonged camera acceleration overflowed its speed");
+	AdvanceSceneViewMovementSpeed(false, 1.f, targetSpeed, currentSpeed);
+	Expect(targetSpeed == 0.f && currentSpeed == 0.f, "Camera speed did not recover after movement stopped");
+}
 } // namespace
 
 int main()
@@ -273,7 +432,10 @@ int main()
 	try
 	{
 		TestPanPrecision();
+		TestNavigationPrecision();
+		TestSceneCameraRecovery();
 		TestSceneRightClick();
+		TestMiddleClickAndPan();
 		std::cout << "Scene right-click menu, navigation and cancellation input tests passed\n";
 		return 0;
 	}

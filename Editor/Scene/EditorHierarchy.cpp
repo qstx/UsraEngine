@@ -29,6 +29,11 @@ EditorSelectionEntry GameObjectSelection(ResourceId documentId, ResourceId objec
 
 bool IsHierarchyRenameShortcutPressed()
 {
+	const ImGuiIO& io = ImGui::GetIO();
+	if (io.KeyShift || io.KeyCtrl || io.KeyAlt || io.KeySuper)
+	{
+		return false;
+	}
 #if defined(__APPLE__)
 	return ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
 #else
@@ -36,9 +41,17 @@ bool IsHierarchyRenameShortcutPressed()
 #endif
 }
 
-Vector<EditorSelectionEntry> OutermostPrefabRoots(const Scene& scene,
-	                                              const Vector<EditorSelectionEntry>& selection,
-	                                              const Map<String, bool>& prefabObjects, ResourceId documentId)
+const char* HierarchyRenameShortcutLabel()
+{
+#if defined(__APPLE__)
+	return "Enter";
+#else
+	return "F2";
+#endif
+}
+
+Vector<EditorSelectionEntry> OutermostPrefabRoots(const Scene& scene, const Vector<EditorSelectionEntry>& selection,
+                                                  const Map<String, bool>& prefabObjects, ResourceId documentId)
 {
 	Vector<EditorSelectionEntry> roots;
 	for (const EditorSelectionEntry& entry : selection)
@@ -2688,6 +2701,11 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		ImGui::PopStyleVar();
 		const bool cancel = ImGui::IsItemActive() && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 		const bool finish = submit || ImGui::IsItemDeactivated();
+		// SetCursorScreenPos overlays the input on the TreeNode row. Submit a trailing item so
+		// Dear ImGui accounts for the adjusted cursor when calculating the window/parent bounds.
+		const ImVec2 cursorAfterInput = ImGui::GetCursorScreenPos();
+		ImGui::Dummy({0.f, 0.f});
+		ImGui::SetCursorScreenPos(cursorAfterInput);
 		if (cancel)
 		{
 			renameTarget = {};
@@ -2714,15 +2732,6 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		const ImRect pickabilityRect = SceneRowControlRect(rowRect, 1);
 		const ImVec2 mouse = ImGui::GetIO().MousePos;
 		sceneControlHovered = visibilityRect.Contains(mouse) || pickabilityRect.Contains(mouse);
-		if (DrawSceneRowControl("SceneVisibility", visibilityRect, true, visibleInScene, "Toggle Scene visibility"))
-		{
-			ToggleSceneObjectVisibility(scene, node, ImGui::GetIO().KeyAlt);
-		}
-		if (DrawSceneRowControl("ScenePickability", pickabilityRect, false, pickableInScene,
-		                        "Toggle Scene pickability"))
-		{
-			ToggleSceneObjectPickability(scene, node, ImGui::GetIO().KeyAlt);
-		}
 	}
 	if (rowClicked && !sceneControlHovered)
 	{
@@ -2786,7 +2795,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	{
 		renameClickCandidate = {};
 		renameClickReleasedAt = -1.0;
-		focusSelectionRequested = true;
+		RequestFocusSelection();
 	}
 	if (!sceneControlHovered && ImGui::BeginDragDropSource())
 	{
@@ -2798,6 +2807,20 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		}
 		ImGui::TextUnformatted(display.c_str());
 		ImGui::EndDragDropSource();
+	}
+	if (showSceneControls)
+	{
+		const ImRect visibilityRect = SceneRowControlRect(rowRect, 0);
+		const ImRect pickabilityRect = SceneRowControlRect(rowRect, 1);
+		if (DrawSceneRowControl("SceneVisibility", visibilityRect, true, visibleInScene, "Toggle Scene visibility"))
+		{
+			ToggleSceneObjectVisibility(scene, node, ImGui::GetIO().KeyAlt);
+		}
+		if (DrawSceneRowControl("ScenePickability", pickabilityRect, false, pickableInScene,
+		                        "Toggle Scene pickability"))
+		{
+			ToggleSceneObjectPickability(scene, node, ImGui::GetIO().KeyAlt);
+		}
 	}
 	auto parentOf = [&](ResourceId objectId)
 	{
@@ -2974,7 +2997,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 			     const auto* primary = context.selection.PrimaryEntry();
 			     return duplicateObjects(scene, ids, primary ? primary->objectId : ResourceId{});
 		     }});
-		commands.Register({"hierarchy.rename", "Rename", "F2",
+		commands.Register({"hierarchy.rename", "Rename", HierarchyRenameShortcutLabel(),
 		                   [editableScene, documentId, targetId = entry.objectId](const EditorCommandContext& context)
 		                   {
 			                   const auto* primary = context.selection.PrimaryEntry();
@@ -3310,7 +3333,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		}
 		const auto canRename = contextMenuTarget ? commands.CanExecute("hierarchy.rename", *contextMenuTarget, current)
 		                                         : Result<void>::Failure("The hierarchy menu target is unavailable");
-		if (menuItem(14, "Rename", "F2", static_cast<bool>(canRename)))
+		if (menuItem(14, "Rename", HierarchyRenameShortcutLabel(), static_cast<bool>(canRename)))
 		{
 			commands.Execute("hierarchy.rename", *contextMenuTarget, current);
 		}
@@ -3978,16 +4001,16 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 		ImGui::TextWrapped("%s", commandDiagnostic.c_str());
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && hierarchyRowFocused &&
-	    !ImGui::GetIO().WantTextInput &&
-	    ImGui::IsKeyPressed(ImGuiKey_F, false) && selection && selection->PrimaryEntry() &&
-	    selection->PrimaryEntry()->kind == EditorSelectionKind::GameObject &&
-	    selection->PrimaryEntry()->documentId == documentId &&
-	    selection->PrimaryEntry()->playSession == playSession && !selection->PrimaryEntry()->IsMissing())
+	    !hierarchyInput.WantTextInput && !hierarchyInput.KeyShift && !hierarchyInput.KeyCtrl &&
+	    !hierarchyInput.KeyAlt && !hierarchyInput.KeySuper && ImGui::IsKeyPressed(ImGuiKey_F, false) && selection &&
+	    selection->PrimaryEntry() && selection->PrimaryEntry()->kind == EditorSelectionKind::GameObject &&
+	    selection->PrimaryEntry()->documentId == documentId && selection->PrimaryEntry()->playSession == playSession &&
+	    !selection->PrimaryEntry()->IsMissing())
 	{
-		focusSelectionRequested = true;
+		RequestFocusSelection();
 	}
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && hierarchyRowFocused &&
-	    !ImGui::GetIO().WantTextInput && IsHierarchyRenameShortcutPressed() && selection &&
+	    !hierarchyInput.WantTextInput && IsHierarchyRenameShortcutPressed() && selection &&
 	    selection->entries.size() == 1 && editableScene)
 	{
 		const auto* primary = selection->PrimaryEntry();

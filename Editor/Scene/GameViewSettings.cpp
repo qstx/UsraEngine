@@ -138,13 +138,19 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 		settings.sceneCameraSpeed = json.value("sceneCameraSpeed", 1.f);
 		settings.sceneCameraSpeedMin = json.value("sceneCameraSpeedMin", 0.01f);
 		settings.sceneCameraSpeedMax = json.value("sceneCameraSpeedMax", 2.f);
+		settings.sceneCameraSpeedModifier = json.value("sceneCameraSpeedModifier", 5.f);
+		settings.sceneCameraEasingEnabled = json.value("sceneCameraEasingEnabled", true);
+		settings.sceneCameraEasingDuration = json.value("sceneCameraEasingDuration", 0.4f);
+		settings.sceneCameraAccelerationEnabled = json.value("sceneCameraAccelerationEnabled", true);
+		settings.sceneCameraAccelerationSpeed = json.value("sceneCameraAccelerationSpeed", 0.8f);
+		settings.sceneCameraDynamicClipping = json.value("sceneCameraDynamicClipping", true);
 		if (version == 1 && settings.sceneCameraSpeed == 10.f && settings.sceneCameraSpeedMin == 0.01f &&
 		    settings.sceneCameraSpeedMax == 99.f)
 		{
 			settings.sceneCameraSpeed = 1.f;
 			settings.sceneCameraSpeedMax = 2.f;
 		}
-		settings.sceneCameraFieldOfView = json.value("sceneCameraFieldOfView", 45.f);
+		settings.sceneCameraFieldOfView = json.value("sceneCameraFieldOfView", 60.f);
 		settings.sceneCameraNearClip = json.value("sceneCameraNearClip", 0.1f);
 		settings.sceneCameraFarClip = json.value("sceneCameraFarClip", 100.f);
 		settings.showSceneGrid = json.value("showSceneGrid", true);
@@ -167,16 +173,20 @@ Result<GameViewSettingsState> DeserializeGameViewSettings(const String& text)
 		    !std::isfinite(settings.sceneCameraSpeedMax) || settings.sceneCameraSpeedMin < 0.0001f ||
 		    settings.sceneCameraSpeedMin > 9999.f || settings.sceneCameraSpeedMax < 0.0002f ||
 		    settings.sceneCameraSpeedMax > 10000.f || settings.sceneCameraSpeedMin >= settings.sceneCameraSpeedMax ||
+		    !std::isfinite(settings.sceneCameraSpeedModifier) || settings.sceneCameraSpeedModifier < 1.1f ||
+		    settings.sceneCameraSpeedModifier > 25.f ||
+		    !std::isfinite(settings.sceneCameraEasingDuration) || settings.sceneCameraEasingDuration < 0.1f ||
+		    settings.sceneCameraEasingDuration > 2.f || !std::isfinite(settings.sceneCameraAccelerationSpeed) ||
+		    settings.sceneCameraAccelerationSpeed < 0.1f || settings.sceneCameraAccelerationSpeed > 4.f ||
 		    !std::isfinite(settings.sceneCameraFieldOfView) || settings.sceneCameraFieldOfView < 1.f ||
 		    settings.sceneCameraFieldOfView > 179.f || !std::isfinite(settings.sceneCameraNearClip) ||
-		    settings.sceneCameraNearClip < 0.01f || !std::isfinite(settings.sceneCameraFarClip) ||
-		    settings.sceneCameraFarClip <= settings.sceneCameraNearClip ||
+		    settings.sceneCameraNearClip < 0.01f || settings.sceneCameraNearClip > 99'999.f ||
+		    !std::isfinite(settings.sceneCameraFarClip) ||
+		    settings.sceneCameraFarClip <= settings.sceneCameraNearClip || settings.sceneCameraFarClip > 1'000'000.f ||
 		    !std::isfinite(settings.sceneGridSize) || settings.sceneGridSize < 0.0001f ||
-		    settings.sceneGridSize > 10000.f ||
-		    !std::isfinite(settings.sceneGizmoIconSize) || settings.sceneGizmoIconSize < 0.1f ||
-		    !std::isfinite(settings.sceneOrientationGizmoOffsetX) ||
-		    !std::isfinite(settings.sceneOrientationGizmoOffsetY) ||
-		    settings.sceneGizmoIconSize > 3.f)
+		    settings.sceneGridSize > 10000.f || !std::isfinite(settings.sceneGizmoIconSize) ||
+		    settings.sceneGizmoIconSize < 0.1f || !std::isfinite(settings.sceneOrientationGizmoOffsetX) ||
+		    !std::isfinite(settings.sceneOrientationGizmoOffsetY) || settings.sceneGizmoIconSize > 3.f)
 		{
 			return Result<GameViewSettingsState>::Failure("Game view settings contain invalid values");
 		}
@@ -218,6 +228,12 @@ String SerializeGameViewSettings(const GameViewSettingsState& settings)
 	                       {"sceneCameraSpeed", settings.sceneCameraSpeed},
 	                       {"sceneCameraSpeedMin", settings.sceneCameraSpeedMin},
 	                       {"sceneCameraSpeedMax", settings.sceneCameraSpeedMax},
+	                       {"sceneCameraSpeedModifier", settings.sceneCameraSpeedModifier},
+	                       {"sceneCameraEasingEnabled", settings.sceneCameraEasingEnabled},
+	                       {"sceneCameraEasingDuration", settings.sceneCameraEasingDuration},
+	                       {"sceneCameraAccelerationEnabled", settings.sceneCameraAccelerationEnabled},
+	                       {"sceneCameraAccelerationSpeed", settings.sceneCameraAccelerationSpeed},
+	                       {"sceneCameraDynamicClipping", settings.sceneCameraDynamicClipping},
 	                       {"sceneCameraFieldOfView", settings.sceneCameraFieldOfView},
 	                       {"sceneCameraNearClip", settings.sceneCameraNearClip},
 	                       {"sceneCameraFarClip", settings.sceneCameraFarClip}};
