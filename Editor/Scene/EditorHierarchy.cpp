@@ -547,10 +547,11 @@ bool DrawSceneRowControl(const char* id, const ImRect& rect, bool eye, bool enab
 	{
 		return false;
 	}
-	ImGui::SetCursorScreenPos(rect.Min);
 	ImGui::PushID(id);
-	const bool clicked = ImGui::InvisibleButton("##SceneRowControl", rect.GetSize());
-	const bool hovered = ImGui::IsItemHovered();
+	const ImGuiID buttonId = ImGui::GetID("##SceneRowControl");
+	bool hovered = false;
+	bool held = false;
+	const bool clicked = ImGui::ItemAdd(rect, buttonId) && ImGui::ButtonBehavior(rect, buttonId, &hovered, &held);
 	const ImU32 color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
 	const ImVec2 center{(rect.Min.x + rect.Max.x) * 0.5f, (rect.Min.y + rect.Max.y) * 0.5f};
 	if (eye)
@@ -2603,7 +2604,7 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 	                            })
 	              : hasChildren;
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow |
-	                           ImGuiTreeNodeFlags_OpenOnDoubleClick;
+	                           ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_AllowOverlap;
 	if (!hasVisibleChildren)
 	{
 		flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
@@ -2654,11 +2655,11 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		ImGui::SetScrollHereY(0.5f);
 		keyboardFocusTarget = {};
 	}
-	const ImVec2 rowCursorAfterTree = ImGui::GetCursorScreenPos();
 	pointerOverHierarchyRow |= ImGui::IsMouseHoveringRect(rowRect.Min, rowRect.Max, false);
 	const bool rowClicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
 	const bool rowRightClicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
-	const bool rowHovered = ImGui::IsItemHovered();
+	const bool rowHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenOverlappedByItem |
+	                                             ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 	const bool rowLabelDoubleClicked =
 	    rowHovered && ImGui::GetIO().MousePos.x >= rowRect.Min.x + ImGui::GetTreeNodeToLabelSpacing() &&
 	    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
@@ -2722,7 +2723,6 @@ Result<bool> EditorHierarchy::DrawGameObject(Scene& scene, GameObject::Ptr node,
 		{
 			ToggleSceneObjectPickability(scene, node, ImGui::GetIO().KeyAlt);
 		}
-		ImGui::SetCursorScreenPos(rowCursorAfterTree);
 	}
 	if (rowClicked && !sceneControlHovered)
 	{
@@ -3496,22 +3496,17 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	{
 		sceneName.resize(extension);
 	}
-	auto groupState = sceneGroupOpenByDocument.emplace(groupKey, true).first;
 	if (filtering)
 	{
 		ImGui::SetNextItemOpen(true, ImGuiCond_Always);
 	}
 	ImGui::PushID(groupKey.c_str());
-	const bool sceneRootsOpen = Icons::TreeNode("##sceneGroup", ImGuiTreeNodeFlags_SpanAvailWidth |
-	                                                        ImGuiTreeNodeFlags_OpenOnArrow |
-	                                                        ImGuiTreeNodeFlags_OpenOnDoubleClick,
-	                                           Icons::Icon::Scene, sceneName.c_str(), 16.f);
+	const bool showSceneRoots = Icons::TreeNode(
+	    "##sceneGroup",
+	    ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
+	        ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_NoTreePushOnOpen,
+	    Icons::Icon::Scene, sceneName.c_str(), 16.f);
 	ImGui::PopID();
-	if (ImGui::IsItemToggledOpen())
-	{
-		groupState->second = sceneRootsOpen;
-	}
-	const bool showSceneRoots = filtering || groupState->second;
 	if (!ImGui::GetDragDropPayload())
 	{
 		dragHoverTarget = {};
@@ -3907,28 +3902,22 @@ Result<bool> EditorHierarchy::Draw(Scene& scene, bool* open, const LinkedSceneRe
 	}
 	if (showSceneRoots)
 	{
+		ImGui::Indent();
 		for (GameObject::Ptr root : OrderedGameObjects(scene.RootGameObjects(), hierarchyAlphabeticalSort))
 		{
-			auto drawn =
-			    DrawGameObject(scene, root, visibleRows, selection, documentId, playSession, documentRevision,
-			                   editableScene, searchMatches, filtering && !createRootRequested && !createChildRequested,
-			                   expandFilteredBranches);
+			auto drawn = DrawGameObject(
+			    scene, root, visibleRows, selection, documentId, playSession, documentRevision, editableScene,
+			    searchMatches, filtering && !createRootRequested && !createChildRequested, expandFilteredBranches);
 			if (!drawn)
 			{
-				if (sceneRootsOpen)
-				{
-					ImGui::TreePop();
-				}
+				ImGui::Unindent();
 				ImGui::PopStyleVar();
 				ImGui::End();
 				return drawn;
 			}
 			changed |= drawn.value;
 		}
-	}
-	if (sceneRootsOpen)
-	{
-		ImGui::TreePop();
+		ImGui::Unindent();
 	}
 	if (!pointerOverHierarchyRow)
 	{

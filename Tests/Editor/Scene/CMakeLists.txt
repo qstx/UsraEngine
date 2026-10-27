@@ -30,6 +30,10 @@ if(URSA_BUILD_EDITOR)
 
   add_test(NAME UrsaViewportLayoutTests COMMAND UrsaViewportLayoutTests)
 
+  ursa_add_test_executable(UrsaSceneViewInputTests SceneViewInputTests.cpp)
+  target_link_libraries(UrsaSceneViewInputTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaSceneViewInputTests COMMAND UrsaSceneViewInputTests)
+
   ursa_add_test_executable(UrsaGameViewSettingsTests GameViewSettingsTests.cpp)
   target_link_libraries(UrsaGameViewSettingsTests PRIVATE Ursa::Editor)
 
@@ -37,5 +41,6 @@ if(URSA_BUILD_EDITOR)
 endif()
 ursa_require_test_content(UrsaEditorPreviewTests UrsaEditorPreviewTests)
 ursa_require_test_content(UrsaEditorGizmoInteractionTests UrsaEditorGizmoInteractionTests)
+ursa_require_test_content(UrsaSceneViewInputTests UrsaSceneViewInputTests)
 
 ursa_finalize_test_directory()

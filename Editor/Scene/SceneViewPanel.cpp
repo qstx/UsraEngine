@@ -2058,12 +2058,14 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 	if (!showScene)
 	{
 		sceneNavigationGesture = SceneNavigationGesture::None;
+		sceneRightClickMenuCandidate = false;
 		SetSceneCursorCaptured(false);
 	}
 	if (sceneCursorCaptured && (!sceneNavigationWindow || !sceneNavigationWindow->Focused()))
 	{
 		SetSceneCursorCaptured(false);
 		sceneNavigationGesture = SceneNavigationGesture::None;
+		sceneRightClickMenuCandidate = false;
 	}
 	Scene& scene = play.Active() ? *play.GetScene() : draft.GetScene();
 	if (sceneTarget.preview)
@@ -2077,6 +2079,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 	const String sceneViewStateKey = projectKey + "/" + document.Id().ToString();
 	if (loadedSceneViewStateKey != sceneViewStateKey)
 	{
+		sceneRightClickMenuCandidate = false;
 		loadedSceneViewStateKey = sceneViewStateKey;
 		const String statePath = "user:Settings/SceneView/" + sceneViewStateKey + ".json";
 		auto path = VirtualPath::Parse(statePath);
@@ -2713,6 +2716,40 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					ImGui::EndDragDropTarget();
 				}
 				const ImGuiIO& scenePointerInput = ImGui::GetIO();
+				if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+				{
+					sceneRightClickMenuCandidate = imageHovered && !sceneOrientationHovered && !gizmoWasOver &&
+					                               !gizmoWasUsing &&
+					                               sceneNavigationGesture == SceneNavigationGesture::None;
+				}
+				if (sceneRightClickMenuCandidate)
+				{
+					const bool navigationKey = ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
+					                           ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
+					                           ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E);
+					// Once navigation or cancellation consumes a press, releasing it cannot open a menu.
+					if (scenePointerInput.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] > 0.f || navigationKey ||
+					    scenePointerInput.MouseWheel != 0.f || scenePointerInput.MouseWheelH != 0.f ||
+					    scenePointerInput.KeyCtrl || scenePointerInput.KeyAlt || scenePointerInput.KeySuper ||
+					    scenePointerInput.AppFocusLost || scenePointerInput.WantTextInput ||
+					    ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::GetDragDropPayload() ||
+					    !ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+					{
+						sceneRightClickMenuCandidate = false;
+					}
+				}
+				if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+				{
+					if (sceneRightClickMenuCandidate && imageHovered && !sceneOrientationHovered)
+					{
+						ImGui::OpenPopup("SceneViewportActions");
+					}
+					sceneRightClickMenuCandidate = false;
+				}
+				else if (!scenePointerInput.MouseDown[ImGuiMouseButton_Right])
+				{
+					sceneRightClickMenuCandidate = false;
+				}
 				if (imageHovered && scenePointerInput.KeyCtrl && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
 				    !gizmoWasOver && !gizmoWasUsing)
 				{
@@ -2737,8 +2774,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						ImGui::OpenPopup("Scene Selection Piercing");
 					}
 				}
-				if (!sceneOrientationHovered && !scenePointerInput.KeyCtrl &&
-				    ImGui::BeginPopupContextItem("SceneViewportActions"))
+				if (ImGui::BeginPopup("SceneViewportActions"))
 				{
 					const bool canCreate = !play.Active() && draft.Kind() == ResourceKind::Scene;
 					if (ImGui::MenuItem("Create Empty", nullptr, false, canCreate))
@@ -3834,6 +3870,10 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 		ImGui::End();
 	}
 	gameWasPlaying = play.Active();
+	if (!sceneTarget.visible)
+	{
+		sceneRightClickMenuCandidate = false;
+	}
 	if (userFiles && userFiles->IsMounted("user"))
 	{
 		const UInt64 overrideRevision = hierarchy.SceneViewOverridesRevision();
@@ -4018,6 +4058,7 @@ Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play,
 void SceneViewPanel::DrawEmpty(bool& showScene, bool& showGame)
 {
 	sceneNavigationGesture = SceneNavigationGesture::None;
+	sceneRightClickMenuCandidate = false;
 	SetSceneCursorCaptured(false);
 	if (showScene)
 	{

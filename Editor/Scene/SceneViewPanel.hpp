@@ -184,6 +184,7 @@ private:
 	Float32 sceneCameraNearClip = 0.1f;
 	Float32 sceneCameraFarClip = 100.f;
 	SceneNavigationGesture sceneNavigationGesture = SceneNavigationGesture::None;
+	bool sceneRightClickMenuCandidate = false;
 	FocusTransition sceneFocusTransition;
 	std::shared_ptr<Window> sceneNavigationWindow;
 	bool sceneCursorCaptured = false;

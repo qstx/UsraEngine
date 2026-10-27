@@ -220,7 +220,6 @@ private:
 	std::array<char, 257> renameBuffer{};
 	std::array<char, 257> searchText{};
 	Map<String, bool> directSearchMatches;
-	Map<String, bool> sceneGroupOpenByDocument;
 	String directSearchQuery;
 	ResourceId directSearchDocument;
 	String previousSearchText;

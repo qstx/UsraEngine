@@ -25,6 +25,10 @@ if(URSA_BUILD_EDITOR)
   target_link_libraries(UrsaEditorPanelInteractionTests PRIVATE Ursa::Editor)
   add_test(NAME UrsaEditorPanelInteractionTests COMMAND UrsaEditorPanelInteractionTests)
 
+  ursa_add_test_executable(UrsaHierarchyLayoutTests HierarchyLayoutTests.cpp)
+  target_link_libraries(UrsaHierarchyLayoutTests PRIVATE Ursa::Editor)
+  add_test(NAME UrsaHierarchyLayoutTests COMMAND UrsaHierarchyLayoutTests)
+
   ursa_add_test_executable(UrsaEditorDragSessionTests EditorDragSessionTests.cpp)
   target_link_libraries(UrsaEditorDragSessionTests PRIVATE Ursa::Editor)
 

@@ -609,8 +609,10 @@ bool TreeNode(const char* id, ImGuiTreeNodeFlags flags, Icon icon, const char* l
 	if (rowHeight > 0.f)
 	{
 		const ImVec2 framePadding = ImGui::GetStyle().FramePadding;
+		const Float32 minimumHeight = std::max(rowHeight, Extent());
 		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-		                    {framePadding.x, std::max(0.f, (rowHeight - ImGui::GetTextLineHeight()) * 0.5f)});
+		                    {framePadding.x, std::max(0.f, (minimumHeight - ImGui::GetTextLineHeight()) * 0.5f)});
+		flags |= ImGuiTreeNodeFlags_FramePadding;
 	}
 	const bool open = ImGui::TreeNodeEx(id, flags, "%s", padded.c_str());
 	if (rowHeight > 0.f)
@@ -619,16 +621,10 @@ bool TreeNode(const char* id, ImGuiTreeNodeFlags flags, Icon icon, const char* l
 	}
 	if (Available())
 	{
-		if (rowHeight > 0.f)
-		{
-			Draw(icon, {origin.x + ImGui::GetTreeNodeToLabelSpacing(),
-			            origin.y + (rowHeight - Extent()) * 0.5f},
-			     Extent(), Color(icon));
-		}
-		else
-		{
-			RowImage(icon, origin, ImGui::GetTreeNodeToLabelSpacing());
-		}
+		const ImVec2 minimum = ImGui::GetItemRectMin();
+		const ImVec2 maximum = ImGui::GetItemRectMax();
+		Draw(icon, {origin.x + ImGui::GetTreeNodeToLabelSpacing(), (minimum.y + maximum.y - Extent()) * 0.5f}, Extent(),
+		     Color(icon));
 	}
 	return open;
 }
