@@ -1,5 +1,6 @@
 #include <Assets/SceneDraft.hpp>
 #include <Core/StringInterop.hpp>
+#include <Scene/SceneViewNavigation.hpp>
 #include <Scene/SceneViewPanel.hpp>
 #include <Workspace/EditorDocuments.hpp>
 #include <imgui_internal.h>
@@ -230,7 +231,40 @@ void TestSceneRightClick()
 	h.Release(false);
 	h.BeginClick();
 	h.Release(true);
+	const auto panPoint = h.Point();
+	io.AddMousePosEvent(panPoint.x, panPoint.y);
+	h.Frame();
+	h.Frame();
+	const Vec3 beforePan = h.camera.position;
+	io.AddMouseButtonEvent(ImGuiMouseButton_Middle, true);
+	h.Frame();
+	io.AddMousePosEvent(panPoint.x + 35.f, panPoint.y + 25.f);
+	h.Frame();
+	Expect(Dot(h.camera.position - beforePan, h.camera.position - beforePan) > 0.f,
+	       "Middle-button dragging did not pan the Scene camera");
+	io.AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
+	h.Frame();
 	Expect(!h.documents->Current()->Dirty(), "Scene navigation changed authoring Dirty state");
+}
+
+void TestPanPrecision()
+{
+	Camera camera;
+	camera.position = {1.f, 1.f, 1.f};
+	camera.target = {};
+	const Vec3 initialPosition = camera.position;
+	PanSceneView(camera, {10.f, 5.f}, 100.f);
+	Expect(Dot(camera.position - initialPosition, camera.position - initialPosition) > 0.f,
+	       "A normal middle-button pan did not move the camera");
+	(void)camera.View();
+	camera.position = {1.f, 1.f, 1.f};
+	camera.target = {};
+	PanSceneView(camera, {1.0e10f, 1.0e10f}, 100.f);
+	(void)camera.View();
+	Expect(Dot(camera.target - camera.position, camera.target - camera.position) > 1.0e-6f,
+	       "Middle-button pan collapsed the camera onto its target");
+	Expect(Dot(camera.position - initialPosition, camera.position - initialPosition) == 0.f,
+	       "An unrepresentable pan changed the camera");
 }
 } // namespace
 
@@ -238,6 +272,7 @@ int main()
 {
 	try
 	{
+		TestPanPrecision();
 		TestSceneRightClick();
 		std::cout << "Scene right-click menu, navigation and cancellation input tests passed\n";
 		return 0;

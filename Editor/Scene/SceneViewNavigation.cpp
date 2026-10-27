@@ -73,8 +73,21 @@ void PanSceneView(Camera& camera, ViewportPoint mouseDelta, Float32 viewportHeig
 	    camera.orthographic ? camera.orthographicSize : distance * std::tan(camera.verticalFovRadians * 0.5f);
 	const Float32 unitsPerPixel = 2.f * halfHeight / viewportHeight;
 	const Vec3 shift = Add(Scale(right, -mouseDelta.x * unitsPerPixel), Scale(screenUp, mouseDelta.y * unitsPerPixel));
-	camera.position = Add(camera.position, shift);
-	camera.target = Add(camera.target, shift);
+	const Vec3 nextPosition = Add(camera.position, shift);
+	const Vec3 nextTarget = Add(camera.target, shift);
+	const Vec3 nextView = nextTarget - nextPosition;
+	const Float32 nextDistance = Length(nextView);
+	if (!std::isfinite(nextDistance) || nextDistance <= MinimumDistance)
+	{
+		return;
+	}
+	const Float32 nextRightLength = Length(Cross(Scale(nextView, 1.f / nextDistance), camera.up));
+	if (!std::isfinite(nextRightLength) || nextRightLength <= 1.0e-5f)
+	{
+		return;
+	}
+	camera.position = nextPosition;
+	camera.target = nextTarget;
 }
 
 void ZoomSceneView(Camera& camera, Float32 wheelDelta, ViewportPoint mousePosition, ViewportPoint viewportSize)
