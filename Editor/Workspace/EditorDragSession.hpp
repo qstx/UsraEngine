@@ -50,7 +50,7 @@ struct ComponentDragReference
 
 Result<EditorDragPayload> BeginEditorDragSession(const Vector<EditorSelectionEntry>& sources, UInt64 selectionRevision);
 Result<EditorDragPayload> BeginEditorDragSession(const EditorSelectionContext& selection,
-                                                 const EditorSelectionEntry& clicked);
+                                                 const EditorSelectionEntry& clicked, bool includeSelection);
 Result<EditorDragPayload> BeginEditorComponentDragSession(const EditorSelectionEntry& owner, ResourceId componentId,
                                                           String componentType, UInt64 selectionRevision);
 Result<EditorDragSession> ResolveEditorDragSession(const EditorDragPayload& payload,

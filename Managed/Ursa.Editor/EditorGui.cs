@@ -99,6 +99,13 @@ public static class EditorGui
 	internal static void DrawEditorInput()
 	{
 		uint state = EditorContext.EditorInputState;
+		if ((state & (1u << 26)) != 0)
+		{
+			bool clickedSelected = (state & 1u) != 0;
+			bool dragControl = (KeyModifiers & 9u) != 0;
+			EditorContext.SetEditorInputCommand(clickedSelected || dragControl ? 1u : 0u);
+			return;
+		}
 		if ((state & (1u << 25)) != 0)
 		{
 			bool focused = (state & 1u) != 0;

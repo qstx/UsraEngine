@@ -33,11 +33,21 @@ EditorSelectionEntry AssetSelection(const ProjectBrowserEntry& asset, UInt64 loc
 }
 
 void DrawProjectAssetDragSource(const EditorSelectionContext& selection, const EditorSelectionEntry& entry,
-                                const String& label)
+                                const String& label, const EditorHierarchy::InputAction& inputAction)
 {
 	if (ImGui::BeginDragDropSource())
 	{
-		const auto drag = BeginEditorDragSession(selection, entry);
+		bool includeSelection = selection.Contains(entry) || ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper;
+		if (inputAction)
+		{
+			UInt32 state = (1u << 26) | (selection.Contains(entry) ? 1u : 0u);
+			auto managedDecision = inputAction(state);
+			if (managedDecision)
+			{
+				includeSelection = managedDecision.value == 1;
+			}
+		}
+		const auto drag = BeginEditorDragSession(selection, entry, includeSelection);
 		if (drag)
 		{
 			ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value, sizeof(drag.value));
@@ -1370,7 +1380,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			const ImRect folderRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
 			recordExternalDropFolder(folderRect, folder.path.relative);
-			DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name);
+			DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name, inputAction);
 			DrawProjectMoveDropTarget(folderRect, workspace, model, selection, folder.path.relative, readOnly,
 			                          diagnostic, actions);
 			if (folderOpen)
@@ -2045,7 +2055,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			if (!editingName)
 			{
-				DrawProjectAssetDragSource(selection, entry, label);
+				DrawProjectAssetDragSource(selection, entry, label, inputAction);
 			}
 			if (!editingName && ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selection.Contains(entry))
 			{
@@ -2149,7 +2159,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 				}
 				if (!editingName)
 				{
-					DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name);
+					DrawProjectAssetDragSource(selection, AssetSelection(folder), folder.name, inputAction);
 				}
 				DrawProjectMoveDropTarget(folderRect, workspace, model, selection, folder.path.relative, readOnly,
 				                          diagnostic, actions);
@@ -2441,7 +2451,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 			}
 			if (!editingName)
 			{
-				DrawProjectAssetDragSource(selection, assetEntry, asset.name);
+				DrawProjectAssetDragSource(selection, assetEntry, asset.name, inputAction);
 			}
 			bool contextSelectionAccepted = true;
 			if (!editingName && ImGui::IsItemClicked(ImGuiMouseButton_Right))
@@ -2670,16 +2680,7 @@ Result<void> ProjectBrowserPanel::Draw(ProjectWorkspace& workspace, ProjectBrows
 						}
 					}
 					projectContentRowIds.push_back(ImGui::GetItemID());
-					if (ImGui::BeginDragDropSource())
-					{
-						const auto drag = BeginEditorDragSession(selection, objectEntry);
-						if (drag)
-						{
-							ImGui::SetDragDropPayload(editorDragSessionPayloadType, &drag.value, sizeof(drag.value));
-						}
-						ImGui::TextUnformatted(objectLabel.c_str());
-						ImGui::EndDragDropSource();
-					}
+					DrawProjectAssetDragSource(selection, objectEntry, objectLabel, inputAction);
 					bool contextObjectSelectionAccepted = true;
 					if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selection.Contains(objectEntry))
 					{

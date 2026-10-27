@@ -126,12 +126,11 @@ Result<EditorDragPayload> BeginEditorDragSession(const Vector<EditorSelectionEnt
 }
 
 Result<EditorDragPayload> BeginEditorDragSession(const EditorSelectionContext& selection,
-                                                 const EditorSelectionEntry& clicked)
+                                                 const EditorSelectionEntry& clicked, bool includeSelection)
 {
 	const bool clickedSelected = selection.Contains(clicked);
-	const bool addToExistingSelection = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper;
 	Vector<EditorSelectionEntry> sources =
-	    clickedSelected || addToExistingSelection ? selection.entries : Vector<EditorSelectionEntry>{};
+	    clickedSelected || includeSelection ? selection.entries : Vector<EditorSelectionEntry>{};
 	if (std::none_of(sources.begin(), sources.end(),
 	                 [&](const EditorSelectionEntry& entry) { return entry.SameIdentity(clicked); }))
 	{
