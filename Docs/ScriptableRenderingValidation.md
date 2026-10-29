@@ -206,7 +206,7 @@ Universal Renderer 的长期输出 backing 由 `RenderOutputBackingCache` 按 se
 复现缓存容量/LRU、session 隔离、尺寸与 generation 替换、超预算拒绝及 Dispose 释放：运行 `Ursa.ManagedHost.ProtocolTests`；复现作用域释放/异常路径和 GPU 执行器对遗漏 Release 的拒绝：运行 `UrsaRenderCommandExecutorTests`。当前可运行的 Release 命令为：
 
 ```powershell
-dotnet Engine/Build/Tests/Managed/Source/Tests/Managed/Ursa.ManagedHost.ProtocolTests/bin/Release/net10.0/Ursa.ManagedHost.ProtocolTests.dll
+dotnet Engine/Build/Tests/Managed/Release/Ursa.ManagedHost.ProtocolTests.dll
 $env:TEMP = (Resolve-Path 'Engine\Build\Temp\CodexTestTemp').Path
 $env:TMP = $env:TEMP
 ctest --test-dir Engine/Build -C Release -R '^(UrsaRenderCommandExecutorTests|UrsaDotNetHostSmoke)$' --output-on-failure

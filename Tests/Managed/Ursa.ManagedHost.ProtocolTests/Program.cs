@@ -485,8 +485,14 @@ internal static unsafe partial class Program
 		Select(0);
 	}
 
-	private static int Main()
+	private static int Main(string[] args)
 	{
+		if (args.Length == 1 && args[0] == "--debug-symbols-only")
+		{
+			ScriptDebugSymbolsTests.Run();
+			Console.WriteLine("Original framework/test source paths, checksums and DLL/PDB identities verified.");
+			return 0;
+		}
 		InstallProtocolScriptIdentities();
 		using var runtimeBindings = InstallRuntimeBindings();
 		using var renderingBindings = InstallRenderingBindings();

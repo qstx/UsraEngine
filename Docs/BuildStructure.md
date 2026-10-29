@@ -28,6 +28,8 @@ Windows 开发基线为 VS2026/v145 与 CMake 4.4.5+。统一 Engine 与 Demo �
 
 `Managed/Framework` 分类中的 SDK 工程从原始 csproj 元数据生成，文件通过 Link 指向原始 `Engine/Managed`；`Projects/Demo` 的 Game/EditorScripts 指向 Assets。正式引擎程序集位于 `<build>/Managed/<配置>`，IDE 框架检查产物在 `<build>/Ide/Managed/Build/<工程>/<配置>`，项目 IDE 产物在 `Demo/Library/ScriptIDE/Build`。单独构建 `UrsaEditor` 不要求编译 Demo IDE 工程；单独右键构建一个 C# 项目只检查对应项目与项目引用，不发布游戏脚本。完整流程见 [统一开发工作区](UnifiedDevelopment.md)。
 
+正式框架直接编译原始 `Managed/*.csproj`，使用 `<build>/Managed/Artifacts` 隔离中间产物，停止复制 `Managed/Source`。正式 PDB 的手写源码路径和校验和对应原始文件；绑定生成代码继续位于 `<build>/Bindings/<配置>`。
+
 解决方案目标按 Runtime、Engine、Editor、Tools、Tests、Managed 和 ThirdParty 分类。项目内 filter 使用源码相对引擎仓库根的真实目录，例如 `Runtime/Core/Memory`、`Engine/Scripting/DotNet` 和 `Tests/Editor/Scene`，同目录头文件和源文件放在一起。
 
 源码登记与 filter 使用同一集合；只修改 `.filters` 不能补齐未登记的头文件。生成的 `.sln/.vcxproj/.filters` 由 CMake 管理，修改配置后重新生成。
@@ -60,7 +62,7 @@ ctest --test-dir Build -C Debug --output-on-failure -L "Tests/Editor/Scene"
 ctest --test-dir Build -C Debug --output-on-failure -R "UrsaProject(Structure|Discovery)Tests"
 ```
 
-托管测试源码位于 `Tests/Managed`，其生成工程位于 `Build/Tests/Managed/Source`。生产程序集仍位于 `Build/Managed/<配置>`，测试夹具通过独立 `UrsaManagedTestAssemblies` 目标生成到 `TestScripts`。关闭 `URSA_BUILD_TESTS` 时不构建测试程序集、不添加 CTest 准备步骤。
+托管测试直接编译 `Tests/Managed` 下的原始 csproj，引用原始框架和 Docs/Examples；中间产物位于 `<build>/Tests/Managed/Artifacts`，可运行测试位于 `<build>/Tests/Managed/<配置>`。生产程序集仍位于 `<build>/Managed/<配置>`，测试夹具通过独立 `UrsaManagedTestAssemblies` 目标复制 DLL/PDB 到该目录的 `TestScripts`。关闭 `URSA_BUILD_TESTS` 时不构建测试程序集、不添加 CTest 准备步骤。`UrsaManagedSourceSymbolsTests` 校验正式 DLL/PDB 身份、原始源码路径及校验和。
 
 ```powershell
 cmake -S . -B Build/Production -DURSA_BUILD_TESTS=OFF -DURSA_ENABLE_DOTNET=ON

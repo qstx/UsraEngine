@@ -53,11 +53,14 @@ VS 的 Debug/Release 映射到相应原生 x64 与托管 Any CPU 配置。引擎
 | 引擎托管 IDE 工程 | Engine/Build/VS2026/Ide/Managed |
 | IDE 框架输出与绑定 | Engine/Build/VS2026/Ide/Managed/Build/工程/配置 |
 | 正式引擎框架 | Engine/Build/VS2026/Managed/配置 |
+| 正式框架中间产物 | Engine/Build/VS2026/Managed/Artifacts |
 | 正式脚本目录工具 | Engine/Build/VS2026/Managed/Tools/配置 |
 | Demo IDE 工程/检查产物 | Demo/Library/ScriptIDE |
 | Demo 正式脚本产物和清单 | Demo/Library/ScriptBuild |
 
 IDE Build 用于编译检查。运行游戏或 Editor 扩展前，仍需通过 Editor 正式脚本构建与内容校验。修改引擎托管 API 或原生绑定后，先构建正式引擎目标并重启宿主，再重新编译项目脚本；单独构建 IDE C# 工程不会替换已加载的框架。
+
+正式构建和 IDE 均编译 `Engine/Managed` 的原始源码，各自隔离输出；正式构建不再复制 `Managed/Source`。正式 PDB 的手写源码路径和校验和对应解决方案中的文件。旧构建树遗留的源码暂存目录已不被使用，可在停止相关程序后清理；`Bindings` 和 artifacts/obj 下的自动生成 `.g.cs`、AssemblyInfo 等仍是正常构建产物。
 
 ## 调试
 

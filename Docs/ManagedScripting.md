@@ -31,7 +31,7 @@ cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON -DURSA_DOTNET_EXECUTABLE="C:/Program
 
 切换 `dotnet.exe` 后若 CMake 仍使用旧路径，请在重新配置时增加 `-UURSA_DOTNET_EXECUTABLE`，清除缓存的程序路径。
 
-启用后，CMake 会验证 host pack 中的 `nethost.h`、`hostfxr.h`、`coreclr_delegates.h`、`nethost.lib` 和 `nethost.dll`。托管工程构建在 `Engine/Build/runtime/Scripting/Managed/Source` 的构建暂存目录中进行；程序集输出到 `Engine/Build/Managed/<配置>`，不会把 `bin/` 或 `obj/` 写入源码目录。原生宿主目标链接 `nethost.lib`，可执行程序旁会复制对应的 `nethost.dll`。
+启用后，CMake 会验证 host pack 中的 `nethost.h`、`hostfxr.h`、`coreclr_delegates.h`、`nethost.lib` 和 `nethost.dll`。正式框架及脚本目录工具直接编译 `Engine/Managed` 下的原始 csproj 和源码，不复制到 `Managed/Source`。`--artifacts-path` 将项目和配置的中间产物放在 `<build>/Managed/Artifacts`，正式程序集与 Portable PDB 输出到 `<build>/Managed/<配置>`，目录工具输出到 `<build>/Managed/Tools/<配置>`；源码树中的既有 bin/obj 不参与源码发现，也不会由这些构建新增或改写。PDB 中的手写 C# 文件路径与解决方案编辑的原始文件一致。原生宿主目标链接 `nethost.lib`，可执行程序旁会复制对应的 `nethost.dll`。
 
 ## VFS 与原生宿主边界
 

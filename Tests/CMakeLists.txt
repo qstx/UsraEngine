@@ -1,7 +1,8 @@
 set(URSA_TEST_SAMPLE_PROJECT "${URSA_BINARY_ROOT}/TestProjects/Sample/$<CONFIG>")
 set(URSA_TEST_CONTENT_PROJECT "${URSA_BINARY_ROOT}/TestProjects/Runtime/$<CONFIG>")
 set(URSA_SHADER_TEST_PAK "${URSA_BINARY_ROOT}/Package/$<CONFIG>/ShaderContent.pak")
-set(URSA_MANAGED_TEST_STAGE_ROOT "${URSA_BINARY_ROOT}/Tests/Managed/Source")
+set(URSA_MANAGED_TEST_ARTIFACTS_ROOT "${URSA_BINARY_ROOT}/Tests/Managed/Artifacts")
+set(URSA_MANAGED_TEST_OUTPUT_DIR "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>")
 include(TestSupport.cmake)
 include(TestProfiles.cmake)
 # Some host fixture tests set TEMP/TMP to this isolated build directory.

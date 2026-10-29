@@ -19,7 +19,21 @@
 
 本机日志位于 `Build/VS2026/PythonProductionGeneration.log`、`PythonWorkspaceFinalGeneration.log`、`PythonWorkspaceFinalRegression.log` 和 `PythonStructureTarget.log`。
 
-## 已通过
+## 正式托管构建使用原始源码（2026-10-29）
+
+正式框架、目录工具和托管测试直接编译原始 csproj，移除 StageManaged 源码复制；framework、test、IDE 各自使用独立 artifacts/output。增加稳定的源码输入清单，覆盖 CMake/MSBuild 同一次构建中的新增与删除。
+
+- Debug/Release 正式框架、目录工具、测试夹具构建通过；`UrsaManagedSourceSymbolsTests` 验证五个正式框架 DLL/PDB 身份、原始手写源码路径和文件校验和，以及测试自身的原始源码路径。绑定工具和目录工具的两个配置 PDB 分别有 7 和 2 个原始源码文档。
+- 临时新增 Runtime C# 类型后，同一次正式构建的 DLL/PDB 包含该类型和源文件；删除并重新构建后两者均移除，探针已清理。
+- 完成两种配置全部目标后，无变化重复构建保留 436 个正式/IDE DLL/PDB 的大小与时间戳，源码树 379 个既有 bin/obj 缓存未新增或改写。
+- 受影响回归 Debug 11/11（152.78 秒）、Release 11/11（104.14 秒）通过，包括样例准备、绑定生成、源码符号、Snake 逻辑及七个工程回归；本轮未启动 VS 或 Editor GUI。
+- 本机旧 `Managed/Source` 与 `Tests/Managed/Source` 共 1099 个文件先完整归档并校验，再清理。归档为 `Build/VS2026/LegacyManagedSources-20261029-125222-e9daa7.zip`；重复正式构建未重建这些目录。
+
+另行执行的完整 `UrsaManagedProtocolTests` 在两个配置均失败于 `CustomEditorRegistrationTests.cs:86` 的 Inspector 数量/Camera 多编辑回退断言。清理前运行迁移前暂存目录中的旧 Debug 二进制，复现相同断言；这是既有失败，未在本次源码构建迁移中修改注册逻辑。新增源码符号检查独立登记，不将该完整协议测试记为通过。
+
+日志见 `Build/VS2026/DirectManagedRegression-Debug.log`、`DirectManagedRegression-Release.log`、`DirectManagedIncremental.log`、`DirectManaged-AddedSourceSymbols.log` 和 `DirectManagedProtocolBaseline.log`。
+
+## 此前统一工作区验收已通过
 
 - 新构建根配置、完整 Debug 方案构建，以及 Debug/Release Editor、Player、脚本工具构建。
 - 无 Library 且有错误 C# 源码的独立项目完成工作区引导，不生成正式游戏程序集或导入游戏资源。

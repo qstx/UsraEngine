@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Keep old local outputs out of source globs when artifacts are external. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

@@ -96,5 +96,5 @@ cmake --build Engine/Build --config Release --target UrsaShaderExampleImportTest
 $env:TEMP = (Resolve-Path 'Engine\Build\Temp\CodexTestTemp').Path
 $env:TMP = $env:TEMP
 ctest --test-dir Engine/Build -C Release -R '^(UrsaShaderExampleImportTests|UrsaShaderPackageTests|UrsaRenderSceneTests|UrsaRenderCommandExecutorTests|UrsaMaterialMigrationTests|UrsaDotNetHostSmoke)$' --output-on-failure
-dotnet Engine/Build/Tests/Managed/Source/Tests/Managed/Ursa.ManagedHost.ProtocolTests/bin/Release/net10.0/Ursa.ManagedHost.ProtocolTests.dll
+dotnet Engine/Build/Tests/Managed/Release/Ursa.ManagedHost.ProtocolTests.dll
 ```

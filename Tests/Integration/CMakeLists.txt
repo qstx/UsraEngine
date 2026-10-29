@@ -88,14 +88,18 @@ if(URSA_ENABLE_DOTNET)
   ursa_attach_dotnet_host_runtime(UrsaDotNetHostTests)
   ursa_require_test_content(UrsaDotNetHostSmoke UrsaDotNetHostTests)
 
-  add_test(NAME UrsaManagedProtocolTests COMMAND "${URSA_DOTNET_EXECUTABLE}" run --project "${URSA_MANAGED_TEST_STAGE_ROOT}/Tests/Managed/Ursa.ManagedHost.ProtocolTests/Ursa.ManagedHost.ProtocolTests.csproj" --configuration "$<CONFIG>" --no-build --no-restore)
+  add_test(NAME UrsaManagedProtocolTests COMMAND "${URSA_DOTNET_EXECUTABLE}"
+    "${URSA_MANAGED_TEST_OUTPUT_DIR}/Ursa.ManagedHost.ProtocolTests.dll")
+  add_test(NAME UrsaManagedSourceSymbolsTests COMMAND "${URSA_DOTNET_EXECUTABLE}"
+    "${URSA_MANAGED_TEST_OUTPUT_DIR}/Ursa.ManagedHost.ProtocolTests.dll" --debug-symbols-only)
+  set_tests_properties(UrsaManagedProtocolTests UrsaManagedSourceSymbolsTests PROPERTIES ENVIRONMENT
+    "URSA_FORMAL_MANAGED_DIR=${URSA_MANAGED_OUTPUT_DIR};URSA_SOURCE_ROOT=${URSA_SOURCE_ROOT}")
   if(NOT URSA_PROJECT_DIR STREQUAL "")
 
     add_test(NAME UrsaSnakeManagedLogicTests COMMAND "${URSA_DOTNET_EXECUTABLE}" run
-      --project "${URSA_MANAGED_TEST_STAGE_ROOT}/Tests/Managed/Ursa.SnakeLogicTests/Ursa.SnakeLogicTests.csproj"
+      --project "${URSA_SOURCE_ROOT}/Tests/Managed/Ursa.SnakeLogicTests/Ursa.SnakeLogicTests.csproj"
       --configuration "$<CONFIG>" "-p:UrsaProjectDir=${URSA_TEST_SAMPLE_PROJECT}"
-      "-p:BaseOutputPath=${URSA_BINARY_ROOT}/ManagedTests/Snake/bin/"
-      "-p:BaseIntermediateOutputPath=${URSA_BINARY_ROOT}/ManagedTests/Snake/obj/")
+      --artifacts-path "${URSA_BINARY_ROOT}/ManagedTests/Snake")
 
     add_test(NAME UrsaProjectScriptCompile COMMAND UrsaAssetImport --project "${URSA_TEST_SAMPLE_PROJECT}" --configuration "$<CONFIG>")
     set_tests_properties(UrsaProjectScriptCompile PROPERTIES FIXTURES_SETUP UrsaProjectScripts)
@@ -241,6 +245,7 @@ endif()
 get_property(integrationTests DIRECTORY PROPERTY TESTS)
 foreach(test IN LISTS integrationTests)
   if(NOT test STREQUAL "UrsaDotNetHostSmoke" AND NOT test STREQUAL "UrsaManagedProtocolTests"
+      AND NOT test STREQUAL "UrsaManagedSourceSymbolsTests"
       AND NOT test STREQUAL "UrsaManagedImportSessionTests" AND NOT test STREQUAL "UrsaScriptedAssetImporterTests"
       AND NOT test STREQUAL "UrsaAssetPostprocessorTests" AND NOT test STREQUAL "UrsaManagedAssetImportWorkflowTests"
       AND NOT test STREQUAL "UrsaManagedImporterInspectorTests"
