@@ -63,6 +63,9 @@ function(ursa_attach_dotnet_host_runtime target)
     if(NOT TARGET ${target})
       message(FATAL_ERROR "Cannot configure the .NET native host for missing target ${target}")
     endif()
+    if(CMAKE_GENERATOR STREQUAL "Visual Studio 18 2026")
+      set_property(TARGET ${target} PROPERTY VS_USER_PROPS "${URSA_SOURCE_ROOT}/CMake/ManagedDebugger.props")
+    endif()
     get_target_property(nethostDll UrsaDotNetHostSupport URSA_NETHOST_DLL)
     add_custom_command(TARGET ${target} POST_BUILD
       COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${nethostDll}" "$<TARGET_FILE_DIR:${target}>"

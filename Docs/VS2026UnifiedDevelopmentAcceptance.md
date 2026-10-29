@@ -11,6 +11,24 @@
 | C++ 格式 | clang-format 19.1.1 |
 | 工作区 Python | 仓库自带 3.11.17 |
 
+## 首次 Play 前的编辑渲染断点（2026-10-29）
+
+对比冷启动与显式 Native/CoreCLR 附加：编辑态确实调用 `RenderPipeline.RenderInternal`；VS 原生宿主的默认 `Auto` 选择使冷启动后的新增托管断点不能按预期停靠。启用 .NET 的原生宿主现通过用户属性表默认设置 `NativeWithManagedCore`。实际 Debug/Release MSBuild 求值一致；Python 回归验证平台用户属性和项目显式 NativeOnly 覆盖仍保留。
+
+真实 VS2026 F5 启动独占 Editor，在主线程托管初始化完成后打开 SDK 工程成员，再新增 RenderInternal 断点。首次 Play 前停在原始 `Managed/Ursa.Rendering/RenderPipeline.cs:42`，所属 `Ide/Managed/Ursa.Rendering/Ursa.Rendering.csproj`；`cameras.Count=1`，调用栈包含原生 `EditorApplication::RenderManagedViewport` 和托管渲染回调。验收同时核对运行时加载的框架 DLL 与正式 Debug DLL 的 SHA256。
+
+显式混合附加回归在同一 PID 完成六次停靠和局部变量验证：C++ 42、编辑渲染 cameras.Count=1、Editor 菜单 41、Game Awake 10，保持附加 Stop 重载后 Editor 42、Game 11。重载前后脚本内容指纹由 `9301d16145693b18` 变为 `67a0b3ca46c9e441`，未进入 Play 时的状态记录为 Running=false。
+
+独占 VS/Editor 和调试宿主均已关闭。测试后恢复 `URSA_BUILD_TESTS=OFF`，生产工作区结构检查通过（17 个第一方目标、424 个 C++ 文件项、7 个 SDK C# 工程）。新脚本为 `Tests/Editor/Scripting/RunPrePlayRenderDebugAcceptance.ps1`；本机证据与日志保留在 `Build/Validation/PrePlayRenderEvidence.json`、`ManagedDebugEvidence.json`、`PrePlayValidation.log` 和 `ManagedDebugValidation.log`。
+
+## 中文构建日志（2026-10-29）
+
+本机 OEM 代码页为 936，VC CustomBuild 默认解码会损坏 dotnet 的 UTF-8 中文。为原生工程的 CustomBuild/CustomBuildStep 明确设置 stdout/stderr UTF-8，并通过 CMake 显式导入引擎根属性文件，保持本地化语言选择。
+
+真实 CMake/MSBuild 夹具在仓库外、带空格及中文的临时目录配置 VS2026：中文 stdout、stderr、源码路径、dotnet 还原/成功消息和重定向日志均保留；移除属性表的 OEM 基线复现乱码；故意退出 23 的子命令仍使整个构建返回非零。正式 Debug Editor 构建也显示正常的中文还原和构建信息。
+
+CTest 的目录配置、编码输出、Python 工具及进程清理四项全部通过（18.30 秒）；Python 工具包含 11 项用例。此轮没有修改 C++ 源码。日志为 `Build/Validation/EncodingValidation.log`、`EditorValidation.log` 和 `BuildRegressionValidation.log`。原有完整协议测试的既有失败仍按下文记录，未将其计为通过。
+
 ## bat / Python 入口追加验收（2026-10-29）
 
 `GenerateEngineSolutionWithTracy.bat` 现通过 Python 实现生成、工具检测与结构检查。将 PATH 中所有 PowerShell 路径移除，确认 `where pwsh` 与 `where powershell` 均找不到后，默认入口完成实际五阶段生成；生产方案为 17 个第一方目标、424 个 C++ 文件项和 7 个 SDK C# 工程。随后通过 `--tests` 恢复完整工作区，检查 163 个目标、615 个 C++ 文件项及 12 个 C# 工程，Demo 关联为 Ready，bootstrap 为 OFF。

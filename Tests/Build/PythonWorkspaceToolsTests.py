@@ -139,6 +139,29 @@ EndGlobalSection
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Engine CMakeLists.txt is missing', result.stderr)
 
+    def test_managed_debugger_defaults_preserve_explicit_user_choices(self):
+        toolchain = get_toolchain()
+        msbuild = Path(toolchain['VisualStudio']) / 'MSBuild/Current/Bin/MSBuild.exe'
+        user = self.write('CppUser/Microsoft.Cpp.x64.user.props', '<Project><PropertyGroup><PreservedSetting>kept</PreservedSetting></PropertyGroup></Project>')
+        project = ET.Element('Project', ToolsVersion='Current')
+        group = ET.SubElement(project, 'PropertyGroup')
+        ET.SubElement(group, 'Platform').text = 'x64'
+        ET.SubElement(group, 'UserRootDir').text = str(user.parent) + os.sep
+        ET.SubElement(group, 'LocalDebuggerDebuggerType').text = 'Auto'
+        ET.SubElement(project, 'Import', Project=str(ENGINE / 'CMake/ManagedDebugger.props'))
+        path = self.root / 'Debugger.vcxproj'
+        def inspect():
+            path.write_text(ET.tostring(project, encoding='unicode'), encoding='utf-8')
+            result = subprocess.run([str(msbuild), str(path), '-nologo', '-getProperty:LocalDebuggerDebuggerType,PreservedSetting'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return json.loads(result.stdout)['Properties']
+        self.assertEqual(inspect(), dict(LocalDebuggerDebuggerType='NativeWithManagedCore', PreservedSetting='kept'))
+        user.write_text('<Project><PropertyGroup><PreservedSetting>kept</PreservedSetting><LocalDebuggerDebuggerType>NativeOnly</LocalDebuggerDebuggerType></PropertyGroup></Project>', encoding='utf-8')
+        self.assertEqual(inspect()['LocalDebuggerDebuggerType'], 'NativeOnly')
+        user.write_text('<Project><PropertyGroup><PreservedSetting>kept</PreservedSetting></PropertyGroup></Project>', encoding='utf-8')
+        ET.SubElement(ET.SubElement(project, 'PropertyGroup'), 'LocalDebuggerDebuggerType').text = 'NativeOnly'
+        self.assertEqual(inspect()['LocalDebuggerDebuggerType'], 'NativeOnly')
+
     def test_old_cache_is_preserved(self):
         cache = self.write('Old build/CMakeCache.txt', 'CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022\n')
         before = cache.read_bytes()

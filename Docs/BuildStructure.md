@@ -32,6 +32,8 @@ Windows 开发基线为 VS2026/v145 与 CMake 4.4.5+。统一 Engine 与 Demo �
 
 正式框架直接编译原始 `Managed/*.csproj`，使用 `<build>/Managed/Artifacts` 隔离中间产物，停止复制 `Managed/Source`。正式 PDB 的手写源码路径和校验和对应原始文件；绑定生成代码继续位于 `<build>/Bindings/<配置>`。
 
+VS2026 工程通过 `DirectoryBuildPropsPath` 显式导入引擎根 `Directory.Build.props`，包括仓库外的 build root。VC CustomBuild/CustomBuildStep 的 stdout 和 stderr 使用 UTF-8 解码，保留 dotnet 的中文日志；只切换终端代码页不能更改 MSBuild 管道的默认 OEM 解码。启用 .NET 的原生宿主通过 `CMake/ManagedDebugger.props` 默认使用 CoreCLR 混合调试，保留用户的显式调试器选择。
+
 解决方案目标按 Runtime、Engine、Editor、Tools、Tests、Managed 和 ThirdParty 分类。项目内 filter 使用源码相对引擎仓库根的真实目录，例如 `Runtime/Core/Memory`、`Engine/Scripting/DotNet` 和 `Tests/Editor/Scene`，同目录头文件和源文件放在一起。
 
 源码登记与 filter 使用同一集合；只修改 `.filters` 不能补齐未登记的头文件。生成的 `.sln/.vcxproj/.filters` 由 CMake 管理，修改配置后重新生成。

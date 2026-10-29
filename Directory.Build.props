@@ -3,4 +3,16 @@
     <!-- Keep old local outputs out of source globs when artifacts are external. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**</DefaultItemExcludes>
   </PropertyGroup>
+  <!-- dotnet emits UTF-8. The VC CustomBuild task otherwise decodes its pipes
+       using the system OEM code page, even in a UTF-8 terminal. -->
+  <ItemDefinitionGroup Condition="'$(MSBuildProjectExtension)' == '.vcxproj'">
+    <CustomBuild>
+      <StdOutEncoding>UTF-8</StdOutEncoding>
+      <StdErrEncoding>UTF-8</StdErrEncoding>
+    </CustomBuild>
+    <CustomBuildStep>
+      <StdOutEncoding>UTF-8</StdOutEncoding>
+      <StdErrEncoding>UTF-8</StdErrEncoding>
+    </CustomBuildStep>
+  </ItemDefinitionGroup>
 </Project>

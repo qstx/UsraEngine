@@ -90,10 +90,10 @@ function Send-Command([string]$Action) {
     throw 'Cannot publish acceptance command'
 }
 
-function Verify-Break([string]$Function, [int]$Line, [string]$Variable, [string]$Expected) {
+function Verify-Break([string]$Function, [int]$Line, [string]$Variable, [string]$Expected, [switch]$RemoveAfter) {
     Wait-Until { $capture = Invoke-Controller 'state' | ConvertFrom-Json; return $capture.Mode -eq 2 -and $capture.Function -like $Function -and $capture.Line -eq $Line } 25 "breakpoint $Function"
     $before = Invoke-Controller 'state' | ConvertFrom-Json
-    if ($Function.StartsWith('DebugAcceptance.') -and -not $before.Project.EndsWith('.csproj', [StringComparison]::OrdinalIgnoreCase)) {
+    if (($Function.StartsWith('DebugAcceptance.') -or $Function.StartsWith('Ursa.')) -and -not $before.Project.EndsWith('.csproj', [StringComparison]::OrdinalIgnoreCase)) {
         throw "Breakpoint source is outside the C# solution project: $($before.File)"
     }
     [void](Invoke-Controller 'step')
@@ -106,6 +106,7 @@ function Verify-Break([string]$Function, [int]$Line, [string]$Variable, [string]
     }
     $records.Add(@{ Break = $before; Step = $after; Local = $value })
     Write-Host "$Function : $Variable = $Expected"
+    if ($RemoveAfter) { [void](Invoke-Controller 'clear' @($before.File, [string]$Line)) }
     [void](Invoke-Controller 'continue')
 }
 
@@ -151,6 +152,15 @@ try {
     if ($Unified) {
         Send-Command 'native'
         Verify-Break '*NativeDebugProbe*' $nativeLine 'nativeMarker' '42'
+    }
+    $prePlay = Read-State
+    if ($prePlay.Running) { throw 'Render breakpoint acceptance already entered Play.' }
+    if ($Unified) {
+        $renderSource = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../Managed/Ursa.Rendering/RenderPipeline.cs'))
+        $renderLine = (Select-String -LiteralPath $renderSource -SimpleMatch 'ObjectDisposedException.ThrowIf(disposed, this);').LineNumber
+        [void](Invoke-Controller 'project-file' @($renderSource))
+        Add-AcceptanceBreakpoint $renderSource $renderLine
+        Verify-Break 'Ursa.Rendering.RenderPipeline.RenderInternal*' $renderLine 'cameras.Count' '1' -RemoveAfter
     }
     Send-Command 'menu'
     Verify-Break 'DebugAcceptance.EditorProbe.Pulse' 9 'editorMarker' '41'
@@ -202,7 +212,7 @@ try {
     $newManifest = Read-Json (Join-Path $runRoot 'Library/ScriptBuild/Manifests/Game.json')
     $newSymbols = Get-FileHash (Join-Path $runRoot 'Library/ScriptBuild/Assemblies/Game/Ursa.Game.pdb') -Algorithm SHA256
     $evidence = @{ Project = $runRoot; Solution=$solution; Pid = $hostProcess.Id; IDE = $ide; Records = $records.ToArray(); Membership=$members; SourceRefresh=$sourceRefresh;
-        FrameworkPrefix=$FrameworkPrefix; FrameworkSha256=(Get-FileHash (Join-Path $buildRoot "Managed/$Configuration/Ursa.Runtime.dll")).Hash; ReloadWhileAttached=[bool]$Unified;
+        FrameworkPrefix=$FrameworkPrefix; FrameworkSha256=(Get-FileHash (Join-Path $buildRoot "Managed/$Configuration/Ursa.Runtime.dll")).Hash; ReloadWhileAttached=[bool]$Unified; PrePlayRenderState=$prePlay;
         OldBuildFingerprint = $oldManifest.BuildFingerprint; NewBuildFingerprint = $newManifest.BuildFingerprint;
         OldPdbSha256 = $oldSymbols.Hash; NewPdbSha256 = $newSymbols.Hash; ReloadedState = $reloaded }
     $evidence | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $acceptanceRoot 'managed-debug-evidence.json') -Encoding utf8

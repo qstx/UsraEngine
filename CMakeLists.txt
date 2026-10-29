@@ -14,6 +14,10 @@ set(URSA_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(URSA_BINARY_ROOT "${CMAKE_CURRENT_BINARY_DIR}")
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 include(CMake/DevelopmentPaths.cmake)
+if(CMAKE_GENERATOR STREQUAL "Visual Studio 18 2026")
+  # Explicit import also covers build trees outside the engine checkout.
+  list(APPEND CMAKE_VS_GLOBALS "DirectoryBuildPropsPath=${URSA_SOURCE_ROOT}/Directory.Build.props")
+endif()
 
 
 option(URSA_BUILD_EDITOR "Build the Ursa editor" ON)

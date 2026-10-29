@@ -189,7 +189,7 @@ internal static class Program
             var dte = Dte(Path.GetFullPath(args[1]));
             var debugger = (EnvDTE80.Debugger2)dte.Debugger;
             string action = args[0];
-            if (action is "state" or "evaluate" or "step" or "continue" or "detach" or "break" or "thread-stacks" or "inspect-frame")
+            if (action is "state" or "evaluate" or "step" or "continue" or "detach" or "break" or "thread-stacks" or "inspect-frame" or "stop")
             {
                 string pidPath = Path.Combine(AppContext.BaseDirectory, "TargetPid.txt");
                 int expected = File.Exists(pidPath) ? int.Parse(File.ReadAllText(pidPath)) : -1;
@@ -263,6 +263,48 @@ internal static class Program
             else if (action == "navigate-definition") Console.WriteLine(JsonSerializer.Serialize(VerifyLanguage(dte, args[2], args[3])));
             else if (action == "navigate-symbol") Console.WriteLine(JsonSerializer.Serialize(VerifyLanguage(dte, args[2], args[3], args[4])));
             else if (action == "complete-member") Console.WriteLine(JsonSerializer.Serialize(VerifyLanguage(dte, args[2], null, null, args[3], args[4], args[5])));
+            else if (action == "launch")
+            {
+                if (dte.Debugger.CurrentMode != EnvDTE.dbgDebugMode.dbgDesignMode)
+                    throw new InvalidOperationException("Launch requires an idle acceptance IDE.");
+                EnvDTE.Project? Find(EnvDTE.Project project)
+                {
+                    if (project.Name == args[2]) return project;
+                    if (project.ProjectItems != null) foreach (EnvDTE.ProjectItem item in project.ProjectItems)
+                        if (item.SubProject is { } child && Find(child) is { } found) return found;
+                    return null;
+                }
+                EnvDTE.Project? target = null;
+                foreach (EnvDTE.Project project in dte.Solution.Projects) if (Find(project) is { } found) { target = found; break; }
+                if (target == null) throw new InvalidOperationException("Startup project not found: " + args[2]);
+                if (args.Length > 3) dte.Solution.SolutionBuild.SolutionConfigurations.Item(args[3]).Activate();
+                string configuration = dte.Solution.SolutionBuild.ActiveConfiguration.Name + "|x64";
+                dynamic native = target.Object;
+                dynamic settings = native.Configurations.Item(configuration).Rules.Item("WindowsLocalDebugger");
+                string debuggerType = settings.GetEvaluatedPropertyValue("LocalDebuggerDebuggerType");
+                object previousStartup = dte.Solution.SolutionBuild.StartupProjects;
+                dte.Solution.SolutionBuild.StartupProjects = new[] { target.UniqueName };
+                dte.ExecuteCommand("Debug.Start");
+                DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+                while (dte.Debugger.DebuggedProcesses.Count == 0 && DateTime.UtcNow < deadline) Thread.Sleep(100);
+                if (dte.Debugger.DebuggedProcesses.Count != 1) throw new InvalidOperationException("Expected one launched debugger process.");
+                int pid = (int)dte.Debugger.DebuggedProcesses.Item(1).ProcessID;
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "TargetPid.txt"), pid.ToString());
+                Console.WriteLine(JsonSerializer.Serialize(new { Pid = pid, DebuggerType = debuggerType, PreviousStartup = previousStartup }));
+            }
+            else if (action == "startup")
+            {
+                if (dte.Debugger.CurrentMode != EnvDTE.dbgDebugMode.dbgDesignMode)
+                    throw new InvalidOperationException("Restoring startup projects requires an idle IDE.");
+                dte.Solution.SolutionBuild.StartupProjects = args.Skip(2).ToArray();
+                Console.WriteLine("Restored startup projects");
+            }
+            else if (action == "stop")
+            {
+                if (dte.Debugger.DebuggedProcesses.Count > 1) throw new InvalidOperationException("Refusing to stop multiple debugger processes.");
+                dte.Debugger.Stop(false);
+                Console.WriteLine("Stopped acceptance debugger");
+            }
             else if (action == "attach")
             {
                 int pid = int.Parse(args[2]);

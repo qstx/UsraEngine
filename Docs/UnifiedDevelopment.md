@@ -45,6 +45,8 @@ cmake -S "%URSA_ENGINE_DIR%" -B "%URSA_ENGINE_DIR%\Build\VS2026" ^
 
 CMake 将两个缓存变量规范化为绝对路径，检查引擎变量与 `-S` 指向同一源码树、项目包含 Assets 目录。切换引擎仓库时使用对应的新构建目录。
 
+VS 自定义构建任务按 UTF-8 解码 dotnet 的标准输出和错误输出，中文还原、构建及诊断信息可以直接保留。CMake 显式导入引擎的 `Directory.Build.props`，因此仓库外的构建目录也适用。更新配置后重新运行 bat，已打开的 VS 接受工程重新加载即可；无需更改 Windows 的系统区域设置。若暂时使用旧工程，可在 cmd 中先执行 `set "DOTNET_CLI_UI_LANGUAGE=en"` 再运行 bat，临时使用英文 dotnet 日志。
+
 bat 只负责选择解释器与转发参数；阶段调度、工具链检测、C# XML/JSON 生成和结构检查由 Python 标准库实现，常规生成不依赖 PowerShell。`Engine/Tools/GenerateSolution.bat` 提供同样参数。原 `GenerateSolution.ps1` 等接口保留兼容转发；可选的 `--tests` 中既有自动化测试、Tracy MCP 发布和格式检查等辅助脚本仍使用 PowerShell，其中 IDE 验收脚本需要 PowerShell 7。
 
 不绑定游戏项目时可直接配置 Engine；关闭 .NET 时不生成托管工程。直接配置绑定项目的完整统一工作区前，应先通过生成入口完成工具引导。
@@ -84,13 +86,23 @@ IDE Build 用于编译检查。运行游戏或 Editor 扩展前，仍需通过 E
 
 ## 调试
 
-以 UrsaEditor 为启动目标，或附加到当前 Editor PID，选择 Native 与 Managed (.NET Core/.NET) 调试支持。C++ 使用当前配置原生 PDB，游戏和 Editor 扩展使用正式 Debug 构建的 Portable PDB。符号窗口中的模块路径应对应正式产物，避免加载 IDE 检查输出的符号。
+以 UrsaEditor 为启动目标，选择 Debug/x64 并按 F5。启用 .NET 的原生宿主默认使用 **混合（.NET Core）**（`NativeWithManagedCore`）；用户显式设置的调试器类型仍会保留。若已有本机设置使用“仅本机”，到项目属性 > 配置属性 > 调试 > 调试器类型改为混合（.NET Core）。附加到已有 Editor PID 时，同时选择 Native 与 Managed (.NET Core/.NET)。C++ 使用当前配置原生 PDB，游戏和 Editor 扩展使用正式 Debug 构建的 Portable PDB。符号窗口中的模块应使用正式程序集对应的符号。
+
+等待 Editor 的编辑环境和托管渲染加载完成后，在解决方案 `Managed/Framework/Ursa.Rendering` 的原始 `RenderPipeline.cs` 中给 `RenderInternal` 设置断点，首次 Play 前即可命中。游戏 Update 等 Play 回调仍需进入 Play；渲染断点不需要以 Play 激活。原生宿主的“自动”调试器选择不能保证从冷启动启用 CoreCLR 混合调试。修改框架后应重建正式目标并重启 Editor，符号来自正式构建而非 IDE 检查输出。
 
 Run 中修改脚本保持现有版本；Stop 后等待正式编译及编辑环境重载完成。External Tools 的 `Editor script session` 标识当前编辑会话，磁盘 DLL 更新本身不代表该会话已切换。框架修改需要重建正式目标并重启宿主。
 
 VS2026 已验证保持 Native 与 Managed 同时附加完成 Stop/重载。外部修改源码时，重新载入已保存的文件并核对当前符号，必要时重新绑定断点；未保存缓冲区应先自行处理。打开的 C# 文件及断点位置应属于 Game、EditorScripts 或相应框架 csproj。桥接等待项目加载后从工程成员打开文件，避免将未加载的源码当作杂项文件。
 
 自动化 IDE 验收会记录本次启动的 VS 和测试宿主进程，在成功、失败或超时后关闭它们，并清理本次新增的断点。复用已有 VS 时，保留该实例和原有断点。
+
+可选的冷启动验收使用独立解决方案副本，以真实 F5 启动 Editor，等托管运行时就绪后才添加 RenderInternal 断点，记录首次 Play 前的源码、csproj、调用栈与局部变量。先完成 Debug Editor 构建，再从工作区根运行：
+
+```powershell
+pwsh -NoProfile -File Engine/Tests/Editor/Scripting/RunPrePlayRenderDebugAcceptance.ps1 `
+  -BuildDirectory Engine/Build/VS2026 `
+  -VisualStudioInstallDirectory "E:/Microsoft Visual Studio/18/Professional"
+```
 
 clang-format 继续要求版本 19，可通过 `Tools/Format.ps1 -ClangFormatPath <clang-format19.exe> -Check` 指定；VS2026 随附的其他版本不能代替此格式约束。
 

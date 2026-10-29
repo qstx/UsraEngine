@@ -62,6 +62,8 @@ External Tools 显示当前 Editor PID、项目、CoreCLR 是否已经初始化�
 
 使用兼容当前 .NET 运行时的托管调试器附加该 PID。在游戏回调中设置断点后点击 Play；在项目 Editor 菜单或 Inspector 回调中设置断点后触发对应工具。调试的程序集来自 Editor 的正式内容清单，不是 IDE Build 输出。
 
+VS2026 统一工程中，启用 .NET 的原生宿主 F5 默认使用混合（.NET Core）调试；已有显式“仅本机”配置需要自行更改。`RenderPipeline.RenderInternal` 在编辑渲染中也执行，编辑环境加载完成后新增的断点可在首次 Play 前命中。操作和冷启动验收命令见 [统一开发工作区](UnifiedDevelopment.md)。
+
 已验收的版本切换流程是：在 Run 中修改源码，确认运行中的脚本仍使用原版本；先从 IDE 分离调试器，再 Stop，等待正式编译、内容校验和旧会话卸载成功；重新附加当前 PID，确认断点使用当前符号，再触发 Editor 菜单或 Play。未保存的序列化字段由原有重载流程恢复。这次验收没有证明保持调试器附加时可无缝切换版本。
 
 断点空心或位置不符时，核对 External Tools 中的项目和 PID、正式 Debug 构建是否成功、IDE 是否加载 `Library/ScriptBuild` 当前清单对应的 DLL/PDB，以及源码是否在上次正式编译后发生变化。不要将 IDE Build 的符号手动替换进正式目录。Portable PDB 的内容指纹及其与程序集的调试身份都会检查，不匹配的符号不能作为当前脚本符号加载。若旧会话无法卸载，按 Editor 诊断分离或重新启动会话，不能绕过卸载检查。

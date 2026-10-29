@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
+          Condition="Exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" />
+  <!-- A native executable hosts CoreCLR dynamically; Auto only inspects its PE.
+       Project .vcxproj.user overrides remain available for explicit choices. -->
+  <PropertyGroup>
+    <LocalDebuggerDebuggerType Condition="'$(LocalDebuggerDebuggerType)' == '' Or '$(LocalDebuggerDebuggerType)' == 'Auto'">NativeWithManagedCore</LocalDebuggerDebuggerType>
+  </PropertyGroup>
+</Project>
