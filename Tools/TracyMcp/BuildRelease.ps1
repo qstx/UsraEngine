@@ -2,7 +2,8 @@
 param(
 	[string]$PythonExecutable = "",
 	[string]$WorkspaceRoot = "",
-	[switch]$PackageExistingBinding
+	[switch]$PackageExistingBinding,
+	[string]$CMakePath = 'cmake'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +20,7 @@ else
 $EngineRoot = Join-Path $WorkspaceRoot 'Engine'
 $TracyRoot = Join-Path $EngineRoot 'ThirdParty\tracy'
 $BuildRoot = Join-Path $EngineRoot 'Build\TracyMcp'
-$CMakeBuildDirectory = Join-Path $BuildRoot 'CMakeBuild'
+$CMakeBuildDirectory = Join-Path $BuildRoot 'CMakeBuildVS2026'
 $BundledPythonVersion = '3.11.17'
 $PythonDistributionTag = '20261009'
 $PythonRuntimeArchiveName = "cpython-$BundledPythonVersion+$PythonDistributionTag-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
@@ -111,8 +112,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $PythonRuntimeInstallDirectory 'pyth
 
 if (-not $PackageExistingBinding)
 {
+	. (Join-Path $PSScriptRoot '../WindowsToolchain.ps1')
+	$toolchain = Get-UrsaWindowsToolchain -CMakePath $CMakePath -BuildDirectory $CMakeBuildDirectory
 	Write-Output "Configuring Tracy $TracyVersion MCP bindings with Python $($PythonInfo.major).$($PythonInfo.minor).$($PythonInfo.patch)..."
-	& cmake -S $TracyRoot -B $CMakeBuildDirectory -G 'Visual Studio 17 2022' -A x64 `
+	& $toolchain.CMake -S $TracyRoot -B $CMakeBuildDirectory -G $toolchain.Generator -A x64 -T v145 `
+		"-DCMAKE_GENERATOR_INSTANCE=$($toolchain.VisualStudio)" `
+		-DCMAKE_POLICY_VERSION_MINIMUM=3.5 `
 		-DTRACY_CLIENT_PYTHON=ON `
 		-DTRACY_STATIC=OFF `
 		-DBUILD_SHARED_LIBS=OFF `
@@ -126,7 +131,7 @@ if (-not $PackageExistingBinding)
 	}
 
 	Write-Output 'Building TracyServerBindings (Release)...'
-	& cmake --build $CMakeBuildDirectory --config Release --target TracyServerBindings --parallel 2
+	& $toolchain.CMake --build $CMakeBuildDirectory --config Release --target TracyServerBindings --parallel 2
 	if ($LASTEXITCODE -ne 0)
 	{
 		throw 'TracyServerBindings build failed.'

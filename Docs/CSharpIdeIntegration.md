@@ -1,5 +1,9 @@
 # C# 工程与外部编辑器
 
+引擎与 Demo 同时开发时，优先使用 [VS2026 统一开发工作区](UnifiedDevelopment.md)。生成入口将 C++、引擎 C#、Game 与 EditorScripts 纳入同一个解决方案；以下独立脚本工作区流程继续适用于未关联项目。
+
+2026-10-28～29 的统一工程、源码归属、补全导航和混合调试结果见 [VS2026 验收记录](VS2026UnifiedDevelopmentAcceptance.md)。该记录也验证了保持混合调试器附加完成正式 Stop/重载；下文已有的分离再附加记录保留其原始验收范围。
+
 ## 工程生成
 
 启用 `URSA_ENABLE_DOTNET` 后，Editor 的正式脚本构建与 IDE 工程使用同一份输入快照：Assets 源码路径、`.meta` GUID、Game/Editor 分组、框架引用，以及 .NET 10 / C# 14 编译设置。收集快照不执行脚本语义分析，也不要求已经有 Game DLL；语法错误、缺失类型或重复脚本类型标识不会阻止 IDE 工程生成，仍由正式构建报告并拒绝发布无效内容。
@@ -7,7 +11,7 @@
 可以先用 Engine 工具生成 IDE 工作区：
 
 ```powershell
-Engine/Build/Release/UrsaScriptCompile.exe Demo --ide
+Engine/Build/VS2026/Release/UrsaScriptCompile.exe Demo --ide
 dotnet build Demo/Library/ScriptIDE/Ursa.Scripts.sln --configuration Debug --disable-build-servers -m:1 -nr:false
 ```
 
@@ -62,13 +66,13 @@ External Tools 显示当前 Editor PID、项目、CoreCLR 是否已经初始化�
 
 断点空心或位置不符时，核对 External Tools 中的项目和 PID、正式 Debug 构建是否成功、IDE 是否加载 `Library/ScriptBuild` 当前清单对应的 DLL/PDB，以及源码是否在上次正式编译后发生变化。不要将 IDE Build 的符号手动替换进正式目录。Portable PDB 的内容指纹及其与程序集的调试身份都会检查，不匹配的符号不能作为当前脚本符号加载。若旧会话无法卸载，按 Editor 诊断分离或重新启动会话，不能绕过卸载检查。
 
-Engine 提供可复用的真实调试验收工具，要求已安装并可使用的 Visual Studio 和 .NET SDK。它创建独立临时项目、仅附加自己启动的验收进程，在 Game `Awake` 和 Editor 菜单中执行断点、单步、局部变量与版本切换检查，最后分离并关闭验收宿主；会在 IDE 打开该临时解决方案：
+Engine 提供可复用的真实调试验收工具，要求已安装并可使用的 Visual Studio 和 .NET SDK。它创建独立临时项目及统一调试方案、仅附加自己启动的验收进程，在 C++、Game `Awake` 和 Editor 菜单中执行断点、单步、局部变量与版本切换检查，最后关闭受控宿主及本次启动的 VS。主方案和项目关联保持不变：
 
 ```powershell
-cmake --build Engine/Build --config Release --target UrsaManagedDebugAcceptance -- /m:1 /nr:false
-Engine/Tests/Editor/Scripting/RunManagedDebugAcceptance.ps1 -BuildDirectory Engine/Build -VisualStudioInstallDirectory 'E:/Microsoft Visual Studio/2022/Professional'
+cmake --build Engine/Build/VS2026 --config Debug --target UrsaManagedDebugAcceptance -- /m:1 /nr:false
+Engine/Tests/Editor/Scripting/RunManagedDebugAcceptance.ps1 -BuildDirectory Engine/Build/VS2026 -VisualStudioInstallDirectory 'E:/Microsoft Visual Studio/18/Professional' -Unified
 ```
 
-证据写入 `Engine/Build/IdeAcceptance/managed-debug-evidence.json`，包括源文件行号、调用栈、局部变量、正式构建指纹、PDB SHA-256 和重载后的字段状态。该工具不代替 IDE 补全和跨工程导航验收。
+证据写入 `Engine/Build/VS2026/IdeAcceptance/managed-debug-evidence.json`，包括源文件行号、调用栈、局部变量、正式构建指纹、PDB SHA-256 和重载后的字段状态。该工具不代替 IDE 补全和跨工程导航验收。
 
 真实 IDE 的支持矩阵及回归结果记录在 [C# IDE 集成验收记录](CSharpIdeIntegrationEvidence.md)；OpenSpec `csharp-ide-integration/tasks.md` 区分已完成与待验证项。生成工程或 Portable PDB 本身不代表已经完成全部 IDE 和断点验收。

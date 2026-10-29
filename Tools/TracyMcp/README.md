@@ -4,13 +4,13 @@
 
 ## 构建发布包
 
-构建需要 64 位 Python 3.11 及开发头文件、Visual Studio 2022 C++ 工具、CMake 和 Git。先初始化 `Engine/ThirdParty/tracy` 子模块，然后从工作区根目录运行：
+构建需要 64 位 Python 3.11 及开发头文件、Visual Studio 2026 v145 C++ 工具、CMake 4.4.5+ 和 Git。先初始化 `Engine/ThirdParty/tracy` 子模块，然后从工作区根目录运行：
 
 ```powershell
 Engine/Tools/TracyMcp/BuildRelease.ps1 -PythonExecutable (Get-Command python).Source
 ```
 
-脚本在被 Engine 忽略的 `Engine/Build/TracyMcp/CMakeBuild/` 中使用 VS 2022 配置 Release `TracyServerBindings`，启用 `TRACY_CLIENT_PYTHON=ON`，并关闭静态 Tracy、LTO 和 CPM 源码缓存。第三方依赖由 CMake 下载到临时构建目录。MSVC 使用 UTF-8 和异常处理选项，并抑制 Tracy 上游的 C4996、C4018 警告。脚本还会下载并校验固定的 CPython 3.11.17 Windows x64 便携发行包，安装到 `Engine/Tools/Python/3.11.17/`；MCP Python 依赖单独放在 Tracy MCP 发布目录的 `PythonPackages/` 中。扩展构建仍需上文的 Python 开发环境，运行 Tracy MCP 不要求另装 Python。
+脚本在被 Engine 忽略的 `Engine/Build/TracyMcp/CMakeBuildVS2026/` 中使用 VS2026/v145 配置 Release `TracyServerBindings`，启用 `TRACY_CLIENT_PYTHON=ON`，并关闭静态 Tracy、LTO 和 CPM 源码缓存。第三方依赖由 CMake 下载到临时构建目录。MSVC 使用 UTF-8 和异常处理选项，并抑制 Tracy 上游的 C4996、C4018 警告。脚本还会下载并校验固定的 CPython 3.11.17 Windows x64 便携发行包，安装到 `Engine/Tools/Python/3.11.17/`；MCP Python 依赖单独放在 Tracy MCP 发布目录的 `PythonPackages/` 中。扩展构建仍需上文的 Python 开发环境，运行 Tracy MCP 不要求另装 Python。
 
 更新发布包前先关闭正在运行的 Tracy MCP 服务，避免 Windows 锁定已加载的 `.pyd` 文件。
 

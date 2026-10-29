@@ -86,7 +86,7 @@ int main()
 		ComponentEditors registry;
 		Done(RegisterBuiltinComponentEditors(registry));
 		const auto types = registry.Types();
-		Expect(types.size() == 6 && registry.FindType("ursa.MeshRenderer") &&
+		Expect(types.size() == 7 && registry.FindType("ursa.MeshRenderer") &&
 		           registry.FindType("ursa.MeshRenderer")->displayName == "Mesh Renderer" &&
 		           registry.FindType("ursa.MeshRenderer")->category == "Rendering",
 		       "Built-in component metadata is incomplete");
@@ -98,6 +98,12 @@ int main()
 		context.object = GameObject::Create("Catalog target");
 		context.roots = {context.object};
 		context.loadContext = &loadContext;
+		const auto* animatorType = registry.FindType("ursa.Animator");
+		Expect(animatorType && animatorType->category == "Animation" && animatorType->version == 1,
+		       "Animator is unavailable to the built-in managed fallback Inspector");
+		auto animator = Take(registry.Create("ursa.Animator", context));
+		Expect(animator->GetGameObject() == context.object && animator->SerializationType() == "ursa.Animator",
+		       "Animator factory does not match its persistence identity");
 		auto box = Take(registry.Create("ursa.MeshRenderer", context));
 		Expect(box->GetGameObject() == context.object && box->SerializationType() == "ursa.MeshRenderer",
 		       "Component factory attached the wrong type or owner");

@@ -3,15 +3,18 @@ $ErrorActionPreference = 'Stop'
 $buildRoot = (Resolve-Path -LiteralPath $BuildDir).Path
 $scratchRoot = [IO.Path]::GetFullPath($Scratch)
 New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
-foreach ($filename in @('CMakeCache.txt','UrsaEngine.sln','UrsaProjectStructure.json')) {
+. (Join-Path $EngineRoot 'Tools/ReadVisualStudioSolution.ps1')
+$solutionPath = Get-UrsaSolutionPath $buildRoot
+foreach ($filename in @('CMakeCache.txt',([IO.Path]::GetFileName($solutionPath)),'UrsaProjectStructure.json')) {
     Copy-Item -LiteralPath (Join-Path $buildRoot $filename) -Destination (Join-Path $scratchRoot $filename) -Force
 }
-$solution = [IO.File]::ReadAllText((Join-Path $buildRoot 'UrsaEngine.sln'))
-foreach ($match in [regex]::Matches($solution, 'Project\("\{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942\}"\) = "[^"]+", "([^"]+\.vcxproj)"')) {
+$projects = Get-UrsaSolutionProjects $buildRoot
+foreach ($project in $projects.Values | Where-Object { $_.Path.EndsWith('.vcxproj') }) {
     foreach ($suffix in @('', '.filters')) {
-        $source = Join-Path $buildRoot ($match.Groups[1].Value + $suffix)
+        $source = $project.Path + $suffix
         if (-not (Test-Path -LiteralPath $source)) { continue }
-        $target = [IO.Path]::GetFullPath((Join-Path $scratchRoot ($match.Groups[1].Value + $suffix)))
+        $relative = [IO.Path]::GetRelativePath($buildRoot, $project.Path)
+        $target = [IO.Path]::GetFullPath((Join-Path $scratchRoot ($relative + $suffix)))
         if (-not $target.StartsWith($scratchRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Negative fixture escaped scratch root' }
         New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($target)) -Force | Out-Null
         Copy-Item -LiteralPath $source -Destination $target -Force

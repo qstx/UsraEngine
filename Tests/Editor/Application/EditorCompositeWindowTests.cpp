@@ -48,7 +48,7 @@ void CompositeFrame(const DevicePtr& device, const SwapchainPtr& swapchain, Test
 	gizmoCamera.position = {0, 0, 5};
 	gizmoCamera.target = {0, 0, 0};
 	const auto gizmo =
-	    Editor::DrawGizmo(selection, selected, gizmoCamera,
+	    Editor::DrawGizmo(selection, {selected}, selected, gizmoCamera,
 	                      {20, 20, static_cast<Ursa::Float32>(previewSize), static_cast<Ursa::Float32>(previewSize)},
 	                      Editor::GizmoOperation::Translate);
 	if (!gizmo)

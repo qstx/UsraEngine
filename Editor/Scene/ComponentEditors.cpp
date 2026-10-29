@@ -1,4 +1,5 @@
 #include <Scene/ComponentEditors.hpp>
+#include <Animation/AnimatorComponent.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <algorithm>
 #include <Scene/Lighting.hpp>
@@ -307,6 +308,11 @@ Result<void> RegisterBuiltinComponentEditors(ComponentEditors& editors)
 		result =
 		    editors.RegisterType({"ursa.SkinnedMeshRenderer", "Skinned Mesh Renderer", "Rendering",
 		                          CreateBuiltinComponent<SkinnedMeshRendererComponent>, rendererAvailable, false, 2});
+	}
+	if (result)
+	{
+		result = editors.RegisterType(
+		    {"ursa.Animator", "Animator", "Animation", CreateBuiltinComponent<AnimatorComponent>, {}});
 	}
 	if (result)
 	{

@@ -148,7 +148,11 @@ void EditorApplication::PumpScriptIde()
 		}
 		else
 		{
-			scriptIdeStatus = "C# 工程已同步：" + PathToUrsaString(generated.value.solution);
+			const auto& openedSolution = scriptEditorConfig.kind == ScriptEditorKind::VisualStudio &&
+			                                     !generated.value.visualStudioSolution.empty()
+			                                 ? generated.value.visualStudioSolution
+			                                 : generated.value.solution;
+			scriptIdeStatus = "C# 工程已同步：" + PathToUrsaString(openedSolution);
 			if (ideOpenRequested)
 			{
 				std::optional<ScriptSourceLocation> source;
@@ -310,6 +314,7 @@ String EditorApplication::ScriptDebugInfo() const
 	info += "Project: " + (workspace ? PathToUrsaString(workspace->ProjectRoot()) : String("None")) + "\n";
 #if defined(URSA_ENABLE_DOTNET)
 	info += managedHost ? "CoreCLR: initialized\n" : "CoreCLR: not initialized; compile valid scripts first\n";
+	info += "Editor script session: " + ToUrsaString(std::to_string(editingScriptSession)) + "\n";
 	info += "Editor script build: Debug, Portable PDB\n";
 	if (workspace)
 	{

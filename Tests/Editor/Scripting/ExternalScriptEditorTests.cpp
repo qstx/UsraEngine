@@ -149,6 +149,15 @@ int wmain(int argumentCount, wchar_t** arguments)
 				       "Code navigation protocol differs");
 			}
 		}
+		workspace.visualStudioSolution = root / "Engine/Build/UrsaEngine.slnx";
+		const ScriptEditorConfig visualStudio{ScriptEditorKind::VisualStudio, "VS2026", custom.executable};
+		const auto unifiedRequest = Take(ExternalScriptEditor::Command(visualStudio, workspace, source));
+		Expect(unifiedRequest.arguments[1] == PathToUrsaString(workspace.visualStudioSolution),
+		       "Visual Studio navigation opened the standalone solution instead of the unified one");
+		const ScriptEditorConfig rider{ScriptEditorKind::Rider, "Rider", custom.executable};
+		Expect(Take(ExternalScriptEditor::Command(rider, workspace, source)).arguments[0] ==
+		           PathToUrsaString(workspace.solution),
+		       "Unified VS association changed another editor's solution selection");
 		Vector<String> values = {"", "with spaces", "a\"b", "C:\\tail\\", "脚本", "$(never); & echo"};
 		ScriptEditorCommand echo{CurrentExecutablePath(), root, {"--echo", PathToUrsaString(root / "Echo.json")}, 3000};
 		echo.arguments.insert(echo.arguments.end(), values.begin(), values.end());

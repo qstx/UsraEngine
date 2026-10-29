@@ -22,13 +22,17 @@
 
 ## Visual Studio 分类
 
+Windows 开发基线为 VS2026/v145 与 CMake 4.4.5+。统一 Engine 与 Demo 的开发请从工作区根运行 `GenerateEngineSolutionWithTracy.bat`，它在新的 `Engine/Build/VS2026` 中完成必要工具引导及项目配置，再打开 `UrsaEngine.slnx`。不要把 VS2022 缓存直接切换生成器。CMake 4.4.5 默认生成的 `.slnx` 与旧 `.sln` 均由结构检查识别。
+
+`Managed/Framework` 分类中的 SDK 工程从原始 csproj 元数据生成，文件通过 Link 指向原始 `Engine/Managed`；`Projects/Demo` 的 Game/EditorScripts 指向 Assets。正式引擎程序集位于 `<build>/Managed/<配置>`，IDE 框架检查产物在 `<build>/Ide/Managed/Build/<工程>/<配置>`，项目 IDE 产物在 `Demo/Library/ScriptIDE/Build`。单独构建 `UrsaEditor` 不要求编译 Demo IDE 工程；单独右键构建一个 C# 项目只检查对应项目与项目引用，不发布游戏脚本。完整流程见 [统一开发工作区](UnifiedDevelopment.md)。
+
 解决方案目标按 Runtime、Engine、Editor、Tools、Tests、Managed 和 ThirdParty 分类。项目内 filter 使用源码相对引擎仓库根的真实目录，例如 `Runtime/Core/Memory`、`Engine/Scripting/DotNet` 和 `Tests/Editor/Scene`，同目录头文件和源文件放在一起。
 
 源码登记与 filter 使用同一集合；只修改 `.filters` 不能补齐未登记的头文件。生成的 `.sln/.vcxproj/.filters` 由 CMake 管理，修改配置后重新生成。
 
 ```powershell
-cmake -S . -B Build -G "Visual Studio 17 2022" -A x64 `
-  -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=../Demo
+cmake -S . -B Build -G "Visual Studio 18 2026" -A x64 -T v145 `
+  -DURSA_ENABLE_DOTNET=ON
 cmake --build Build --config Debug --parallel --target UrsaEditor UrsaScriptPlayer
 cmake --build Build --config Debug --target UrsaProjectStructureCheck
 ```
@@ -81,7 +85,7 @@ Build/Editor/Debug/UrsaAssetImport.exe --project ../Demo --configuration Debug
 Build/Debug/UrsaScriptPlayer.exe --project ../Demo --scene Snake/Snake.ursascene
 ```
 
-## 本次迁移验收
+## 历史迁移验收（2026-10-11，VS2022）
 
 2026-10-11，Windows x64 / VS 2022，使用全新的 `Build/Structure` 验证完整 Editor、.NET 和 Tracy 配置：
 

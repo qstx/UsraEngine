@@ -518,20 +518,26 @@ Result<ScriptProjectInput> ScriptBuildService::ProjectInput()
 	return CollectScriptProjectInput(filesystem, database, runtimeAssembly, editorAssembly);
 }
 
-Result<ScriptIdeWorkspace> ScriptBuildService::GenerateIdeProjects()
+Result<ScriptIdeWorkspace> ScriptBuildService::GenerateIdeProjects(const std::filesystem::path& description,
+                                                                   bool preparing)
 {
 	auto input = ProjectInput();
 	if (!input)
 	{
 		return Result<ScriptIdeWorkspace>::Failure(input.error);
 	}
-	return ScriptIdeProject::Generate(filesystem, input.value,
-	                                  [this]() -> Result<String>
-	                                  {
-		                                  auto current = ProjectInput();
-		                                  return current ? Result<String>::Success(current.value.StructureFingerprint())
-		                                                 : Result<String>::Failure(current.error);
-	                                  });
+	const auto defaultDescription = runtimeAssembly.parent_path().parent_path().parent_path() / "UnifiedWorkspace.json";
+	const ScriptIdeOptions options{description.empty() ? defaultDescription : description, !description.empty(),
+	                               preparing};
+	return ScriptIdeProject::Generate(
+	    filesystem, input.value,
+	    [this]() -> Result<String>
+	    {
+		    auto current = ProjectInput();
+		    return current ? Result<String>::Success(current.value.StructureFingerprint())
+		                   : Result<String>::Failure(current.error);
+	    },
+	    options);
 }
 
 Result<ScriptProjectPaths> ScriptBuildService::GenerateProjects()

@@ -36,7 +36,7 @@ if(URSA_BUILD_EDITOR)
       "${URSA_DOTNET_EXECUTABLE}"
       "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Runtime.dll"
       "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Editor.dll"
-      "${URSA_BINARY_ROOT}/Managed/Tools/Ursa.ScriptCatalogGenerator.dll"
+      "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.ScriptCatalogGenerator.dll"
       "${URSA_DOTNET_REFERENCE_PACK}")
     set_tests_properties(UrsaScriptBuildTests PROPERTIES
       ENVIRONMENT "TEMP=${URSA_BINARY_ROOT}/temp;TMP=${URSA_BINARY_ROOT}/temp")
@@ -48,7 +48,7 @@ if(URSA_BUILD_EDITOR)
       "${URSA_DOTNET_EXECUTABLE}"
       "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Runtime.dll"
       "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Editor.dll"
-      "${URSA_BINARY_ROOT}/Managed/Tools/Ursa.ScriptCatalogGenerator.dll"
+      "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.ScriptCatalogGenerator.dll"
       "${URSA_DOTNET_REFERENCE_PACK}")
     set_tests_properties(UrsaScriptIdentityTests PROPERTIES
       ENVIRONMENT "TEMP=${URSA_BINARY_ROOT}/temp;TMP=${URSA_BINARY_ROOT}/temp")

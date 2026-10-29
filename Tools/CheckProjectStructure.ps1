@@ -5,28 +5,8 @@ $buildRoot = (Resolve-Path -LiteralPath $BuildDir).Path
 $cache = [IO.File]::ReadAllText((Join-Path $buildRoot 'CMakeCache.txt'))
 if ($cache -notmatch 'CMAKE_GENERATOR:INTERNAL=Visual Studio') { throw 'This check requires a Visual Studio generator' }
 $manifest = [IO.File]::ReadAllText((Join-Path $buildRoot 'UrsaProjectStructure.json')) | ConvertFrom-Json
-$solution = [IO.File]::ReadAllText((Join-Path $buildRoot 'UrsaEngine.sln'))
-$entries = @{}
-$parents = @{}
-foreach ($match in [regex]::Matches($solution, 'Project\("\{([^}]+)\}"\) = "([^"]+)", "([^"]+)", "\{([^}]+)\}"')) {
-    $entries[$match.Groups[4].Value] = @{ Type = $match.Groups[1].Value; Name = $match.Groups[2].Value; Path = $match.Groups[3].Value }
-}
-$nested = [regex]::Match($solution, '(?s)GlobalSection\(NestedProjects\).*?EndGlobalSection').Value
-foreach ($match in [regex]::Matches($nested, '\{([^}]+)\} = \{([^}]+)\}')) {
-    $parents[$match.Groups[1].Value] = $match.Groups[2].Value
-}
-$projects = @{}
-foreach ($id in @($entries.Keys)) {
-    $entry = $entries[$id]
-    if ($entry.Type -eq '2150E333-8FDC-42A3-9474-1A3956D46DE8') { continue }
-    $parts = @()
-    $cursor = $id
-    while ($parents.ContainsKey($cursor)) {
-        $cursor = $parents[$cursor]
-        $parts = @($entries[$cursor].Name) + $parts
-    }
-    $projects[$entry.Name] = @{ Path = Join-Path $buildRoot $entry.Path; Folder = $parts -join '/' }
-}
+. (Join-Path $PSScriptRoot 'ReadVisualStudioSolution.ps1')
+$projects = Get-UrsaSolutionProjects $buildRoot
 $registered = @{}
 $checked = 0
 foreach ($target in $manifest.targets) {
@@ -93,4 +73,42 @@ foreach ($name in @('EASTL','TracyClient','glfw','spdlog','assimp','zlibstatic',
         throw "Dependency is misclassified: $name"
     }
 }
-Write-Output "Checked $($manifest.targets.Count) first-party projects and $checked C++ file entries; folders and filters match disk."
+$managedCount = 0
+$managedManifest = Join-Path $buildRoot 'Ide/Managed/Projects.json'
+if ($dotnetEnabled -and (Test-Path -LiteralPath $managedManifest)) {
+    foreach ($entry in ([IO.File]::ReadAllText($managedManifest) | ConvertFrom-Json)) {
+        if (-not $projects.ContainsKey($entry.name)) { throw "Missing managed VS project: $($entry.name)" }
+        $project = $projects[$entry.name]
+        if ($project.Folder -cne $entry.folder -or [IO.Path]::GetFullPath($project.Path) -ne [IO.Path]::GetFullPath($entry.path)) { throw "Wrong managed project mapping: $($entry.name)" }
+        [xml]$xml = [IO.File]::ReadAllText($project.Path)
+        foreach ($compile in $xml.SelectNodes('//Compile[@Include]')) {
+            $include = $compile.GetAttribute('Include')
+            if ($include.Contains('$(') -or $include.Contains('*')) { continue }
+            if (-not [IO.Path]::IsPathRooted($include) -or -not (Test-Path -LiteralPath $include -PathType Leaf)) { throw "Managed source is not an existing original file: $include" }
+            if ($include.StartsWith($buildRoot + '/', [StringComparison]::OrdinalIgnoreCase) -or $include.StartsWith($buildRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw "Managed IDE source points into build output: $include" }
+        }
+        foreach ($reference in $xml.SelectNodes('//ProjectReference[@Include]')) {
+            $name = [IO.Path]::GetFileNameWithoutExtension($reference.GetAttribute('Include'))
+            if (-not $projects.ContainsKey($name)) { throw "Unregistered managed reference: $name" }
+        }
+        if ($project.Node -and -not $project.Node.SelectSingleNode('Platform[@Project="Any CPU"]')) { throw "Missing managed platform mapping: $($entry.name)" }
+        ++$managedCount
+    }
+    $descriptionPath = Join-Path $buildRoot 'UnifiedWorkspace.json'
+    if (Test-Path -LiteralPath $descriptionPath) {
+        $description = [IO.File]::ReadAllText($descriptionPath) | ConvertFrom-Json
+        if ($description.Ready) {
+            foreach ($name in @('Ursa.Game','Ursa.EditorScripts')) {
+                if (-not $projects.ContainsKey($name)) { throw "Missing project script VS project: $name" }
+                [xml]$xml = [IO.File]::ReadAllText($projects[$name].Path)
+                if ($xml.SelectNodes('//Reference').Count -or -not $xml.SelectNodes('//ProjectReference').Count) { throw "Unified script project still uses binary framework references: $name" }
+                foreach ($compile in $xml.SelectNodes('//Compile[@Include]')) {
+                    $source = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($projects[$name].Path)) $compile.GetAttribute('Include')))
+                    $assetsRoot = [IO.Path]::GetFullPath((Join-Path $description.ProjectRoot 'Assets'))
+                    if (-not $source.StartsWith($assetsRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $source)) { throw "Script project does not link an original asset: $source" }
+                }
+            }
+        }
+    }
+}
+Write-Output "Checked $($manifest.targets.Count) first-party targets, $checked C++ file entries and $managedCount SDK C# projects; source paths, folders and references match."

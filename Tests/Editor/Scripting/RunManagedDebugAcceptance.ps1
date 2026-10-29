@@ -1,10 +1,18 @@
 param(
     [Parameter(Mandatory)][string]$BuildDirectory,
     [Parameter(Mandatory)][string]$VisualStudioInstallDirectory,
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Debug',
+    [switch]$Unified,
+    [string]$FrameworkPrefix = ''
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'AcceptanceProcess.ps1')
 $buildRoot = (Resolve-Path -LiteralPath $BuildDirectory).Path
+$cacheText = [IO.File]::ReadAllText((Join-Path $buildRoot 'CMakeCache.txt'))
+$originalProjectRoot = [regex]::Match($cacheText, '(?m)^URSA_PROJECT_DIR:PATH=(.*)\r?$').Groups[1].Value.Trim()
+if ($Unified -and -not $originalProjectRoot) { throw 'Unified debug acceptance requires an existing project association.' }
+$originalEnvironment = @{}
+foreach ($name in @('URSA_USER_DATA_ROOT', 'TEMP', 'TMP')) { $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 $vsRoot = (Resolve-Path -LiteralPath $VisualStudioInstallDirectory).Path
 $acceptanceRoot = Join-Path $buildRoot 'IdeAcceptance'
 $runRoot = Join-Path $acceptanceRoot ('DebugRun-' + [Guid]::NewGuid().ToString('N'))
@@ -19,7 +27,13 @@ $statePath = Join-Path $runRoot 'Library/IdeAcceptance/State.json'
 $gameSource = Join-Path $runRoot 'Assets/DebugProbe.cs'
 $editorSource = Join-Path $runRoot 'Assets/Editor/EditorProbe.cs'
 $records = [Collections.Generic.List[object]]::new()
+$ownedBreakpoints = [Collections.Generic.List[string]]::new()
 $script:commandSequence = 0
+
+function Add-AcceptanceBreakpoint([string]$File, [int]$Line) {
+    $result = Invoke-Controller 'breakpoint' @($File, [string]$Line) | ConvertFrom-Json
+    if ($result.Created) { $ownedBreakpoints.Add($File); $ownedBreakpoints.Add([string]$Line) }
+}
 
 function Invoke-Controller([string]$Action, [string[]]$Extra = @()) {
     for ($attempt = 0; $attempt -lt 20; ++$attempt) {
@@ -28,7 +42,8 @@ function Invoke-Controller([string]$Action, [string[]]$Extra = @()) {
         $arguments = @(('"' + $controller + '"'), $Action, ('"' + $solution + '"'))
         foreach ($value in $Extra) { $arguments += '"' + $value + '"' }
         $process = Start-Process -FilePath (Get-Command dotnet).Source -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $output -RedirectStandardError $errors
-        if (-not $process.WaitForExit(15000)) { $process.Kill(); throw "Controller timed out: $Action" }
+        $timeout = if ($Action -in @('attach', 'detach')) { 60000 } else { 30000 }
+        if (-not $process.WaitForExit($timeout)) { $process.Kill(); [void]$process.WaitForExit(5000); throw "Controller timed out: $Action" }
         $text = [IO.File]::ReadAllText($output)
         if ($process.ExitCode -eq 0) { return $text }
         $errorText = [IO.File]::ReadAllText($errors)
@@ -76,19 +91,29 @@ function Send-Command([string]$Action) {
 }
 
 function Verify-Break([string]$Function, [int]$Line, [string]$Variable, [string]$Expected) {
-    Wait-Until { $capture = Invoke-Controller 'state' | ConvertFrom-Json; return $capture.Mode -eq 2 -and $capture.Function -eq $Function -and $capture.Line -eq $Line } 25 "breakpoint $Function"
+    Wait-Until { $capture = Invoke-Controller 'state' | ConvertFrom-Json; return $capture.Mode -eq 2 -and $capture.Function -like $Function -and $capture.Line -eq $Line } 25 "breakpoint $Function"
     $before = Invoke-Controller 'state' | ConvertFrom-Json
+    if ($Function.StartsWith('DebugAcceptance.') -and -not $before.Project.EndsWith('.csproj', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Breakpoint source is outside the C# solution project: $($before.File)"
+    }
     [void](Invoke-Controller 'step')
-    Wait-Until { $capture = Invoke-Controller 'state' | ConvertFrom-Json; return $capture.Mode -eq 2 -and $capture.Function -eq $Function -and $capture.Line -gt $Line } 15 "single step $Function"
+    Wait-Until { $capture = Invoke-Controller 'state' | ConvertFrom-Json; return $capture.Mode -eq 2 -and $capture.Function -like $Function -and $capture.Line -gt $Line } 15 "single step $Function"
     $after = Invoke-Controller 'state' | ConvertFrom-Json
     $value = Invoke-Controller 'evaluate' @($Variable) | ConvertFrom-Json
-    if (-not $value.Valid -or $value.Value -ne $Expected) { throw "Unexpected local $Variable : $($value | ConvertTo-Json -Compress)" }
+    if (-not $value.Valid -or $value.Value -ne $Expected) {
+        [void](Invoke-Controller 'continue')
+        throw "Unexpected local $Variable : $($value | ConvertTo-Json -Compress)"
+    }
     $records.Add(@{ Break = $before; Step = $after; Local = $value })
     Write-Host "$Function : $Variable = $Expected"
     [void](Invoke-Controller 'continue')
 }
 
 $hostProcess = $null
+$ownedIde = $null
+$navigationStarted = $false
+$navigationOutput = Join-Path $acceptanceRoot 'debug-navigation-output.log'
+$devenv = Join-Path $vsRoot 'Common7/IDE/devenv.exe'
 $attached = $false
 try {
     New-Item -ItemType Directory -Force -Path $acceptanceRoot | Out-Null
@@ -98,66 +123,118 @@ try {
     $hostExecutable = Join-Path $buildRoot "$Configuration/UrsaManagedDebugAcceptance.exe"
     $hostProcess = Start-Process -FilePath $hostExecutable -ArgumentList ('"' + $runRoot + '"') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $acceptanceRoot 'controlled-host.log') -RedirectStandardError (Join-Path $acceptanceRoot 'controlled-host-error.log')
     Wait-Until { return (Test-Path -LiteralPath $statePath) -and (Read-State).Ready -and -not (Read-State).Busy } 90 'initial editing session'
+    if ($Unified) {
+        $solution = & (Join-Path $PSScriptRoot 'GenerateUnifiedIdeFixture.ps1') -BuildDirectory $buildRoot -ProjectDirectory $runRoot
+    }
     $bridge = Join-Path $buildRoot "Editor/$Configuration/UrsaIdeBridge.exe"
-    $devenv = Join-Path $vsRoot 'Common7/IDE/devenv.exe'
-    $navigation = Start-Process -FilePath $bridge -ArgumentList @(('"' + $devenv + '"'), ('"' + $solution + '"'), ('"' + $gameSource + '"'), '11', '5') -WindowStyle Hidden -PassThru
-    if (-not $navigation.WaitForExit(30000)) { $navigation.Kill(); throw 'IDE source navigation timed out' }
+    $navigation = Start-Process -FilePath $bridge -ArgumentList @(('"' + $devenv + '"'), ('"' + $solution + '"'), ('"' + $gameSource + '"'), '11', '5') -WindowStyle Hidden -PassThru -RedirectStandardOutput $navigationOutput
+    $navigationStarted = $true
+    if (-not $navigation.WaitForExit(90000)) { $navigation.Kill(); throw 'IDE source navigation timed out' }
+    $ownedIde = Get-UrsaStartedIde ([IO.File]::ReadAllText($navigationOutput))
     if ($navigation.ExitCode -ne 0) { throw 'IDE could not open the controlled solution' }
     $ide = Invoke-Controller 'info' | ConvertFrom-Json
-    [void](Invoke-Controller 'breakpoint' @($gameSource, '11'))
-    [void](Invoke-Controller 'breakpoint' @($editorSource, '9'))
+    $ide | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $acceptanceRoot 'MixedIdeInfo.json') -Encoding utf8
+    $members = @((Invoke-Controller 'project-file' @($gameSource) | ConvertFrom-Json),
+        (Invoke-Controller 'project-file' @($editorSource) | ConvertFrom-Json))
+    $members | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $acceptanceRoot 'MixedProjectMembership.json') -Encoding utf8
+    Add-AcceptanceBreakpoint $gameSource 11
+    Add-AcceptanceBreakpoint $editorSource 9
     $managedEngine = '{2E36F1D4-B23C-435D-AB41-18E608940038}'
-    [void](Invoke-Controller 'attach' @([string]$hostProcess.Id, $managedEngine))
+    if ($Unified) {
+        $managedEngine += ';{3B476D35-A401-11D2-AAD4-00C04F990171}'
+        $nativeSource = Join-Path $PSScriptRoot 'ManagedDebugAcceptance.cpp'
+        $nativeLine = (Select-String -LiteralPath $nativeSource -SimpleMatch 'const Int32 nativeMarker = seed + 7;').LineNumber
+        Add-AcceptanceBreakpoint $nativeSource $nativeLine
+    }
     $attached = $true
+    [void](Invoke-Controller 'attach' @([string]$hostProcess.Id, $managedEngine))
+    if ($Unified) {
+        Send-Command 'native'
+        Verify-Break '*NativeDebugProbe*' $nativeLine 'nativeMarker' '42'
+    }
     Send-Command 'menu'
     Verify-Break 'DebugAcceptance.EditorProbe.Pulse' 9 'editorMarker' '41'
     Send-Command 'play'
     Verify-Break 'DebugAcceptance.DebugProbe.Awake' 11 'runtimeMarker' '10'
-    Wait-Until { return (Read-State).RunningName -eq 'Debug:10' } 10 'first runtime callback'
-    [void](Invoke-Controller 'detach')
-    $attached = $false
+    Wait-Until { return (Read-State).RunningName -eq ($FrameworkPrefix + 'Debug:10') } 10 'first runtime callback'
+    if (-not $Unified) {
+        [void](Invoke-Controller 'detach')
+        Wait-Until { $capture = Invoke-Controller 'state' | ConvertFrom-Json; return $capture.Mode -eq 1 -and $capture.Processes.Count -eq 0 } 30 'debugger detach completion'
+        $attached = $false
+    }
     $oldManifest = Read-Json (Join-Path $runRoot 'Library/ScriptBuild/Manifests/Game.json')
+    $oldEditingSession = (Read-State).DebugInfo
     $oldSymbols = Get-FileHash (Join-Path $runRoot 'Library/ScriptBuild/Assemblies/Game/Ursa.Game.pdb') -Algorithm SHA256
     $text = [IO.File]::ReadAllText($gameSource)
     if (-not $text.Contains('CodeVersion = 1')) { throw 'Controlled source fixture changed unexpectedly' }
     [IO.File]::WriteAllText($gameSource, $text.Replace('CodeVersion = 1', 'CodeVersion = 2'))
+    $sourceRefresh = Invoke-Controller 'refresh-source' @($gameSource) | ConvertFrom-Json
     Start-Sleep -Seconds 3
-    if ((Read-State).RunningName -ne 'Debug:10') { throw 'Run mixed old and new script versions' }
+    if ((Read-State).RunningName -ne ($FrameworkPrefix + 'Debug:10')) { throw 'Run mixed old and new script versions' }
     Send-Command 'stop'
     Wait-Until {
         $state = Read-State
         $manifest = Read-Json (Join-Path $runRoot 'Library/ScriptBuild/Manifests/Game.json')
-        return -not $state.Running -and -not $state.Busy -and $manifest.BuildFingerprint -ne $oldManifest.BuildFingerprint
+        return -not $state.Running -and -not $state.Busy -and $state.DebugInfo -ne $oldEditingSession -and $manifest.BuildFingerprint -ne $oldManifest.BuildFingerprint
     } 60 'formal recompilation and editing reload'
     $reloaded = Read-State
     if (-not $reloaded.Dirty -or $reloaded.Payload.Fields.value -ne 9) { throw 'Reload lost unsaved editing data' }
-    [void](Invoke-Controller 'attach' @([string]$hostProcess.Id, $managedEngine))
-    $attached = $true
+    if ($ownedBreakpoints.Contains($gameSource)) {
+        [void](Invoke-Controller 'clear' @($gameSource, '11'))
+        [void](Invoke-Controller 'breakpoint' @($gameSource, '11'))
+    }
+    if (-not $Unified) {
+        $attached = $true
+        [void](Invoke-Controller 'attach' @([string]$hostProcess.Id, $managedEngine))
+    }
     Send-Command 'menu'
     Verify-Break 'DebugAcceptance.EditorProbe.Pulse' 9 'editorMarker' '42'
     Send-Command 'play'
     Verify-Break 'DebugAcceptance.DebugProbe.Awake' 11 'runtimeMarker' '11'
-    Wait-Until { return (Read-State).RunningName -eq 'Debug:11' } 10 'new runtime callback'
-    [void](Invoke-Controller 'detach')
-    $attached = $false
+    Wait-Until { return (Read-State).RunningName -eq ($FrameworkPrefix + 'Debug:11') } 10 'new runtime callback'
+    if (-not $Unified) {
+        [void](Invoke-Controller 'detach')
+        Wait-Until { $capture = Invoke-Controller 'state' | ConvertFrom-Json; return $capture.Mode -eq 1 -and $capture.Processes.Count -eq 0 } 30 'final debugger detach completion'
+        $attached = $false
+    }
     Send-Command 'stop'
     Wait-Until { return -not (Read-State).Running -and -not (Read-State).Busy } 30 'final Stop'
     $newManifest = Read-Json (Join-Path $runRoot 'Library/ScriptBuild/Manifests/Game.json')
     $newSymbols = Get-FileHash (Join-Path $runRoot 'Library/ScriptBuild/Assemblies/Game/Ursa.Game.pdb') -Algorithm SHA256
-    $evidence = @{ Project = $runRoot; Pid = $hostProcess.Id; IDE = $ide; Records = $records.ToArray();
+    $evidence = @{ Project = $runRoot; Solution=$solution; Pid = $hostProcess.Id; IDE = $ide; Records = $records.ToArray(); Membership=$members; SourceRefresh=$sourceRefresh;
+        FrameworkPrefix=$FrameworkPrefix; FrameworkSha256=(Get-FileHash (Join-Path $buildRoot "Managed/$Configuration/Ursa.Runtime.dll")).Hash; ReloadWhileAttached=[bool]$Unified;
         OldBuildFingerprint = $oldManifest.BuildFingerprint; NewBuildFingerprint = $newManifest.BuildFingerprint;
         OldPdbSha256 = $oldSymbols.Hash; NewPdbSha256 = $newSymbols.Hash; ReloadedState = $reloaded }
     $evidence | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $acceptanceRoot 'managed-debug-evidence.json') -Encoding utf8
-    [void](Invoke-Controller 'clear')
+    [void](Invoke-Controller 'clear' $ownedBreakpoints.ToArray())
+    $ownedBreakpoints.Clear()
     Send-Command 'close'
     if (-not $hostProcess.WaitForExit(15000)) { throw 'Controlled host did not close' }
     if ($hostProcess.ExitCode -ne 0) { throw "Controlled host exited with $($hostProcess.ExitCode)" }
+    $attached = $false
     Write-Host 'Game and Editor breakpoints, stepping, locals and reloaded-version breakpoints passed.'
-}
-finally {
-    if ($attached) { try { [void](Invoke-Controller 'detach') } catch { Write-Warning $_ } }
-    if ($hostProcess -and -not $hostProcess.HasExited) {
-        try { Send-Command 'close'; [void]$hostProcess.WaitForExit(5000) } catch { Write-Warning $_ }
-        if (-not $hostProcess.HasExited) { $hostProcess.Kill() }
+} catch {
+    @{ Error=$_.ToString(); Records=$records.ToArray();
+        ControllerOutput=$(if (Test-Path (Join-Path $acceptanceRoot 'controller-output.log')) { [IO.File]::ReadAllText((Join-Path $acceptanceRoot 'controller-output.log')) });
+        ControllerError=$(if (Test-Path (Join-Path $acceptanceRoot 'controller-error.log')) { [IO.File]::ReadAllText((Join-Path $acceptanceRoot 'controller-error.log')) }) } |
+        ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $acceptanceRoot 'MixedDebugFailure.json') -Encoding utf8
+    throw
+} finally {
+    if ($attached -and -not $Unified) { try { [void](Invoke-Controller 'detach') } catch { Write-Warning $_ } }
+    if ($ownedBreakpoints.Count) { try { [void](Invoke-Controller 'clear' $ownedBreakpoints.ToArray()) } catch { Write-Warning $_ } }
+    try {
+        try {
+            if ($hostProcess -and -not $hostProcess.HasExited) {
+                try { Send-Command 'close'; [void]$hostProcess.WaitForExit(3000) } catch { Write-Warning $_ }
+                Stop-UrsaAcceptanceProcess -Process $hostProcess -ExpectedExecutable $hostExecutable
+            }
+        } finally {
+            if (-not $ownedIde -and $navigationStarted -and (Test-Path -LiteralPath $navigationOutput)) {
+                $ownedIde = Get-UrsaStartedIde ([IO.File]::ReadAllText($navigationOutput))
+            }
+            Stop-UrsaAcceptanceProcess -Process $ownedIde -ExpectedExecutable $devenv
+        }
+    } finally {
+        foreach ($name in $originalEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], 'Process') }
     }
 }

@@ -1,4 +1,5 @@
-param([Parameter(Mandatory)][string]$Scratch, [Parameter(Mandatory)][string]$EngineRoot)
+param([Parameter(Mandatory)][string]$Scratch, [Parameter(Mandatory)][string]$EngineRoot,
+    [string]$CMakePath = 'cmake', [string]$Generator = 'Visual Studio 18 2026')
 $ErrorActionPreference = 'Stop'
 $scratchRoot = [IO.Path]::GetFullPath($Scratch)
 $sourceRoot = Join-Path $scratchRoot 'Source'
@@ -8,7 +9,7 @@ New-Item -ItemType Directory -Path $moduleRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $sourceRoot 'CMake') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $EngineRoot 'CMake/SourceGroups.cmake') -Destination (Join-Path $sourceRoot 'CMake/SourceGroups.cmake')
 $cmake = @'
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 4.4.5)
 project(DiscoveryProbe LANGUAGES CXX)
 set(URSA_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 include(CMake/SourceGroups.cmake)
@@ -18,10 +19,10 @@ ursa_source_groups(DiscoveryProbe "Runtime")
 '@
 [IO.File]::WriteAllText((Join-Path $sourceRoot 'CMakeLists.txt'), $cmake, [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $moduleRoot 'Base.cpp'), 'int Base() { return 1; }', [Text.UTF8Encoding]::new($false))
-& cmake -S $sourceRoot -B $buildRoot -G 'Visual Studio 17 2022' -A x64
+& $CMakePath -S $sourceRoot -B $buildRoot -G $Generator -A x64 -T v145
 if ($LASTEXITCODE -ne 0) { throw 'Discovery fixture configuration failed' }
 function Build-Probe {
-    & cmake --build $buildRoot --config Debug --parallel -- /nodeReuse:false
+    & $CMakePath --build $buildRoot --config Debug --parallel -- /nodeReuse:false
     if ($LASTEXITCODE -ne 0) { throw 'Normal discovery fixture build failed' }
 }
 Build-Probe

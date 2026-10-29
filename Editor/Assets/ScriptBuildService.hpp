@@ -43,7 +43,8 @@ public:
 
 	Result<ScriptProjectInput> ProjectInput();
 
-	Result<ScriptIdeWorkspace> GenerateIdeProjects();
+	Result<ScriptIdeWorkspace> GenerateIdeProjects(const std::filesystem::path& description = {},
+	                                               bool preparing = false);
 
 	const Vector<ScriptDiagnostic>& LastDiagnostics() const
 	{

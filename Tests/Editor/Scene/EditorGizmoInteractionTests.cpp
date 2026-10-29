@@ -52,8 +52,9 @@ GizmoInteractionReport Frame(ImGuiBridge& gui, Scene& scene, GameObject::Ptr sel
 	ImGui::Begin("Gizmo Interaction Test", nullptr,
 	             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove);
 	GizmoInteractionReport interaction;
-	const auto result = DrawGizmo(scene, selected, camera, {viewportOrigin.x + 20, viewportOrigin.y + 20, 600, 400},
-	                              operation, &interaction);
+	const auto result =
+	    DrawGizmo(scene, {selected}, selected, camera, {viewportOrigin.x + 20, viewportOrigin.y + 20, 600, 400},
+	              operation, GizmoPivotMode::Pivot, GizmoSpace::Local, {}, &interaction);
 	if (!result)
 	{
 		ImGui::End();

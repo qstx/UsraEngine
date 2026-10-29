@@ -52,6 +52,12 @@ public sealed class DebugProbe : Behaviour
 }
 )";
 
+Int32 NativeDebugProbe(Int32 seed)
+{
+	const Int32 nativeMarker = seed + 7;
+	return nativeMarker;
+}
+
 const char* editorSource = R"(using System;
 using Ursa.Editor;
 namespace DebugAcceptance;
@@ -118,7 +124,8 @@ protected:
 			}
 			auto& files = Workspace()->Index().Filesystem();
 			auto commandText = files.ReadText(Path("lib:IdeAcceptance/Command.json"));
-			if (script && !ScriptWorkPending() && commandText)
+			const bool workPending = ScriptWorkPending() || (!RunningScene() && AssetWorkPending());
+			if (script && !workPending && commandText)
 			{
 				const auto command = Json::parse(ToStdString(commandText.value));
 				const UInt64 sequence = command.at("Sequence").get<UInt64>();
@@ -144,8 +151,16 @@ protected:
 						menu.path = "Tools/IDE Acceptance";
 						Take(InvokeEditorTool(menu));
 					}
+					else if (action == "native")
+					{
+						if (NativeDebugProbe(35) != 42)
+						{
+							throw std::runtime_error("Native debugger probe returned an unexpected result");
+						}
+					}
 					else if (action == "close")
 					{
+						Done(Documents()->SaveCurrent());
 						window->RequestClose();
 					}
 					else if (action != "play" && action != "stop")
@@ -167,8 +182,8 @@ protected:
 				}
 			}
 			Json state = {{"Pid", ExternalScriptEditor::ProcessId()},
-			              {"Ready", script != nullptr},
-			              {"Busy", ScriptWorkPending()},
+			              {"Ready", script != nullptr && EditingRenderReady()},
+			              {"Busy", ScriptWorkPending() || (!RunningScene() && AssetWorkPending())},
 			              {"Running", RunningScene() != nullptr},
 			              {"RunningName", ToStdString(runtimeName)},
 			              {"LastCommand", lastCommand},
@@ -226,7 +241,7 @@ int main(int argumentCount, char** arguments)
 		std::ofstream(root / "Assets/Editor/EditorProbe.cs") << editorSource;
 		DebugAcceptanceEditor editor;
 		Done(editor.OpenProject(root));
-		Done(editor.Run(1280, 720, "Ursa Managed Debug Acceptance", false));
+		Done(editor.Run(1280, 720, "Ursa Managed Debug Acceptance", true));
 		return 0;
 	}
 	catch (const std::exception& error)

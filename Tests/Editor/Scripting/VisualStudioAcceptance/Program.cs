@@ -7,6 +7,22 @@ internal static class Program
 {
     [DllImport("ole32.dll")] private static extern int GetRunningObjectTable(int reserved, out IRunningObjectTable table);
     [DllImport("ole32.dll")] private static extern int CreateBindCtx(int reserved, out IBindCtx context);
+    [DllImport("ole32.dll")] private static extern int CoRegisterMessageFilter(IOleMessageFilter? filter, out IOleMessageFilter? previous);
+
+    [ComImport, Guid("00000016-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IOleMessageFilter
+    {
+        [PreserveSig] int HandleInComingCall(int type, IntPtr caller, int elapsed, IntPtr info);
+        [PreserveSig] int RetryRejectedCall(IntPtr callee, int elapsed, int rejectType);
+        [PreserveSig] int MessagePending(IntPtr callee, int elapsed, int pendingType);
+    }
+
+    private sealed class AutomationMessageFilter : IOleMessageFilter
+    {
+        public int HandleInComingCall(int type, IntPtr caller, int elapsed, IntPtr info) => 0;
+        public int RetryRejectedCall(IntPtr callee, int elapsed, int rejectType) => elapsed < 10000 && rejectType is 1 or 2 ? 100 : -1;
+        public int MessagePending(IntPtr callee, int elapsed, int pendingType) => 2;
+    }
 
     private static EnvDTE.DTE Dte(string solution)
     {
@@ -44,11 +60,51 @@ internal static class Program
         selection.MoveToLineAndOffset(line, column, false);
     }
 
-    private static object VerifyLanguage(EnvDTE.DTE dte, string path, string? definition)
+    private static EnvDTE.Document OpenProjectFile(EnvDTE.DTE dte, string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        EnvDTE.ProjectItem? item = dte.Solution.FindProjectItem(fullPath);
+        if (item?.ContainingProject?.FullName?.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            EnvDTE.ProjectItem? FindFiles(EnvDTE.ProjectItems items)
+            {
+                foreach (EnvDTE.ProjectItem candidate in items)
+                {
+                    for (short index = 1; index <= candidate.FileCount; ++index)
+                        if (string.Equals(Path.GetFullPath(candidate.FileNames[index]), fullPath, StringComparison.OrdinalIgnoreCase)) return candidate;
+                    if (candidate.ProjectItems is { } children && FindFiles(children) is { } found) return found;
+                }
+                return null;
+            }
+            EnvDTE.ProjectItem? FindProject(EnvDTE.Project project)
+            {
+                if (project.FullName.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) return FindFiles(project.ProjectItems);
+                if (!string.IsNullOrEmpty(project.FullName)) return null;
+                foreach (EnvDTE.ProjectItem child in project.ProjectItems)
+                    if (child.SubProject is { } sub && FindProject(sub) is { } found) return found;
+                return null;
+            }
+            item = null;
+            foreach (EnvDTE.Project project in dte.Solution.Projects)
+                if (FindProject(project) is { } found) { item = found; break; }
+        }
+        string? projectPath = item?.ContainingProject?.FullName;
+        if (item == null || string.IsNullOrEmpty(projectPath) || !projectPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("C# source is not loaded in a solution project: " + fullPath);
+        EnvDTE.Window window = item.Open(EnvDTE.Constants.vsViewKindCode);
+        window.Activate();
+        EnvDTE.Document document = window.Document;
+        if (!string.Equals(document.ProjectItem?.ContainingProject?.FullName, projectPath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("C# source opened outside its solution project: " + fullPath);
+        return document;
+    }
+
+    private static object VerifyLanguage(EnvDTE.DTE dte, string path, string? definition, string? navigationSymbol = null,
+        string expression = "Transform.LocalPosition", string prefix = "LocalRotat", string completedMember = "LocalRotation")
     {
         if (dte.Debugger.CurrentMode != EnvDTE.dbgDebugMode.dbgDesignMode || dte.UndoContext.IsOpen)
             throw new InvalidOperationException("IDE language verification requires an idle solution.");
-        EnvDTE.Document document = dte.ItemOperations.OpenFile(Path.GetFullPath(path)).Document;
+        EnvDTE.Document document = OpenProjectFile(dte, path);
         var text = (EnvDTE.TextDocument)document.Object("TextDocument");
         var selection = (EnvDTE.TextSelection)document.Selection;
         string original = text.StartPoint.CreateEditPoint().GetText(text.EndPoint);
@@ -61,12 +117,13 @@ internal static class Program
         {
             if (definition == null)
             {
-                const string member = "LocalPosition";
-                int offset = original.IndexOf("Transform.LocalPosition", StringComparison.Ordinal) + "Transform.".Length;
-                if (offset < "Transform.".Length) throw new InvalidOperationException("Completion fixture not found.");
+                string member = expression[(expression.LastIndexOf('.') + 1)..];
+                int expressionOffset = original.IndexOf(expression, StringComparison.Ordinal);
+                if (expressionOffset < 0) throw new InvalidOperationException("Completion fixture not found.");
+                int offset = expressionOffset + expression.Length - member.Length;
                 Move(selection, original, offset);
                 selection.MoveToLineAndOffset(selection.ActivePoint.Line, selection.ActivePoint.LineCharOffset + member.Length, true);
-                selection.Text = "LocalRotat";
+                selection.Text = prefix;
                 Thread.Sleep(500);
                 dte.ExecuteCommand("Edit.CompleteWord");
                 DateTime deadline = DateTime.UtcNow.AddSeconds(12);
@@ -74,22 +131,24 @@ internal static class Program
                 do
                 {
                     string current = Retry(() => text.StartPoint.CreateEditPoint().GetText(text.EndPoint));
-                    completed = current.Length >= offset + "LocalRotation".Length && current.Substring(offset, "LocalRotation".Length) == "LocalRotation";
+                    completed = current.Length >= offset + completedMember.Length && current.Substring(offset, completedMember.Length) == completedMember;
                     if (completed) break;
                     Thread.Sleep(150);
                 } while (DateTime.UtcNow < deadline);
-                if (!completed) throw new InvalidOperationException("IDE did not complete the Engine Transform.LocalRotation member.");
-                result = new { Action = "Completion", File = path, Typed = "LocalRotat", Completed = "LocalRotation" };
+                if (!completed) throw new InvalidOperationException("IDE did not complete member " + completedMember +
+                    "; project=" + document.ProjectItem?.ContainingProject?.Name + "; context=" +
+                    text.StartPoint.CreateEditPoint().GetText(text.EndPoint).Substring(Math.Max(0, offset - 30), Math.Min(85, original.Length - Math.Max(0, offset - 30))));
+                result = new { Action = "Completion", File = path, Project = document.ProjectItem.ContainingProject.FullName, Typed = prefix, Completed = completedMember };
             }
             else
             {
-                const string symbol = "MoveWithInputBehaviour";
-                string extra = "\ninternal static class UrsaIdeNavigationProbe { internal static System.Type Target => typeof(MoveWithInputBehaviour); }\n";
+                string symbol = navigationSymbol ?? "MoveWithInputBehaviour";
+                string extra = "\ninternal static class UrsaIdeNavigationProbe { internal static System.Type Target => typeof(" + symbol + "); }\n";
                 selection.EndOfDocument(false);
                 selection.Text = extra;
                 string current = text.StartPoint.CreateEditPoint().GetText(text.EndPoint);
                 int offset = current.LastIndexOf(symbol, StringComparison.Ordinal);
-                Move(selection, current, offset + 5);
+                Move(selection, current, offset + Math.Max(1, symbol.Length - 2));
                 Thread.Sleep(800);
                 dte.ExecuteCommand("Edit.GoToDefinition");
                 DateTime deadline = DateTime.UtcNow.AddSeconds(12);
@@ -103,7 +162,9 @@ internal static class Program
                     Thread.Sleep(150);
                 } while (DateTime.UtcNow < deadline);
                 if (!navigated) throw new InvalidOperationException("IDE did not navigate from the Editor project to Game source: " + actual);
-                result = new { Action = "ProjectReferenceNavigation", Source = path, Target = actual };
+                string targetProject = dte.ActiveDocument.ProjectItem?.ContainingProject?.FullName ?? "";
+                if (!targetProject.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Definition opened outside its solution project: " + actual);
+                result = new { Action = "ProjectReferenceNavigation", Source = path, SourceProject = document.ProjectItem.ContainingProject.FullName, Target = actual, TargetProject = targetProject };
             }
         }
         finally
@@ -120,12 +181,15 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        var filter = new AutomationMessageFilter();
+        IOleMessageFilter? previous = null;
         try
         {
+            Marshal.ThrowExceptionForHR(CoRegisterMessageFilter(filter, out previous));
             var dte = Dte(Path.GetFullPath(args[1]));
             var debugger = (EnvDTE80.Debugger2)dte.Debugger;
             string action = args[0];
-            if (action is "state" or "evaluate" or "step" or "continue" or "detach")
+            if (action is "state" or "evaluate" or "step" or "continue" or "detach" or "break" or "thread-stacks" or "inspect-frame")
             {
                 string pidPath = Path.Combine(AppContext.BaseDirectory, "TargetPid.txt");
                 int expected = File.Exists(pidPath) ? int.Parse(File.ReadAllText(pidPath)) : -1;
@@ -143,46 +207,146 @@ internal static class Program
                 foreach (EnvDTE.Project project in dte.Solution.Projects) projects.Add((string)project.Name + ":" + (string)project.FullName);
                 Console.WriteLine(JsonSerializer.Serialize(new { Version = (string)dte.Version, Projects = projects, Engines = engines, Mode = (int)dte.Debugger.CurrentMode }));
             }
+            else if (action == "projects")
+            {
+                var projects = new List<object>();
+                void Visit(EnvDTE.Project project)
+                {
+                    projects.Add(new { Name = project.Name, Path = project.FullName, Kind = project.Kind, Count = project.ProjectItems?.Count });
+                    if (project.ProjectItems != null) foreach (EnvDTE.ProjectItem item in project.ProjectItems) if (item.SubProject is { } child) Visit(child);
+                }
+                foreach (EnvDTE.Project project in dte.Solution.Projects) Visit(project);
+                Console.WriteLine(JsonSerializer.Serialize(projects));
+            }
+            else if (action == "errors")
+            {
+                var errors = new List<object>();
+                var items = ((EnvDTE80.DTE2)dte).ToolWindows.ErrorList.ErrorItems;
+                for (int index = 1; index <= Math.Min(items.Count, 30); ++index) { var item = items.Item(index); errors.Add(new { item.Description, item.FileName, item.Line }); }
+                Console.WriteLine(JsonSerializer.Serialize(errors));
+            }
+            else if (action == "project-file")
+            {
+                var document = OpenProjectFile(dte, args[2]);
+                Console.WriteLine(JsonSerializer.Serialize(new { File = document.FullName, Project = document.ProjectItem.ContainingProject.FullName }));
+            }
+            else if (action == "refresh-source")
+            {
+                string path = Path.GetFullPath(args[2]);
+                foreach (EnvDTE.Document existing in dte.Documents)
+                    if (string.Equals(existing.FullName, path, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!existing.Saved) throw new InvalidOperationException("Refusing to reload an unsaved source buffer: " + path);
+                        existing.Close(EnvDTE.vsSaveChanges.vsSaveChangesNo);
+                        break;
+                    }
+                var document = OpenProjectFile(dte, path);
+                var text = (EnvDTE.TextDocument)document.Object("TextDocument");
+                if (text.StartPoint.CreateEditPoint().GetText(text.EndPoint).Replace("\r\n", "\n") != File.ReadAllText(path).Replace("\r\n", "\n"))
+                    throw new InvalidOperationException("Reloaded source buffer does not match disk.");
+                Console.WriteLine(JsonSerializer.Serialize(new { File = document.FullName, Project = document.ProjectItem.ContainingProject.FullName, Reloaded = true }));
+            }
+            else if (action == "close-fixture-documents")
+            {
+                if (dte.Debugger.CurrentMode != EnvDTE.dbgDebugMode.dbgDesignMode) throw new InvalidOperationException("Document cleanup requires an idle IDE.");
+                string prefix = Path.Combine(Path.GetFullPath(args[2]), "IdeAcceptance", "DebugRun-");
+                var targets = new List<EnvDTE.Document>();
+                var skipped = new List<string>();
+                foreach (EnvDTE.Document document in dte.Documents)
+                    if (document.FullName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    { if (document.Saved) targets.Add(document); else skipped.Add(document.FullName); }
+                var closed = targets.Select(document => document.FullName).ToArray();
+                foreach (var document in targets) document.Close(EnvDTE.vsSaveChanges.vsSaveChangesNo);
+                Console.WriteLine(JsonSerializer.Serialize(new { Closed = closed, UnsavedPreserved = skipped }));
+            }
             else if (action == "complete") Console.WriteLine(JsonSerializer.Serialize(VerifyLanguage(dte, args[2], null)));
             else if (action == "navigate-definition") Console.WriteLine(JsonSerializer.Serialize(VerifyLanguage(dte, args[2], args[3])));
+            else if (action == "navigate-symbol") Console.WriteLine(JsonSerializer.Serialize(VerifyLanguage(dte, args[2], args[3], args[4])));
+            else if (action == "complete-member") Console.WriteLine(JsonSerializer.Serialize(VerifyLanguage(dte, args[2], null, null, args[3], args[4], args[5])));
             else if (action == "attach")
             {
                 int pid = int.Parse(args[2]);
                 if (dte.Debugger.DebuggedProcesses.Count != 0) throw new InvalidOperationException("IDE already has a debugger session; refusing to replace it.");
                 foreach (EnvDTE.Process process in dte.Debugger.LocalProcesses)
-                    if ((int)process.ProcessID == pid) { ((EnvDTE80.Process2)process).Attach2(args[3]); File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "TargetPid.txt"), pid.ToString()); Console.WriteLine("Attached " + pid); return 0; }
+                    if ((int)process.ProcessID == pid) { var engines = args[3].Split(';'); File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "TargetPid.txt"), pid.ToString()); ((EnvDTE80.Process2)process).Attach2(engines.Length == 1 ? (object)engines[0] : engines); Console.WriteLine("Attached " + pid); return 0; }
                 throw new InvalidOperationException("Target process was not listed");
             }
             else if (action == "breakpoint")
             {
-                var points = dte.Debugger.Breakpoints.Add("", Path.GetFullPath(args[2]), int.Parse(args[3]), 1);
-                Console.WriteLine("Breakpoint added: " + points.Count);
+                string file = Path.GetFullPath(args[2]);
+                int line = int.Parse(args[3]);
+                foreach (EnvDTE.Breakpoint point in dte.Debugger.Breakpoints)
+                    if (string.Equals(point.File, file, StringComparison.OrdinalIgnoreCase) && point.FileLine == line)
+                    { Console.WriteLine(JsonSerializer.Serialize(new { Created = false })); return 0; }
+                dte.Debugger.Breakpoints.Add("", file, line, 1);
+                Console.WriteLine(JsonSerializer.Serialize(new { Created = true }));
             }
             else if (action == "state")
             {
                 int mode = (int)dte.Debugger.CurrentMode;
-                string function = ""; string file = ""; int line = 0; var frames = new List<string>();
+                string function = ""; string file = ""; string project = ""; int line = 0; var frames = new List<string>();
                 if (mode == 2 && dte.Debugger.CurrentStackFrame is { } currentFrame)
                 {
                     function = currentFrame.FunctionName;
                     foreach (EnvDTE.StackFrame frame in dte.Debugger.CurrentThread.StackFrames) { frames.Add(frame.FunctionName); if (frames.Count == 12) break; }
-                    try { file = (string)dte.ActiveDocument.FullName; line = ((EnvDTE.TextSelection)dte.ActiveDocument.Selection).ActivePoint.Line; } catch { }
+                    try { file = (string)dte.ActiveDocument.FullName; project = dte.ActiveDocument.ProjectItem?.ContainingProject?.FullName ?? ""; line = ((EnvDTE.TextSelection)dte.ActiveDocument.Selection).ActivePoint.Line; } catch { }
                 }
-                Console.WriteLine(JsonSerializer.Serialize(new { Mode = mode, Function = function, File = file, Line = line, Frames = frames }));
+                var processes = new List<int>();
+                foreach (EnvDTE.Process process in dte.Debugger.DebuggedProcesses) processes.Add(process.ProcessID);
+                Console.WriteLine(JsonSerializer.Serialize(new { Mode = mode, Function = function, File = file, Project = project, Line = line, Frames = frames, Processes = processes }));
             }
             else if (action == "evaluate")
             {
-                var expression = dte.Debugger.GetExpression(args[2], true, 1000);
-                Console.WriteLine(JsonSerializer.Serialize(new { Expression = args[2], Valid = (bool)expression.IsValidValue, Value = (string)expression.Value }));
+                var expression = Retry(() => dte.Debugger.GetExpression(args[2], false, 5000));
+                bool valid = Retry(() => expression.IsValidValue);
+                string value = Retry(() => expression.Value);
+                Console.WriteLine(JsonSerializer.Serialize(new { Expression = args[2], Valid = valid, Value = value }));
             }
+            else if (action == "inspect-frame")
+            {
+                foreach (EnvDTE.Thread thread in dte.Debugger.CurrentProgram.Threads)
+                    foreach (EnvDTE.StackFrame frame in thread.StackFrames)
+                        if (frame.FunctionName.Contains(args[2], StringComparison.Ordinal))
+                        {
+                            dte.Debugger.CurrentThread = thread;
+                            dte.Debugger.CurrentStackFrame = frame;
+                            var values = new List<object>();
+                            foreach (string expression in args.Skip(3)) { var value = dte.Debugger.GetExpression(expression, true, 1000); values.Add(new { Expression = expression, Valid = (bool)value.IsValidValue, Value = (string)value.Value }); }
+                            Console.WriteLine(JsonSerializer.Serialize(new { Function = frame.FunctionName, Values = values }));
+                            return 0;
+                        }
+                throw new InvalidOperationException("Requested native frame not found.");
+            }
+            else if (action == "thread-stacks")
+            {
+                var threads = new List<object>();
+                foreach (EnvDTE.Thread thread in dte.Debugger.CurrentProgram.Threads)
+                {
+                    var frames = new List<string>();
+                    foreach (EnvDTE.StackFrame frame in thread.StackFrames) { frames.Add(frame.FunctionName); if (frames.Count == 16) break; }
+                    threads.Add(new { thread.ID, Frames = frames });
+                }
+                Console.WriteLine(JsonSerializer.Serialize(threads));
+            }
+            else if (action == "break") { dte.Debugger.Break(false); Console.WriteLine("Break"); }
             else if (action == "step") { dte.Debugger.StepOver(false); Console.WriteLine("StepOver"); }
             else if (action == "continue") { dte.Debugger.Go(false); Console.WriteLine("Continue"); }
-            else if (action == "detach") { dte.Debugger.DetachAll(); Console.WriteLine("Detached"); }
+            else if (action == "detach")
+            {
+                int expected = int.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TargetPid.txt")));
+                var targets = new List<EnvDTE.Process>();
+                foreach (EnvDTE.Process process in dte.Debugger.DebuggedProcesses)
+                    if (process.ProcessID == expected) targets.Add(process);
+                foreach (var target in targets) target.Detach(true);
+                Console.WriteLine("Detached " + expected);
+            }
             else if (action == "clear")
             {
                 var remove = new List<object>();
                 foreach (EnvDTE.Breakpoint point in dte.Debugger.Breakpoints)
-                    if (((string)point.File).Contains("IdeAcceptance", StringComparison.OrdinalIgnoreCase)) remove.Add(point);
+                    for (int index = 2; index + 1 < args.Length; index += 2)
+                        if (string.Equals(point.File, Path.GetFullPath(args[index]), StringComparison.OrdinalIgnoreCase) && point.FileLine == int.Parse(args[index + 1]))
+                        { remove.Add(point); break; }
                 foreach (EnvDTE.Breakpoint point in remove) point.Delete();
                 Console.WriteLine("Cleared acceptance breakpoints");
             }
@@ -190,5 +354,6 @@ internal static class Program
             return 0;
         }
         catch (Exception exception) { Console.Error.WriteLine(exception.ToString()); return 1; }
+        finally { CoRegisterMessageFilter(previous, out _); GC.KeepAlive(filter); }
     }
 }

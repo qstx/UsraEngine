@@ -422,6 +422,8 @@ Result<ScriptEditorCommand> ExternalScriptEditor::Command(const ScriptEditorConf
 		return Result<ScriptEditorCommand>::Failure("Choose an External Script Editor in Edit > External Tools");
 	}
 	ScriptEditorCommand command{config.executable, workspace.projectRoot};
+	const auto& visualStudioSolution =
+	    workspace.visualStudioSolution.empty() ? workspace.solution : workspace.visualStudioSolution;
 	if (source && (source->line == 0 || source->column == 0))
 	{
 		return Result<ScriptEditorCommand>::Failure("Source line and column must be positive");
@@ -429,7 +431,7 @@ Result<ScriptEditorCommand> ExternalScriptEditor::Command(const ScriptEditorConf
 	if (config.kind == ScriptEditorKind::VisualStudio && source)
 	{
 		command.executable = CurrentExecutablePath().parent_path() / "UrsaIdeBridge.exe";
-		command.arguments = {PathToUrsaString(config.executable), PathToUrsaString(workspace.solution),
+		command.arguments = {PathToUrsaString(config.executable), PathToUrsaString(visualStudioSolution),
 		                     PathToUrsaString(source->file), ToUrsaString(std::to_string(source->line)),
 		                     ToUrsaString(std::to_string(source->column))};
 		command.timeoutMilliseconds = 30000;
@@ -457,7 +459,7 @@ Result<ScriptEditorCommand> ExternalScriptEditor::Command(const ScriptEditorConf
 	}
 	else if (config.kind == ScriptEditorKind::VisualStudio)
 	{
-		command.arguments = {PathToUrsaString(workspace.solution)};
+		command.arguments = {PathToUrsaString(visualStudioSolution)};
 	}
 	else
 	{

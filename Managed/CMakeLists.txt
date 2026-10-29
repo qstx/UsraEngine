@@ -81,7 +81,7 @@ ursa_source_groups(UrsaManagedHostAssemblies "Managed")
 
 add_custom_command(OUTPUT "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Built.stamp"
   COMMAND "${URSA_DOTNET_EXECUTABLE}" build "${URSA_MANAGED_STAGE_ROOT}/Ursa.ScriptCatalogGenerator/Ursa.ScriptCatalogGenerator.csproj"
-    --configuration "$<CONFIG>" --output "${URSA_BINARY_ROOT}/Managed/Tools" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS}
+    --configuration "$<CONFIG>" --output "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS}
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>"
   COMMAND "${CMAKE_COMMAND}" -E touch "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Built.stamp"
   DEPENDS UrsaManagedHostAssemblies ${managedSources}

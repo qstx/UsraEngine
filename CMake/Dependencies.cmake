@@ -1,3 +1,7 @@
+# The pinned upstream projects include legacy minimum versions. Limit their
+# compatibility baseline here, without changing upstream sources or our policies.
+set(ursaPreviousPolicyMinimum "${CMAKE_POLICY_VERSION_MINIMUM}")
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -42,6 +46,9 @@ add_subdirectory(ThirdParty/spdlog)
 if(MSVC)
   target_compile_definitions(spdlog PRIVATE _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING)
   target_compile_options(spdlog PRIVATE "$<$<CONFIG:Debug,RelWithDebInfo>:/Z7>")
+  if(MSVC_VERSION GREATER_EQUAL 1950)
+    target_compile_options(spdlog PUBLIC "/FI${URSA_SOURCE_ROOT}/Runtime/Core/Compatibility/SpdlogFmtMsvc.hpp")
+  endif()
 endif()
 set(FETCHCONTENT_SOURCE_DIR_EABASE "${URSA_SOURCE_ROOT}/ThirdParty/eabase")
 # EABase is header-only. Supply its interface target directly rather than
@@ -89,6 +96,8 @@ foreach(URSA_DEPENDENCY IN ITEMS EASTL EABase TracyClient glfw spdlog spdlog_hea
     set_target_properties(${URSA_DEPENDENCY} PROPERTIES FOLDER "ThirdParty")
   endif()
 endforeach()
+
+set(CMAKE_POLICY_VERSION_MINIMUM "${ursaPreviousPolicyMinimum}")
 
 
 if(URSA_BUILD_EDITOR)

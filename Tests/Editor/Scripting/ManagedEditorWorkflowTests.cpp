@@ -75,6 +75,11 @@ protected:
 
 	Result<void> OnGui() override
 	{
+		if (reportedPhase != phase)
+		{
+			reportedPhase = phase;
+			std::cerr << "Editor workflow phase " << phase << std::endl;
+		}
 		auto rendered = EditorApplication::OnGui();
 		if (!rendered)
 		{
@@ -642,6 +647,7 @@ private:
 	Scripting::ScriptBehaviourComponent* script = nullptr;
 	String stableScriptId;
 	std::chrono::steady_clock::time_point deadline;
+	UInt32 reportedPhase = ~0u;
 	UInt32 phase = 0;
 	UInt32 runs = 0;
 	UInt32 responsiveFrames = 0;

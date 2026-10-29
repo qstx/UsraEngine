@@ -200,6 +200,53 @@ int main()
 		Take(ScriptIdeProject::Generate(rebuilt, rebuiltInput));
 		Expect(Take(rebuiltDatabase->Metadata(Path("prj:Scripts/Editor/Renamed.cs"))).guid == guid,
 		       "Rebuilding Library changed existing source metadata");
+		const auto engineRoot = root / "Engine";
+		Write(engineRoot / "CMakeLists.txt", "# Unified workspace fixture");
+		const auto makeWorkspace = [&](const char* name)
+		{
+			const auto build = engineRoot / name;
+			Write(build / "UrsaEngine.slnx", "<Solution />");
+			for (const auto* module : {"Ursa.Bindings", "Ursa.Runtime", "Ursa.Rendering", "Ursa.Editor"})
+			{
+				Write(build / "Ide/Managed" / module / (std::string(module) + ".csproj"), "<Project />");
+			}
+			const Json description = {{"Version", 1},
+			                          {"Ready", true},
+			                          {"EngineRoot", engineRoot.generic_u8string()},
+			                          {"BuildRoot", build.generic_u8string()},
+			                          {"ProjectRoot", root.generic_u8string()},
+			                          {"Solution", (build / "UrsaEngine.slnx").generic_u8string()},
+			                          {"ManagedProjects", (build / "Ide/Managed").generic_u8string()},
+			                          {"Configurations", Json::array({"Debug", "Release"})}};
+			const auto path = build / "UnifiedWorkspace.json";
+			Write(path, description.dump(2).c_str());
+			return path;
+		};
+		const auto firstDescription = makeWorkspace("BuildA");
+		const auto secondDescription = makeWorkspace("BuildB");
+		const auto unified = Take(ScriptIdeProject::Generate(rebuilt, rebuiltInput, {}, {firstDescription, true}));
+		Expect(unified.visualStudioSolution == firstDescription.parent_path() / "UrsaEngine.slnx",
+		       "Unified generation lost the solution association");
+		const auto unifiedGame = Take(rebuilt.ReadText(Path("lib:ScriptIDE/Projects/Game/Ursa.Game.csproj")));
+		Expect(unifiedGame.find("ProjectReference") != String::npos && unifiedGame.find("HintPath") == String::npos &&
+		           unifiedGame.find("Ursa.Editor.csproj") == String::npos,
+		       "Unified Game project does not reference framework sources or leaks Editor APIs");
+		Expect(Take(ScriptIdeProject::Generate(rebuilt, rebuiltInput)).filesChanged == 0,
+		       "Persisted unified workspace was not reused without rewrites");
+		const auto switched = Take(ScriptIdeProject::Generate(rebuilt, rebuiltInput, {}, {secondDescription, true}));
+		Expect(switched.visualStudioSolution != unified.visualStudioSolution &&
+		           switched.fingerprint != unified.fingerprint,
+		       "Switching build roots left stale unified references");
+		std::filesystem::remove(secondDescription.parent_path() / "UrsaEngine.slnx");
+		Expect(!ScriptIdeProject::Generate(rebuilt, rebuiltInput), "Missing associated solution silently fell back");
+		const auto recovered = Take(ScriptIdeProject::Generate(rebuilt, rebuiltInput, {}, {firstDescription, true}));
+		Expect(recovered.visualStudioSolution == unified.visualStudioSolution,
+		       "Explicit workspace reassociation failed");
+		std::filesystem::remove_all(library);
+		const auto recoveredAfterClean =
+		    Take(ScriptIdeProject::Generate(rebuilt, rebuiltInput, {}, {firstDescription}));
+		Expect(recoveredAfterClean.visualStudioSolution == unified.visualStudioSolution,
+		       "Cleaning Library could not recover the current engine workspace");
 		std::filesystem::remove_all(root);
 		return 0;
 	}

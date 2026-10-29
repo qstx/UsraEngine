@@ -4,7 +4,7 @@ UrsaEngine is a C++17 graphics engine foundation with an API independent RHI and
 
 ## Requirements
 
-- Windows 10 or newer, Visual Studio 2022 with C++ desktop tools, CMake 3.20 or newer.
+- Windows 10 or newer, Visual Studio 2026 with C++ desktop tools (v145), CMake 4.4.5 or newer.
 - Vulkan SDK 1.2 or newer with `glslc`, and a Vulkan 1.2 capable GPU and driver.
 - Git submodules containing pinned GLFW 3.5.1, VMA 3.4.0, nlohmann/json 3.12.0, EASTL 3.21.23 (`7fadbf0`), its matching EABase (`123363e`), spdlog 1.13.0 (`7c02e20`), Assimp 6.0.5 (`392a658f`), stb (`2c980bb5`), Dear ImGui `v1.92.9b-docking` (`b48d1af`), and ImGuizmo `1.10` (`b796ac3`) sources.
 
@@ -118,10 +118,12 @@ void inspectId(Ursa::ResourceId id) {
 
 ## Build and test
 
+For one VS2026 solution containing Engine C++, Engine C#, Demo gameplay and Editor extensions, run `GenerateEngineSolutionWithTracy.bat` from the parent workspace. Open `Engine/Build/VS2026/UrsaEngine.slnx`. Add `--tests` to include tests. The first run builds workspace tools; existing VS2022 caches are retained. See [统一开发工作区](Docs/UnifiedDevelopment.md) for generation, refresh, output isolation and debugging.
+
 ```powershell
 git submodule update --init
 git submodule update --init --recursive ThirdParty/imgui ThirdParty/imguizmo
-cmake -S . -B Build -G "Visual Studio 17 2022" -A x64 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake -S . -B Build -G "Visual Studio 18 2026" -A x64 -T v145 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build Build --parallel --config Debug
 ctest --test-dir Build -C Debug --output-on-failure
 cmake --build Build --parallel --config Release
@@ -419,7 +421,7 @@ $savedPath = $env:PATH
 Remove-Item Env:Path -ErrorAction SilentlyContinue
 Remove-Item Env:PATH -ErrorAction SilentlyContinue
 $env:PATH = $savedPath
-cmake -S . -B Build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B Build -G "Visual Studio 18 2026" -A x64 -T v145
 cmake --build Build --parallel --config Debug
 ```
 

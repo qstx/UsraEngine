@@ -218,9 +218,9 @@ protected:
 		bool hiddenHierarchy = false;
 		bool inspector = true;
 		String diagnostic;
-		auto inspected =
-		    DrawSceneInspector(*Documents()->Current(), hierarchy, *Documents(), *Workspace(), Project().components,
-		                       Project().componentEditors, diagnostic, nullptr, &hiddenHierarchy, &inspector);
+		auto inspected = DrawSceneInspector(
+		    *Documents()->Current(), hierarchy, *Documents(), *Workspace(), ProjectTagLayerSettings::Defaults(),
+		    Project().components, Project().componentEditors, diagnostic, nullptr, &hiddenHierarchy, &inspector);
 		if (!inspected)
 		{
 			return Result<void>::Failure(inspected.error);

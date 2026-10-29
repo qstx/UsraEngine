@@ -71,7 +71,7 @@ Scene 和 Game 的相机距离不同是当前行为。蛇的位置随实际时�
 性能样本。任务 10.4 的正式对比使用独立构建目录，避免改变现有构建开关：
 
 ```powershell
-cmake -S Engine -B Engine/Build/SrpPerformance -G "Visual Studio 17 2022" -A x64 -DURSA_ENABLE_DOTNET=ON -DURSA_BUILD_EDITOR=ON -DURSA_ENABLE_TRACY=ON -DURSA_ENABLE_TRACY_MEMORY=OFF -DURSA_ENABLE_TRACY_DIAGNOSTICS=OFF -DURSA_TRACY_MEMORY_CALLSTACK_DEPTH=0
+cmake -S Engine -B Engine/Build/SrpPerformance -G "Visual Studio 18 2026" -A x64 -T v145 -DURSA_ENABLE_DOTNET=ON -DURSA_BUILD_EDITOR=ON -DURSA_ENABLE_TRACY=ON -DURSA_ENABLE_TRACY_MEMORY=OFF -DURSA_ENABLE_TRACY_DIAGNOSTICS=OFF -DURSA_TRACY_MEMORY_CALLSTACK_DEPTH=0
 cmake --build Engine/Build/SrpPerformance --config Release --target UrsaScriptPlayer UrsaEditor UrsaAssetImport --parallel 8
 Engine/Build/SrpPerformance/Release/UrsaAssetImport.exe --project Demo --configuration Release --profile Both
 Engine/Build/SrpPerformance/Release/UrsaScriptPlayer.exe --project Demo --scene Snake/Snake.ursascene --hidden --frames 1320

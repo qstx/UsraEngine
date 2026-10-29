@@ -99,10 +99,31 @@ ComPtr<IDispatch> FindSolution(const std::filesystem::path& solution)
 
 void Navigate(IDispatch* dte, const wchar_t* file, Int32 line, Int32 column)
 {
-	auto operations = Invoke(dte, L"ItemOperations", DISPATCH_PROPERTYGET);
-	auto window = Invoke(operations.pdispVal, L"OpenFile", DISPATCH_METHOD, {_variant_t(file), _variant_t(L"")});
+	auto solution = Invoke(dte, L"Solution", DISPATCH_PROPERTYGET);
+	auto item = Invoke(solution.pdispVal, L"FindProjectItem", DISPATCH_METHOD, {_variant_t(file)});
+	if (item.vt != VT_DISPATCH || !item.pdispVal)
+	{
+		_com_issue_error(E_PENDING);
+	}
+	auto project = Invoke(item.pdispVal, L"ContainingProject", DISPATCH_PROPERTYGET);
+	auto projectPath = Invoke(project.pdispVal, L"FullName", DISPATCH_PROPERTYGET);
+	if (projectPath.vt != VT_BSTR || !projectPath.bstrVal ||
+	    _wcsicmp(std::filesystem::path(projectPath.bstrVal).extension().c_str(), L".csproj") != 0)
+	{
+		_com_issue_error(E_PENDING);
+	}
+	auto window =
+	    Invoke(item.pdispVal, L"Open", DISPATCH_METHOD, {_variant_t(L"{7651A700-06E5-11D1-8EBD-00A0C90F26EA}")});
 	Invoke(window.pdispVal, L"Activate", DISPATCH_METHOD);
 	auto document = Invoke(dte, L"ActiveDocument", DISPATCH_PROPERTYGET);
+	auto openedItem = Invoke(document.pdispVal, L"ProjectItem", DISPATCH_PROPERTYGET);
+	auto openedProject = Invoke(openedItem.pdispVal, L"ContainingProject", DISPATCH_PROPERTYGET);
+	auto openedProjectPath = Invoke(openedProject.pdispVal, L"FullName", DISPATCH_PROPERTYGET);
+	if (openedProjectPath.vt != VT_BSTR || !openedProjectPath.bstrVal ||
+	    _wcsicmp(openedProjectPath.bstrVal, projectPath.bstrVal) != 0)
+	{
+		_com_issue_error(E_PENDING);
+	}
 	auto selection = Invoke(document.pdispVal, L"Selection", DISPATCH_PROPERTYGET);
 	Invoke(selection.pdispVal, L"MoveToLineAndOffset", DISPATCH_METHOD,
 	       {_variant_t(static_cast<long>(line)), _variant_t(static_cast<long>(column)), _variant_t(false)});
@@ -140,7 +161,8 @@ int wmain(int argumentCount, wchar_t** arguments)
 		const auto source = std::filesystem::canonical(arguments[3]);
 		const Int32 line = std::stoi(arguments[4]);
 		const Int32 column = std::stoi(arguments[5]);
-		if (line < 1 || column < 1 || source.extension() != L".cs" || solution.extension() != L".sln" ||
+		if (line < 1 || column < 1 || source.extension() != L".cs" ||
+		    (solution.extension() != L".sln" && solution.extension() != L".slnx") ||
 		    executable.filename() != L"devenv.exe")
 		{
 			throw std::runtime_error("Invalid Visual Studio navigation request");
@@ -158,10 +180,12 @@ int wmain(int argumentCount, wchar_t** arguments)
 			{
 				throw std::runtime_error("Cannot start Visual Studio");
 			}
+			std::cout << "Started Visual Studio PID " << process.dwProcessId << std::endl;
 			CloseHandle(process.hThread);
 			CloseHandle(process.hProcess);
 		}
-		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+		HRESULT navigationError = S_OK;
 		while (std::chrono::steady_clock::now() < deadline)
 		{
 			if (dte)
@@ -172,12 +196,20 @@ int wmain(int argumentCount, wchar_t** arguments)
 					exitCode = 0;
 					break;
 				}
-				catch (const _com_error&)
+				catch (const _com_error& error)
 				{
+					navigationError = error.Error();
 				}
 			}
 			Sleep(200);
 			dte = FindSolution(solution);
+		}
+		if (exitCode != 0)
+		{
+			std::cerr
+			    << "Visual Studio did not load the source as a C# project item in the requested solution. "
+			       "Complete first-run dialogs, wait for project loading, or regenerate the workspace, then retry.\n";
+			std::cerr << "Navigation HRESULT: 0x" << std::hex << static_cast<UInt32>(navigationError) << '\n';
 		}
 	}
 	catch (const std::exception& error)

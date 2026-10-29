@@ -1506,10 +1506,12 @@ void ImportedUiContracts(Harness& h)
 		const Ursa::Scripting::Bindings::Utf8View label{reinterpret_cast<const UInt8*>(fieldLabel.data()),
 		                                                fieldLabel.size(), 1, 0};
 		OptionalField empty{};
+		const Ursa::Scripting::Bindings::Utf8View expectedType{nullptr, 0, 1, 0};
 		FieldResult next;
 		next.status = Ursa::Scripting::Bindings::Editor::NativeEditorBindings_AssetField(
 		    invocation.Token(), &label, managedField ? &managedField->value : &empty,
-		    Ursa::Scripting::Bindings::Wire::Enum_Ursa_Editor_EditorReferenceKind::V_Mesh, &next.value, &next.outcome);
+		    Ursa::Scripting::Bindings::Wire::Enum_Ursa_Editor_EditorReferenceKind::V_Mesh, &expectedType, 0,
+		    &next.value, &next.outcome);
 		Expect(bool(next), next.Error().c_str());
 		managedField = std::make_unique<FieldResult>(std::move(next));
 
