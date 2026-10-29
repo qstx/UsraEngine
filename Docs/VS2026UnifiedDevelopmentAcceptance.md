@@ -33,6 +33,14 @@
 
 日志见 `Build/VS2026/DirectManagedRegression-Debug.log`、`DirectManagedRegression-Release.log`、`DirectManagedIncremental.log`、`DirectManaged-AddedSourceSymbols.log` 和 `DirectManagedProtocolBaseline.log`。
 
+## 引擎仓库与项目目录变量（2026-10-29）
+
+按用户澄清，`URSA_ENGINE_DIR` 表示引擎仓库目录。入口从环境变量或 `--engine-dir` / `--project-dir` 读取路径，命令行优先，将引擎目录同时传给 CMake `-S` 和 `URSA_ENGINE_DIR`，项目目录传给 `URSA_PROJECT_DIR`。CMake 校验两个引擎路径为同一源码树并规范化缓存；源码根继续由实际 CMake 源码目录确定。
+
+通过位于构建树内的临时目录联接，实际配置了带空格的引擎仓库、项目和 build root。核对 Editor、Player、脚本编译工具的 Debug/Release 共六组 VS 工作目录和项目参数，以及工作区描述中的 EngineRoot/ProjectRoot。配置完成后仅移除本次创建的联接，未移动或复制引擎仓库。证据为 `Build/VS2026/DirectoryVariablesEvidence.json`。
+
+显式设置当前 Engine/Demo 的环境变量后，原 bat 完成五阶段工作区生成。Python 回归 10/10 通过（含环境变量、命令行优先级及路径转发），CMake 目录夹具覆盖默认值、规范化、错误引擎、缺失目录和 Assets 为文件等七种情况；最终相关 CTest 9/9（21.95 秒）通过。日志为 `DirectoryVariablesConfigure.log`、`DirectoryVariablesGeneration.log` 和 `DirectoryVariablesRegression.log`，均位于 `Build/VS2026`；本轮未启动 VS/Editor GUI。
+
 ## 此前统一工作区验收已通过
 
 - 新构建根配置、完整 Debug 方案构建，以及 Debug/Release Editor、Player、脚本工具构建。

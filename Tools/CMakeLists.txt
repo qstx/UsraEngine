@@ -57,13 +57,13 @@ if(URSA_BUILD_EDITOR)
     target_link_libraries(UrsaScriptPlayer PRIVATE Ursa::DotNetHost)
     target_compile_definitions(UrsaScriptPlayer PRIVATE URSA_SCRIPT_PLAYER_ENGINE_ASSETS="${URSA_SOURCE_ROOT}/Assets")
     ursa_attach_dotnet_host_runtime(UrsaScriptPlayer)
+    set_target_properties(UrsaScriptCompile UrsaScriptPlayer PROPERTIES
+      VS_DEBUGGER_WORKING_DIRECTORY "${URSA_ENGINE_DIR}")
     if(NOT URSA_PROJECT_DIR STREQUAL "")
       set_target_properties(UrsaScriptCompile PROPERTIES
-        VS_DEBUGGER_COMMAND_ARGUMENTS "\"${URSA_PROJECT_DIR}\" $<CONFIG>"
-        VS_DEBUGGER_WORKING_DIRECTORY "${URSA_SOURCE_ROOT}")
+        VS_DEBUGGER_COMMAND_ARGUMENTS "\"${URSA_PROJECT_DIR}\" $<CONFIG>")
       set_target_properties(UrsaScriptPlayer PROPERTIES
-        VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene"
-        VS_DEBUGGER_WORKING_DIRECTORY "${URSA_SOURCE_ROOT}")
+        VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene")
     endif()
   endif()
   if(NOT URSA_PROJECT_DIR STREQUAL "")

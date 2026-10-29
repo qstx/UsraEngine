@@ -109,6 +109,36 @@ EndGlobalSection
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Python 3.11+', result.stdout)
 
+    def test_engine_project_environment_and_argument_precedence(self):
+        engine = self.root / 'Engine checkout with spaces'
+        self.write('Engine checkout with spaces/CMakeLists.txt', '# engine fixture')
+        self.write('Engine checkout with spaces/ThirdParty/tracy/CMakeLists.txt', '# dependency fixture')
+        project = self.root / 'Project with spaces'
+        self.write('Project with spaces/Assets/Probe.cs', 'class Probe {}')
+        capture = self.root / 'Configure arguments.txt'
+        cmake = self.write('Capture cmake.cmd', '@echo off\nif "%~1"=="--version" (\n echo cmake version 4.4.5\n exit /b 0\n)\n> "' + str(capture) + '" echo %*\nexit /b 42\n')
+        env = dict(os.environ, URSA_ENGINE_DIR=str(engine), URSA_PROJECT_DIR=str(project))
+        result = self.bat('--cmake', cmake, env=env)
+        self.assertEqual(result.returncode, 42, result.stdout + result.stderr)
+        args = capture.read_text()
+        self.assertIn(str(engine), args)
+        self.assertIn(str(engine / 'Build/VS2026'), args)
+        self.assertIn('-DURSA_ENGINE_DIR=' + engine.as_posix(), args)
+        self.assertIn('-DURSA_PROJECT_DIR=' + project.as_posix(), args)
+        env.update(URSA_ENGINE_DIR=str(self.root / 'Missing engine'), URSA_PROJECT_DIR=str(self.root / 'Missing project'))
+        result = self.bat('--cmake', cmake, '--engine-dir', engine, '--project-dir', project,
+                          '--build-dir', self.root / 'Selected build', env=env)
+        self.assertEqual(result.returncode, 42, result.stdout + result.stderr)
+        args = capture.read_text()
+        self.assertIn(str(self.root / 'Selected build'), args)
+        self.assertNotIn('Missing engine', args)
+        self.assertNotIn('Missing project', args)
+
+    def test_missing_engine_is_reported(self):
+        result = self.bat('--engine-dir', self.root / 'Missing engine')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Engine CMakeLists.txt is missing', result.stderr)
+
     def test_old_cache_is_preserved(self):
         cache = self.write('Old build/CMakeCache.txt', 'CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022\n')
         before = cache.read_bytes()

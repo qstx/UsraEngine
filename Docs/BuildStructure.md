@@ -26,6 +26,8 @@ Windows 开发基线为 VS2026/v145 与 CMake 4.4.5+。统一 Engine 与 Demo �
 
 生成入口采用 bat + Python 3.11+，默认使用仓库自带 Python。`--build-dir`、`--project-dir` 和 `--tests` 可从 bat 直接传入；CMake 直接调用 Python 生成 SDK 工程。`UrsaProjectStructureCheck` 也使用 Python，旧 ps1 接口保留兼容转发。常规生成不要求 PowerShell；既有格式检查和可选自动化测试仍保留其脚本依赖。
 
+引擎仓库和项目目录可以分别通过 `URSA_ENGINE_DIR`、`URSA_PROJECT_DIR` 环境变量，或 `--engine-dir`、`--project-dir` 参数传给生成入口。CMake 接收同名 PATH 缓存变量；引擎目录同时用于 `-S`，两者必须指向同一源码树。内部源码发现仍以实际 CMake 源码根为准。VS 的 Editor/Player/脚本编译工作目录使用 `URSA_ENGINE_DIR`，项目调试参数、脚本工程及打包使用 `URSA_PROJECT_DIR`。
+
 `Managed/Framework` 分类中的 SDK 工程从原始 csproj 元数据生成，文件通过 Link 指向原始 `Engine/Managed`；`Projects/Demo` 的 Game/EditorScripts 指向 Assets。正式引擎程序集位于 `<build>/Managed/<配置>`，IDE 框架检查产物在 `<build>/Ide/Managed/Build/<工程>/<配置>`，项目 IDE 产物在 `Demo/Library/ScriptIDE/Build`。单独构建 `UrsaEditor` 不要求编译 Demo IDE 工程；单独右键构建一个 C# 项目只检查对应项目与项目引用，不发布游戏脚本。完整流程见 [统一开发工作区](UnifiedDevelopment.md)。
 
 正式框架直接编译原始 `Managed/*.csproj`，使用 `<build>/Managed/Artifacts` 隔离中间产物，停止复制 `Managed/Source`。正式 PDB 的手写源码路径和校验和对应原始文件；绑定生成代码继续位于 `<build>/Bindings/<配置>`。

@@ -1,6 +1,9 @@
 add_test(NAME UrsaBuildResourcePathsTests COMMAND "${CMAKE_COMMAND}"
   "-DENGINE_ROOT=${URSA_SOURCE_ROOT}" "-DSCRATCH=${URSA_BINARY_ROOT}/Temp/ResourcePaths"
   -P "${URSA_SOURCE_ROOT}/Tests/Build/BuildResourcePathsTests.cmake")
+add_test(NAME UrsaDevelopmentPathsTests COMMAND "${CMAKE_COMMAND}"
+  "-DENGINE_ROOT=${URSA_SOURCE_ROOT}" "-DSCRATCH=${URSA_BINARY_ROOT}/Temp/DevelopmentPaths/$<CONFIG>"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/DevelopmentPathsTests.cmake")
 
 add_test(NAME UrsaShaderPackageBuild
   COMMAND ${CMAKE_COMMAND}

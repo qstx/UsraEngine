@@ -48,10 +48,10 @@ if(WIN32)
 endif()
 target_link_libraries(UrsaEditor PRIVATE Ursa::Editor)
 ursa_attach_dotnet_host_runtime(UrsaEditor)
+set_target_properties(UrsaEditor PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${URSA_ENGINE_DIR}")
 if(NOT URSA_PROJECT_DIR STREQUAL "")
   set_target_properties(UrsaEditor PROPERTIES
-    VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene"
-    VS_DEBUGGER_WORKING_DIRECTORY "${URSA_SOURCE_ROOT}")
+    VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene")
 endif()
 
 if(MSVC)

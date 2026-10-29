@@ -6,23 +6,28 @@ tools; later runs refresh incrementally. No PowerShell is needed.
 """
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
-from CheckProjectStructure import check
 from WindowsToolchain import get_toolchain
 from WorkspaceCommon import full_path, main_entry, run
 
 
 def main():
-    engine_root = full_path(Path(__file__).parent / '..')
+    default_engine = Path(__file__).parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--build-dir', default=str(engine_root / 'Build/VS2026'), help='build directory (default: Engine/Build/VS2026)')
-    parser.add_argument('--project-dir', default=str(engine_root.parent / 'Demo'), help='game project directory (default: Demo)')
+    parser.add_argument('--engine-dir', default=os.environ.get('URSA_ENGINE_DIR'), help='engine checkout passed to CMake -S (default: URSA_ENGINE_DIR or this Engine)')
+    parser.add_argument('--build-dir', help='build directory (default: selected engine/Build/VS2026)')
+    parser.add_argument('--project-dir', default=os.environ.get('URSA_PROJECT_DIR'), help='game project directory (default: URSA_PROJECT_DIR or sibling Demo)')
     parser.add_argument('--cmake', default='cmake', help='CMake executable')
     parser.add_argument('--tests', action='store_true', help='include test projects')
     args = parser.parse_args()
-    build, project = full_path(args.build_dir), full_path(args.project_dir)
+    engine_root = full_path(args.engine_dir or default_engine)
+    build = full_path(args.build_dir or engine_root / 'Build/VS2026')
+    project = full_path(args.project_dir or engine_root.parent / 'Demo')
+    if not (engine_root / 'CMakeLists.txt').is_file():
+        raise RuntimeError(f'Engine CMakeLists.txt is missing: {engine_root}')
     if not (project / 'Assets').is_dir():
         raise RuntimeError(f'Project Assets directory is missing: {project}')
     if not (engine_root / 'ThirdParty/tracy/CMakeLists.txt').is_file():
@@ -32,7 +37,8 @@ def main():
     configure = [toolchain['CMake'], '-S', engine_root, '-B', build, '-G', toolchain['Generator'], '-A', 'x64', '-T', 'v145',
                  f'-DCMAKE_GENERATOR_INSTANCE={toolchain["VisualStudio"]}', '-DURSA_BUILD_EDITOR=ON', '-DURSA_ENABLE_DOTNET=ON',
                  '-DURSA_ENABLE_TRACY=ON', '-DURSA_MSVC_PARALLEL_COMPILE=ON', f'-DURSA_BUILD_TESTS={"ON" if args.tests else "OFF"}',
-                 f'-DURSA_PROJECT_DIR={project.as_posix()}', f'-DURSA_WORKSPACE_PYTHON={Path(sys.executable).as_posix()}']
+                 f'-DURSA_ENGINE_DIR={engine_root.as_posix()}', f'-DURSA_PROJECT_DIR={project.as_posix()}',
+                 f'-DURSA_WORKSPACE_PYTHON={Path(sys.executable).as_posix()}']
     print('[1/5] Configure workspace tools', flush=True)
     run(configure + ['-DURSA_WORKSPACE_BOOTSTRAP=ON'])
     print('[2/5] Build workspace tools (no game compilation or content import)', flush=True)
@@ -49,7 +55,7 @@ def main():
     print('[5/5] Complete the unified solution and publish the association', flush=True)
     run(configure + ['-DURSA_WORKSPACE_BOOTSTRAP=OFF'])
     run(ide)
-    check(build)
+    run([sys.executable, engine_root / 'Tools/CheckProjectStructure.py', '--build-dir', build])
     print(f'Solution ready: {build / "UrsaEngine.slnx"}')
     print('Open in VS2026. Build UrsaEditor or UrsaScriptPlayer; IDE script builds only check compilation.')
 

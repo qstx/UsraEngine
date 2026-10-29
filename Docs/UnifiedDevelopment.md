@@ -16,14 +16,34 @@ GenerateEngineSolutionWithTracy.bat --tests
 
 首次生成会先配置并构建 Debug 的 UrsaScriptCompile，再复用资产数据库生成项目工程，准备 Debug/Release 的框架 IDE 绑定，最后完成 CMake 解决方案和关联发布。这个过程不编译 Demo 游戏脚本，不导入资源；错误的游戏脚本也能在生成的 IDE 中修复。旧 `Engine/Build` 中的 VS2022 缓存会保留，生成器不会自动删除或复用它。
 
-指定其他项目或构建根仍可使用同一个 bat（路径有空格时加引号）：
+指定其他引擎仓库、项目或构建根仍可使用同一个 bat（路径有空格时加引号）：
 
 ```bat
 GenerateEngineSolutionWithTracy.bat --build-dir "G:\Work\Ursa Build" --project-dir "G:\Work\My Game" --tests
+GenerateEngineSolutionWithTracy.bat --engine-dir "G:\Work\Engine" --project-dir "G:\Work\My Game"
 GenerateEngineSolutionWithTracy.bat --help
 rem 也可直接调用 Python：
 Engine\Tools\Python\3.11.17\python.exe Engine\Tools\GenerateSolution.py --tests
 ```
+
+也可以在调用前设置变量：
+
+```bat
+set "URSA_ENGINE_DIR=G:\Work\Engine"
+set "URSA_PROJECT_DIR=G:\Work\My Game"
+GenerateEngineSolutionWithTracy.bat --tests
+```
+
+`URSA_ENGINE_DIR` 表示引擎仓库目录。入口将其同时传给 CMake `-S` 和 `-DURSA_ENGINE_DIR`，项目目录传给 `-DURSA_PROJECT_DIR`；命令行参数优先于同名环境变量。未指定时沿用当前引擎及其相邻 Demo，默认构建目录随选定引擎变为 `<engine>/Build/VS2026`。VS 中 Editor、Player 和脚本编译工具的工作目录使用该引擎仓库路径。
+
+完成 bat 的首次工作区引导后，也可直接重新配置：
+
+```bat
+cmake -S "%URSA_ENGINE_DIR%" -B "%URSA_ENGINE_DIR%\Build\VS2026" ^
+  -DURSA_ENGINE_DIR="%URSA_ENGINE_DIR%" -DURSA_PROJECT_DIR="%URSA_PROJECT_DIR%"
+```
+
+CMake 将两个缓存变量规范化为绝对路径，检查引擎变量与 `-S` 指向同一源码树、项目包含 Assets 目录。切换引擎仓库时使用对应的新构建目录。
 
 bat 只负责选择解释器与转发参数；阶段调度、工具链检测、C# XML/JSON 生成和结构检查由 Python 标准库实现，常规生成不依赖 PowerShell。`Engine/Tools/GenerateSolution.bat` 提供同样参数。原 `GenerateSolution.ps1` 等接口保留兼容转发；可选的 `--tests` 中既有自动化测试、Tracy MCP 发布和格式检查等辅助脚本仍使用 PowerShell，其中 IDE 验收脚本需要 PowerShell 7。
 
