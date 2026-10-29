@@ -4,6 +4,7 @@
 /Library/
 /.vs/
 *.user
+__pycache__/
 
 /Managed/**/bin/
 /Managed/**/obj/

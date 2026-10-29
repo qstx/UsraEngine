@@ -9,6 +9,15 @@
 | C++ | v145，MSVC 19.51.36260.0，x64 |
 | .NET SDK | 10.0.403，托管工程 Any CPU |
 | C++ 格式 | clang-format 19.1.1 |
+| 工作区 Python | 仓库自带 3.11.17 |
+
+## bat / Python 入口追加验收（2026-10-29）
+
+`GenerateEngineSolutionWithTracy.bat` 现通过 Python 实现生成、工具检测与结构检查。将 PATH 中所有 PowerShell 路径移除，确认 `where pwsh` 与 `where powershell` 均找不到后，默认入口完成实际五阶段生成；生产方案为 17 个第一方目标、424 个 C++ 文件项和 7 个 SDK C# 工程。随后通过 `--tests` 恢复完整工作区，检查 163 个目标、615 个 C++ 文件项及 12 个 C# 工程，Demo 关联为 Ready，bootstrap 为 OFF。
+
+新增 Python 回归 8/8 通过，覆盖 bat 从其他当前目录执行、带空格参数、缺失解释器、过旧 CMake、旧缓存原样保留、子命令失败返回 42 且不发布、XML 元数据/源码/项目引用、原 .NET GUID 的固定值、无变化文件时间戳、源码增删以及 sln/slnx 映射。受影响的 7 个 CTest 全部通过（20.12 秒），包含旧 ps1 转发兼容、结构负例、工程发现、脚本刷新与独立验收夹具；VS 中的 `UrsaProjectStructureCheck` 目标也完成 Python 检查。本轮未启动 VS 或 Editor GUI；此前真实语言服务与混合调试证据保留。
+
+本机日志位于 `Build/VS2026/PythonProductionGeneration.log`、`PythonWorkspaceFinalGeneration.log`、`PythonWorkspaceFinalRegression.log` 和 `PythonStructureTarget.log`。
 
 ## 已通过
 

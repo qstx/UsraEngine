@@ -2,6 +2,7 @@ param([Parameter(Mandatory)][string]$EngineRoot, [Parameter(Mandatory)][string]$
 $ErrorActionPreference = 'Stop'
 $EngineRoot = [IO.Path]::GetFullPath($EngineRoot)
 $Scratch = [IO.Path]::GetFullPath($Scratch)
+$Scratch = Join-Path $Scratch ('Run-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($Scratch) | Out-Null
 . (Join-Path $EngineRoot 'Tools/WindowsToolchain.ps1')
 function Expect([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
@@ -13,8 +14,8 @@ $rejected = $false
 try { Get-UrsaWindowsToolchain -BuildDirectory $oldCache | Out-Null } catch { $rejected = $_.Exception.Message -match 'Incompatible build cache' }
 Expect $rejected 'Old generator cache was accepted'
 Expect ([IO.File]::ReadAllText($cachePath).Contains('2022')) 'Old cache was modified'
-$oldCmake = Join-Path $Scratch 'OldCMake.ps1'
-[IO.File]::WriteAllText($oldCmake, "Write-Output 'cmake version 3.28.0'; exit 0")
+$oldCmake = Join-Path $Scratch 'OldCMake.cmd'
+[IO.File]::WriteAllText($oldCmake, "@echo off`r`necho cmake version 3.28.0`r`nexit /b 0`r`n")
 $rejected = $false
 try { Get-UrsaWindowsToolchain -CMakePath $oldCmake | Out-Null } catch { $rejected = $_.Exception.Message -match '4.4.5 or newer' }
 Expect $rejected 'Old CMake version was accepted'

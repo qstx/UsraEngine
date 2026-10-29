@@ -15,6 +15,8 @@ set_tests_properties(UrsaShaderPackageBuild PROPERTIES FIXTURES_SETUP UrsaShader
 ursa_require_test_content(UrsaShaderPackageBuild UrsaShaderPackageTests)
 
 if(WIN32 AND CMAKE_GENERATOR MATCHES "^Visual Studio")
+  add_test(NAME UrsaPythonWorkspaceToolsTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/PythonWorkspaceToolsTests.py")
   find_program(URSA_POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
   add_test(NAME UrsaAcceptanceProcessTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -File
     "${URSA_SOURCE_ROOT}/Tests/Editor/Scripting/AcceptanceProcessTests.ps1")
@@ -29,8 +31,8 @@ if(WIN32 AND CMAKE_GENERATOR MATCHES "^Visual Studio")
       "${CMAKE_CURRENT_SOURCE_DIR}/UnifiedWorkspaceRefreshTests.ps1"
       -BuildDirectory "${URSA_BINARY_ROOT}" -Compiler "$<TARGET_FILE:UrsaScriptCompile>")
   endif()
-  add_test(NAME UrsaProjectStructureTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
-    -File "${URSA_SOURCE_ROOT}/Tools/CheckProjectStructure.ps1" -BuildDir "${URSA_BINARY_ROOT}")
+  add_test(NAME UrsaProjectStructureTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${URSA_SOURCE_ROOT}/Tools/CheckProjectStructure.py" --build-dir "${URSA_BINARY_ROOT}")
   add_test(NAME UrsaProjectDiscoveryTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
     -File "${CMAKE_CURRENT_SOURCE_DIR}/ProjectDiscoveryTests.ps1"
     -Scratch "${URSA_BINARY_ROOT}/Temp/ProjectDiscovery/$<CONFIG>" -EngineRoot "${URSA_SOURCE_ROOT}"

@@ -24,6 +24,8 @@
 
 Windows 开发基线为 VS2026/v145 与 CMake 4.4.5+。统一 Engine 与 Demo 的开发请从工作区根运行 `GenerateEngineSolutionWithTracy.bat`，它在新的 `Engine/Build/VS2026` 中完成必要工具引导及项目配置，再打开 `UrsaEngine.slnx`。不要把 VS2022 缓存直接切换生成器。CMake 4.4.5 默认生成的 `.slnx` 与旧 `.sln` 均由结构检查识别。
 
+生成入口采用 bat + Python 3.11+，默认使用仓库自带 Python。`--build-dir`、`--project-dir` 和 `--tests` 可从 bat 直接传入；CMake 直接调用 Python 生成 SDK 工程。`UrsaProjectStructureCheck` 也使用 Python，旧 ps1 接口保留兼容转发。常规生成不要求 PowerShell；既有格式检查和可选自动化测试仍保留其脚本依赖。
+
 `Managed/Framework` 分类中的 SDK 工程从原始 csproj 元数据生成，文件通过 Link 指向原始 `Engine/Managed`；`Projects/Demo` 的 Game/EditorScripts 指向 Assets。正式引擎程序集位于 `<build>/Managed/<配置>`，IDE 框架检查产物在 `<build>/Ide/Managed/Build/<工程>/<配置>`，项目 IDE 产物在 `Demo/Library/ScriptIDE/Build`。单独构建 `UrsaEditor` 不要求编译 Demo IDE 工程；单独右键构建一个 C# 项目只检查对应项目与项目引用，不发布游戏脚本。完整流程见 [统一开发工作区](UnifiedDevelopment.md)。
 
 解决方案目标按 Runtime、Engine、Editor、Tools、Tests、Managed 和 ThirdParty 分类。项目内 filter 使用源码相对引擎仓库根的真实目录，例如 `Runtime/Core/Memory`、`Engine/Scripting/DotNet` 和 `Tests/Editor/Scene`，同目录头文件和源文件放在一起。

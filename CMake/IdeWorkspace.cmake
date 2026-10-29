@@ -11,20 +11,21 @@ function(ursa_configure_ide_workspace)
   if(NOT URSA_ENABLE_DOTNET OR NOT CMAKE_GENERATOR STREQUAL "Visual Studio 18 2026")
     return()
   endif()
-  find_program(URSA_WORKSPACE_POWERSHELL NAMES pwsh REQUIRED)
+  include("${URSA_SOURCE_ROOT}/CMake/WorkspacePython.cmake")
+  ursa_find_workspace_python()
   file(GLOB_RECURSE ideInputs CONFIGURE_DEPENDS
     "${URSA_SOURCE_ROOT}/Managed/*.cs" "${URSA_SOURCE_ROOT}/Managed/*.csproj"
     "${URSA_SOURCE_ROOT}/Managed/*.props" "${URSA_SOURCE_ROOT}/Managed/*.targets")
   if(URSA_BUILD_TESTS)
     file(GLOB_RECURSE testIdeInputs CONFIGURE_DEPENDS "${URSA_SOURCE_ROOT}/Tests/Managed/*.cs" "${URSA_SOURCE_ROOT}/Tests/Managed/*.csproj")
     list(APPEND ideInputs ${testIdeInputs})
-    set(testFlag -IncludeTests)
+    set(testFlag --include-tests)
   endif()
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${URSA_SOURCE_ROOT}/Tools/GenerateManagedIde.ps1" ${ideInputs})
-  execute_process(COMMAND "${URSA_WORKSPACE_POWERSHELL}" -NoProfile -File "${URSA_SOURCE_ROOT}/Tools/GenerateManagedIde.ps1"
-    -EngineRoot "${URSA_SOURCE_ROOT}" -BuildRoot "${URSA_BINARY_ROOT}"
-    -RoslynDirectory "${URSA_ROSLYN_DIRECTORY}" -ProjectDirectory "${URSA_PROJECT_DIR}" ${testFlag}
+    "${URSA_SOURCE_ROOT}/Tools/GenerateManagedIde.py" "${URSA_SOURCE_ROOT}/Tools/WorkspaceCommon.py" ${ideInputs})
+  execute_process(COMMAND "${URSA_WORKSPACE_PYTHON}" "${URSA_SOURCE_ROOT}/Tools/GenerateManagedIde.py"
+    --engine-root "${URSA_SOURCE_ROOT}" --build-root "${URSA_BINARY_ROOT}"
+    --roslyn-directory "${URSA_ROSLYN_DIRECTORY}" --project-directory "${URSA_PROJECT_DIR}" ${testFlag}
     COMMAND_ERROR_IS_FATAL ANY)
   file(READ "${URSA_BINARY_ROOT}/Ide/Managed/Projects.json" projects)
   string(JSON count LENGTH "${projects}")
@@ -39,7 +40,7 @@ function(ursa_configure_ide_workspace)
     set(projectIde "${URSA_PROJECT_DIR}/Library/ScriptIDE/Projects")
     if(NOT URSA_WORKSPACE_BOOTSTRAP)
       if(NOT EXISTS "${projectIde}/Game/Ursa.Game.csproj" OR NOT EXISTS "${projectIde}/Editor/Ursa.EditorScripts.csproj")
-        message(FATAL_ERROR "Project IDE files are missing. Run GenerateEngineSolutionWithTracy.bat (or Tools/GenerateSolution.ps1) to bootstrap the unified workspace.")
+        message(FATAL_ERROR "Project IDE files are missing. Run GenerateEngineSolutionWithTracy.bat (or Tools/GenerateSolution.bat) to bootstrap the unified workspace.")
       endif()
       get_filename_component(projectName "${URSA_PROJECT_DIR}" NAME)
       ursa_include_csharp_project(Ursa.Game "${projectIde}/Game/Ursa.Game.csproj" "61019740-4D72-4E51-A436-86CE4B2B2B3F" "Projects/${projectName}")

@@ -2,26 +2,30 @@
 
 ## 环境与生成
 
-需要 VS2026（18.x）的 Desktop development with C++、v145、CMake 4.4.5+、.NET 10 SDK/运行时、PowerShell 7，以及引擎已有的 Vulkan SDK 和第三方子模块。
+需要 VS2026（18.x）的 Desktop development with C++、v145、CMake 4.4.5+、.NET 10 SDK/运行时、Python 3.11+，以及引擎已有的 Vulkan SDK 和第三方子模块。bat 默认使用仓库自带的 `Engine/Tools/Python/3.11.17/python.exe`，无需另装 Python；没有自带解释器时使用 PATH 中的 `python`。可用环境变量 `URSA_PYTHON` 指定解释器的完整路径（值不含额外引号或参数）。
 
 从包含 Engine 与 Demo 的工作区根运行：
 
-```powershell
-.\GenerateEngineSolutionWithTracy.bat
-# 同时包含测试：
-.\GenerateEngineSolutionWithTracy.bat --tests
+```bat
+GenerateEngineSolutionWithTracy.bat
+rem 同时包含测试：
+GenerateEngineSolutionWithTracy.bat --tests
 ```
 
 生成后打开 `Engine/Build/VS2026/UrsaEngine.slnx`。解决方案同时包含 Runtime/Engine/Editor C++、Managed 下的引擎 C# 框架，以及 Projects/Demo 下的 Ursa.Game 与 Ursa.EditorScripts。CMake 4.4.5 默认使用 slnx，既有桥接和检查也支持 sln。
 
 首次生成会先配置并构建 Debug 的 UrsaScriptCompile，再复用资产数据库生成项目工程，准备 Debug/Release 的框架 IDE 绑定，最后完成 CMake 解决方案和关联发布。这个过程不编译 Demo 游戏脚本，不导入资源；错误的游戏脚本也能在生成的 IDE 中修复。旧 `Engine/Build` 中的 VS2022 缓存会保留，生成器不会自动删除或复用它。
 
-需要指定其他项目或构建根时使用 PowerShell 入口：
+指定其他项目或构建根仍可使用同一个 bat（路径有空格时加引号）：
 
-```powershell
-pwsh -NoProfile -File Engine/Tools/GenerateSolution.ps1 `
-  -BuildDirectory G:/Work/UrsaBuild -ProjectDirectory G:/Work/MyGame -Tests
+```bat
+GenerateEngineSolutionWithTracy.bat --build-dir "G:\Work\Ursa Build" --project-dir "G:\Work\My Game" --tests
+GenerateEngineSolutionWithTracy.bat --help
+rem 也可直接调用 Python：
+Engine\Tools\Python\3.11.17\python.exe Engine\Tools\GenerateSolution.py --tests
 ```
+
+bat 只负责选择解释器与转发参数；阶段调度、工具链检测、C# XML/JSON 生成和结构检查由 Python 标准库实现，常规生成不依赖 PowerShell。`Engine/Tools/GenerateSolution.bat` 提供同样参数。原 `GenerateSolution.ps1` 等接口保留兼容转发；可选的 `--tests` 中既有自动化测试、Tracy MCP 发布和格式检查等辅助脚本仍使用 PowerShell，其中 IDE 验收脚本需要 PowerShell 7。
 
 不绑定游戏项目时可直接配置 Engine；关闭 .NET 时不生成托管工程。直接配置绑定项目的完整统一工作区前，应先通过生成入口完成工具引导。
 

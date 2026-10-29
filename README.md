@@ -5,6 +5,7 @@ UrsaEngine is a C++17 graphics engine foundation with an API independent RHI and
 ## Requirements
 
 - Windows 10 or newer, Visual Studio 2026 with C++ desktop tools (v145), CMake 4.4.5 or newer.
+- Unified workspace generation uses BAT entry points and Python 3.11+ (bundled under `Tools/Python`), plus the .NET 10 SDK. Run the workspace's `GenerateEngineSolutionWithTracy.bat --help`; see [Unified development](Docs/UnifiedDevelopment.md) for custom build/project paths. Existing optional automation and formatting tools retain their PowerShell dependencies.
 - Vulkan SDK 1.2 or newer with `glslc`, and a Vulkan 1.2 capable GPU and driver.
 - Git submodules containing pinned GLFW 3.5.1, VMA 3.4.0, nlohmann/json 3.12.0, EASTL 3.21.23 (`7fadbf0`), its matching EABase (`123363e`), spdlog 1.13.0 (`7c02e20`), Assimp 6.0.5 (`392a658f`), stb (`2c980bb5`), Dear ImGui `v1.92.9b-docking` (`b48d1af`), and ImGuizmo `1.10` (`b796ac3`) sources.
 

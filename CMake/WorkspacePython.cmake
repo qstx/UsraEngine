@@ -1,0 +1,20 @@
+# Use the same interpreter selection as Tools/RunPython.bat. Keep this optional
+# for native-only configurations that do not generate managed IDE projects.
+function(ursa_find_workspace_python)
+  if(NOT URSA_WORKSPACE_PYTHON)
+    if(DEFINED ENV{URSA_PYTHON} AND NOT "$ENV{URSA_PYTHON}" STREQUAL "")
+      set(URSA_WORKSPACE_PYTHON "$ENV{URSA_PYTHON}")
+    elseif(EXISTS "${URSA_SOURCE_ROOT}/Tools/Python/3.11.17/python.exe")
+      set(URSA_WORKSPACE_PYTHON "${URSA_SOURCE_ROOT}/Tools/Python/3.11.17/python.exe")
+    else()
+      find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+      set(URSA_WORKSPACE_PYTHON "${Python3_EXECUTABLE}")
+    endif()
+  endif()
+  execute_process(COMMAND "${URSA_WORKSPACE_PYTHON}" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"
+    RESULT_VARIABLE pythonResult OUTPUT_QUIET ERROR_QUIET)
+  if(NOT pythonResult STREQUAL "0")
+    message(FATAL_ERROR "Python 3.11+ is required for workspace generation. Set URSA_PYTHON or URSA_WORKSPACE_PYTHON to its executable path.")
+  endif()
+  set(URSA_WORKSPACE_PYTHON "${URSA_WORKSPACE_PYTHON}" CACHE FILEPATH "Workspace Python 3.11+ interpreter")
+endfunction()

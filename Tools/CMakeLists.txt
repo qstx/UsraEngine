@@ -22,8 +22,8 @@ if(WIN32)
   set_target_properties(UrsaEngineFormatCheck PROPERTIES FOLDER "Tools")
   if(CMAKE_GENERATOR MATCHES "^Visual Studio")
     add_custom_target(UrsaProjectStructureCheck
-      COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
-        -File "${CMAKE_CURRENT_SOURCE_DIR}/CheckProjectStructure.ps1" -BuildDir "${URSA_BINARY_ROOT}"
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/RunPython.bat"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CheckProjectStructure.py" --build-dir "${URSA_BINARY_ROOT}"
       VERBATIM)
     set_target_properties(UrsaProjectStructureCheck PROPERTIES FOLDER "Tools")
   endif()
