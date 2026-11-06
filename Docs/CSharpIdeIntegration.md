@@ -72,7 +72,7 @@ Engine 提供可复用的真实调试验收工具，要求已安装并可使用�
 
 ```powershell
 cmake --build Engine/Build/VS2026 --config Debug --target UrsaManagedDebugAcceptance -- /m:1 /nr:false
-Engine/Tests/Editor/Scripting/RunManagedDebugAcceptance.ps1 -BuildDirectory Engine/Build/VS2026 -VisualStudioInstallDirectory 'E:/Microsoft Visual Studio/18/Professional' -Unified
+Engine/Tools/RunPython.bat Engine/Tests/Editor/Scripting/RunManagedDebugAcceptance.py --build-directory Engine/Build/VS2026 --visual-studio-install-directory 'E:/Microsoft Visual Studio/18/Professional' --unified
 ```
 
 证据写入 `Engine/Build/VS2026/IdeAcceptance/managed-debug-evidence.json`，包括源文件行号、调用栈、局部变量、正式构建指纹、PDB SHA-256 和重载后的字段状态。该工具不代替 IDE 补全和跨工程导航验收。

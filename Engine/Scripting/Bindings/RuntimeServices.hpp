@@ -12,6 +12,12 @@ namespace Ursa::Scripting::Bindings
 {
 struct RuntimeServices
 {
+	static Result<bool> CpuMarkersEnabled(BindingCall& call);
+	static Result<UInt64> RegisterCpuMarker(BindingCall& call, const Utf8View& name, const Utf8View& file,
+	                                        const Utf8View& function, Int32 line);
+	static Result<UInt64> BeginCpuMarker(BindingCall& call, UInt64 marker);
+	static Result<void> EndCpuMarker(BindingCall& call, UInt64 token);
+
 	using Handle = Wire::Value_Ursa_NativeHandle;
 	using LocalValue = Wire::Value_Ursa_LocalTransformValue;
 	using VectorValue = Wire::Value_Ursa_Vector3;

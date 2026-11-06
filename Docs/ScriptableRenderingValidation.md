@@ -95,7 +95,7 @@ Debug 全量构建及 Release 全量测试正在继续；Editor 交互、Player 
 
 ## 2026-10-14：Demo 离屏与计算样例
 
-`Tests/Integration/ProjectPipelineSamplesTests.ps1` 在独立测试项目中复制 Demo Assets，以公开 C# API 和发布内容验收真实 Player、Editor，不改写正在编辑的 Demo 项目或已有资源 GUID。
+`Tests/Integration/ProjectPipelineSamplesTests.py` 在独立测试项目中复制 Demo Assets，以公开 C# API 和发布内容验收真实 Player、Editor，不改写正在编辑的 Demo 项目或已有资源 GUID。
 
 已通过的实际流程：默认 Forward → 项目 Showcase 管线 → Editor Play → ComputeShowcase 管线 → Pak Player。每个相机只剔除一次，同一结果生成不透明、透明列表，按顺序写入带深度的离屏颜色，再由项目 Composite Shader 全屏合成。输出保留 Checker、Ceramic、Gold 和地板；合成图像上下方向与默认图像一致。
 

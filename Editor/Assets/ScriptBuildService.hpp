@@ -53,6 +53,11 @@ public:
 
 	Result<ScriptBuildReport> Build(ScriptAssemblyGroup group, const String& configuration = "Debug");
 
+	void SetDeepProfiling(bool enabled)
+	{
+		deepProfiling = enabled;
+	}
+
 	Result<String> SourceFingerprint();
 
 	Result<bool> IsBuildCurrent(ScriptAssemblyGroup group, const String& configuration = "Debug");
@@ -94,5 +99,11 @@ private:
 	Vector<ScriptTypeRecord> scriptTypes;
 	Vector<ScriptDiagnostic> diagnosticRecords;
 	bool projectsGenerated = false;
+#if defined(URSA_ENABLE_DEEP_PROFILING)
+	bool deepProfiling = true;
+#else
+	bool deepProfiling = false;
+#endif
+	String selectedConfiguration;
 };
 } // namespace Ursa::Editor

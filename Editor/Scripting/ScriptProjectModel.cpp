@@ -8,6 +8,17 @@
 
 namespace Ursa::Editor
 {
+std::filesystem::path ScriptFrameworkVariant(const std::filesystem::path& assembly, const String& configuration)
+{
+	const auto directory = assembly.parent_path();
+	const auto name = directory.filename();
+	if (name == "Debug" || name == "Release" || name == "Publish")
+	{
+		return directory.parent_path() / ToStdString(configuration) / assembly.filename();
+	}
+	return assembly;
+}
+
 String EscapeProjectXml(const String& value)
 {
 	String escaped;
@@ -87,7 +98,13 @@ String ScriptProjectInput::Properties() const
 	       "    <ImplicitUsings>" + EscapeProjectXml(implicitUsings) + "</ImplicitUsings>\n" +
 	       "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n" +
 	       "    <DebugType>portable</DebugType>\n" +
-	       "    <Optimize Condition=\"'$(Configuration)' == 'Debug'\">false</Optimize>\n";
+	       "    <Configurations>Debug;Release;Publish</Configurations>\n"
+	       "    <Optimize Condition=\"'$(Configuration)' == 'Debug'\">false</Optimize>\n"
+	       "    <Optimize Condition=\"'$(Configuration)' != 'Debug'\">true</Optimize>\n"
+	       "    <DefineConstants Condition=\"'$(Configuration)' == "
+	       "'Publish'\">$(DefineConstants);URSA_PUBLISH</DefineConstants>\n"
+	       "    <DefineConstants Condition=\"'$(Configuration)' != 'Publish' And '$(UrsaEnableProfiler)' != "
+	       "'false'\">$(DefineConstants);URSA_ENABLE_PROFILER</DefineConstants>\n";
 }
 
 String ScriptProjectInput::CompileItems(ScriptAssemblyGroup group, const std::filesystem::path& projectDirectory,
@@ -123,7 +140,8 @@ String ScriptProjectInput::FrameworkItems(ScriptAssemblyGroup group) const
 			continue;
 		}
 		result += "    <Reference Include=\"" + EscapeProjectXml(reference.name) + "\"><HintPath>" +
-		          EscapeProjectXml(PathToUrsaString(reference.nativePath)) + "</HintPath></Reference>\n";
+		          EscapeProjectXml(PathToUrsaString(ScriptFrameworkVariant(reference.nativePath, "$(Configuration)"))) +
+		          "</HintPath></Reference>\n";
 	}
 	return result;
 }

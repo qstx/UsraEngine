@@ -29,6 +29,16 @@ if(URSA_BUILD_EDITOR)
       ENVIRONMENT "TEMP=${URSA_BINARY_ROOT}/temp;TMP=${URSA_BINARY_ROOT}/temp")
 
     ursa_add_test_executable(UrsaScriptBuildTests ScriptBuildTests.cpp)
+    ursa_add_test_executable(UrsaScriptProfilingBuildTests ScriptProfilingBuildTests.cpp)
+    target_link_libraries(UrsaScriptProfilingBuildTests PRIVATE Ursa::Editor)
+    add_dependencies(UrsaScriptProfilingBuildTests UrsaManagedHostAssemblies UrsaManagedScriptCatalog UrsaManagedDeepProfiler)
+    add_test(NAME UrsaScriptProfilingBuildTests COMMAND UrsaScriptProfilingBuildTests
+      "${URSA_DOTNET_EXECUTABLE}" "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Runtime.dll"
+      "${URSA_MANAGED_OUTPUT_DIR}/Ursa.Editor.dll"
+      "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.ScriptCatalogGenerator.dll"
+      "${URSA_DOTNET_REFERENCE_PACK}" "$<CONFIG>")
+    set_tests_properties(UrsaScriptProfilingBuildTests PROPERTIES TIMEOUT 240
+      ENVIRONMENT "TEMP=${URSA_BINARY_ROOT}/Temp;TMP=${URSA_BINARY_ROOT}/Temp")
     target_link_libraries(UrsaScriptBuildTests PRIVATE Ursa::Editor)
     add_dependencies(UrsaScriptBuildTests UrsaManagedHostAssemblies UrsaManagedScriptCatalog)
 

@@ -1,3 +1,7 @@
+ursa_add_test_executable(UrsaCpuProfilerTests CpuProfilerTests.cpp)
+target_link_libraries(UrsaCpuProfilerTests PRIVATE Ursa::Runtime)
+add_test(NAME UrsaCpuProfilerTests COMMAND UrsaCpuProfilerTests)
+
 ursa_add_test_executable(UrsaProfilerCompileTests ProfilerCompileTests.cpp)
 target_link_libraries(UrsaProfilerCompileTests PRIVATE Ursa::Runtime)
 

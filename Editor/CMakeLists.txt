@@ -62,7 +62,7 @@ endif()
 
 if(URSA_ENABLE_DOTNET)
     target_link_libraries(UrsaEditorCore PRIVATE Ursa::DotNetHost)
-    add_dependencies(UrsaEditorCore UrsaManagedScriptCatalog)
+    add_dependencies(UrsaEditorCore UrsaManagedScriptCatalog UrsaManagedDeepProfiler)
     target_compile_definitions(UrsaEditorCore PUBLIC
       URSA_ENABLE_DOTNET=1
       URSA_DOTNET_EXECUTABLE_PATH="${URSA_DOTNET_EXECUTABLE}"

@@ -11,14 +11,16 @@ int main(int argumentCount, char** arguments)
 	using namespace Ursa::Editor;
 	if (argumentCount < 2)
 	{
-		std::cerr << "Usage: UrsaScriptCompile <project-directory> [Debug|Release|--ide [--workspace "
-		             "<description.json>] [--prepare-workspace]]\n";
+		std::cerr << "Usage: UrsaScriptCompile <project-directory> [Debug|Release|Publish|--ide [--workspace "
+		             "<description.json>] [--prepare-workspace]] [--deep-profile|--no-deep-profile]\n";
 		return 2;
 	}
 	const bool ideOnly = argumentCount >= 3 && String(arguments[2]) == "--ide";
 	const String configuration = argumentCount >= 3 && !ideOnly ? arguments[2] : "Debug";
 	std::filesystem::path description;
 	bool preparing = false;
+	bool deepProfiling = false;
+	bool noDeepProfiling = false;
 	for (Int32 index = 3; index < argumentCount; ++index)
 	{
 		const String option = arguments[index];
@@ -30,15 +32,23 @@ int main(int argumentCount, char** arguments)
 		{
 			preparing = true;
 		}
+		else if (!ideOnly && option == "--deep-profile")
+		{
+			deepProfiling = true;
+		}
+		else if (!ideOnly && option == "--no-deep-profile")
+		{
+			noDeepProfiling = true;
+		}
 		else
 		{
 			std::cerr << "Unknown or incomplete script compiler option\n";
 			return 2;
 		}
 	}
-	if (configuration != "Debug" && configuration != "Release")
+	if (configuration != "Debug" && configuration != "Release" && configuration != "Publish")
 	{
-		std::cerr << "Script configuration must be Debug or Release\n";
+		std::cerr << "Script configuration must be Debug, Release or Publish\n";
 		return 2;
 	}
 	auto workspace = ProjectWorkspace::Open(std::filesystem::absolute(std::filesystem::u8path(arguments[1])));
@@ -75,6 +85,18 @@ int main(int argumentCount, char** arguments)
 		}
 		std::cout << ToStdString(PathToUrsaString(generated.value.solution)) << '\n';
 		return 0;
+	}
+	if (deepProfiling)
+	{
+		service.value->SetDeepProfiling(true);
+	}
+	if (noDeepProfiling)
+	{
+		service.value->SetDeepProfiling(false);
+	}
+	if (configuration == "Publish" && !deepProfiling)
+	{
+		service.value->SetDeepProfiling(false);
 	}
 	auto compiled = service.value->Build(ScriptAssemblyGroup::Editor, configuration);
 	if (!compiled)

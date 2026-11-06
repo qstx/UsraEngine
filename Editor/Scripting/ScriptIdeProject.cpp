@@ -40,14 +40,14 @@ String Solution()
 		          group + "\\" + project.first + ".csproj\", \"" + project.second + "\"\nEndProject\n";
 	}
 	result += "Global\n\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n";
-	for (const String configuration : {String("Debug"), String("Release")})
+	for (const String configuration : {String("Debug"), String("Release"), String("Publish")})
 	{
 		result += "\t\t" + configuration + "|Any CPU = " + configuration + "|Any CPU\n";
 	}
 	result += "\tEndGlobalSection\n\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\n";
 	for (const auto& id : {gameId, editorId})
 	{
-		for (const String configuration : {String("Debug"), String("Release")})
+		for (const String configuration : {String("Debug"), String("Release"), String("Publish")})
 		{
 			result += "\t\t" + id + "." + configuration + "|Any CPU.ActiveCfg = " + configuration + "|Any CPU\n";
 			result += "\t\t" + id + "." + configuration + "|Any CPU.Build.0 = " + configuration + "|Any CPU\n";
@@ -152,7 +152,7 @@ Result<ScriptIdeWorkspace> ScriptIdeProject::Generate(VirtualFileSystem& filesys
 					const auto solution = std::filesystem::u8path(document.at("Solution").get<std::string>());
 					const auto managed = std::filesystem::u8path(document.at("ManagedProjects").get<std::string>());
 					if (document.at("Version") != 1 || (!options.preparing && !document.at("Ready").get<bool>()) ||
-					    document.at("Configurations") != Json::array({"Debug", "Release"}) ||
+					    document.at("Configurations") != Json::array({"Debug", "Release", "Publish"}) ||
 					    !buildRoot.is_absolute() || !std::filesystem::is_regular_file(engineRoot / "CMakeLists.txt") ||
 					    !std::filesystem::equivalent(solution.parent_path(), buildRoot) ||
 					    (solution.filename() != "UrsaEngine.sln" && solution.filename() != "UrsaEngine.slnx") ||
@@ -179,7 +179,7 @@ Result<ScriptIdeWorkspace> ScriptIdeProject::Generate(VirtualFileSystem& filesys
 	catch (const std::exception& exception)
 	{
 		return Result<ScriptIdeWorkspace>::Failure(
-		    "Cannot use unified workspace. Run GenerateEngineSolutionWithTracy.bat to regenerate or reassociate it. " +
+		    "Cannot use unified workspace. Run GenerateEngineSolution.bat to regenerate or reassociate it. " +
 		    ToUrsaString(exception.what()));
 	}
 	const Json codeWorkspace = {

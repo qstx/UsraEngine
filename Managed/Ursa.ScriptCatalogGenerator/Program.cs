@@ -20,6 +20,8 @@ internal sealed class Manifest
 	public string BindingsAssembly { get; set; } = string.Empty;
 	public string LanguageVersion { get; set; } = "14.0";
 	public string Nullable { get; set; } = "enable";
+	public string Configuration { get; set; } = "Debug";
+	public bool ProfilerEnabled { get; set; } = true;
 	public List<SourceEntry> Sources { get; set; } = new();
 }
 
@@ -117,7 +119,11 @@ internal static class Program
 
 			if (!LanguageVersionFacts.TryParse(manifest.LanguageVersion, out LanguageVersion languageVersion))
 				throw new InvalidDataException("Unsupported script language version.");
-			var parseOptions = new CSharpParseOptions(languageVersion);
+			var symbols = new List<string> { "TRACE", "NET", "NET10_0", "NET10_0_OR_GREATER", "NETCOREAPP" };
+			if (manifest.Configuration == "Debug") symbols.Add("DEBUG");
+			if (manifest.Configuration == "Publish") symbols.Add("URSA_PUBLISH");
+			else if (manifest.ProfilerEnabled) symbols.Add("URSA_ENABLE_PROFILER");
+			var parseOptions = new CSharpParseOptions(languageVersion, preprocessorSymbols: symbols);
 			var trees = manifest.Sources.Select(source =>
 				CSharpSyntaxTree.ParseText(File.ReadAllText(source.Path), parseOptions, source.VirtualPath)).ToArray();
 			var references = Directory.GetFiles(manifest.ReferenceDirectory, "*.dll")

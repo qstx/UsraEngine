@@ -13,11 +13,11 @@
 ```powershell
 cmake --build Engine/Build --config Debug --target UrsaEditor UrsaScriptPlayer UrsaAssetImport UrsaFrameCaptureTests --parallel 8
 Engine/Build/Debug/UrsaAssetImport.exe --project Demo --configuration Debug --profile Both
-powershell -NoProfile -ExecutionPolicy Bypass -File Engine/Tools/CaptureRenderingBaseline.ps1
+Engine/Tools/RunPython.bat Engine/Tools/CaptureRenderingBaseline.py
 ```
 
 脚本默认写入新的 `Engine/Build/SrpBaseline/<时间戳>/`，拒绝覆盖已有证据。
-`-OutputDir <新目录>` 可固定输出位置，`-BuildDir`、`-ProjectDir` 和 `-Configuration`
+`--output-dir <新目录>` 可固定输出位置，`--build-dir`、`--project-dir` 和 `--configuration`
 可选择构建及项目。每次运行使用独立用户数据目录，不修改已有 Editor 用户布局。
 源码场景、材质和元数据不保存；运行生成的对象随会话退出清理。
 

@@ -28,9 +28,10 @@ when changing a test's profile. `TestProfiles.cmake` classifies tests during
 `ursa_finalize_test_directory()`; call that helper after setting fixture requirements.
 Update its resource lists when adding GPU or window tests, including tests with indirect device creation.
 
-Build and project integration scripts share `URSA_POWERSHELL_EXECUTABLE`. CMake prefers
-`pwsh` and falls back to Windows PowerShell; an existing cache selection can be changed
-with `-DURSA_POWERSHELL_EXECUTABLE=<path>` when configuring.
+Build and project integration scripts use Python 3.11+ through `Tools/RunPython.bat`.
+The bundled interpreter is selected by default; set `URSA_PYTHON` to an executable path
+to override it. No PowerShell installation is required. VS acceptance still uses the
+existing C# automation controller and requires VS2026 and .NET 10.
 
 Public header examples share `UrsaPublicHeaderSmoke`. Each example remains a separate
 translation unit with its original includes and runtime checks; the runner reports failed

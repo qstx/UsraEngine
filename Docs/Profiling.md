@@ -1,6 +1,6 @@
 # Tracy 性能分析
 
-UrsaEngine 使用 Tracy 采集 CPU 帧阶段和 Vulkan GPU 区段。Tracy 是可选依赖，默认构建不会链接 Tracy client。Profiler 图形界面由 Tracy 项目单独提供，不随 UrsaEditor 或游戏发布。
+UrsaEngine 使用 Tracy 采集 CPU 帧阶段和 Vulkan GPU 区段。Debug 和 Release 默认包含基础采样，可用 `URSA_ENABLE_TRACY=OFF` 显式关闭；Publish 使用优化代码且不链接 Tracy client。Profiler 图形界面由 Tracy 项目单独提供，不随 UrsaEditor 或游戏发布。
 
 ## 启用
 
@@ -17,9 +17,9 @@ cmake -S Engine -B Engine/Build -DURSA_ENABLE_TRACY=ON -DCMAKE_BUILD_TYPE=Debug
 cmake --build Engine/Build --config Debug --parallel
 ```
 
-Release 配置使用相同选项，将 `Debug` 改为 `Release`。如果使用 Visual Studio 生成器，通过 `--config` 选择构建配置即可。
+Release 配置使用相同选项，将 `Debug` 改为 `Release`。Publish 是独立的正式发布配置，编译和链接优化继承 Release，强制移除采样。Visual Studio 生成器通过 `--config Debug|Release|Publish` 选择配置。完整说明见 [构建配置](BuildConfigurations.md)。
 
-Ursa 默认启用 Tracy 的 on-demand 采样。应用启动后不会持续记录完整 capture；连接 Profiler 并开始录制后才会采集，停止录制即可结束本次采样。普通构建可省略 `URSA_ENABLE_TRACY` 或显式设为 `OFF`。
+Ursa 默认启用 Tracy 的 on-demand 采样。应用启动后不会持续记录完整 capture；连接 Profiler 并开始录制后才会采集，停止录制即可结束本次采样。显式关闭基础采样时使用 `URSA_ENABLE_TRACY=OFF`。同一生成目录的 Publish 始终不链接 Tracy，即使 Debug/Release 已开启。
 
 ## 连接 Profiler
 
@@ -46,7 +46,58 @@ cmake --build Engine/Build --config Debug --parallel
 
 从 Tracy `v0.14.1` 下载或构建独立的 Tracy Profiler，并确保 Profiler 和 Engine 使用同一版本。先用 `UrsaEditor --project Demo` 或 `UrsaScriptPlayer --project Demo --scene Snake/Snake.ursascene` 启动应用，再在 Tracy Profiler 中连接该进程并开始 capture。默认连接使用本机网络发现；如需跨机器采样，请按 Tracy Profiler 的连接设置配置网络。
 
-CPU 时间线包含 Engine/Editor 帧、场景更新阶段、SceneDrawEncoder 录制阶段以及原生到 C# 的生命周期回调边界。Vulkan GPU 时间线标记渲染和计算命令；如果所选队列不支持 Vulkan 时间戳，GPU 区段会跳过，CPU 采样仍可使用。托管回调按脚本类型和回调阶段命名；用户 C# 方法体内部没有单独插桩。
+CPU 时间线包含 Engine/Editor 帧、场景更新阶段、SceneDrawEncoder 录制阶段以及原生到 C# 的生命周期回调边界。Vulkan GPU 时间线标记渲染和计算命令；如果所选队列不支持 Vulkan 时间戳，GPU 区段会跳过，CPU 采样仍可使用。托管回调按脚本类型和回调阶段命名；用户 C# 方法体内部可用下面的显式 CPU 标记。
+
+### C# 关键方法的 CPU 耗时
+
+使用 `Ursa.Profiling.ProfilerMarker` 声明固定标记，在要测量的同步范围中使用 `Auto()`：
+
+```csharp
+using Ursa.Profiling;
+
+private static readonly ProfilerMarker findTargetMarker = new("Player.FindTarget");
+
+private void FindTarget()
+{
+    using var scope = findTargetMarker.Auto();
+    // 目标搜索逻辑；return 和异常展开都会结束采样。
+}
+```
+
+启用 `URSA_ENABLE_TRACY` 并连接 Tracy 后，该范围与 C++ 标记使用同一 client；在 Update 中调用时嵌套于已有的 `Player::Update` zone。每个 marker 有独立的源码位置和统计身份，构造时自动记录声明处的文件、成员名和行号。计时覆盖 scope 内经过的时间，包括内部调用和等待，不等同于线程实际占用 CPU 的时间。
+
+marker 是值类型，可在宿主初始化前作为静态字段构造，首次使用才注册 native 元数据。请复用固定 marker，避免逐帧创建带对象 ID 等变化名称的 marker：native 元数据按内容去重并保留到进程退出，以便脚本卸载后 Tracy 仍可读取。标记不会保留项目程序集。Publish 或框架编译关闭 profiling 时，构造/Auto/Dispose 是没有采样状态的编译期空实现，不查询绑定或 native 能力。开发框架在绑定前使用标记为空操作，初始化后可正常采样。
+
+`AutoScope` 是 ref struct，须在同一线程、同一脚本绑定上下文中按栈顺序结束；不要复制 scope，不要跨 `await`、`yield` 或会话重载持有它。明确支持跨线程的 profiling 绑定随执行上下文传递，因此 Task/await 的后续同步片段可以创建自己的 scope；这不赋予场景和编辑器 API 跨线程访问权限。重复 Dispose 同一个 scope 为空操作；错误的结束顺序或上下文会在提交错误事件前报告异常。Tracy 断开重连时由完整连接身份过滤旧 scope 的结束事件。
+
+CPU marker 与 `Ursa.Rendering.ProfilingScope` 用途不同：后者在 CommandBuffer 中录制 GPU 调试域。新增 Runtime 绑定后需重建引擎及项目脚本内容，使契约身份一致。
+
+### Deep Profiling
+
+Debug/Release 可显式开启项目方法自动插桩，默认关闭。统一使用某个配置的工具和框架：
+
+```powershell
+cmake --build Engine/Build/VS2026 --config Release --target UrsaScriptCompile
+Engine/Build/VS2026/Release/UrsaScriptCompile.exe Demo Release --deep-profile
+```
+
+也可以在 `UrsaAssetImport` 中使用 `--deep-profile` / `--no-deep-profile`。要让 Editor 的项目构建默认开启，可在 CMake 配置中设置 `URSA_ENABLE_DEEP_PROFILING=ON`；它要求 .NET 和 Tracy 支持。开关变化会使脚本缓存失效。Publish 显式请求 Deep Profiling 会失败。
+
+工具对编译后的项目程序集和 portable PDB 后处理：方法进入时开始范围，正常返回和异常展开时结束；覆盖泛型、递归、属性访问器及编译器生成的方法。实例构造从 this/base 初始化调用之后开始记录。async/iterator 按状态机每次执行的同步片段记录，名称带 `[MoveNext]` 等后缀，不把 await/yield 挂起时间计为 CPU 执行。任务切到后台线程时在该线程建立独立范围。
+
+使用 `Ursa.Profiling.IgnoredByDeepProfiler` 可忽略方法、构造函数或整个类型；被忽略 async/iterator 的生成状态机也不插桩。无方法体的 abstract/extern 不产生范围。系统库和引擎框架不改写；强命名程序集及不支持的 IL 会明确报错。重复插桩、损坏符号或后处理失败不会发布新内容。
+
+Deep Profiling 会增加方法调用、元数据和传输开销，并禁止被插桩方法内联；适合定位调用层级。定位后关闭深度采样，用优化的 Release 与少量手动 marker 复测。插桩工具和 Mono.Cecil 只在构建机器使用，不打包进 Player。
+
+2026-11-04 Windows x64 Debug 的真实宿主采集验证：项目 DLL 自动插桩后，四轮加载/运行/卸载得到 `SessionProbe.Awake()` 4 次、`ComputeAsync() [MoveNext]` 8 次；后者分布在 3 个线程，4 个后台工作 marker 均嵌套在对应线程的 MoveNext 范围内。采集与 CSV 位于忽略目录 `Engine/Build/DeepProfiling/HostCapture/`，仅用于功能验证。
+
+构建测试目标后，可运行 `UrsaCpuProfilerTests`、`UrsaManagedProfilerTests` 和 `UrsaManagedProfilerHostTests`；宿主测试执行四轮真实脚本加载、运行和卸载。需要采集时运行：
+
+```powershell
+Engine/Build/VS2026/Debug/UrsaDotNetHostTests.exe Engine/Build/VS2026/Managed/Debug Engine/Build/MarkerValidation/HostCapture --profiling-capture
+```
+
+该模式等待 Tracy 连接最多 10 秒。2026-11-04 Windows x64 Debug 实测 capture 中，`SessionProbe.Awake.Work` 和 `SessionProbe.Awake.Counter` 各有 4 次采样，源码映射到 `SessionProbe.cs`；四个子范围均处于同线程的外层范围内，宿主正常退出。Tracy 开启与关闭两种构建的 CPU marker、托管 API、真实宿主及源码符号相关测试各 5 项通过。原生 scope 的两次实际 capture 也验证了断开重连后继续采样。记录的是功能正确性，不是性能基准。
 
 每个完成的主循环帧发送一个默认 `FrameMark`，并保留 `Engine` 或 `Editor` 命名帧标记。默认帧序列供 Profiler 初始 FPS/帧时间显示及客户端全局帧计数使用，命名序列用于区分运行入口。标记位于帧工作完成后的边界；窗口最小化或帧失败退出时不计作完成帧，Editor 未取得交换链图像的分支也不计帧。Editor 的 FPS 是编辑器整帧频率，包含 UI、游戏预览、呈现及等待时间，不能直接视为 Play 模式的逻辑更新频率。
 

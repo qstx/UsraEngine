@@ -16,8 +16,7 @@ target_link_libraries(UrsaShaderImporter PRIVATE Ursa::Engine)
 
 if(WIN32)
   add_custom_target(UrsaEngineFormatCheck
-    COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
-      -File "${CMAKE_CURRENT_SOURCE_DIR}/Format.ps1" -Check -ProjectDir "${URSA_PROJECT_DIR}"
+    COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat" "${CMAKE_CURRENT_SOURCE_DIR}/Format.py" --check --project-dir "${URSA_PROJECT_DIR}"
     WORKING_DIRECTORY "${URSA_SOURCE_ROOT}" VERBATIM)
   set_target_properties(UrsaEngineFormatCheck PROPERTIES FOLDER "Tools")
   if(CMAKE_GENERATOR MATCHES "^Visual Studio")

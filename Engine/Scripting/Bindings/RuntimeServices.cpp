@@ -4,9 +4,32 @@
 #include <Mesh/Primitive.hpp>
 #include <Animation/AnimatorComponent.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
+#include <Core/CpuProfiler.hpp>
+#include <Core/Profiler.hpp>
 
 namespace Ursa::Scripting::Bindings
 {
+Result<bool> RuntimeServices::CpuMarkersEnabled(BindingCall&)
+{
+	return Result<bool>::Success(Profiling::CpuMarkersEnabled());
+}
+
+Result<UInt64> RuntimeServices::RegisterCpuMarker(BindingCall&, const Utf8View& name, const Utf8View& file,
+                                                  const Utf8View& function, Int32 line)
+{
+	return Profiling::RegisterCpuMarker(ReadString(name), ReadString(file), ReadString(function), line);
+}
+
+Result<UInt64> RuntimeServices::BeginCpuMarker(BindingCall&, UInt64 marker)
+{
+	return Profiling::BeginCpuMarker(marker);
+}
+
+Result<void> RuntimeServices::EndCpuMarker(BindingCall&, UInt64 token)
+{
+	return Profiling::EndCpuMarker(token);
+}
+
 ManagedSceneApi& RuntimeServices::SceneApi(BindingCall& call)
 {
 	auto* api = dynamic_cast<ManagedSceneApi*>(&call.context);
@@ -20,6 +43,7 @@ ManagedSceneApi& RuntimeServices::SceneApi(BindingCall& call)
 
 Result<RuntimeServices::Handle> RuntimeServices::CreateGameObject(BindingCall& call, const Utf8View& name)
 {
+	URSA_PROFILE_SCOPE("Ursa.API.GameObject.Create");
 	if (name.length > 256)
 	{
 		return Result<Handle>::Failure("GameObject name exceeds 256 UTF-8 bytes");
@@ -106,6 +130,7 @@ Result<DataView> RuntimeServices::GetChildren(BindingCall& call, const Handle& h
 
 Result<void> RuntimeServices::DestroyGameObject(BindingCall& call, const Handle& handle)
 {
+	URSA_PROFILE_SCOPE("Ursa.API.GameObject.Destroy");
 	auto& api = SceneApi(call);
 	api.RequireSceneMutation();
 	return TakeBindingResult(api.Resolve(ReadManagedHandle(handle)))->Destroy();

@@ -487,6 +487,18 @@ internal static unsafe partial class Program
 
 	private static int Main(string[] args)
 	{
+		if (args.Length == 5 && args[0] == "--deep-profiling-only")
+		{
+			TestDeepProfiling(args[1], args[2], args[3], args[4]);
+			Console.WriteLine("Deep Profiling IL, symbols, behavior, async threads and collectible contexts verified.");
+			return 0;
+		}
+		if (args.Length == 1 && args[0] == "--profiling-only")
+		{
+			TestCpuProfilerMarkers();
+			Console.WriteLine("Managed CPU marker scopes, caching, allocation and binding lifetime verified.");
+			return 0;
+		}
 		if (args.Length == 1 && args[0] == "--debug-symbols-only")
 		{
 			ScriptDebugSymbolsTests.Run();
@@ -494,6 +506,7 @@ internal static unsafe partial class Program
 			return 0;
 		}
 		InstallProtocolScriptIdentities();
+		TestCpuProfilerMarkers();
 		using var runtimeBindings = InstallRuntimeBindings();
 		using var renderingBindings = InstallRenderingBindings();
 		ScriptableObjectTests.Run();

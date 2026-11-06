@@ -2,7 +2,22 @@
   <PropertyGroup>
     <!-- Keep old local outputs out of source globs when artifacts are external. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**</DefaultItemExcludes>
+    <Configurations>Debug;Release;Publish</Configurations>
+    <Optimize Condition="'$(Configuration)' != 'Debug'">true</Optimize>
+    <Optimize Condition="'$(Configuration)' == 'Debug'">false</Optimize>
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <UrsaEnableProfiler Condition="'$(UrsaEnableProfiler)' == '' And '$(Configuration)' != 'Publish'">true</UrsaEnableProfiler>
+    <UrsaEnableProfiler Condition="'$(Configuration)' == 'Publish'">false</UrsaEnableProfiler>
+    <DefineConstants Condition="'$(UrsaEnableProfiler)' == 'true' And '$(Configuration)' != 'Publish'">$(DefineConstants);URSA_ENABLE_PROFILER</DefineConstants>
+    <DefineConstants Condition="'$(Configuration)' == 'Publish'">$(DefineConstants);URSA_PUBLISH</DefineConstants>
   </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>Ursa.BuildConfiguration</_Parameter1>
+      <_Parameter2>$(Configuration)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
   <!-- dotnet emits UTF-8. The VC CustomBuild task otherwise decodes its pipes
        using the system OEM code page, even in a UTF-8 terminal. -->
   <ItemDefinitionGroup Condition="'$(MSBuildProjectExtension)' == '.vcxproj'">

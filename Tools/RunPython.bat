@@ -1,5 +1,6 @@
 @echo off
 setlocal DisableDelayedExpansion
+set "PYTHONUTF8=1"
 rem URSA_PYTHON is an executable path, without surrounding quotes or arguments.
 if defined URSA_PYTHON goto selected
 if exist "%~dp0Python\3.11.17\python.exe" (

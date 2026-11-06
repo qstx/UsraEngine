@@ -7,7 +7,10 @@
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/PakArchive.hpp>
 #include <Vfs/PakBuilder.hpp>
+#include <Core/CpuProfiler.hpp>
+#include <Core/Profiler.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -16,6 +19,7 @@
 #include <sstream>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -48,6 +52,45 @@ bool HasExpectedBytes(const Vector<UInt8>& actual, const Vector<UInt8>& expected
 {
 	return actual.size() == expected.size() && std::equal(actual.begin(), actual.end(), expected.begin());
 }
+
+void TestManagedCpuMarkers(DotNetHost& host, const VirtualPath& contentPath, bool capture)
+{
+	URSA_PROFILE_FRAME("Managed marker reload");
+	if (capture)
+	{
+		Expect(Profiling::CpuMarkersEnabled(), "Capture mode requires Tracy");
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (!Profiling::IsConnected() && std::chrono::steady_clock::now() < deadline)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+		Expect(Profiling::IsConnected(), "Tracy did not connect before the managed marker test");
+	}
+	for (UInt32 iteration = 0; iteration < 4; ++iteration)
+	{
+		Scene scene;
+		ManagedSceneApi api(scene);
+		const UInt64 session = Take(host.CreateScriptSession(false, &api));
+		Done(host.LoadScriptContent(session, contentPath));
+		Done(host.ValidateScriptSession(session));
+		Done(host.SelectScriptSession(session));
+		{
+			ManagedScriptRuntime runtime(scene, host, api, session);
+			auto object = Take(scene.CreateGameObject("Profiler"));
+			Take(runtime.CreateAndAdd(object, "Ursa.SessionFixtures.SessionProbe, Ursa.SessionFixtures"));
+			FrameContext frame;
+			frame.deltaSeconds = 1.0f / 60.0f;
+			frame.fixedDeltaSeconds = 1.0f / 50.0f;
+			frame.frameIndex = iteration;
+			scene.BeginFrame();
+			Done(scene.Update(frame));
+			Expect(Take(object->Name()) == "Session:1:7", "Marked script failed or reused old static state");
+			scene.Clear();
+		}
+		Done(host.CloseScriptSession(session));
+		URSA_PROFILE_FRAME("Managed marker reload");
+	}
+}
 } // namespace
 
 int main(int argumentCount, char** arguments)
@@ -56,10 +99,12 @@ int main(int argumentCount, char** arguments)
 	try
 	{
 		Expect(argumentCount == 3 ||
-		           (argumentCount == 4 && (std::string(arguments[3]) == "--import-only" ||
-		                                   std::string(arguments[3]) == "--importer-registration-only" ||
-		                                   std::string(arguments[3]) == "--editor-only" ||
-		                                   std::string(arguments[3]) == "--builtin-inspector-only")),
+		           (argumentCount == 4 &&
+		            (std::string(arguments[3]) == "--import-only" ||
+		             std::string(arguments[3]) == "--importer-registration-only" ||
+		             std::string(arguments[3]) == "--editor-only" || std::string(arguments[3]) == "--profiling-only" ||
+		             std::string(arguments[3]) == "--profiling-capture" ||
+		             std::string(arguments[3]) == "--builtin-inspector-only")),
 		       "Managed host test requires managed output, writable cache and optional --import-only");
 		const auto managedOutput = std::filesystem::u8path(arguments[1]);
 		const auto packageRoot = root / "package";
@@ -302,6 +347,13 @@ int main(int argumentCount, char** arguments)
 		       "Native-to-managed initialization or UTF-8/empty-data callback failed");
 		if (argumentCount == 4)
 		{
+			if (std::string(arguments[3]) == "--profiling-only" || std::string(arguments[3]) == "--profiling-capture")
+			{
+				TestManagedCpuMarkers(*host, sessionContentPath, std::string(arguments[3]) == "--profiling-capture");
+				Done(host->CloseEndpoint());
+				std::cout << "Managed CPU markers survived four load/run/unload sessions\n";
+				return 0;
+			}
 #if defined(URSA_DOTNET_TEST_EDITOR)
 			if (std::string(arguments[3]) == "--editor-only")
 			{

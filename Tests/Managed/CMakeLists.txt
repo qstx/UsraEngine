@@ -10,7 +10,7 @@ set(testSourceList "${URSA_BINARY_ROOT}/Tests/Managed/SourceInputs.txt")
 string(JOIN "\n" testSourceListContent ${testSources} ${frameworkSources} ${exampleSources})
 file(CONFIGURE OUTPUT "${testSourceList}" CONTENT "${testSourceListContent}\n" @ONLY)
 set(testCommands)
-foreach(project IN ITEMS Ursa.ManagedHost.ProtocolTests Ursa.SessionFixtures Ursa.EditorFixtures)
+foreach(project IN ITEMS Ursa.ManagedHost.ProtocolTests Ursa.SessionFixtures Ursa.EditorFixtures Ursa.DeepProfilingFixtures)
   list(APPEND testOutputs "${URSA_MANAGED_OUTPUT_DIR}/TestScripts/${project}.dll"
     "${URSA_MANAGED_OUTPUT_DIR}/TestScripts/${project}.pdb")
   list(APPEND testCommands
@@ -18,7 +18,7 @@ foreach(project IN ITEMS Ursa.ManagedHost.ProtocolTests Ursa.SessionFixtures Urs
     --artifacts-path "${URSA_MANAGED_TEST_ARTIFACTS_ROOT}" --output "${URSA_MANAGED_TEST_OUTPUT_DIR}"
     "-p:UrsaBindingsGenerator=${URSA_BINDINGS_GENERATOR}"
     "-p:UrsaBindingsGeneratedDir=${URSA_BINARY_ROOT}/Bindings/$<CONFIG>"
-    --configuration "$<CONFIG>" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS}
+    --configuration "$<CONFIG>" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS} ${URSA_MANAGED_PROFILE_FLAGS}
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${URSA_MANAGED_TEST_OUTPUT_DIR}/${project}.dll"
     "${URSA_MANAGED_TEST_OUTPUT_DIR}/${project}.pdb"
@@ -38,7 +38,7 @@ add_custom_command(OUTPUT "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>/Built.sta
   "${URSA_MANAGED_OUTPUT_DIR}/TestScripts/"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>"
   COMMAND "${CMAKE_COMMAND}" -E touch "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>/Built.stamp"
-  DEPENDS UrsaManagedHostAssemblies ${testSources} ${frameworkSources} ${exampleSources} "${testSourceList}"
+  DEPENDS UrsaManagedHostAssemblies UrsaManagedDeepProfiler ${testSources} ${frameworkSources} ${exampleSources} "${testSourceList}"
   VERBATIM)
 add_custom_target(UrsaManagedTestAssemblies DEPENDS "${URSA_BINARY_ROOT}/Tests/Managed/$<CONFIG>/Built.stamp" ${testOutputs}
   SOURCES ${testSources})

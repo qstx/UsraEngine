@@ -304,6 +304,14 @@ void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& op
 	                                             std::filesystem::u8path(URSA_DOTNET_CATALOG_GENERATOR_PATH),
 	                                             std::filesystem::u8path(URSA_DOTNET_REFERENCE_PACK_PATH)));
 	const auto group = options.profile == "Editor" ? ScriptAssemblyGroup::Editor : ScriptAssemblyGroup::Game;
+	if (options.deepProfiling)
+	{
+		service->SetDeepProfiling(*options.deepProfiling);
+	}
+	else if (options.configuration == "Publish")
+	{
+		service->SetDeepProfiling(false);
+	}
 	if (!options.buildScripts && !Take(service->IsBuildCurrent(group, options.configuration)))
 	{
 		throw std::runtime_error("Current script content is not ready; run UrsaAssetImport without --no-scripts");

@@ -170,7 +170,8 @@ internal static partial class BindingEmitter
 			output.Append($"inline Int32 {slot}(void* context" + string.Concat(method.Parameters.Select(p =>
 				$", {(p.Type.Indirect ? "const " : "")}{Cpp(p.Type)}{(p.Type.Indirect ? "*" : "")} p_{p.Name}")) +
 				(method.Return.Key != "void" ? $", {Cpp(method.Return)}* result" : "") + ", BindingOutcome* outcome) noexcept\n{\n");
-			output.Append($"\treturn Invoke(context, outcome, {method.Thread}, [&](BindingCall& call)\n\t{{\n");
+			if (method.ContextFree) output.Append("\t(void)context;\n");
+			output.Append($"\treturn Invoke({(method.ContextFree ? "StatelessBindingContext().Token()" : "context")}, outcome, {method.Thread}, [&](BindingCall& call)\n\t{{\n");
 			foreach (BindingParameter parameter in method.Parameters)
 			{
 				if (parameter.Type.Indirect) output.Append($"\t\tif (!p_{parameter.Name}) throw std::runtime_error(\"Null binding parameter: {parameter.Name}\");\n");
@@ -238,6 +239,9 @@ internal static partial class BindingEmitter
 		var output = new StringBuilder(banner).Append("#nullable enable\nusing System;\nusing System.Runtime.CompilerServices;\nusing System.Runtime.InteropServices;\nusing Ursa.Bindings;\n\nnamespace Ursa.Bindings.Generated\n{\n");
 		output.Append($"internal static unsafe class {owner}\n{{\n\tinternal const string Hash = \"{module.Hash}\";\n\t[ThreadStatic] private static nint functions;\n\t[ThreadStatic] internal static nint Context;\n\t[ThreadStatic] private static int ownerThread;\n");
 		BindingMethod[] functions = Functions(module);
+		bool anyThread = functions.Any(method => method.Direction == BindingDirection.NativeMethod && method.Thread == 1);
+		if (anyThread)
+			output.Append("\tinternal sealed class Endpoint\n\t{\n\t\tinternal readonly nint Address;\n\t\tinternal readonly nint Context;\n\t\tinternal readonly Table Functions;\n\t\tinternal Endpoint(nint functions, nint context) { Address = functions; Context = context; Functions = *(Table*)functions; }\n\t}\n\tprivate static readonly System.Threading.AsyncLocal<Endpoint?> inherited = new();\n\t[ThreadStatic] private static Endpoint? cachedEndpoint;\n");
 		output.Append($"\tinternal const ulong Id = 0x{module.Id:x16}ul;\n\t[ModuleInitializer]\n\tinternal static void Register() => BindingRegistry.Register(new BindingModuleRegistration(Id, {Literal(module.Name)}, Hash, {functions.Length}, {module.Required.ToString().ToLowerInvariant()}, {module.CallScoped.ToString().ToLowerInvariant()}, new ulong[] {{ " +
 			string.Join(", ", module.Dependencies.Select(d => $"0x{BindingModule.IdFor(d):x16}ul")) +
 			$" }}, Bind, Clear, {(functions.Any(m => m.Direction == BindingDirection.ManagedCallback) ? "CreateCallbacks" : "null")}));\n");
@@ -248,8 +252,17 @@ internal static partial class BindingEmitter
 				$", {Cs(p.Type)}{(p.Type.Indirect ? "*" : "")}")) + (method.Return.Key != "void" ? $", {Cs(method.Return)}*" : "") +
 				$", BindingOutcome*, int> {ContractReader.Slot(method)};\n");
 		output.Append("\t}\n");
-		output.Append($"\tinternal static void Bind(nint descriptor, nint context)\n\t{{\n\t\tBindingMemory.ValidateModule(descriptor, Hash, {functions.Length}, \"{module.Name}\");\n\t\tBindingMemory.ValidateContext(descriptor, context, \"{module.Name}\");\n\t\tfunctions = ((BindingModuleDescriptor*)descriptor)->Functions;\n\t\tContext = context;\n\t\townerThread = Environment.CurrentManagedThreadId;\n\t}}\n");
-		output.Append("\tinternal static void Clear() { functions = 0; Context = 0; ownerThread = 0; }\n\tinternal static Table* Require(uint policy)\n\t{\n\t\tBindingRegistry.RequireCurrent();\n\t\tif (functions == 0 || (policy == 0 && ownerThread != Environment.CurrentManagedThreadId)) throw new InvalidOperationException(\"Binding module is unavailable on this thread.\");\n\t\treturn (Table*)functions;\n\t}\n");
+		output.Append($"\tinternal static void Bind(nint descriptor, nint context)\n\t{{\n\t\tBindingMemory.ValidateModule(descriptor, Hash, {functions.Length}, \"{module.Name}\");\n\t\tBindingMemory.ValidateContext(descriptor, context, \"{module.Name}\");\n\t\tfunctions = ((BindingModuleDescriptor*)descriptor)->Functions;\n\t\tContext = context;\n\t\townerThread = Environment.CurrentManagedThreadId;\n");
+		if (anyThread)
+			output.Append("\t\tif (cachedEndpoint == null || cachedEndpoint.Address != functions || cachedEndpoint.Context != context) cachedEndpoint = new Endpoint(functions, context);\n\t\tif (!ReferenceEquals(inherited.Value, cachedEndpoint)) inherited.Value = cachedEndpoint;\n");
+		output.Append("\t}\n\tinternal static void Clear() { functions = 0; Context = 0; ownerThread = 0;");
+		if (anyThread) output.Append(" inherited.Value = null;");
+		output.Append(" }\n\tinternal static nint AvailableContext(uint policy) => ");
+		if (anyThread) output.Append("policy == 1 ? inherited.Value?.Context ?? Context : ");
+		output.Append("Context");
+		output.Append(";\n\tinternal static Table* Require(uint policy, out nint context)\n\t{\n\t\tBindingRegistry.RequireCurrent();\n\t\tcontext = AvailableContext(policy);\n\t\tnint selected = functions;\n");
+		output.Append("\t\tif (selected == 0 || (policy == 0 && ownerThread != Environment.CurrentManagedThreadId)) throw new InvalidOperationException(\"Binding module is unavailable on this thread.\");\n\t\treturn (Table*)selected;\n\t}\n");
+		if (anyThread) output.Append("\tinternal static Endpoint RequireAny()\n\t{\n\t\tBindingRegistry.RequireCurrent();\n\t\treturn inherited.Value ?? (Context != 0 ? cachedEndpoint : null) ?? throw new InvalidOperationException(\"Binding module has no inherited endpoint.\");\n\t}\n");
 		foreach (WireType type in OrderedTypes(moduleTypes).Where(t => t.Kind is "struct" or "optional" or "archive"))
 		{
 			output.Append($"\t[StructLayout(LayoutKind.Sequential)]\n\tinternal struct {type.AbiName}\n\t{{\n");
@@ -278,14 +291,25 @@ internal static partial class BindingEmitter
 				else
 				{
 					string moduleCs = "global::Ursa.Bindings.Generated." + owner;
-					output.Append($"\t\tvar table = {moduleCs}.Require({method.Thread});\n\t\tif (table->{ContractReader.Slot(method)} == null) throw new InvalidOperationException(\"Missing native entry: {method.Identity}\");\n");
+					string entry;
+					if (method.Thread == 1)
+					{
+						output.Append($"\t\tvar endpoint = {moduleCs}.RequireAny();\n\t\tnint callContext = endpoint.Context;\n\t\tvar entry = endpoint.Functions.{ContractReader.Slot(method)};\n");
+						entry = "entry";
+					}
+					else
+					{
+						output.Append($"\t\tvar table = {moduleCs}.Require({method.Thread}, out nint callContext);\n");
+						entry = $"table->{ContractReader.Slot(method)}";
+					}
+					output.Append($"\t\tif ({entry} == null) throw new InvalidOperationException(\"Missing native entry: {method.Identity}\");\n");
 					bool arena = method.Parameters.Any(p => p.Type.NeedsArena);
 					if (arena) output.Append("\t\tusing var arena = new BindingArena();\n");
 					foreach (BindingParameter parameter in method.Parameters)
 						output.Append($"\t\tvar p_{parameter.Name} = {moduleCs}.To_{ConvertName(parameter.Type)}(@{parameter.Name}, {(arena ? "arena" : "null")});\n");
 					output.Append("\t\tBindingOutcome outcome = default;\n\t\ttry\n\t\t{\n");
 					if (method.Return.Key != "void") output.Append($"\t\t\t{QualifyCs(method.Return, moduleCs)} result = default;\n");
-					output.Append($"\t\t\tint status = table->{ContractReader.Slot(method)}({moduleCs}.Context" + string.Concat(method.Parameters.Select(p =>
+					output.Append($"\t\t\tint status = {entry}(callContext" + string.Concat(method.Parameters.Select(p =>
 						", " + (p.Type.Indirect ? "&" : "") + "p_" + p.Name)) + (method.Return.Key != "void" ? ", &result" : "") + ", &outcome);\n");
 					output.Append($"\t\t\tBindingMemory.ThrowIfFailed(status, outcome, {Literal(method.Identity)});\n");
 					if (method.Return.Key != "void") output.Append($"\t\t\treturn {moduleCs}.From_{ConvertName(method.Return)}(result);\n");

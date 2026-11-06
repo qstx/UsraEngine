@@ -79,12 +79,12 @@ set(managedOutputs
 add_custom_command(OUTPUT "${URSA_MANAGED_OUTPUT_DIR}/Built.stamp" ${managedOutputs}
   COMMAND "${URSA_DOTNET_EXECUTABLE}" build "${CMAKE_CURRENT_SOURCE_DIR}/Ursa.ManagedHost/Ursa.ManagedHost.csproj"
     --artifacts-path "${URSA_MANAGED_ARTIFACTS_ROOT}"
-    --configuration "$<CONFIG>" --output "${URSA_MANAGED_OUTPUT_DIR}" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS}
+    --configuration "$<CONFIG>" --output "${URSA_MANAGED_OUTPUT_DIR}" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS} ${URSA_MANAGED_PROFILE_FLAGS}
     "-p:UrsaBindingsGenerator=${URSA_BINDINGS_GENERATOR}"
     "-p:UrsaBindingsGeneratedDir=${URSA_BINARY_ROOT}/Bindings/$<CONFIG>"
   COMMAND "${URSA_DOTNET_EXECUTABLE}" build "${CMAKE_CURRENT_SOURCE_DIR}/Ursa.Editor/Ursa.Editor.csproj"
     --artifacts-path "${URSA_MANAGED_ARTIFACTS_ROOT}"
-    --configuration "$<CONFIG>" --output "${URSA_MANAGED_OUTPUT_DIR}" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS}
+    --configuration "$<CONFIG>" --output "${URSA_MANAGED_OUTPUT_DIR}" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS} ${URSA_MANAGED_PROFILE_FLAGS}
     "-p:UrsaBindingsGenerator=${URSA_BINDINGS_GENERATOR}"
     "-p:UrsaBindingsGeneratedDir=${URSA_BINARY_ROOT}/Bindings/$<CONFIG>"
   COMMAND "${CMAKE_COMMAND}" -E touch "${URSA_MANAGED_OUTPUT_DIR}/Built.stamp"
@@ -106,3 +106,13 @@ add_custom_command(OUTPUT "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Built.sta
   VERBATIM)
 add_custom_target(UrsaManagedScriptCatalog DEPENDS "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Built.stamp")
 set_target_properties(UrsaManagedScriptCatalog PROPERTIES FOLDER "Managed/Tools")
+
+add_custom_command(OUTPUT "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/DeepProfiler.stamp"
+  BYPRODUCTS "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.DeepProfiler.dll"
+  COMMAND "${URSA_DOTNET_EXECUTABLE}" build "${CMAKE_CURRENT_SOURCE_DIR}/Ursa.DeepProfiler/Ursa.DeepProfiler.csproj"
+    --artifacts-path "${URSA_MANAGED_ARTIFACTS_ROOT}"
+    --configuration "$<CONFIG>" --output "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS}
+  COMMAND "${CMAKE_COMMAND}" -E touch "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/DeepProfiler.stamp"
+  DEPENDS ${managedSources} "${managedSourceList}" VERBATIM)
+add_custom_target(UrsaManagedDeepProfiler DEPENDS "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/DeepProfiler.stamp")
+set_target_properties(UrsaManagedDeepProfiler PROPERTIES FOLDER "Managed/Tools")

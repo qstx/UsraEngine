@@ -135,12 +135,17 @@ Result<BuildProcessResult> RunProcess(const std::filesystem::path& executable,
 Result<BuildProcessResult> RunDotNet(const std::filesystem::path& executable, const std::filesystem::path& project,
                                      const std::filesystem::path& output, const String& configuration)
 {
-	return RunProcess(executable,
-	                  {L"build", project.wstring(), L"--configuration",
-	                   std::filesystem::u8path(ToStdString(configuration)).wstring(), L"--output", output.wstring(),
-	                   L"--nologo", L"--disable-build-servers", L"-m:1", L"-nr:false",
-	                   L"-p:ErrorLog=" + (output / "CompilerDiagnostics.sarif").wstring()},
-	                  project.parent_path());
+#if defined(URSA_ENABLE_TRACY)
+	const std::wstring profiler = configuration == "Publish" ? L"false" : L"true";
+#else
+	const std::wstring profiler = L"false";
+#endif
+	return RunProcess(
+	    executable,
+	    {L"build", project.wstring(), L"--configuration", std::filesystem::u8path(ToStdString(configuration)).wstring(),
+	     L"--output", output.wstring(), L"--nologo", L"--disable-build-servers", L"-m:1", L"-nr:false",
+	     L"-p:ErrorLog=" + (output / "CompilerDiagnostics.sarif").wstring(), L"-p:UrsaEnableProfiler=" + profiler},
+	    project.parent_path());
 }
 #endif
 
@@ -211,6 +216,10 @@ ScriptBuildService::ScriptBuildService(VirtualFileSystem& filesystem, AssetDatab
       catalogGeneratorAssembly(std::move(catalogGeneratorAssembly)),
       referenceAssemblyDirectory(std::move(referenceAssemblyDirectory))
 {
+	const auto variant = this->runtimeAssembly.parent_path().filename();
+	selectedConfiguration = variant == "Debug" || variant == "Release" || variant == "Publish"
+	                            ? PathToUrsaString(variant)
+	                            : String("Debug");
 }
 
 Result<std::unique_ptr<ScriptBuildService>>
@@ -249,15 +258,26 @@ Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input
 	}
 	const std::filesystem::path catalogOutputPath = catalogOutputDirectory.value / "ScriptTypeCatalog.json";
 	Json manifest = Json::object();
-	manifest["RuntimeAssembly"] = ToStdString(PathToUrsaString(runtimeAssembly));
-	manifest["RenderingAssembly"] = ToStdString(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Rendering.dll"));
-	manifest["EditorAssembly"] = ToStdString(PathToUrsaString(editorAssembly));
+	const String catalogConfiguration = selectedConfiguration.empty() ? String("Debug") : selectedConfiguration;
+	manifest["RuntimeAssembly"] =
+	    ToStdString(PathToUrsaString(ScriptFrameworkVariant(runtimeAssembly, catalogConfiguration)));
+	manifest["RenderingAssembly"] = ToStdString(PathToUrsaString(
+	    ScriptFrameworkVariant(runtimeAssembly.parent_path() / "Ursa.Rendering.dll", catalogConfiguration)));
+	manifest["EditorAssembly"] =
+	    ToStdString(PathToUrsaString(ScriptFrameworkVariant(editorAssembly, catalogConfiguration)));
+	manifest["Configuration"] = ToStdString(catalogConfiguration);
+#if defined(URSA_ENABLE_TRACY)
+	manifest["ProfilerEnabled"] = catalogConfiguration != "Publish";
+#else
+	manifest["ProfilerEnabled"] = false;
+#endif
 	manifest["ReferenceDirectory"] = ToStdString(PathToUrsaString(referenceAssemblyDirectory));
 	manifest["OutputPath"] = ToStdString(PathToUrsaString(catalogOutputPath));
 	manifest["DiagnosticsPath"] = ToStdString(PathToUrsaString(catalogOutputDirectory.value / "Diagnostics.json"));
 	manifest["LanguageVersion"] = ToStdString(input.languageVersion);
 	manifest["Nullable"] = ToStdString(input.nullable);
-	manifest["BindingsAssembly"] = ToStdString(PathToUrsaString(runtimeAssembly.parent_path() / "Ursa.Bindings.dll"));
+	manifest["BindingsAssembly"] = ToStdString(PathToUrsaString(
+	    ScriptFrameworkVariant(runtimeAssembly.parent_path() / "Ursa.Bindings.dll", catalogConfiguration)));
 	manifest["Sources"] = Json::array();
 	Map<String, Vector<UInt8>> sourceBytes;
 	for (const ScriptSourceAsset& source : sources)
@@ -647,10 +667,25 @@ Result<std::filesystem::path> ScriptBuildService::EnsureToolDirectory(const Virt
 
 Result<ScriptBuildReport> ScriptBuildService::Build(ScriptAssemblyGroup group, const String& configuration)
 {
-	if (configuration.empty())
+	if (configuration != "Debug" && configuration != "Release" && configuration != "Publish")
 	{
-		return Result<ScriptBuildReport>::Failure("A script build configuration is required");
+		return Result<ScriptBuildReport>::Failure("Script configuration must be Debug, Release or Publish");
 	}
+	if (configuration == "Publish" && deepProfiling)
+	{
+		return Result<ScriptBuildReport>::Failure("Deep Profiling is only available in Debug/Release, not Publish");
+	}
+	for (const auto& framework : {runtimeAssembly, runtimeAssembly.parent_path() / "Ursa.Rendering.dll",
+	                              runtimeAssembly.parent_path() / "Ursa.Bindings.dll", editorAssembly})
+	{
+		const auto variant = ScriptFrameworkVariant(framework, configuration);
+		if (!std::filesystem::is_regular_file(variant))
+		{
+			return Result<ScriptBuildReport>::Failure("Build the matching " + configuration +
+			                                          " framework first: " + PathToUrsaString(variant));
+		}
+	}
+	selectedConfiguration = configuration;
 	auto generated = GenerateProjects();
 	if (!generated)
 	{
@@ -677,6 +712,16 @@ Result<String> ScriptBuildService::SourceFingerprint()
 		return Result<String>::Failure(refreshed.error);
 	}
 	UInt64 hash = 14695981039346656037ull;
+	HashString(hash, deepProfiling ? "DeepProfiling:1" : "DeepProfiling:0");
+	if (deepProfiling)
+	{
+		auto tool = ReadConfiguredFile(catalogGeneratorAssembly.parent_path() / "Ursa.DeepProfiler.dll");
+		if (!tool)
+		{
+			return Result<String>::Failure(tool.error);
+		}
+		HashBytes(hash, tool.value.data(), tool.value.size());
+	}
 	HashString(hash, Scripting::Bindings::Manifest::generator);
 	HashString(hash, ToUrsaString(Scripting::Bindings::ScriptBindingRequirements(true).dump()));
 	for (const auto& dependency : Vector<std::filesystem::path>{
@@ -842,6 +887,37 @@ Result<ScriptBuildReport> ScriptBuildService::BuildProject(const VirtualPath& pr
 	}
 	if (process.value.exitCode == 0)
 	{
+		if (deepProfiling)
+		{
+			const String imageName = group == ScriptAssemblyGroup::Game ? "Ursa.Game.dll" : "Ursa.EditorScripts.dll";
+			const auto tool = catalogGeneratorAssembly.parent_path() / "Ursa.DeepProfiler.dll";
+			const auto instrumented = output.value / "DeepProfiled" / ToStdString(imageName);
+			auto transformed =
+			    RunProcess(dotnetExecutable,
+			               {tool.wstring(), (output.value / ToStdString(imageName)).wstring(), instrumented.wstring(),
+			                ScriptFrameworkVariant(runtimeAssembly, configuration).wstring(),
+			                std::filesystem::u8path(ToStdString(configuration)).wstring()},
+			               output.value);
+			if (!transformed || transformed.value.exitCode != 0)
+			{
+				return Result<ScriptBuildReport>::Success({false, group, assembly,
+				                                           transformed ? transformed.value.output : transformed.error,
+				                                           diagnosticRecords});
+			}
+			for (const String extension : {String(".dll"), String(".pdb")})
+			{
+				const auto file =
+				    instrumented.stem().wstring() + std::filesystem::u8path(ToStdString(extension)).wstring();
+				std::error_code error;
+				std::filesystem::copy_file(instrumented.parent_path() / file, output.value / file,
+				                           std::filesystem::copy_options::overwrite_existing, error);
+				if (error)
+				{
+					return Result<ScriptBuildReport>::Failure("Cannot stage instrumented DLL/PDB: " +
+					                                          ToUrsaString(error.message()));
+				}
+			}
+		}
 		auto latestFingerprint = BuildFingerprint(group, configuration);
 		if (!latestFingerprint || latestFingerprint.value != fingerprint.value)
 		{
@@ -1031,6 +1107,7 @@ Result<String> ScriptBuildService::BuildFingerprint(ScriptAssemblyGroup group, c
 	                     Scripting::Bindings::ScriptBindingRequirements(group == ScriptAssemblyGroup::Editor).dump()));
 	HashString(hash, group == ScriptAssemblyGroup::Game ? "Game" : "Editor");
 	HashString(hash, configuration);
+	HashString(hash, deepProfiling ? "DeepProfiling:1" : "DeepProfiling:0");
 	HashString(hash, PathToUrsaString(dotnetExecutable));
 	HashString(hash, PathToUrsaString(referenceAssemblyDirectory));
 	auto sdkVersion = RunProcess(dotnetExecutable, {L"--version"}, referenceAssemblyDirectory);
@@ -1070,6 +1147,19 @@ Result<String> ScriptBuildService::BuildFingerprint(ScriptAssemblyGroup group, c
 				HashBytes(hash, gameBytes.value.data(), gameBytes.value.size());
 			}
 		}
+	}
+	for (auto& dependency : dependencies)
+	{
+		if (dependency != catalogGeneratorAssembly)
+		{
+			dependency = ScriptFrameworkVariant(dependency, configuration);
+		}
+	}
+	if (deepProfiling)
+	{
+		dependencies.push_back(catalogGeneratorAssembly.parent_path() / "Ursa.DeepProfiler.dll");
+		dependencies.push_back(catalogGeneratorAssembly.parent_path() / "Mono.Cecil.dll");
+		dependencies.push_back(catalogGeneratorAssembly.parent_path() / "Mono.Cecil.Rocks.dll");
 	}
 	for (const std::filesystem::path& dependency : dependencies)
 	{

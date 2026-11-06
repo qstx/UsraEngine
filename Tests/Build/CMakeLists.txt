@@ -19,6 +19,9 @@ ursa_require_test_content(UrsaShaderPackageBuild UrsaShaderPackageTests)
 
 if(WIN32 AND CMAKE_GENERATOR MATCHES "^Visual Studio")
   if(URSA_ENABLE_DOTNET)
+    add_test(NAME UrsaProfilingConfigurationsTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+      "${CMAKE_CURRENT_SOURCE_DIR}/ProfilingConfigurationsTests.py" --build-root "${URSA_BINARY_ROOT}"
+      --dotnet "${URSA_DOTNET_EXECUTABLE}")
     add_test(NAME UrsaBuildOutputEncodingTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
       "${CMAKE_CURRENT_SOURCE_DIR}/BuildOutputEncodingTests.py" --cmake "${CMAKE_COMMAND}"
       --scratch "${URSA_BINARY_ROOT}/Temp/BuildOutputEncoding/$<CONFIG>")
@@ -26,29 +29,29 @@ if(WIN32 AND CMAKE_GENERATOR MATCHES "^Visual Studio")
   endif()
   add_test(NAME UrsaPythonWorkspaceToolsTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
     "${CMAKE_CURRENT_SOURCE_DIR}/PythonWorkspaceToolsTests.py")
-  find_program(URSA_POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
-  add_test(NAME UrsaAcceptanceProcessTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -File
-    "${URSA_SOURCE_ROOT}/Tests/Editor/Scripting/AcceptanceProcessTests.ps1")
-  add_test(NAME UrsaManagedWorkspaceGenerationTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -File
-    "${CMAKE_CURRENT_SOURCE_DIR}/ManagedWorkspaceGenerationTests.ps1"
-    -EngineRoot "${URSA_SOURCE_ROOT}" -Scratch "${URSA_BINARY_ROOT}/Temp/ManagedWorkspaceGeneration/$<CONFIG>")
+  add_test(NAME UrsaPythonAutomationTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/PythonAutomationTests.py")
+
+  add_test(NAME UrsaAcceptanceProcessTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${URSA_SOURCE_ROOT}/Tests/Editor/Scripting/AcceptanceProcessTests.py")
+  add_test(NAME UrsaManagedWorkspaceGenerationTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ManagedWorkspaceGenerationTests.py"
+    --engine-root "${URSA_SOURCE_ROOT}" --scratch "${URSA_BINARY_ROOT}/Temp/ManagedWorkspaceGeneration/$<CONFIG>")
   if(TARGET UrsaScriptCompile AND NOT URSA_PROJECT_DIR STREQUAL "")
-    add_test(NAME UrsaUnifiedIdeFixtureTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -File
-      "${CMAKE_CURRENT_SOURCE_DIR}/UnifiedIdeFixtureTests.ps1"
-      -BuildDirectory "${URSA_BINARY_ROOT}" -Compiler "$<TARGET_FILE:UrsaScriptCompile>")
-    add_test(NAME UrsaUnifiedWorkspaceRefreshTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -File
-      "${CMAKE_CURRENT_SOURCE_DIR}/UnifiedWorkspaceRefreshTests.ps1"
-      -BuildDirectory "${URSA_BINARY_ROOT}" -Compiler "$<TARGET_FILE:UrsaScriptCompile>")
+    add_test(NAME UrsaUnifiedIdeFixtureTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+      "${CMAKE_CURRENT_SOURCE_DIR}/UnifiedIdeFixtureTests.py"
+      --build-directory "${URSA_BINARY_ROOT}" --compiler "$<TARGET_FILE:UrsaScriptCompile>")
+    add_test(NAME UrsaUnifiedWorkspaceRefreshTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+      "${CMAKE_CURRENT_SOURCE_DIR}/UnifiedWorkspaceRefreshTests.py"
+      --build-directory "${URSA_BINARY_ROOT}" --compiler "$<TARGET_FILE:UrsaScriptCompile>")
   endif()
   add_test(NAME UrsaProjectStructureTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
     "${URSA_SOURCE_ROOT}/Tools/CheckProjectStructure.py" --build-dir "${URSA_BINARY_ROOT}")
-  add_test(NAME UrsaProjectDiscoveryTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
-    -File "${CMAKE_CURRENT_SOURCE_DIR}/ProjectDiscoveryTests.ps1"
-    -Scratch "${URSA_BINARY_ROOT}/Temp/ProjectDiscovery/$<CONFIG>" -EngineRoot "${URSA_SOURCE_ROOT}"
-    -CMakePath "${CMAKE_COMMAND}" -Generator "${CMAKE_GENERATOR}")
-  add_test(NAME UrsaProjectStructureNegativeTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
-    -File "${CMAKE_CURRENT_SOURCE_DIR}/ProjectStructureNegativeTests.ps1"
-    -BuildDir "${URSA_BINARY_ROOT}" -EngineRoot "${URSA_SOURCE_ROOT}"
-    -Scratch "${URSA_BINARY_ROOT}/Temp/ProjectStructureNegative/$<CONFIG>")
+  add_test(NAME UrsaProjectDiscoveryTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat" "${CMAKE_CURRENT_SOURCE_DIR}/ProjectDiscoveryTests.py"
+    --scratch "${URSA_BINARY_ROOT}/Temp/ProjectDiscovery/$<CONFIG>" --engine-root "${URSA_SOURCE_ROOT}"
+    --cmake "${CMAKE_COMMAND}" --generator "${CMAKE_GENERATOR}")
+  add_test(NAME UrsaProjectStructureNegativeTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat" "${CMAKE_CURRENT_SOURCE_DIR}/ProjectStructureNegativeTests.py"
+    --build-dir "${URSA_BINARY_ROOT}" --engine-root "${URSA_SOURCE_ROOT}"
+    --scratch "${URSA_BINARY_ROOT}/Temp/ProjectStructureNegative/$<CONFIG>")
 endif()
 ursa_finalize_test_directory()

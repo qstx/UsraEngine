@@ -7,21 +7,23 @@
 从包含 Engine 与 Demo 的工作区根运行：
 
 ```bat
-GenerateEngineSolutionWithTracy.bat
+GenerateEngineSolution.bat
 rem 同时包含测试：
-GenerateEngineSolutionWithTracy.bat --tests
+GenerateEngineSolution.bat --tests
 ```
 
 生成后打开 `Engine/Build/VS2026/UrsaEngine.slnx`。解决方案同时包含 Runtime/Engine/Editor C++、Managed 下的引擎 C# 框架，以及 Projects/Demo 下的 Ursa.Game 与 Ursa.EditorScripts。CMake 4.4.5 默认使用 slnx，既有桥接和检查也支持 sln。
 
-首次生成会先配置并构建 Debug 的 UrsaScriptCompile，再复用资产数据库生成项目工程，准备 Debug/Release 的框架 IDE 绑定，最后完成 CMake 解决方案和关联发布。这个过程不编译 Demo 游戏脚本，不导入资源；错误的游戏脚本也能在生成的 IDE 中修复。旧 `Engine/Build` 中的 VS2022 缓存会保留，生成器不会自动删除或复用它。
+首次生成会先配置并构建 Debug 的 UrsaScriptCompile，再复用资产数据库生成项目工程，准备 Debug/Release/Publish 的框架 IDE 绑定，最后完成 CMake 解决方案和关联发布。这个过程不编译 Demo 游戏脚本，不导入资源；错误的游戏脚本也能在生成的 IDE 中修复。旧 `Engine/Build` 中的 VS2022 缓存会保留，生成器不会自动删除或复用它。
+
+统一入口生成 Debug、Release、Publish 三种配置。Debug/Release 开启基础 Tracy，Publish 编译期剔除；Deep Profiling 单独控制，详见 [构建配置](BuildConfigurations.md)。
 
 指定其他引擎仓库、项目或构建根仍可使用同一个 bat（路径有空格时加引号）：
 
 ```bat
-GenerateEngineSolutionWithTracy.bat --build-dir "G:\Work\Ursa Build" --project-dir "G:\Work\My Game" --tests
-GenerateEngineSolutionWithTracy.bat --engine-dir "G:\Work\Engine" --project-dir "G:\Work\My Game"
-GenerateEngineSolutionWithTracy.bat --help
+GenerateEngineSolution.bat --build-dir "G:\Work\Ursa Build" --project-dir "G:\Work\My Game" --tests
+GenerateEngineSolution.bat --engine-dir "G:\Work\Engine" --project-dir "G:\Work\My Game"
+GenerateEngineSolution.bat --help
 rem 也可直接调用 Python：
 Engine\Tools\Python\3.11.17\python.exe Engine\Tools\GenerateSolution.py --tests
 ```
@@ -31,7 +33,7 @@ Engine\Tools\Python\3.11.17\python.exe Engine\Tools\GenerateSolution.py --tests
 ```bat
 set "URSA_ENGINE_DIR=G:\Work\Engine"
 set "URSA_PROJECT_DIR=G:\Work\My Game"
-GenerateEngineSolutionWithTracy.bat --tests
+GenerateEngineSolution.bat --tests
 ```
 
 `URSA_ENGINE_DIR` 表示引擎仓库目录。入口将其同时传给 CMake `-S` 和 `-DURSA_ENGINE_DIR`，项目目录传给 `-DURSA_PROJECT_DIR`；命令行参数优先于同名环境变量。未指定时沿用当前引擎及其相邻 Demo，默认构建目录随选定引擎变为 `<engine>/Build/VS2026`。VS 中 Editor、Player 和脚本编译工具的工作目录使用该引擎仓库路径。
@@ -47,7 +49,7 @@ CMake 将两个缓存变量规范化为绝对路径，检查引擎变量与 `-S`
 
 VS 自定义构建任务按 UTF-8 解码 dotnet 的标准输出和错误输出，中文还原、构建及诊断信息可以直接保留。CMake 显式导入引擎的 `Directory.Build.props`，因此仓库外的构建目录也适用。更新配置后重新运行 bat，已打开的 VS 接受工程重新加载即可；无需更改 Windows 的系统区域设置。若暂时使用旧工程，可在 cmd 中先执行 `set "DOTNET_CLI_UI_LANGUAGE=en"` 再运行 bat，临时使用英文 dotnet 日志。
 
-bat 只负责选择解释器与转发参数；阶段调度、工具链检测、C# XML/JSON 生成和结构检查由 Python 标准库实现，常规生成不依赖 PowerShell。`Engine/Tools/GenerateSolution.bat` 提供同样参数。原 `GenerateSolution.ps1` 等接口保留兼容转发；可选的 `--tests` 中既有自动化测试、Tracy MCP 发布和格式检查等辅助脚本仍使用 PowerShell，其中 IDE 验收脚本需要 PowerShell 7。
+bat 只负责选择解释器与转发参数；阶段调度、工具链检测、C# XML/JSON 生成和结构检查由 Python 标准库实现。`Engine/Tools/GenerateSolution.bat` 提供同样参数。第一方测试、Tracy MCP 发布和格式检查也使用 Python，不再要求安装 PowerShell。VS 自动化验收继续调用已有的 C# 控制器，因此仍需要 VS2026 与 .NET 10。
 
 不绑定游戏项目时可直接配置 Engine；关闭 .NET 时不生成托管工程。直接配置绑定项目的完整统一工作区前，应先通过生成入口完成工具引导。
 
@@ -67,7 +69,7 @@ cmake --build Engine/Build/VS2026 --config Debug --parallel 3 --target UrsaEdito
 dotnet build Demo/Library/ScriptIDE/Projects/Editor/Ursa.EditorScripts.csproj -c Debug
 ```
 
-VS 的 Debug/Release 映射到相应原生 x64 与托管 Any CPU 配置。引擎 CMake 目标生成正式框架；IDE 项目有独立输出，不覆盖正式框架或项目发布：
+VS 的 Debug/Release/Publish 映射到相应原生 x64 与托管 Any CPU 配置。引擎 CMake 目标生成正式框架；IDE 项目有独立输出，不覆盖正式框架或项目发布：
 
 | 内容 | 位置 |
 |---|---|
@@ -99,11 +101,11 @@ VS2026 已验证保持 Native 与 Managed 同时附加完成 Stop/重载。外�
 可选的冷启动验收使用独立解决方案副本，以真实 F5 启动 Editor，等托管运行时就绪后才添加 RenderInternal 断点，记录首次 Play 前的源码、csproj、调用栈与局部变量。先完成 Debug Editor 构建，再从工作区根运行：
 
 ```powershell
-pwsh -NoProfile -File Engine/Tests/Editor/Scripting/RunPrePlayRenderDebugAcceptance.ps1 `
-  -BuildDirectory Engine/Build/VS2026 `
-  -VisualStudioInstallDirectory "E:/Microsoft Visual Studio/18/Professional"
+Engine/Tools/RunPython.bat Engine/Tests/Editor/Scripting/RunPrePlayRenderDebugAcceptance.py `
+  --build-directory Engine/Build/VS2026 `
+  --visual-studio-install-directory "E:/Microsoft Visual Studio/18/Professional"
 ```
 
-clang-format 继续要求版本 19，可通过 `Tools/Format.ps1 -ClangFormatPath <clang-format19.exe> -Check` 指定；VS2026 随附的其他版本不能代替此格式约束。
+clang-format 继续要求版本 19，可通过 `Tools/Format.py --clang-format-path <clang-format19.exe> --check` 指定；VS2026 随附的其他版本不能代替此格式约束。
 
 本机工具链、回归和真实 IDE 证据见 [VS2026 统一开发验收](VS2026UnifiedDevelopmentAcceptance.md)。

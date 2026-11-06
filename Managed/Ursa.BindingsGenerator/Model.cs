@@ -61,7 +61,7 @@ internal sealed record BindingParameter(string Name, WireType Type, uint HandleK
 internal sealed record BindingMethod(
 	string Name, string Identity, string CsNamespace, string CsClass, string Target,
 	BindingDirection Direction, uint Thread, bool NativeOnly, WireType Return,
-	IReadOnlyList<BindingParameter> Parameters, Location Location, string? CommandWriter = null)
+	IReadOnlyList<BindingParameter> Parameters, Location Location, string? CommandWriter = null, bool ContextFree = false)
 {
 	internal uint Opcode => BinaryPrimitives.ReadUInt32LittleEndian(SHA256.HashData(Encoding.UTF8.GetBytes(Identity)));
 }

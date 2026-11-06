@@ -28,6 +28,8 @@ public sealed class NativeMethodAttribute(string name) : Attribute
 {
 	public string Name { get; } = name;
 	public BindingThread Thread { get; set; } = BindingThread.Owner;
+	/// <summary>Runs an Any-thread process service without borrowing a scene/session context.</summary>
+	public bool ContextFree { get; set; }
 }
 
 [AttributeUsage(AttributeTargets.Method, Inherited = false)]

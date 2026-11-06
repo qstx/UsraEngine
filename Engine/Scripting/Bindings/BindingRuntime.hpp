@@ -268,6 +268,13 @@ private:
 	UIntPtr contextToken = 0;
 };
 
+inline BindingContext& StatelessBindingContext()
+{
+	// Process services must not wait on a scene lock held across a managed callback.
+	static auto* context = new BindingContext;
+	return *context;
+}
+
 class BindingArena final
 {
 public:

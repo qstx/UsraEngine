@@ -4,6 +4,7 @@
 #include <Workspace/ProjectWorkspace.hpp>
 #include <Vfs/RuntimeContent.hpp>
 #include <Vfs/AssetRoots.hpp>
+#include <optional>
 
 namespace Ursa::Editor
 {
@@ -17,6 +18,7 @@ struct AssetImportOptions
 	bool force = false;
 	bool bootstrapOnly = false;
 	bool buildScripts = true;
+	std::optional<bool> deepProfiling;
 };
 
 struct AssetImportReport

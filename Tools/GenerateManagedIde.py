@@ -35,6 +35,8 @@ def generate(engine_root, build_root, include_tests=False, roslyn_directory='', 
                               sourceProject=path.as_posix())
     props = ET.Element('Project')
     group = ET.SubElement(props, 'PropertyGroup')
+    ET.SubElement(props, 'Import', Project=(engine_root / 'Directory.Build.props').as_posix(),
+                  Condition=f"Exists('{(engine_root / 'Directory.Build.props').as_posix()}')")
     for name, value in {
         'BaseIntermediateOutputPath': f'{ide_root.as_posix()}/Build/$(MSBuildProjectName)/$(Configuration)/obj/',
         'OutputPath': f'{ide_root.as_posix()}/Build/$(MSBuildProjectName)/$(Configuration)/bin/',

@@ -332,6 +332,8 @@ internal static unsafe class Program
 		Invalid("[BindingModule(\"A\")][NativeHeader(\"x.hpp\")] internal static partial class A { [NativeMethod(\"F::M\")] internal static partial int Bad(System.DateTime value); }", "UBG0200");
 		Invalid("[BindingModule(\"A\", Required = true, CallScoped = true)] internal static partial class A {}", "UBG0112");
 		Invalid("[BindingModule(\"A\")][NativeHeader(\"x.hpp\")] internal static partial class A { [NativeMethod(\"F::M\")] internal static partial int Bad([BindingSession] ulong session); }", "UBG0109");
+		Invalid("[BindingModule(\"A\")][NativeHeader(\"x.hpp\")] internal static partial class A { [NativeMethod(\"F::M\", ContextFree = true)] internal static partial int Bad(); }", "UBG0114");
+		Invalid("[BindingModule(\"A\", CallScoped = true)][NativeHeader(\"x.hpp\")] internal static partial class A { [NativeMethod(\"F::M\", Thread = BindingThread.Any, ContextFree = true)] internal static partial int Bad(); }", "UBG0114");
 		Invalid("[BindingModule(\"Runtime\", Dependencies = new[] { \"Editor\" })] internal static partial class A {} [BindingModule(\"Editor\")] internal static partial class B {}", "UBG0111");
 		Invalid("[BindingModule(\"A\")] internal static partial class A { [RecordedCommand] internal static partial void Bad(int value); }", "UBG0113");
 		Invalid("[SerializedArchive] internal struct Archive { public string Json; } [BindingModule(\"A\")] internal static partial class A { [RecordedCommand] internal static partial void Bad(BindingCommandWriter writer, Archive archive); }", "UBG0115");

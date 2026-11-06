@@ -43,6 +43,8 @@ struct ScriptProjectInput
 
 String EscapeProjectXml(const String& value);
 
+std::filesystem::path ScriptFrameworkVariant(const std::filesystem::path& assembly, const String& configuration);
+
 Result<ScriptProjectInput> CollectScriptProjectInput(VirtualFileSystem& filesystem, AssetDatabase& database,
                                                      const std::filesystem::path& runtimeAssembly,
                                                      const std::filesystem::path& editorAssembly);

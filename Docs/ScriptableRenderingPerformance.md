@@ -24,7 +24,7 @@ Snake 是实时脚本场景，物体数随实际帧时间和游戏逻辑变化�
 完整的基线与 SRP 原始证据，以及独立诊断样本，保留于 `Engine/Build/SrpPerformanceEvidence/`。试采 `Pilot1` 和 `Pilot2` 因帧时间戳解码/Windows 主机文本编码检查失败而没有有效报告，不纳入以上数据；修复后通过的 `Pilot3`、旧提交 `PilotLegacy1` 只用于验证导出链路，同样排除正式汇总。可用以下命令串行重跑 12 轮，并用生成的输入路径、文件摘要和原始 capture 复核汇总：
 
 ```powershell
-Engine/Tools/RunSrpPerformanceMatrix.ps1
+Engine/Tools/RunPython.bat Engine/Tools/RunSrpPerformanceMatrix.py
 ```
 
 内存诊断单独运行；将 `--player`、`--project` 改为旧端程序和项目即可采集旧端，保持 Diagnostics/Memory 开关一致：

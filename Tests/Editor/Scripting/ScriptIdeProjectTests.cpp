@@ -88,6 +88,10 @@ int main()
 		Expect(input.FrameworkItems(ScriptAssemblyGroup::Game).find("Ursa.Editor") == String::npos &&
 		           input.FrameworkItems(ScriptAssemblyGroup::Editor).find("Ursa.Editor") != String::npos,
 		       "Framework references violate group dependencies");
+		Expect(input.Properties().find("Debug;Release;Publish") != String::npos &&
+		           ScriptFrameworkVariant(root / "Managed/Debug/Ursa.Runtime.dll", "Publish") ==
+		               root / "Managed/Publish/Ursa.Runtime.dll",
+		       "Publish properties or framework variant mapping are missing");
 		workspace = Take(ScriptIdeProject::Generate(filesystem, input));
 		auto editorProject = Take(filesystem.ReadText(Path("lib:ScriptIDE/Projects/Editor/Ursa.EditorScripts.csproj")));
 		auto gameProject = Take(filesystem.ReadText(Path("lib:ScriptIDE/Projects/Game/Ursa.Game.csproj")));
@@ -217,7 +221,7 @@ int main()
 			                          {"ProjectRoot", root.generic_u8string()},
 			                          {"Solution", (build / "UrsaEngine.slnx").generic_u8string()},
 			                          {"ManagedProjects", (build / "Ide/Managed").generic_u8string()},
-			                          {"Configurations", Json::array({"Debug", "Release"})}};
+			                          {"Configurations", Json::array({"Debug", "Release", "Publish"})}};
 			const auto path = build / "UnifiedWorkspace.json";
 			Write(path, description.dump(2).c_str());
 			return path;

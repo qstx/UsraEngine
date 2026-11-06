@@ -6,6 +6,15 @@ namespace Ursa;
 [NativeHeader("Scripting/Bindings/RuntimeServices.hpp")]
 internal static partial class NativeRuntimeBindings
 {
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::CpuMarkersEnabled", Thread = BindingThread.Any, ContextFree = true)]
+	internal static partial bool CpuMarkersEnabled();
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::RegisterCpuMarker", Thread = BindingThread.Any, ContextFree = true)]
+	internal static partial ulong RegisterCpuMarker(string name, string file, string function, int line);
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::BeginCpuMarker", Thread = BindingThread.Any, ContextFree = true)]
+	internal static partial ulong BeginCpuMarker(ulong marker);
+	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::EndCpuMarker", Thread = BindingThread.Any, ContextFree = true)]
+	internal static partial void EndCpuMarker(ulong token);
+
 	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::CreateGameObject")]
 	internal static partial NativeHandle CreateGameObject(string name);
 	[NativeMethod("Ursa::Scripting::Bindings::RuntimeServices::GetName")]

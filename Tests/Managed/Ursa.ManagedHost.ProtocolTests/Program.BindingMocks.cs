@@ -19,6 +19,10 @@ internal static unsafe partial class Program
 	{
 		var registration = new BindingCallbackRegistration(RuntimeModule.Hash, (uint)(sizeof(RuntimeModule.Table) / sizeof(nint)), sizeof(RuntimeModule.Table));
 		var table = (RuntimeModule.Table*)registration.Functions;
+		table->NativeRuntimeBindings_CpuMarkersEnabled = &BoundCpuMarkersEnabled;
+		table->NativeRuntimeBindings_RegisterCpuMarker = &BoundRegisterCpuMarker;
+		table->NativeRuntimeBindings_BeginCpuMarker = &BoundBeginCpuMarker;
+		table->NativeRuntimeBindings_EndCpuMarker = &BoundEndCpuMarker;
 		table->NativeRuntimeBindings_CreateGameObject = &BoundCreateGameObject;
 		table->NativeRuntimeBindings_GetName = &BoundGetName;
 		table->NativeRuntimeBindings_SetName = &BoundSetName;

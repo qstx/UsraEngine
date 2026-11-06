@@ -91,12 +91,12 @@ save/reload without an Animator Controller. The OBJ model is also saved and
 reopened as both a Scene and a Prefab.
 
 To validate the importer against a public animated GLB, build
-`UrsaModelImportCandidateTests` and run `Tools/ValidatePublicGltf.ps1`. The
+`UrsaModelImportCandidateTests` and run `Tools/ValidatePublicGltf.py`. The
 script downloads Khronos' `RiggedSimple.glb` into the ignored `Build` directory
 when no local file is supplied, then checks candidate construction, mesh skin
 bindings, animation clips, and artifact encoding, then imports the model into an
 isolated project through `UrsaAssetImport` and verifies the published model-v9
-sub-assets. You can pass `-ModelPath`
+sub-assets. You can pass `--model-path`
 with another self-contained `.glb` file that contains meshes, a skin, and
 animations. `RiggedSimple` is published by the
 [Khronos glTF Sample Assets project](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/RiggedSimple)

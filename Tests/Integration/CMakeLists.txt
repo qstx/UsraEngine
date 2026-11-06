@@ -90,6 +90,15 @@ if(URSA_ENABLE_DOTNET)
 
   add_test(NAME UrsaManagedProtocolTests COMMAND "${URSA_DOTNET_EXECUTABLE}"
     "${URSA_MANAGED_TEST_OUTPUT_DIR}/Ursa.ManagedHost.ProtocolTests.dll")
+  add_test(NAME UrsaManagedProfilerTests COMMAND "${URSA_DOTNET_EXECUTABLE}"
+    "${URSA_MANAGED_TEST_OUTPUT_DIR}/Ursa.ManagedHost.ProtocolTests.dll" --profiling-only)
+  add_test(NAME UrsaManagedProfilerHostTests COMMAND UrsaDotNetHostTests
+    "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/temp/ManagedProfiler" --profiling-only)
+  add_test(NAME UrsaDeepProfilingTests COMMAND "${URSA_DOTNET_EXECUTABLE}"
+    "${URSA_MANAGED_TEST_OUTPUT_DIR}/Ursa.ManagedHost.ProtocolTests.dll" --deep-profiling-only
+    "${URSA_MANAGED_TEST_OUTPUT_DIR}/Ursa.DeepProfilingFixtures.dll"
+    "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.DeepProfiler.dll" "$<CONFIG>"
+    "${URSA_BINARY_ROOT}/Tests/DeepProfiling/$<CONFIG>")
   add_test(NAME UrsaManagedSourceSymbolsTests COMMAND "${URSA_DOTNET_EXECUTABLE}"
     "${URSA_MANAGED_TEST_OUTPUT_DIR}/Ursa.ManagedHost.ProtocolTests.dll" --debug-symbols-only)
   set_tests_properties(UrsaManagedProtocolTests UrsaManagedSourceSymbolsTests PROPERTIES ENVIRONMENT
@@ -220,24 +229,21 @@ if(URSA_ENABLE_DOTNET)
   endif()
 endif()
 if(TARGET UrsaAssetImport AND TARGET UrsaScriptPlayer AND NOT URSA_PROJECT_DIR STREQUAL "")
-  find_program(URSA_POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
 
   if(URSA_ENABLE_DOTNET AND TARGET UrsaEditor)
-    add_test(NAME UrsaProjectPipelineSamplesTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
-      -File "${CMAKE_CURRENT_SOURCE_DIR}/ProjectPipelineSamplesTests.ps1"
-      -Importer "$<TARGET_FILE:UrsaAssetImport>" -Player "$<TARGET_FILE:UrsaScriptPlayer>"
-      -PackageTool "$<TARGET_FILE:UrsaPak>"
-      -Capture "$<TARGET_FILE:UrsaCapture>"
-      -Editor "$<TARGET_FILE:UrsaEditor>" -Source "${URSA_TEST_SAMPLE_PROJECT}"
-      -Configuration "$<CONFIG>" -OutputRoot "${URSA_BINARY_ROOT}/TestProjects/PipelineSamples/$<CONFIG>")
+    add_test(NAME UrsaProjectPipelineSamplesTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat" "${CMAKE_CURRENT_SOURCE_DIR}/ProjectPipelineSamplesTests.py"
+      --importer "$<TARGET_FILE:UrsaAssetImport>" --player "$<TARGET_FILE:UrsaScriptPlayer>"
+      --package-tool "$<TARGET_FILE:UrsaPak>"
+      --capture "$<TARGET_FILE:UrsaCapture>"
+      --editor "$<TARGET_FILE:UrsaEditor>" --source "${URSA_TEST_SAMPLE_PROJECT}"
+      --configuration "$<CONFIG>" --output-root "${URSA_BINARY_ROOT}/TestProjects/PipelineSamples/$<CONFIG>")
     set_tests_properties(UrsaProjectPipelineSamplesTests PROPERTIES TIMEOUT 600)
   endif()
 
-  add_test(NAME UrsaAssetImportCliTests COMMAND "${URSA_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
-    -File "${CMAKE_CURRENT_SOURCE_DIR}/AssetImportCliTests.ps1"
-    -Importer "$<TARGET_FILE:UrsaAssetImport>" -Player "$<TARGET_FILE:UrsaScriptPlayer>"
-    -PackageTool "$<TARGET_FILE:UrsaPak>" -Configuration "$<CONFIG>"
-    -Project "${URSA_BINARY_ROOT}/TestProjects/Cli/$<CONFIG>" -Source "${URSA_TEST_SAMPLE_PROJECT}")
+  add_test(NAME UrsaAssetImportCliTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat" "${CMAKE_CURRENT_SOURCE_DIR}/AssetImportCliTests.py"
+    --importer "$<TARGET_FILE:UrsaAssetImport>" --player "$<TARGET_FILE:UrsaScriptPlayer>"
+    --package-tool "$<TARGET_FILE:UrsaPak>" --configuration "$<CONFIG>"
+    --project "${URSA_BINARY_ROOT}/TestProjects/Cli/$<CONFIG>" --source "${URSA_TEST_SAMPLE_PROJECT}")
   set_tests_properties(UrsaAssetImportCliTests PROPERTIES
     ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/AssetImportCliUser/$<CONFIG>")
 endif()
@@ -245,7 +251,9 @@ endif()
 get_property(integrationTests DIRECTORY PROPERTY TESTS)
 foreach(test IN LISTS integrationTests)
   if(NOT test STREQUAL "UrsaDotNetHostSmoke" AND NOT test STREQUAL "UrsaManagedProtocolTests"
-      AND NOT test STREQUAL "UrsaManagedSourceSymbolsTests"
+      AND NOT test STREQUAL "UrsaManagedSourceSymbolsTests" AND NOT test STREQUAL "UrsaManagedProfilerTests"
+      AND NOT test STREQUAL "UrsaManagedProfilerHostTests"
+      AND NOT test STREQUAL "UrsaDeepProfilingTests"
       AND NOT test STREQUAL "UrsaManagedImportSessionTests" AND NOT test STREQUAL "UrsaScriptedAssetImporterTests"
       AND NOT test STREQUAL "UrsaAssetPostprocessorTests" AND NOT test STREQUAL "UrsaManagedAssetImportWorkflowTests"
       AND NOT test STREQUAL "UrsaManagedImporterInspectorTests"

@@ -102,10 +102,12 @@ internal sealed class ContractReader
 						throw Error("UBG0105", "Callbacks require a qualified C# static target.", method);
 					uint thread = 0;
 					bool nativeOnly = false;
+					bool contextFree = false;
 					foreach (var named in primary.NamedArguments)
 					{
 						if (named.Key == "Thread") thread = Convert.ToUInt32(named.Value.Value);
 						if (named.Key == "NativeOnly") nativeOnly = named.Value.Value is true;
+						if (named.Key == "ContextFree") contextFree = named.Value.Value is true;
 					}
 					if (thread > 1) throw Error("UBG0106", "Unknown thread policy.", method);
 					WireType returnType = reader.Resolve(method.ReturnType, method.Locations.First());
@@ -132,8 +134,11 @@ internal sealed class ContractReader
 							throw Error("UBG0109", "BindingSession requires one ulong parameter on a managed callback.", parameter);
 						parameters.Add(new(parameter.Name, type, handleKind, session));
 					}
+					if (contextFree && (direction != BindingDirection.NativeMethod || thread != 1 || module.CallScoped ||
+						parameters.Any(parameter => parameter.HandleKind != 0 || parameter.Session)))
+						throw Error("UBG0114", "ContextFree requires an Any-thread native process service without session/handle parameters.", method);
 					module.Methods.Add(new(method.Name, identity, symbol.ContainingNamespace.ToDisplayString(), symbol.Name,
-						target, direction, thread, nativeOnly, returnType, parameters, method.Locations.First(), commandWriter));
+						target, direction, thread, nativeOnly, returnType, parameters, method.Locations.First(), commandWriter, contextFree));
 				}
 			}
 		}
@@ -181,7 +186,7 @@ internal sealed class ContractReader
 			string canonical = "Ursa.Bindings.v1|win-x64|cdecl|le\n" + BuiltinAbi.Identity + "\n" +
 				$"{module.Name}:{module.Id}:{module.Required}:{module.CallScoped}\n" +
 				string.Join("\n", module.Dependencies) + "\n" + string.Join("\n", used.OrderBy(t => t.Key, StringComparer.Ordinal).Select(t => t.Shape)) +
-				"\n" + string.Join("\n", module.Methods.Select(m => $"{m.Identity}|{m.Direction}|{m.Target}|{m.Thread}|{m.NativeOnly}|{m.Return.Key}|" +
+				"\n" + string.Join("\n", module.Methods.Select(m => $"{m.Identity}|{m.Direction}|{m.Target}|{m.Thread}|{m.NativeOnly}{(m.ContextFree ? ":ContextFree" : "")}|{m.Return.Key}|" +
 					string.Join(",", m.Parameters.Select(p => $"{p.Type.Key}:{p.HandleKind}:{p.Session}"))));
 			module.Hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
 			BindingMethod[] commands = module.Methods.Where(m => m.Direction == BindingDirection.RecordedCommand).ToArray();

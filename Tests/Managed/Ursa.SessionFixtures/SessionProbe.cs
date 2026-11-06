@@ -1,10 +1,15 @@
 using System;
 using Ursa;
+using Ursa.Profiling;
+using System.Threading.Tasks;
 
 namespace Ursa.SessionFixtures;
 
 public sealed class SessionProbe : Behaviour
 {
+	private static readonly ProfilerMarker awakeMarker = new("SessionProbe.Awake.Work");
+	private static readonly ProfilerMarker counterMarker = new("SessionProbe.Awake.Counter");
+	private static readonly ProfilerMarker workerMarker = new("SessionProbe.Async.Worker");
 	private static int counter;
 	public int value = Ursa.SessionDependency.ProbeDefaults.Value;
 	public Vector3 position = new(1, 2, 3);
@@ -13,7 +18,18 @@ public sealed class SessionProbe : Behaviour
 
 	public override void Awake()
 	{
+		using var scope = awakeMarker.Auto();
+		using var nested = counterMarker.Auto();
 		GameObject.Name = $"Session:{++counter}:{value}";
+		if (ComputeAsync().GetAwaiter().GetResult() != 7)
+			throw new InvalidOperationException("Profiled async continuation changed its result.");
+	}
+
+	private static async Task<int> ComputeAsync()
+	{
+		await Task.Yield();
+		using var worker = workerMarker.Auto();
+		return 7;
 	}
 }
 

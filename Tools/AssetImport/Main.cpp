@@ -53,6 +53,10 @@ int main(int argc, char** argv)
 		{
 			options.buildScripts = false;
 		}
+		else if (argument == "--deep-profile" || argument == "--no-deep-profile")
+		{
+			options.deepProfiling = argument == "--deep-profile";
+		}
 		else if (argument == "--bootstrap")
 		{
 			options.bootstrapOnly = true;
@@ -66,8 +70,9 @@ int main(int argc, char** argv)
 	if (project.empty() || (profile != "Both" && profile != "Editor" && profile != "Player"))
 	{
 		std::cerr
-		    << "Usage: UrsaAssetImport --project <project> [--engine <Assets>] [--configuration Debug|Release] "
-		       "[--profile Both|Editor|Player] [--target WindowsVulkan] [--scope prj:Path] [--force] [--no-scripts]\n";
+		    << "Usage: UrsaAssetImport --project <project> [--engine <Assets>] [--configuration Debug|Release|Publish] "
+		       "[--profile Both|Editor|Player] [--target WindowsVulkan] [--scope prj:Path] [--force] [--no-scripts] "
+		       "[--deep-profile|--no-deep-profile]\n";
 		return 2;
 	}
 	auto workspace = AssetImportPipeline::OpenProject(project, engine);

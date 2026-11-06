@@ -3,6 +3,8 @@
 Requires CMake 4.4.5+, VS2026/v145, .NET 10 and initialized third-party
 submodules. Tests are omitted by default. The first run builds workspace
 tools; later runs refresh incrementally. No PowerShell is needed.
+Generates Debug, Release and Publish configurations. Tracy is enabled for
+Debug/Release; Publish excludes it. Deep Profiling is controlled separately.
 """
 
 import argparse
@@ -47,8 +49,8 @@ def main():
     ide = [compiler, project, '--ide', '--workspace', description]
     print('[3/5] Collect project scripts and generate C# projects', flush=True)
     run(ide + ['--prepare-workspace'])
-    print('[4/5] Prepare IDE framework bindings and both configurations', flush=True)
-    for configuration in ('Debug', 'Release'):
+    print('[4/5] Prepare IDE framework bindings and all three configurations', flush=True)
+    for configuration in ('Debug', 'Release', 'Publish'):
         for name in ('Ursa.Editor', 'Ursa.ManagedHost'):
             run(['dotnet', 'build', build / f'Ide/Managed/{name}/{name}.csproj', '--configuration', configuration,
                  '--nologo', '-m:1', '--disable-build-servers', '-nr:false'])

@@ -22,7 +22,7 @@
 
 ## Visual Studio 分类
 
-Windows 开发基线为 VS2026/v145 与 CMake 4.4.5+。统一 Engine 与 Demo 的开发请从工作区根运行 `GenerateEngineSolutionWithTracy.bat`，它在新的 `Engine/Build/VS2026` 中完成必要工具引导及项目配置，再打开 `UrsaEngine.slnx`。不要把 VS2022 缓存直接切换生成器。CMake 4.4.5 默认生成的 `.slnx` 与旧 `.sln` 均由结构检查识别。
+Windows 开发基线为 VS2026/v145 与 CMake 4.4.5+。统一 Engine 与 Demo 的开发请从工作区根运行 `GenerateEngineSolution.bat`，它在新的 `Engine/Build/VS2026` 中完成必要工具引导及项目配置，再打开 `UrsaEngine.slnx`。不要把 VS2022 缓存直接切换生成器。CMake 4.4.5 默认生成的 `.slnx` 与旧 `.sln` 均由结构检查识别。
 
 生成入口采用 bat + Python 3.11+，默认使用仓库自带 Python。`--build-dir`、`--project-dir` 和 `--tests` 可从 bat 直接传入；CMake 直接调用 Python 生成 SDK 工程。`UrsaProjectStructureCheck` 也使用 Python，旧 ps1 接口保留兼容转发。常规生成不要求 PowerShell；既有格式检查和可选自动化测试仍保留其脚本依赖。
 
@@ -47,7 +47,7 @@ cmake --build Build --config Debug --target UrsaProjectStructureCheck
 
 Editor 位于 `Build/Editor/Debug/UrsaEditor.exe`，Player 位于 `Build/Debug/UrsaScriptPlayer.exe`，导入工具位于 `Build/Editor/Debug/UrsaAssetImport.exe`。其他配置将 Debug 替换为相应配置名。MSVC 默认启用 `/MP`，构建入口同时使用 `--parallel` 调度多个目标。
 
-工作区根的 `GenerateEngineSolutionWithTracy.bat` 会显式开启 `/MP`，覆盖旧 Build 缓存中的并行关闭设置。默认保留 Editor、Player、导入和打包工具，使用 `URSA_BUILD_TESTS=OFF` 避免整解决方案构建连带编译全部测试；运行 `GenerateEngineSolutionWithTracy.bat --tests` 可在同一个解决方案中启用测试工程。直接运行 CMake 的测试默认值保持原样。
+工作区根的 `GenerateEngineSolution.bat` 会显式开启 `/MP`，覆盖旧 Build 缓存中的并行关闭设置。默认保留 Editor、Player、导入和打包工具，使用 `URSA_BUILD_TESTS=OFF` 避免整解决方案构建连带编译全部测试；运行 `GenerateEngineSolution.bat --tests` 可在同一个解决方案中启用测试工程。直接运行 CMake 的测试默认值保持原样。
 
 在 VS 中右键所需的 Editor、Player 或工具目标并选择 **Build**，会构建该目标及其依赖；**Build Solution** 会构建当前配置勾选的全部目标。命令行可使用上面的 `--target` 选择一个或多个目标。Debug 和 Release 使用各自的编译产物，切换配置后的首次构建仍需要编译对应依赖。
 
