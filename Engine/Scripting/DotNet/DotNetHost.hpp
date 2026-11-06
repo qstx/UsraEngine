@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Result.hpp>
+#include <Application/RuntimeSceneManager.hpp>
 #include <Core/Types.hpp>
 #include <Serialization/AssetReference.hpp>
 #include <Scripting/ManagedHandleRegistry.hpp>
@@ -26,7 +27,8 @@ enum class ManagedBehaviourEvent : UInt32
 	Update,
 	LateUpdate,
 	OnDisable,
-	OnDestroy
+	OnDestroy,
+	OnGUI
 };
 
 struct ManagedHostFiles
@@ -174,6 +176,8 @@ public:
 	Result<String> SerializeBehaviour(UInt64 instanceToken);
 
 	Result<void> DeserializeBehaviour(UInt64 instanceToken, const String& payload);
+	Result<void> ValidateSceneScript(UInt64 session, const String& typeName, const String& archive);
+	Result<void> NotifySceneChange(UInt64 session, const RuntimeScene& scene, UInt64 nativeSession, bool loaded);
 
 	Result<Vector<ManagedEditorExtension>> PrepareEditorExtensions(UInt64 sessionId);
 

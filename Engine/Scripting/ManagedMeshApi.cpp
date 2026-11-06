@@ -94,6 +94,10 @@ Result<ManagedHandle> ManagedSceneApi::RegisterMaterial(const std::shared_ptr<Ma
 void ManagedSceneApi::RequireWritableResource(const ManagedHandle& handle) const
 {
 	RequireResourceAccess();
+	if (validatingSceneCandidate)
+	{
+		throw std::logic_error("Resource mutation is not permitted while validating a Scene candidate");
+	}
 	const auto value = handles->Resolve(handle, handle.kind);
 	if (!value)
 	{

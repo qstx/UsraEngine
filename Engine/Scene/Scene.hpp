@@ -178,6 +178,12 @@ public:
 
 	void BeginFrame();
 
+	Result<void> PrepareFrame(const FrameContext& context, bool invokeStart = true);
+
+	Result<Vector<ComponentId>> PrepareGuiCycle(const FrameContext& context);
+
+	Result<void> DispatchGui(const FrameContext& context, const Vector<ComponentId>& snapshot);
+
 	Result<void> Update(const FrameContext& context);
 
 	Result<void> FixedUpdate(const FrameContext& context);
@@ -187,6 +193,10 @@ public:
 	Result<void> CommitChanges();
 
 	void Clear();
+
+	// Installs a fully decoded, inactive candidate while retaining the host's
+	// Scene container and runtime preparation service. Lifecycle is explicit.
+	Result<void> ReplaceGraph(Scene& candidate);
 
 private:
 	friend class GameObject;
@@ -269,7 +279,7 @@ private:
 
 	Result<void> RunPhase(Phase phase, const FrameContext& context);
 
-	Result<void> SynchronizeLifecycle(const FrameContext& context);
+	Result<void> SynchronizeLifecycle(const FrameContext& context, bool invokeStart = true);
 
 	bool IsGameObjectActive(const GameObject* object) const;
 

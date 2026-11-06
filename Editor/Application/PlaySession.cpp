@@ -10,9 +10,10 @@ FrameInput SelectPlayInput(FrameInput polled, bool viewportFocused, bool editorI
 	return viewportFocused && !editorInputCaptured ? polled : FrameInput{};
 }
 
-bool EditorInputBlocksPlay(bool wantCaptureKeyboard, bool wantTextInput, bool dragDropActive, bool popupOpen)
+bool EditorInputBlocksPlay(bool wantCaptureKeyboard, bool wantTextInput, bool dragDropActive, bool popupOpen,
+                           bool gameNavigationOnly)
 {
-	return wantCaptureKeyboard || wantTextInput || dragDropActive || popupOpen;
+	return (wantCaptureKeyboard && !gameNavigationOnly) || wantTextInput || dragDropActive || popupOpen;
 }
 
 Result<void> PlaySession::Start(const SceneDraft& draft, ResourceId documentId, const ComponentRegistry& registry,
@@ -92,9 +93,25 @@ Result<void> PlaySession::Tick(Ursa::Float32 deltaSeconds, Window* window, Frame
 	return frameRunner.Tick(*scene, deltaSeconds, window, input);
 }
 
+Result<void> PlaySession::TickGui(Float32 deltaSeconds, Window* window, FrameInput input,
+                                  const Vector<Gui::Event>& events, Gui::Point viewport)
+{
+	if (!scene)
+	{
+		return Result<void>::Failure("Play mode is not active");
+	}
+	const bool simulate = !paused || stepRequested;
+	stepRequested = false;
+	return frameRunner.TickGui(*scene, deltaSeconds, window, input, guiSession, events, viewport, simulate);
+}
+
 void PlaySession::Stop()
 {
 	URSA_PROFILE_DIAGNOSTIC_SCOPE("Editor.Play.Stop");
+	guiSession.Reset();
+	guiSession.readClipboard = {};
+	guiSession.writeClipboard = {};
+	guiSession.measureText = {};
 #if defined(URSA_ENABLE_TRACY_DIAGNOSTICS)
 	const bool wasActive = Active();
 #endif

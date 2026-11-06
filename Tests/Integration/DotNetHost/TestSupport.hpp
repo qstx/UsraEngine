@@ -46,6 +46,7 @@ inline VirtualPath Path(const String& value)
 }
 
 void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPath, UInt32 objectCount = 1);
+void TestManagedGui(DotNetHost& host, const VirtualPath& contentPath);
 void TestManagedMatrixBindings(DotNetHost& host, VirtualFileSystem& filesystem, const VirtualPath& content);
 void TestPipelineAssetReload(DotNetHost& host, VirtualFileSystem& filesystem, const VirtualPath& content);
 void TestManagedForward(DotNetHost& host, const VirtualPath& content);

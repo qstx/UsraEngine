@@ -63,6 +63,7 @@ public:
 	}
 
 	ResourceSession::AssetPathResolver AssetResolver() const;
+	ResourceSession::AssetPathResolver SourceAssetResolver() const;
 
 	ProjectAssetImporter& Importer()
 	{

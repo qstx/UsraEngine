@@ -1,4 +1,5 @@
 add_subdirectory(Application)
+add_subdirectory(Gui)
 add_subdirectory(Material)
 add_subdirectory(Math)
 add_subdirectory(Mesh)

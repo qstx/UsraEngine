@@ -1,0 +1,63 @@
+{
+  "format": "UrsaScriptableAsset",
+  "version": 1,
+  "localFileId": 6973234053898343887,
+  "typeId": "ursa.rendering.universal-pipeline",
+  "typeVersion": 2,
+  "payload": {
+    "FormatVersion": 1,
+    "ScriptType": "ursa.rendering.universal-pipeline",
+    "Version": 2,
+    "SourceGuid": "c3db9aad-cd0d-4d07-a4dd-4f8a056a7410",
+    "LocalFileId": 6973234053898343887,
+    "Fields": {
+      "BloomEnabled": false,
+      "BloomIntensity": 0.5,
+      "BloomScatter": 0.7,
+      "BloomThreshold": 1,
+      "ExposureEV": 0,
+      "FxaaEnabled": false,
+      "MainLightShadowAtlasHeight": 1024,
+      "MainLightShadowAtlasWidth": 2048,
+      "MainLightShadowCascadeCount": 2,
+      "MainLightShadowDistance": 50,
+      "MainLightShadowSplitFractions": [0.25],
+      "MainLightShadowsEnabled": true,
+      "RendererData": {
+        "$ursaReference": {
+          "Kind": "ScriptableObject",
+          "Id": "",
+          "Resource": {
+            "guid": "f4f2e337-6555-4d79-b8a7-3f1b718f5bd8",
+            "localFileId": 15516842715564576692
+          }
+        }
+      },
+      "ToneMapping": 1
+    },
+    "FieldTypes": {
+      "BloomEnabled": {"Kind": "Boolean", "ElementKind": "Unsupported", "TypeName": "System.Boolean", "ElementTypeName": ""},
+      "BloomIntensity": {"Kind": "FloatingPoint", "ElementKind": "Unsupported", "TypeName": "System.Single", "ElementTypeName": ""},
+      "BloomScatter": {"Kind": "FloatingPoint", "ElementKind": "Unsupported", "TypeName": "System.Single", "ElementTypeName": ""},
+      "BloomThreshold": {"Kind": "FloatingPoint", "ElementKind": "Unsupported", "TypeName": "System.Single", "ElementTypeName": ""},
+      "ExposureEV": {"Kind": "FloatingPoint", "ElementKind": "Unsupported", "TypeName": "System.Single", "ElementTypeName": ""},
+      "FxaaEnabled": {"Kind": "Boolean", "ElementKind": "Unsupported", "TypeName": "System.Boolean", "ElementTypeName": ""},
+      "MainLightShadowAtlasHeight": {"Kind": "UnsignedInteger", "ElementKind": "Unsupported", "TypeName": "System.UInt32", "ElementTypeName": ""},
+      "MainLightShadowAtlasWidth": {"Kind": "UnsignedInteger", "ElementKind": "Unsupported", "TypeName": "System.UInt32", "ElementTypeName": ""},
+      "MainLightShadowCascadeCount": {"Kind": "UnsignedInteger", "ElementKind": "Unsupported", "TypeName": "System.UInt32", "ElementTypeName": ""},
+      "MainLightShadowDistance": {"Kind": "FloatingPoint", "ElementKind": "Unsupported", "TypeName": "System.Single", "ElementTypeName": ""},
+      "MainLightShadowSplitFractions": {"Kind": "Array", "ElementKind": "FloatingPoint", "TypeName": "System.Single[]", "ElementTypeName": "System.Single"},
+      "MainLightShadowsEnabled": {"Kind": "Boolean", "ElementKind": "Unsupported", "TypeName": "System.Boolean", "ElementTypeName": ""},
+      "RendererData": {"Kind": "ScriptableObjectReference", "ElementKind": "Unsupported", "TypeName": "Ursa.Rendering.UniversalRendererData", "ElementTypeName": ""},
+      "ToneMapping": {
+        "Kind": "Enumeration",
+        "ElementKind": "Unsupported",
+        "TypeName": "Ursa.Rendering.ToneMappingMode",
+        "ElementTypeName": "",
+        "EnumValues": ["None", "Reinhard"],
+        "EnumNumericValues": [0, 1],
+        "EnumUnderlyingType": "System.Int32"
+      }
+    }
+  }
+}

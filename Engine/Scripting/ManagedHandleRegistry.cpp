@@ -136,6 +136,28 @@ Result<void> ManagedHandleRegistry::InvalidateAll()
 	return {};
 }
 
+Result<void> ManagedHandleRegistry::InvalidateKind(ManagedHandleKind kind)
+{
+	auto valid = RequireMainThread();
+	if (!valid)
+	{
+		return valid;
+	}
+	for (UInt32 index = 0; index < slots.size(); ++index)
+	{
+		auto& slot = slots[index];
+		if (!slot.object || slot.kind != kind)
+		{
+			continue;
+		}
+		objectIndices.erase(slot.object);
+		slot.object = nullptr;
+		AdvanceGeneration(slot);
+		freeIndices.push_back(index);
+	}
+	return {};
+}
+
 Result<void> ManagedHandleRegistry::RequireMainThread() const
 {
 	if (std::this_thread::get_id() == mainThread)

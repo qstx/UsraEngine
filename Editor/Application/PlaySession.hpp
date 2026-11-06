@@ -10,7 +10,8 @@ namespace Ursa::Editor
 using PlayContextSetup = std::function<Result<std::shared_ptr<void>>(ComponentLoadContext&)>;
 
 FrameInput SelectPlayInput(FrameInput polled, bool viewportFocused, bool editorInputCaptured);
-bool EditorInputBlocksPlay(bool wantCaptureKeyboard, bool wantTextInput, bool dragDropActive, bool popupOpen);
+bool EditorInputBlocksPlay(bool wantCaptureKeyboard, bool wantTextInput, bool dragDropActive, bool popupOpen,
+                           bool gameNavigationOnly = false);
 
 class PlaySession final
 {
@@ -19,6 +20,31 @@ public:
 	                   ResourceSession& resources, const PlayContextSetup& setup = {});
 
 	Result<void> Tick(Ursa::Float32 deltaSeconds, Window* window, FrameInput input);
+	Result<void> TickGui(Float32 deltaSeconds, Window* window, FrameInput input, const Vector<Gui::Event>& events,
+	                     Gui::Point viewport);
+
+	Gui::Session& GuiSession()
+	{
+		return guiSession;
+	}
+
+	void CancelGuiInput(const FrameInput& physical)
+	{
+		guiSession.CancelInput();
+		frameRunner.SynchronizeInput(physical);
+	}
+
+	FrameContext SceneContext(Window* window, FrameInput input) const
+	{
+		return frameRunner.CurrentContext(window, input);
+	}
+
+	void ResetAfterSceneLoad(const FrameInput& input)
+	{
+		guiSession.Reset();
+		frameRunner.ResetAccumulator();
+		frameRunner.SynchronizeInput(input);
+	}
 
 	void Pause()
 	{
@@ -80,6 +106,7 @@ private:
 	std::shared_ptr<void> services;
 	std::unique_ptr<Scene> scene;
 	SceneFrameRunner frameRunner;
+	Gui::Session guiSession;
 	bool paused = false;
 	bool stepRequested = false;
 };

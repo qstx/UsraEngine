@@ -7,8 +7,22 @@
 #include <Material/Material.hpp>
 #include <functional>
 
+namespace Ursa::Gui
+{
+class Canvas;
+}
+
 namespace Ursa::Rendering
 {
+// Only the host's primary game output receives this one-use token. Camera and
+// preview targets cannot opt themselves into runtime GUI composition.
+struct GameGuiOutput
+{
+	UInt64 session = 0;
+	UInt64 sequence = 0;
+	std::shared_ptr<Gui::Canvas> canvas;
+};
+
 struct RenderCommand
 {
 	RenderCommandOpcode opcode = RenderCommandOpcode::SetRenderTarget;
@@ -62,7 +76,7 @@ public:
 
 	Result<void> Begin(std::shared_ptr<RenderTextureResource> cameraTarget = {},
 	                   Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead,
-	                   const Rhi::SwapchainPtr& swapchain = {});
+	                   const Rhi::SwapchainPtr& swapchain = {}, GameGuiOutput gui = {});
 	Result<void> ResetCamera(std::optional<CameraData> camera = {});
 	Result<void> Execute(const Vector<RenderCommand>& commands);
 	Result<void> Submit();

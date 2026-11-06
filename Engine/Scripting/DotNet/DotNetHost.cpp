@@ -6,6 +6,7 @@
 #include <Scripting/Bindings/BindingCollections.hpp>
 #include <Scripting/Bindings/BindingHandles.hpp>
 #include <Scripting/Bindings/BindingRequirements.hpp>
+#include <Scripting/Bindings/SceneServices.hpp>
 #include <Runtime.generated.hpp>
 #include <Rendering.generated.hpp>
 #include <ManagedHost.generated.hpp>
@@ -851,6 +852,33 @@ Result<void> DotNetHost::DestroyBehaviour(UInt64 instanceToken)
 		return Result<void>::Failure("Cannot destroy an invalid managed Behaviour instance");
 	}
 	auto result = HostBindings::Call_ManagedHostBindings_DestroyBehaviour(bindingState->host, instanceToken);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<void> DotNetHost::ValidateSceneScript(UInt64 session, const String& typeName, const String& payload)
+{
+	if (!initialized || !bindingState || !session)
+	{
+		return Result<void>::Failure("Scene candidate validation requires an active script session");
+	}
+	Bindings::Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive archive;
+	archive.F_Version = 1;
+	archive.F_Json = {reinterpret_cast<const UInt8*>(payload.data()), payload.size(), 1, 0};
+	Bindings::Utf8View type{reinterpret_cast<const UInt8*>(typeName.data()), typeName.size(), 1, 0};
+	auto result =
+	    HostBindings::Call_ManagedHostBindings_ValidateSceneScript(bindingState->host, session, type, archive);
+	return result ? Result<void>{} : Result<void>::Failure(result.Error());
+}
+
+Result<void> DotNetHost::NotifySceneChange(UInt64 session, const RuntimeScene& scene, UInt64 nativeSession, bool loaded)
+{
+	if (!initialized || !bindingState || !session)
+	{
+		return Result<void>::Failure("Scene notification requires an active script session");
+	}
+	Bindings::BindingArena arena;
+	const auto data = Bindings::SceneServices::Write(scene, nativeSession, arena);
+	auto result = HostBindings::Call_ManagedHostBindings_NotifySceneChange(bindingState->host, session, data, loaded);
 	return result ? Result<void>{} : Result<void>::Failure(result.Error());
 }
 

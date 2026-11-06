@@ -111,8 +111,8 @@ Result<RenderingServices::Token> RenderingServices::Begin(BindingCall& call, UIn
 	}
 	if (api.renderExecutor)
 	{
-		CompleteBindingResult(
-		    api.renderExecutor->Begin(api.renderOutput, api.renderOutputFinalState, api.renderWindow));
+		CompleteBindingResult(api.renderExecutor->Begin(api.renderOutput, api.renderOutputFinalState, api.renderWindow,
+		                                                std::exchange(api.pendingGuiOutput, {})));
 		const auto target = api.renderExecutor->CameraTarget();
 		if (target)
 		{

@@ -11,6 +11,7 @@
 #include <Serialization/ComponentRegistry.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <Rendering/Pipeline/GraphicsSettings.hpp>
+#include <Application/SceneBuildSettings.hpp>
 #include <Scripting/Bindings/BindingRequirements.hpp>
 #include <algorithm>
 
@@ -52,9 +53,11 @@ bool BootstrapAsset(const AssetRecord& asset)
 {
 	return asset.path.scheme == engineScheme &&
 	       (asset.path.relative.rfind("Shaders/Editor/", 0) == 0 ||
+	        asset.path.relative.rfind("Shaders/Runtime/", 0) == 0 ||
 	        asset.path.relative.rfind("Shaders/Universal/", 0) == 0 ||
 	        asset.path.relative.rfind("Shaders/Internal/", 0) == 0 ||
-	        asset.path.relative.rfind("Fonts/Editor/", 0) == 0 || asset.path.relative.rfind("Icons/Editor/", 0) == 0);
+	        asset.path.relative.rfind("Fonts/Editor/", 0) == 0 || asset.path.relative.rfind("Fonts/Runtime/", 0) == 0 ||
+	        asset.path.relative.rfind("Icons/Editor/", 0) == 0);
 }
 
 bool RuntimeAsset(const AssetRecord& asset)
@@ -449,6 +452,9 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 		const auto graphics =
 		    options.bootstrapOnly ? Rendering::GraphicsSettings{} : Take(Rendering::ReadGraphicsSettings(files));
 		Done(Rendering::ValidatePipelineAsset(files, workspace.AssetResolver(), scriptTypes, graphics.renderPipeline));
+		const auto sceneBuilds = options.bootstrapOnly
+		                             ? SceneBuildSettings{}
+		                             : Take(ReadSceneBuildSettings(files, workspace.SourceAssetResolver()));
 		Set<String> sourceInventory;
 		for (const String scheme : {String(engineScheme), String(projectScheme)})
 		{
@@ -591,6 +597,11 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 		{
 			const auto graphicsBlob = StoreBlob(files, Take(Rendering::EncodeGraphicsSettings(graphics)), ".graphics");
 			AddEntry(report.snapshot, files, Path(Rendering::graphicsSettingsRuntime), graphicsBlob);
+			if (sceneBuilds.configured)
+			{
+				const auto sceneBlob = StoreBlob(files, Take(EncodeSceneBuildSettings(sceneBuilds)), ".scenes");
+				AddEntry(report.snapshot, files, Path(sceneBuildSettingsRuntime), sceneBlob);
+			}
 			if (files.IsMounted(projectSettingsScheme))
 			{
 				const auto currentSettings = Take(files.List(projectSettingsScheme));

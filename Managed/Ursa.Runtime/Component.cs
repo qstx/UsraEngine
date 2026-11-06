@@ -94,7 +94,7 @@ public abstract class Component
 		return component;
 	}
 
-	private static Type? FindConcreteType(string typeId)
+	internal static Type? FindConcreteType(string typeId)
 	{
 		Type? managedType = BehaviourRegistry.ResolveType(typeId);
 		if (managedType != null && typeof(Component).IsAssignableFrom(managedType))

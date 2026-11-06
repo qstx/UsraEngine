@@ -45,6 +45,12 @@ internal static partial class ManagedHostBindings
 	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.InvokeBehaviour")]
 	internal static partial void InvokeBehaviour(ulong token, uint eventId);
 
+	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.ValidateSceneScript")]
+	internal static partial void ValidateSceneScript([BindingSession] ulong session, string typeName, BehaviourFieldArchive archive);
+
+	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.NotifySceneChange")]
+	internal static partial void NotifySceneChange([BindingSession] ulong session, Ursa.SceneManagement.SceneData scene, bool loaded);
+
 	[ManagedCallback("Ursa.ManagedHost.HostCallbacks.DestroyBehaviour")]
 	internal static partial void DestroyBehaviour(ulong token);
 

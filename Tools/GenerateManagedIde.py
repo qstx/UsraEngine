@@ -21,8 +21,6 @@ def generate(engine_root, build_root, include_tests=False, roslyn_directory='', 
     inputs = source_files(engine_root / 'Managed', '*.csproj')
     if include_tests:
         inputs += source_files(engine_root / 'Tests/Managed', '*.csproj')
-    if not project_directory or not (Path(project_directory) / 'Assets/Scripts/Snake/SnakeGame.cs').is_file():
-        inputs = [path for path in inputs if path.stem != 'Ursa.SnakeLogicTests']
     projects = {}
     for path in sorted(inputs):
         name = path.stem

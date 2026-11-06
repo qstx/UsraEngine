@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Scene/Scene.hpp>
+#include <Application/RuntimeSceneManager.hpp>
 #include <Rendering/Scene/RendererList.hpp>
 #include <Rendering/Commands/RenderCommandExecutor.hpp>
 #include <Rhi/RHI.hpp>
@@ -17,6 +18,8 @@ namespace Ursa::Scripting
 namespace Bindings
 {
 struct RuntimeServices;
+struct GuiServices;
+struct SceneServices;
 struct MeshServices;
 struct MaterialServices;
 struct ResourceServices;
@@ -55,6 +58,15 @@ public:
 	virtual void RequireSceneMutation() const
 	{
 		Require(0);
+		if (validatingSceneCandidate)
+		{
+			throw std::logic_error("Scene mutation is not permitted while validating a load candidate");
+		}
+	}
+
+	bool SetCandidateValidation(bool value)
+	{
+		return std::exchange(validatingSceneCandidate, value);
 	}
 
 	virtual bool PersistentResourcesReadOnly() const
@@ -137,6 +149,13 @@ public:
 
 	void SetBehaviourRuntime(ManagedBehaviourRuntime* runtime);
 	GameObject::Ptr SetLifecycleOwner(GameObject::Ptr owner);
+	Result<void> InvalidateSceneObjects();
+
+	void SetSceneManager(RuntimeSceneManager* manager)
+	{
+		RequireGameExecution();
+		sceneManager = manager;
+	}
 
 	void SetRenderDevice(Rhi::DevicePtr selectedDevice);
 	void SetRenderOutput(std::shared_ptr<ManagedRenderTexture> output,
@@ -147,6 +166,7 @@ public:
 	void SetRenderObjectExclusions(Vector<ResourceId> objectIds);
 	void SetRenderWindow(Rhi::SwapchainPtr output);
 	void SetFrameCapture(Rendering::FrameCapture* capture);
+	void SetGameGuiOutput(UInt64 sequence, std::shared_ptr<Gui::Canvas> canvas);
 
 	UInt64 AcceptedRenderBatchCount() const
 	{
@@ -155,6 +175,8 @@ public:
 
 private:
 	friend struct Bindings::RuntimeServices;
+	friend struct Bindings::GuiServices;
+	friend struct Bindings::SceneServices;
 	friend struct Bindings::MeshServices;
 	friend struct Bindings::MaterialServices;
 	friend struct Bindings::ResourceServices;
@@ -185,6 +207,8 @@ private:
 	UnorderedMap<UInt32, std::shared_ptr<ManagedRenderTexture>> ownedRenderTextures;
 	UnorderedMap<UInt32, std::shared_ptr<ManagedGraphicsBuffer>> ownedGraphicsBuffers;
 	Scene& scene;
+	RuntimeSceneManager* sceneManager = nullptr;
+	bool validatingSceneCandidate = false;
 	Scene* renderSceneOverride = nullptr;
 	Vector<ResourceId> renderObjectExclusions;
 	std::unique_ptr<ManagedHandleRegistry> handles;
@@ -199,6 +223,7 @@ private:
 	Rhi::DevicePtr device;
 	std::unique_ptr<Rendering::RenderCommandExecutor> renderExecutor;
 	std::shared_ptr<ManagedRenderTexture> renderOutput;
+	Rendering::GameGuiOutput pendingGuiOutput;
 	Rhi::SwapchainPtr renderWindow;
 	Rhi::ResourceState renderOutputFinalState = Rhi::ResourceState::ShaderRead;
 	std::optional<Rendering::CameraType> renderCameraFilter;

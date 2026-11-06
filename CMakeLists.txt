@@ -71,6 +71,7 @@ endforeach()
 include(CMake/BuildResourcePaths.cmake)
 ursa_configure_resource_paths()
 
+include(CMake/ImGui.cmake)
 add_subdirectory(Runtime)
 add_subdirectory(Engine)
 if(URSA_ENABLE_DOTNET)

@@ -53,6 +53,7 @@ public:
 	}
 
 	Result<void> RestoreSerializedPayload();
+	Result<void> WithFieldResources(const std::function<Result<void>()>& action) const;
 
 	Result<void> ApplySerializedPayload(String payload, ResourceSession* resources = nullptr);
 
@@ -78,6 +79,8 @@ public:
 	Result<void> Update(const FrameContext& context) override;
 
 	Result<void> LateUpdate(const FrameContext& context) override;
+
+	Result<void> OnGUI(const FrameContext& context);
 
 	void OnDisable() override;
 

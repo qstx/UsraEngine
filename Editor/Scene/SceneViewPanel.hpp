@@ -35,7 +35,7 @@ Result<SceneDropPoint> ResolveSceneDropPoint(const Camera& camera, Float32 aspec
 
 class SceneViewPanel final
 {
-friend struct SceneViewPanelTestAccess;
+	friend struct SceneViewPanelTestAccess;
 
 public:
 	static Result<std::unique_ptr<SceneViewPanel>> Create(Rhi::DevicePtr device, ImGuiBridge& gui);
@@ -66,12 +66,32 @@ public:
 	}
 
 	Result<void> RenderPending(SceneDraft& draft, PlaySession& play, const EditorRenderViewport& renderViewport);
-	Result<void> TransformSelectionToView(Scene& scene, const EditorSelectionContext& selection,
-	                                      ResourceId documentId, bool playSession, bool alignRotation);
+	Result<void> TransformSelectionToView(Scene& scene, const EditorSelectionContext& selection, ResourceId documentId,
+	                                      bool playSession, bool alignRotation);
 
 	const ViewportLayout& SceneLayout() const
 	{
 		return sceneLayout;
+	}
+
+	const ViewportLayout& GameLayout() const
+	{
+		return gameLayout;
+	}
+
+	ImGuiViewport* GameViewport() const
+	{
+		return gameViewport;
+	}
+
+	bool GameGestureCaptured() const
+	{
+		return gameGestureCaptured;
+	}
+
+	UInt32 GameInputControlId() const
+	{
+		return gameInputControlId;
 	}
 
 private:
@@ -128,6 +148,10 @@ private:
 	ViewportTarget sceneTarget;
 	ViewportTarget gameTarget;
 	ViewportLayout sceneLayout;
+	ViewportLayout gameLayout;
+	ImGuiViewport* gameViewport = nullptr;
+	bool gameGestureCaptured = false;
+	UInt32 gameInputControlId = 0;
 	Rhi::SamplerPtr sampler;
 	GameViewSizeMode gameSizeMode = GameViewSizeMode::FreeAspect;
 	UInt32 gamePresetWidth = 16;

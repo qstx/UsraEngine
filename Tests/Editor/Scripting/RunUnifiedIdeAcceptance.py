@@ -18,8 +18,9 @@ def main():
     expect(workspace['Ready'], 'Generate a complete unified workspace before IDE acceptance.')
     root = build / 'IdeAcceptance'
     controller = Controller(build_controller(build, vs), workspace['Solution'], root)
-    game = Path(workspace['ProjectRoot']) / 'Assets/Scripts/Snake/SnakeController.cs'
-    editor = Path(workspace['ProjectRoot']) / 'Assets/Scripts/Editor/SnakeEditor.cs'
+    fixture = Path(workspace['EngineRoot']) / 'Tests/Fixtures/SampleAssets'
+    game = fixture / 'Scripts/Snake/SnakeController.cs'
+    editor = fixture / 'Scripts/Editor/SnakeEditor.cs'
     framework = Path(workspace['EngineRoot']) / 'Managed/Ursa.Runtime/Transform.cs'
     hashes = {p: sha256(p) for p in (game, editor, framework)}
     bridge, devenv = build / 'Editor/Debug/UrsaIdeBridge.exe', vs / 'Common7/IDE/devenv.exe'

@@ -585,6 +585,32 @@ static_assert(offsetof(Value_Ursa_EditorPreviewResult, F_HasPreview) == 4, "Wire
 static_assert(offsetof(Value_Ursa_EditorPreviewResult, F_ConstantRepaint) == 8, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_EditorPreviewResult, F_Info) == 16, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_EditorPreviewResult, F_Diagnostic) == 40, "Wire field offset mismatch");
+struct Value_Ursa_GuiEventData
+{
+	UInt64 F_Token{};
+	UInt32 F_Type{};
+	UInt32 F_RawType{};
+	Value_Ursa_Vector2 F_MousePosition{};
+	Value_Ursa_Vector2 F_Delta{};
+	Int32 F_Button{};
+	Int32 F_ClickCount{};
+	UInt32 F_KeyCode{};
+	UInt32 F_Modifiers{};
+	Utf8View F_Text{};
+	Utf8View F_CommandName{};
+};
+static_assert(sizeof(Value_Ursa_GuiEventData) == 96, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_Token) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_Type) == 8, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_RawType) == 12, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_MousePosition) == 16, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_Delta) == 24, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_Button) == 32, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_ClickCount) == 36, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_KeyCode) == 40, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_Modifiers) == 44, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_Text) == 48, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_GuiEventData, F_CommandName) == 72, "Wire field offset mismatch");
 struct Value_Ursa_ImportBindingCapability
 {
 	UInt64 F_ModuleId{};
@@ -1032,6 +1058,24 @@ struct Value_Ursa_ResourceReferenceArchive
 static_assert(sizeof(Value_Ursa_ResourceReferenceArchive) == 32, "Wire type size mismatch");
 static_assert(offsetof(Value_Ursa_ResourceReferenceArchive, F_Version) == 0, "Wire field offset mismatch");
 static_assert(offsetof(Value_Ursa_ResourceReferenceArchive, F_Json) == 8, "Wire field offset mismatch");
+struct Value_Ursa_SceneManagement_SceneData
+{
+	UInt64 F_Session{};
+	UInt64 F_Token{};
+	Utf8View F_Guid{};
+	UInt64 F_LocalFileId{};
+	Utf8View F_Name{};
+	Utf8View F_Path{};
+	Int32 F_BuildIndex{};
+};
+static_assert(sizeof(Value_Ursa_SceneManagement_SceneData) == 104, "Wire type size mismatch");
+static_assert(offsetof(Value_Ursa_SceneManagement_SceneData, F_Session) == 0, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_SceneManagement_SceneData, F_Token) == 8, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_SceneManagement_SceneData, F_Guid) == 16, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_SceneManagement_SceneData, F_LocalFileId) == 40, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_SceneManagement_SceneData, F_Name) == 48, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_SceneManagement_SceneData, F_Path) == 72, "Wire field offset mismatch");
+static_assert(offsetof(Value_Ursa_SceneManagement_SceneData, F_BuildIndex) == 96, "Wire field offset mismatch");
 struct Value_Ursa_ScriptableAssetGraphArchive
 {
 	UInt32 F_Version{};
@@ -1727,6 +1771,26 @@ inline void CheckOwned_Wire_05a209b1b44f050b(const Wire::Value_Ursa_EditorPrevie
 	CheckOwned_Wire_473287f8298dba71(value.F_Info, arena);
 	CheckOwned_Wire_473287f8298dba71(value.F_Diagnostic, arena);
 }
+inline void Check_Wire_3766b1ba71c5aba6(const Wire::Value_Ursa_GuiEventData& value)
+{
+	(void)value;
+	Check_Wire_6ccc44e523c092e7(value.F_Token);
+	Check_Wire_c3f2029bb0eab1c0(value.F_Type);
+	Check_Wire_c3f2029bb0eab1c0(value.F_RawType);
+	Check_Wire_86bcfc29122eb5a4(value.F_MousePosition);
+	Check_Wire_86bcfc29122eb5a4(value.F_Delta);
+	Check_Wire_6da88c34ba124c41(value.F_Button);
+	Check_Wire_6da88c34ba124c41(value.F_ClickCount);
+	Check_Wire_c3f2029bb0eab1c0(value.F_KeyCode);
+	Check_Wire_c3f2029bb0eab1c0(value.F_Modifiers);
+	Check_Wire_473287f8298dba71(value.F_Text);
+	Check_Wire_473287f8298dba71(value.F_CommandName);
+}
+inline void CheckOwned_Wire_3766b1ba71c5aba6(const Wire::Value_Ursa_GuiEventData& value, const BindingArena& arena)
+{
+	CheckOwned_Wire_473287f8298dba71(value.F_Text, arena);
+	CheckOwned_Wire_473287f8298dba71(value.F_CommandName, arena);
+}
 inline void Check_Wire_10c23906dff6ca56(const Wire::Value_Ursa_ImportBindingCapability& value)
 {
 	(void)value;
@@ -2351,6 +2415,23 @@ inline void Check_Wire_f49daff3ead99a4e(const Wire::Value_Ursa_ResourceReference
 inline void CheckOwned_Wire_f49daff3ead99a4e(const Wire::Value_Ursa_ResourceReferenceArchive& value, const BindingArena& arena)
 {
 	CheckOwned_Wire_473287f8298dba71(value.F_Json, arena);
+}
+inline void Check_Wire_fb9412ac0e5a9669(const Wire::Value_Ursa_SceneManagement_SceneData& value)
+{
+	(void)value;
+	Check_Wire_6ccc44e523c092e7(value.F_Session);
+	Check_Wire_6ccc44e523c092e7(value.F_Token);
+	Check_Wire_473287f8298dba71(value.F_Guid);
+	Check_Wire_6ccc44e523c092e7(value.F_LocalFileId);
+	Check_Wire_473287f8298dba71(value.F_Name);
+	Check_Wire_473287f8298dba71(value.F_Path);
+	Check_Wire_6da88c34ba124c41(value.F_BuildIndex);
+}
+inline void CheckOwned_Wire_fb9412ac0e5a9669(const Wire::Value_Ursa_SceneManagement_SceneData& value, const BindingArena& arena)
+{
+	CheckOwned_Wire_473287f8298dba71(value.F_Guid, arena);
+	CheckOwned_Wire_473287f8298dba71(value.F_Name, arena);
+	CheckOwned_Wire_473287f8298dba71(value.F_Path, arena);
 }
 inline void Check_Wire_42bc3c7ccaa68330(const Wire::Value_Ursa_ScriptableAssetGraphArchive& value)
 {

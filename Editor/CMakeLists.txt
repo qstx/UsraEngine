@@ -1,14 +1,8 @@
-set(URSA_IMGUI_ROOT "${URSA_SOURCE_ROOT}/ThirdParty/imgui")
 set(URSA_IMGUIZMO_ROOT "${URSA_SOURCE_ROOT}/ThirdParty/imguizmo/src")
-
-add_library(UrsaImGui STATIC
-  "${URSA_IMGUI_ROOT}/imgui.cpp"
-  "${URSA_IMGUI_ROOT}/imgui_draw.cpp"
-  "${URSA_IMGUI_ROOT}/imgui_tables.cpp"
-  "${URSA_IMGUI_ROOT}/imgui_widgets.cpp"
-  "${URSA_IMGUIZMO_ROOT}/ImGuizmo.cpp")
-set_target_properties(UrsaImGui PROPERTIES FOLDER "ThirdParty")
-target_include_directories(UrsaImGui PUBLIC "${URSA_IMGUI_ROOT}" "${URSA_IMGUIZMO_ROOT}")
+add_library(UrsaImGuizmo STATIC "${URSA_IMGUIZMO_ROOT}/ImGuizmo.cpp")
+set_target_properties(UrsaImGuizmo PROPERTIES FOLDER "ThirdParty")
+target_include_directories(UrsaImGuizmo PUBLIC "${URSA_IMGUIZMO_ROOT}")
+target_link_libraries(UrsaImGuizmo PUBLIC UrsaImGui)
 
 ursa_collect_sources(URSA_EDITOR_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/Application" "${CMAKE_CURRENT_SOURCE_DIR}/Assets"
@@ -28,7 +22,7 @@ configure_file(Resources/EditorIcon.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/Generate
 target_include_directories(UrsaEditorCore PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/Generated")
 target_compile_definitions(UrsaEditorCore PRIVATE URSA_EDITOR_VERSION="${PROJECT_VERSION}")
 target_include_directories(UrsaEditorCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(UrsaEditorCore PUBLIC Ursa::Engine UrsaImGui PRIVATE assimp::assimp Ursa::StbImage)
+target_link_libraries(UrsaEditorCore PUBLIC Ursa::Engine UrsaImGuizmo PRIVATE assimp::assimp Ursa::StbImage)
 if(WIN32)
   target_link_libraries(UrsaEditorCore PRIVATE advapi32)
 endif()
@@ -51,7 +45,7 @@ ursa_attach_dotnet_host_runtime(UrsaEditor)
 set_target_properties(UrsaEditor PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${URSA_ENGINE_DIR}")
 if(NOT URSA_PROJECT_DIR STREQUAL "")
   set_target_properties(UrsaEditor PROPERTIES
-    VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene")
+    VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\"")
 endif()
 
 if(MSVC)

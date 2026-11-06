@@ -1,0 +1,21 @@
+{
+  "folder": false,
+  "guid": "61ebf261-67a3-42c0-95e1-a5956b877d59",
+  "importer": "",
+  "importerVersion": 0,
+  "scriptTypes": {
+    "Types": [
+      {
+        "Id": "auto:61ebf261-67a3-42c0-95e1-a5956b877d59:Ursa.Demo.Rendering.ScreenTintFeatureAsset",
+        "Legacy": false,
+        "LocalFileId": 838856799468303050,
+        "Primary": true,
+        "TypeName": "Ursa.Demo.Rendering.ScreenTintFeatureAsset",
+        "Version": 1
+      }
+    ],
+    "Version": 1
+  },
+  "settings": {},
+  "version": 1
+}

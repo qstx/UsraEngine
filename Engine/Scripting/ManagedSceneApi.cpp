@@ -90,6 +90,33 @@ GameObject::Ptr ManagedSceneApi::SetLifecycleOwner(GameObject::Ptr owner)
 	return std::exchange(lifecycleOwner, std::move(owner));
 }
 
+Result<void> ManagedSceneApi::InvalidateSceneObjects()
+{
+	RequireGameExecution();
+	if (activeRenderToken)
+	{
+		return Result<void>::Failure("Scene objects cannot change inside a render context");
+	}
+	auto objectsInvalid = handles->InvalidateKind(ManagedHandleKind::GameObject);
+	if (!objectsInvalid)
+	{
+		return objectsInvalid;
+	}
+	auto componentsInvalid = handles->InvalidateKind(ManagedHandleKind::Component);
+	if (!componentsInvalid)
+	{
+		return componentsInvalid;
+	}
+	objects.clear();
+	componentOwners.clear();
+	componentIdentities.clear();
+	detachedRoots.clear();
+	lifecycleOwner.reset();
+	frameContext = nullptr;
+	pendingGuiOutput = {};
+	return {};
+}
+
 UInt64 ManagedSceneApi::SessionIdentity() const
 {
 	return handles->SessionId();
@@ -178,6 +205,16 @@ void ManagedSceneApi::SetFrameCapture(Rendering::FrameCapture* capture)
 	{
 		renderExecutor->SetFrameCapture(capture);
 	}
+}
+
+void ManagedSceneApi::SetGameGuiOutput(UInt64 sequence, std::shared_ptr<Gui::Canvas> canvas)
+{
+	RequireGameExecution();
+	if (activeRenderToken || !sequence)
+	{
+		throw std::logic_error("Game GUI output requires a render boundary and sequence");
+	}
+	pendingGuiOutput = {SessionIdentity(), sequence, std::move(canvas)};
 }
 
 Result<ManagedHandle> ManagedSceneApi::Register(const GameObject::Ptr& object)

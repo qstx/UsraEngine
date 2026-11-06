@@ -1,4 +1,5 @@
 #include <Rendering/Commands/RenderCommandExecutor.hpp>
+#include <Gui/GuiCanvas.hpp>
 #include <Shader/ShaderReflection.hpp>
 #include <Shader/ShaderRenderState.hpp>
 #include <Rendering/Shader/ComputeKernel.hpp>
@@ -428,6 +429,7 @@ struct RenderCommandExecutor::Impl
 	RenderFrameContext* activeFrame = nullptr;
 	std::unique_ptr<SceneDrawEncoder> sceneRenderer;
 	FrameCapture* capture = nullptr;
+	GameGuiOutput guiOutput;
 	Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead;
 	std::shared_ptr<RenderTextureResource> currentTarget;
 	Vector<RenderTargetReference> currentColors;
@@ -469,7 +471,8 @@ Result<std::unique_ptr<RenderCommandExecutor>> RenderCommandExecutor::Create(Rhi
 }
 
 Result<void> RenderCommandExecutor::Begin(std::shared_ptr<RenderTextureResource> cameraTarget,
-                                          Rhi::ResourceState finalState, const Rhi::SwapchainPtr& swapchain)
+                                          Rhi::ResourceState finalState, const Rhi::SwapchainPtr& swapchain,
+                                          GameGuiOutput gui)
 {
 	RenderFrameContext* acquiredHere = nullptr;
 	const auto result = Guard(
@@ -519,6 +522,8 @@ Result<void> RenderCommandExecutor::Begin(std::shared_ptr<RenderTextureResource>
 			    }
 		    }
 		    impl->finalState = finalState;
+		    Require(!gui.canvas || (gui.session && gui.sequence), "Game GUI requires a valid host output token");
+		    impl->guiOutput = std::move(gui);
 		    impl->active = true;
 		    for (auto it = impl->materialTextures.begin(); it != impl->materialTextures.end();)
 		    {
@@ -968,6 +973,16 @@ void RenderCommandExecutor::SetFrameCapture(FrameCapture* capture)
 
 Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 {
+	struct ReleaseGui
+	{
+		GameGuiOutput& output;
+
+		~ReleaseGui()
+		{
+			output = {};
+		}
+	} releaseGui{guiOutput};
+
 	struct TextureState
 	{
 		Rhi::TexturePtr resource;
@@ -1474,11 +1489,17 @@ Result<Rhi::FencePtr> RenderCommandExecutor::Impl::Finish(bool captureFrame)
 						throw std::runtime_error("Render command has no GPU encoding");
 				}
 			}
+			closeCameraRegion();
+			if (captureFrame && guiOutput.canvas && cameraTarget && cameraTarget->color)
+			{
+				transitionTexture(cameraTarget, false, Rhi::ResourceState::ColorAttachment);
+				Done(guiOutput.canvas->Record(*frames, command, cameraTarget->color));
+				Done(frames->Retain(guiOutput.canvas));
+			}
 			if (cameraTarget && cameraTarget->color)
 			{
 				transitionTexture(cameraTarget, false, finalState);
 			}
-			closeCameraRegion();
 			completion = Take(frames->Complete(captureFrame ? capture : nullptr));
 			activeFrame = nullptr;
 			for (const auto& state : textures)

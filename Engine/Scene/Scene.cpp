@@ -1,5 +1,7 @@
 #include <Core/Types.hpp>
 #include <Scene/Scene.hpp>
+#include <Scripting/ScriptBehaviourComponent.hpp>
+#include <Gui/GuiSession.hpp>
 #include <algorithm>
 
 namespace Ursa
@@ -966,6 +968,81 @@ Result<void> Scene::Update(const FrameContext& context)
 	return RunPhase(Phase::Update, context);
 }
 
+Result<void> Scene::PrepareFrame(const FrameContext& context, bool invokeStart)
+{
+	runtimeFrameContext = context;
+	hasRuntimeFrame = true;
+	auto prepared = PrepareRuntime();
+	return prepared ? SynchronizeLifecycle(context, invokeStart) : prepared;
+}
+
+Result<Vector<ComponentId>> Scene::PrepareGuiCycle(const FrameContext& context)
+{
+	// GUI cycles also advance attachment visibility while simulation is paused.
+	BeginFrame();
+	auto prepared = PrepareFrame(context);
+	if (!prepared)
+	{
+		return Result<Vector<ComponentId>>::Failure(prepared.error);
+	}
+	Vector<ComponentId> snapshot;
+	TemporaryVector<ComponentId> order{Memory::TemporaryContainerAllocator(Memory::MemoryTag::Scene)};
+	for (const auto& root : rootObjects)
+	{
+		CollectComponents(HandleOf(root.get()), order);
+	}
+	for (auto id : order)
+	{
+		if (ContainsComponent(id) && IsComponentActive(id).value &&
+		    dynamic_cast<Scripting::ScriptBehaviourComponent*>(GetComponent(id)))
+		{
+			snapshot.push_back(id);
+		}
+	}
+	return Result<Vector<ComponentId>>::Success(std::move(snapshot));
+}
+
+Result<void> Scene::DispatchGui(const FrameContext& context, const Vector<ComponentId>& snapshot)
+{
+	if (!context.gui || inPhase)
+	{
+		return Result<void>::Failure("Invalid or nested GUI scene dispatch");
+	}
+
+	struct PhaseScope
+	{
+		bool& value;
+
+		~PhaseScope()
+		{
+			value = false;
+		}
+	} scope{inPhase};
+
+	inPhase = true;
+	for (const auto id : snapshot)
+	{
+		if (context.gui->Exited())
+		{
+			break;
+		}
+		if (!ContainsComponent(id) || !IsComponentActive(id).value)
+		{
+			continue;
+		}
+		auto* script = dynamic_cast<Scripting::ScriptBehaviourComponent*>(GetComponent(id));
+		if (script)
+		{
+			auto result = script->OnGUI(context);
+			if (!result)
+			{
+				return result;
+			}
+		}
+	}
+	return {};
+}
+
 Result<void> Scene::FixedUpdate(const FrameContext& context)
 {
 	return RunPhase(Phase::Fixed, context);
@@ -1042,7 +1119,7 @@ Result<void> Scene::RunPhase(Phase phase, const FrameContext& context)
 	return SynchronizeLifecycle(context);
 }
 
-Result<void> Scene::SynchronizeLifecycle(const FrameContext& context)
+Result<void> Scene::SynchronizeLifecycle(const FrameContext& context, bool invokeStart)
 {
 	Memory::TemporaryScope lifecycleMemory;
 	auto needsSynchronization = [this](bool includeStart = false)
@@ -1201,6 +1278,10 @@ Result<void> Scene::SynchronizeLifecycle(const FrameContext& context)
 				continue;
 			}
 
+			if (!invokeStart)
+			{
+				return {};
+			}
 			slot.started = true;
 			Component* component = slot.object;
 			const bool previousLifecycleState = inLifecycle;
@@ -1377,6 +1458,72 @@ void Scene::Clear()
 	rootObjects.clear();
 	activeCamera = {};
 	hasRuntimeFrame = false;
+}
+
+Result<void> Scene::ReplaceGraph(Scene& candidate)
+{
+	if (&candidate == this || inPhase || inLifecycle || candidate.inPhase || candidate.inLifecycle ||
+	    candidate.hasRuntimeFrame || candidate.runtimePreparation)
+	{
+		return Result<void>::Failure(
+		    "Scene replacement requires a fully decoded inactive candidate and a host frame boundary");
+	}
+	UInt32 generation = 1;
+	for (const auto& slot : components)
+	{
+		generation = std::max(generation, slot.generation);
+	}
+	for (const auto& slot : objects)
+	{
+		generation = std::max(generation, slot.generation);
+	}
+	if (generation >= std::numeric_limits<UInt32>::max() - 1)
+	{
+		return Result<void>::Failure("Scene graph generation space is exhausted");
+	}
+	++generation;
+	Clear();
+	objects.swap(candidate.objects);
+	rootObjects.swap(candidate.rootObjects);
+	freeObjectIndices.swap(candidate.freeObjectIndices);
+	components.swap(candidate.components);
+	freeComponentIndices.swap(candidate.freeComponentIndices);
+	activeCamera = candidate.activeCamera;
+	ambientColor = candidate.ambientColor;
+	ambientIntensity = candidate.ambientIntensity;
+	candidate.activeCamera = {};
+	for (auto& slot : objects)
+	{
+		slot.generation = generation;
+		if (slot.object)
+		{
+			slot.object->scene = this;
+			slot.object->sceneNodeGeneration = generation;
+		}
+		if (slot.pendingParent)
+		{
+			slot.pendingParent.generation = generation;
+		}
+	}
+	for (auto& slot : components)
+	{
+		slot.generation = generation;
+		if (slot.owner)
+		{
+			slot.owner.generation = generation;
+		}
+		if (slot.object)
+		{
+			slot.object->scene = this;
+			slot.object->id.generation = generation;
+			slot.availableFrame = frameSerial;
+		}
+	}
+	if (activeCamera)
+	{
+		activeCamera.generation = generation;
+	}
+	return {};
 }
 
 void Scene::DestroySubtree(ObjectHandle node)

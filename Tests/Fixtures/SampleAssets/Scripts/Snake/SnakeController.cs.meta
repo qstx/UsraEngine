@@ -1,0 +1,21 @@
+{
+  "folder": false,
+  "guid": "7f6ce254-214b-45bb-afa8-e3bb99f58c88",
+  "importer": "",
+  "importerVersion": 0,
+  "scriptTypes": {
+    "Types": [
+      {
+        "Id": "demo.snake-controller",
+        "Legacy": false,
+        "LocalFileId": 4788986422269556870,
+        "Primary": true,
+        "TypeName": "Ursa.Demo.SnakeController",
+        "Version": 1
+      }
+    ],
+    "Version": 1
+  },
+  "settings": {},
+  "version": 1
+}

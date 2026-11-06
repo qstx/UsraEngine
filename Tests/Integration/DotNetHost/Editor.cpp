@@ -23,6 +23,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
+#include <iostream>
 
 namespace Ursa::Test
 {
@@ -985,15 +986,16 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	}
 	const UInt64 domain = Take(host.CreateScriptSession(true));
 	Done(host.LoadScriptContent(domain, Path("prj:Managed/Game.json")));
-	Done(host.LoadScriptAssembly(Take(source.Read(Path("ursa:TestScripts/Ursa.EditorFixtures.dll")))));
+	Done(host.LoadScriptContent(domain, Path("prj:Managed/EditorExtensions.json")));
 	Done(host.ValidateScriptSession(domain));
 	auto descriptors = Take(host.PrepareEditorExtensions(domain));
 	const auto customCamera = std::find_if(descriptors.begin(), descriptors.end(),
 	                                       [](const auto& item) { return item.id == "inspector:ursa.Camera"; });
-	Expect(customCamera != descriptors.end() && !customCamera->canEditMultipleObjects &&
+	// Single-target calls use the project Inspector below; multi-edit retains the built-in fallback.
+	Expect(customCamera != descriptors.end() && customCamera->canEditMultipleObjects &&
 	           std::any_of(descriptors.begin(), descriptors.end(),
 	                       [](const auto& item) { return item.id == "inspector:ursa.DirectionalLight"; }),
-	       "Project Camera Inspector did not override the built-in or other built-ins were missing");
+	       "Camera Inspector lost its built-in multi-edit fallback or other built-ins were missing");
 	Expect(!host.PrepareEditorExtensions(domain), "The same session registered editor callbacks twice");
 	ComponentLoadContext loadContext(documents->Session());
 	ManagedEditorContext context;
@@ -1351,7 +1353,7 @@ void TestEditorExtensions(DotNetHost& host, VirtualFileSystem& source, const std
 	Done(host.CloseScriptSession(domain));
 	const UInt64 replacement = Take(host.CreateScriptSession(true));
 	Done(host.LoadScriptContent(replacement, Path("prj:Managed/Game.json")));
-	Done(host.LoadScriptAssembly(Take(source.Read(Path("ursa:TestScripts/Ursa.EditorFixtures.dll")))));
+	Done(host.LoadScriptContent(replacement, Path("prj:Managed/EditorExtensions.json")));
 	Done(host.ValidateScriptSession(replacement));
 	auto registrations = Take(host.PrepareEditorExtensions(replacement));
 	Expect(registrations.size() == descriptors.size(), "Reload duplicated extension registrations");

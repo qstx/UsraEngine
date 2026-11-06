@@ -1,0 +1,22 @@
+{
+  "format": "UrsaScriptableAsset",
+  "version": 1,
+  "localFileId": 838856799468303050,
+  "typeId": "auto:61ebf261-67a3-42c0-95e1-a5956b877d59:Ursa.Demo.Rendering.ScreenTintFeatureAsset",
+  "typeVersion": 1,
+  "payload": {
+    "FormatVersion": 1,
+    "ScriptType": "auto:61ebf261-67a3-42c0-95e1-a5956b877d59:Ursa.Demo.Rendering.ScreenTintFeatureAsset",
+    "Version": 1,
+    "SourceGuid": "61ebf261-67a3-42c0-95e1-a5956b877d59",
+    "LocalFileId": 838856799468303050,
+    "Fields": {
+      "Enabled": true,
+      "tint": [1, 0.94, 0.86, 1]
+    },
+    "FieldTypes": {
+      "Enabled": {"Kind": "Boolean", "ElementKind": "Unsupported", "TypeName": "System.Boolean", "ElementTypeName": ""},
+      "tint": {"Kind": "Color", "ElementKind": "Unsupported", "TypeName": "Ursa.Color", "ElementTypeName": ""}
+    }
+  }
+}

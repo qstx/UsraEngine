@@ -6,6 +6,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(UrsaProjectDir)/Assets/Scripts/Snake/SnakeGame.cs" Link="SnakeGame.cs" />
+    <Compile Include="../../Fixtures/SampleAssets/Scripts/Snake/SnakeGame.cs" Link="SnakeGame.cs" />
   </ItemGroup>
 </Project>

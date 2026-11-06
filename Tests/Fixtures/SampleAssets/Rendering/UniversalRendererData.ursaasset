@@ -1,0 +1,36 @@
+{
+  "format": "UrsaScriptableAsset",
+  "version": 1,
+  "localFileId": 15516842715564576692,
+  "typeId": "ursa.rendering.universal-renderer-data",
+  "typeVersion": 1,
+  "payload": {
+    "FormatVersion": 1,
+    "ScriptType": "ursa.rendering.universal-renderer-data",
+    "Version": 1,
+    "SourceGuid": "c3db9aad-cd0d-4d07-a4dd-4f8a056a7410",
+    "LocalFileId": 15516842715564576692,
+    "Fields": {
+      "Features": [
+        {
+          "$ursaReference": {
+            "Kind": "ScriptableObject",
+            "Id": "",
+            "Resource": {
+              "guid": "d0d64deb-e492-4b22-8aab-85de9c8fd5fb",
+              "localFileId": 838856799468303050
+            }
+          }
+        }
+      ]
+    },
+    "FieldTypes": {
+      "Features": {
+        "Kind": "Array",
+        "ElementKind": "ScriptableObjectReference",
+        "TypeName": "Ursa.Rendering.ScriptableRendererFeature[]",
+        "ElementTypeName": "Ursa.Rendering.ScriptableRendererFeature"
+      }
+    }
+  }
+}

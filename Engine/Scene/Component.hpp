@@ -16,6 +16,11 @@ class Scene;
 
 class GameObject;
 
+namespace Gui
+{
+class Session;
+}
+
 struct ComponentId
 {
 	Ursa::UInt32 index = std::numeric_limits<Ursa::UInt32>::max();
@@ -70,11 +75,29 @@ struct FrameInput
 				input.keys[i] = window.KeyDown(static_cast<Key>(i));
 			}
 		}
+		for (Ursa::Size i = 0; i < 3; ++i)
+		{
+			input.mouseButtons[i] = window.MouseDown(static_cast<MouseButton>(i));
+		}
+		const auto cursor = window.CursorPosition();
+		input.mouseX = static_cast<Float32>(cursor.first);
+		input.mouseY = static_cast<Float32>(cursor.second);
 		return input;
 	}
 
 	Array<bool, keyCount> keyPressed{};
 	Array<bool, keyCount> keyReleased{};
+	Array<bool, 4> mouseButtons{};
+	Array<bool, 4> mousePressed{};
+	Array<bool, 4> mouseReleased{};
+	Array<bool, keyCount> consumedKeys{};
+	Array<bool, 4> consumedButtons{};
+	Float32 mouseX = 0;
+	Float32 mouseY = 0;
+	Float32 scrollX = 0;
+	Float32 scrollY = 0;
+	bool pointerConsumed = false;
+	bool scrollConsumed = false;
 };
 
 struct FrameContext
@@ -86,6 +109,7 @@ struct FrameContext
 	Ursa::UInt64 frameIndex = 0;
 	Window* window = nullptr;
 	FrameInput input;
+	Gui::Session* gui = nullptr;
 };
 
 class Component : public Serializable

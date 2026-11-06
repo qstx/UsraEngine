@@ -294,6 +294,51 @@ public static class ScriptFieldSchema
 		}
 	}
 
+	internal static void ValidateScenePayload(Type type, string serializedPayload, ISet<string> objectIds,
+		IReadOnlyDictionary<string, Type> componentTypes)
+	{
+		object candidate = RuntimeHelpers.GetUninitializedObject(type);
+		GC.SuppressFinalize(candidate);
+		try
+		{
+			Deserialize(candidate, serializedPayload);
+			Payload payload = JsonSerializer.Deserialize<Payload>(serializedPayload, jsonOptions)!;
+			foreach (ScriptFieldDescriptor descriptor in Describe(type))
+			{
+				if (!payload.Fields.TryGetValue(descriptor.Name, out JsonElement value))
+				{
+					bool found = false;
+					foreach (string former in descriptor.FormerNames)
+						if (payload.Fields.TryGetValue(former, out value)) { found = true; break; }
+					if (!found) continue;
+				}
+				bool collection = descriptor.Kind is ScriptSerializedFieldKind.Array or ScriptSerializedFieldKind.List;
+				ScriptSerializedFieldKind kind = collection ? descriptor.ElementKind : descriptor.Kind;
+				if (kind is not (ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference or ScriptSerializedFieldKind.ScriptableObjectReference)) continue;
+				Type expected = descriptor.Kind == ScriptSerializedFieldKind.Array ? descriptor.ValueType.GetElementType()! :
+					descriptor.Kind == ScriptSerializedFieldKind.List ? descriptor.ValueType.GetGenericArguments()[0] : descriptor.ValueType;
+				if (value.ValueKind == JsonValueKind.Null) continue;
+				void Validate(JsonElement item)
+				{
+					ReferencePayload? reference = ReadFieldReference(item, kind, descriptor.Name);
+					if (reference == null) return;
+					if (reference.Kind == "GameObject" && !objectIds.Contains(reference.Id))
+						throw new InvalidOperationException($"Missing candidate GameObject in {type.FullName}.{descriptor.Name}: {reference.Id}");
+					if (reference.Kind == "Component" && (!componentTypes.TryGetValue(reference.Id, out Type? actual) || !expected.IsAssignableFrom(actual)))
+						throw new InvalidOperationException($"Missing or incompatible candidate Component in {type.FullName}.{descriptor.Name}: {reference.Id}");
+					if (reference.Kind == "ScriptableObject")
+					{
+						JsonElement resource = reference.Resource ?? throw new InvalidOperationException("Missing candidate asset identity.");
+						_ = ScriptableObjectRegistry.LoadAsset(new AssetReference(resource.GetProperty("guid").GetString()!, resource.GetProperty("localFileId").GetUInt64()), expected);
+					}
+				}
+				if (collection) { foreach (JsonElement item in value.EnumerateArray()) Validate(item); }
+				else Validate(value);
+			}
+		}
+		finally { pendingReferences.Remove(candidate); }
+	}
+
 	public static IReadOnlyList<ScriptFieldDescriptor> Describe(Type scriptType)
 	{
 		if (scriptType == null)
@@ -719,7 +764,7 @@ public static class ScriptFieldSchema
 					if (reference.Resource == null) throw new InvalidOperationException("Asset reference is missing its identity.");
 					var identity = new AssetReference(reference.Resource.Value.GetProperty("guid").GetString()!,
 						reference.Resource.Value.GetProperty("localFileId").GetUInt64());
-					return assetResolver != null ? assetResolver(identity, elementType!) : ScriptableObjectRegistry.ResolveAsset(identity, elementType!);
+					return assetResolver != null ? assetResolver(identity, elementType!) : ScriptableObjectRegistry.LoadAsset(identity, elementType!);
 				}
 				if (reference.Kind == "Texture")
 				{

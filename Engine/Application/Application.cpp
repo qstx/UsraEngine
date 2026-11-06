@@ -27,6 +27,11 @@ Result<void> Application::OnRender(Rendering::FrameCapture* capture)
 	return sceneRenderer->Render(*scene, swapchain, capture);
 }
 
+Result<void> Application::OnSceneFrame(Float32 elapsedSeconds)
+{
+	return sceneFrameRunner.Tick(*scene, elapsedSeconds, window.get(), FrameInput::Capture(*window));
+}
+
 Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const String& title, bool visible,
                               Ursa::UInt32 frameLimit)
 {
@@ -86,6 +91,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		frameCapture.PollWindowCapture();
 		if (window->FramebufferWidth() == 0 || window->FramebufferHeight() == 0)
 		{
+			OnSuspended();
 			window->WaitEvents();
 			previous = std::chrono::steady_clock::now();
 			sceneFrameRunner.ResetAccumulator();
@@ -106,7 +112,7 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 			result = OnFrame(dt);
 			if (result)
 			{
-				result = sceneFrameRunner.Tick(*scene, dt, window.get(), FrameInput::Capture(*window));
+				result = OnSceneFrame(dt);
 			}
 			if (result)
 			{
@@ -117,6 +123,11 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		if (!result)
 		{
 			break;
+		}
+		if (restartFrameClock)
+		{
+			previous = std::chrono::steady_clock::now();
+			restartFrameClock = false;
 		}
 		URSA_PROFILE_FRAME("Engine");
 		if (frameLimit && ++frames >= frameLimit)

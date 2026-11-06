@@ -54,16 +54,17 @@ def main():
     expect(path.read_text(encoding='utf-8-sig') == before, 'Removed source retained')
     tests = fixture / 'Tests/Managed/Ursa.SnakeLogicTests'
     tests.mkdir(parents=True)
-    (tests / 'Ursa.SnakeLogicTests.csproj').write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><Compile Include="$(UrsaProjectDir)/Assets/Scripts/Snake/SnakeGame.cs" /></ItemGroup></Project>', encoding='utf-8')
+    (tests / 'Ursa.SnakeLogicTests.csproj').write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><Compile Include="../../Fixtures/SampleAssets/Scripts/Snake/SnakeGame.cs" /></ItemGroup></Project>', encoding='utf-8')
     project.mkdir()
     invoke(include_tests=True, project_directory=str(project))
     manifest = build / 'Ide/Managed/Projects.json'
-    expect('Ursa.SnakeLogicTests' not in manifest.read_text(encoding='utf-8-sig'), 'Different project included Demo source tests')
-    snake = project / 'Assets/Scripts/Snake/SnakeGame.cs'
+    expect('Ursa.SnakeLogicTests' in manifest.read_text(encoding='utf-8-sig'), 'Engine fixture tests disappeared for an unrelated project')
+    snake = fixture / 'Tests/Fixtures/SampleAssets/Scripts/Snake/SnakeGame.cs'
     snake.parent.mkdir(parents=True); snake.write_text('class SnakeGame {}', encoding='utf-8')
     invoke(include_tests=True, project_directory=str(project))
-    expect('Ursa.SnakeLogicTests' in manifest.read_text(encoding='utf-8-sig'), 'Available Demo tests omitted')
-    expect(f'<UrsaProjectDir>{project}</UrsaProjectDir>' in (build / 'Ide/Managed/Ursa.SnakeLogicTests/Ursa.SnakeLogicTests.csproj').read_text(encoding='utf-8-sig'), 'Project source root lost')
+    expect('Ursa.SnakeLogicTests' in manifest.read_text(encoding='utf-8-sig'), 'Available Engine fixture tests omitted')
+    generated = (build / 'Ide/Managed/Ursa.SnakeLogicTests/Ursa.SnakeLogicTests.csproj').read_text(encoding='utf-8-sig')
+    expect(snake.as_posix() in generated and '<UrsaProjectDir>' not in generated, 'Engine fixture sources still depend on the user project')
     props = build / 'Ide/Managed/Directory.Build.props'
     stamp = props.stat().st_mtime_ns
     invoke(include_tests=True)

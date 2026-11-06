@@ -76,5 +76,10 @@ Result<Scripting::ManagedPreviewResult> InvokeManagedEditorPreview(Scripting::Do
                                                                    Scripting::ManagedPreviewPhase phase,
                                                                    const ViewportRect& rect,
                                                                    ManagedEditorContext& context);
+#else
+inline Result<bool> InvokeManagedEditorExtension(Scripting::DotNetHost&, UInt64, const String&, ManagedEditorContext&)
+{
+	return Result<bool>::Failure("Managed Editor extensions require .NET support");
+}
 #endif
 } // namespace Ursa::Editor

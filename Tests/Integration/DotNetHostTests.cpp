@@ -103,7 +103,7 @@ int main(int argumentCount, char** arguments)
 		            (std::string(arguments[3]) == "--import-only" ||
 		             std::string(arguments[3]) == "--importer-registration-only" ||
 		             std::string(arguments[3]) == "--editor-only" || std::string(arguments[3]) == "--profiling-only" ||
-		             std::string(arguments[3]) == "--profiling-capture" ||
+		             std::string(arguments[3]) == "--profiling-capture" || std::string(arguments[3]) == "--gui-only" ||
 		             std::string(arguments[3]) == "--builtin-inspector-only")),
 		       "Managed host test requires managed output, writable cache and optional --import-only");
 		const auto managedOutput = std::filesystem::u8path(arguments[1]);
@@ -219,6 +219,58 @@ int main(int argumentCount, char** arguments)
 		     {"Version", 1u},
 		     {"Group", "Game"},
 		     {"ClrTypeName", "Ursa.SessionFixtures.GeneratedFormatReader, Ursa.SessionFixtures"}});
+		for (const auto& type : {"GuiProbe", "GuiSwallowedExitProbe", "SceneSwitchProbe"})
+		{
+			catalog["Scripts"].push_back(
+			    {{"SourceGuid", "77777777-7777-4777-8777-777777777777"},
+			     {"LocalFileId", type == std::string("GuiProbe")                ? 1u
+			                     : type == std::string("GuiSwallowedExitProbe") ? 2u
+			                                                                    : 3u},
+			     {"Kind", "Behaviour"},
+			     {"ScriptType", std::string("test.gui.") + type},
+			     {"Version", 1u},
+			     {"Group", "Game"},
+			     {"ClrTypeName", std::string("Ursa.SessionFixtures.") + type + ", Ursa.SessionFixtures"}});
+		}
+		UInt64 nativeTypeId = 0;
+		for (const auto* type :
+		     {"ProtocolBehaviour", "SerializedProbeBehaviour", "ThrowOnAwakeBehaviour", "ThrowOnFixedUpdateBehaviour",
+		      "ThrowOnUpdateBehaviour", "ThrowOnDisableBehaviour", "ThrowOnDestroyBehaviour", "MoveWithInputBehaviour"})
+		{
+			catalog["Scripts"].push_back(
+			    {{"SourceGuid", "66666666-6666-4666-8666-666666666666"},
+			     {"LocalFileId", ++nativeTypeId},
+			     {"Kind", "Behaviour"},
+			     {"Group", "Game"},
+			     {"Version", 1u},
+			     {"LegacyIdentity", true},
+			     {"ScriptType", std::string("test.native.") + type},
+			     {"ClrTypeName", std::string("Ursa.SessionFixtures.Native") + type + ", Ursa.SessionFixtures"}});
+		}
+		UInt64 renderingTypeId = 0;
+		for (const auto& type :
+		     Vector<std::pair<String, String>>{{"RenderingBindingsProbe", "test.rendering-bindings-probe"},
+		                                       {"PipelineReloadProbe", "test.pipeline-reload-probe"},
+		                                       {"ForwardPipelineProbe", "test.forward-pipeline"}})
+		{
+			catalog["Scripts"].push_back(
+			    {{"SourceGuid", "88888888-8888-4888-8888-888888888888"},
+			     {"LocalFileId", ++renderingTypeId},
+			     {"Kind", "Behaviour"},
+			     {"Group", "Game"},
+			     {"Version", 1u},
+			     {"LegacyIdentity", true},
+			     {"ScriptType", ToStdString(type.second)},
+			     {"ClrTypeName", ToStdString("Ursa.SessionFixtures." + type.first + ", Ursa.SessionFixtures")}});
+		}
+		catalog["Scripts"].push_back(
+		    {{"SourceGuid", "88888888-8888-4888-8888-888888888888"},
+		     {"LocalFileId", ++renderingTypeId},
+		     {"Kind", "ScriptableObject"},
+		     {"Group", "Game"},
+		     {"Version", 1u},
+		     {"ScriptType", "test.presentation-pipeline"},
+		     {"ClrTypeName", "Ursa.Examples.PresentationPipelineAsset, Ursa.SessionFixtures"}});
 		const auto catalogBytes = JsonBytes(catalog);
 		nlohmann::json content{{"Version", 2u},
 		                       {"RequiredBindings", Bindings::ScriptBindingRequirements(false)},
@@ -236,6 +288,16 @@ int main(int argumentCount, char** arguments)
 		                                 {"Fingerprint", ToStdString(Fingerprint(dependencyBytes))}});
 		entries.push_back({sessionCatalogPath, catalogBytes});
 		entries.push_back({sessionContentPath, JsonBytes(content)});
+#if defined(URSA_DOTNET_TEST_EDITOR)
+		auto editorContent = content;
+		editorContent["Group"] = "Editor";
+		editorContent["RequiredBindings"] = Bindings::ScriptBindingRequirements(true);
+		editorContent["Assemblies"].push_back(
+		    {{"Name", "Ursa.EditorFixtures"},
+		     {"Path", ToStdString(editorFixturePath.ToString())},
+		     {"Fingerprint", ToStdString(Fingerprint(Take(looseSource.Read(editorFixturePath))))}});
+		entries.push_back({Path("prj:Managed/EditorExtensions.json"), JsonBytes(editorContent)});
+#endif
 		auto incompatibleBindings = content;
 		incompatibleBindings["RequiredBindings"][0]["Hash"] = std::string(64, '0');
 		entries.push_back({Path("prj:Managed/IncompatibleBindings.json"), JsonBytes(incompatibleBindings)});
@@ -347,6 +409,13 @@ int main(int argumentCount, char** arguments)
 		       "Native-to-managed initialization or UTF-8/empty-data callback failed");
 		if (argumentCount == 4)
 		{
+			if (std::string(arguments[3]) == "--gui-only")
+			{
+				TestManagedGui(*host, sessionContentPath);
+				Done(host->CloseEndpoint());
+				std::cout << "Managed OnGUI event and lifetime checks passed\n";
+				return 0;
+			}
 			if (std::string(arguments[3]) == "--profiling-only" || std::string(arguments[3]) == "--profiling-capture")
 			{
 				TestManagedCpuMarkers(*host, sessionContentPath, std::string(arguments[3]) == "--profiling-capture");
@@ -378,8 +447,10 @@ int main(int argumentCount, char** arguments)
 			                  : "Managed Import session passed without a window or GPU\n");
 			return 0;
 		}
-		ManagedScriptRuntime scriptRuntime(scene, *host, sceneApi);
-		const String probeType = "ProtocolBehaviour, Ursa.ManagedHost.ProtocolTests";
+		const auto protocolSession = Take(host->CreateScriptSession(false, &sceneApi));
+		Done(host->LoadScriptContent(protocolSession, sessionContentPath));
+		ManagedScriptRuntime scriptRuntime(scene, *host, sceneApi, protocolSession);
+		const String probeType = "Ursa.SessionFixtures.NativeProtocolBehaviour, Ursa.SessionFixtures";
 		auto scriptedObject = Take(scene.CreateGameObject("Mixed"));
 		auto secondScriptedObject = Take(scene.CreateGameObject("Second"));
 		Take(scriptRuntime.CreateAndAdd(scriptedObject, probeType));
@@ -390,21 +461,23 @@ int main(int argumentCount, char** arguments)
 			const ComponentId component = Take(scriptRuntime.CreateAndAdd(object, typeName));
 			return std::make_pair(std::move(object), component);
 		};
-		auto awakeFailure = addFailureProbe("AwakeFailure", "ThrowOnAwakeBehaviour, Ursa.ManagedHost.ProtocolTests");
-		auto fixedFailure =
-		    addFailureProbe("FixedFailure", "ThrowOnFixedUpdateBehaviour, Ursa.ManagedHost.ProtocolTests");
-		auto updateFailure = addFailureProbe("UpdateFailure", "ThrowOnUpdateBehaviour, Ursa.ManagedHost.ProtocolTests");
+		auto awakeFailure =
+		    addFailureProbe("AwakeFailure", "Ursa.SessionFixtures.NativeThrowOnAwakeBehaviour, Ursa.SessionFixtures");
+		auto fixedFailure = addFailureProbe(
+		    "FixedFailure", "Ursa.SessionFixtures.NativeThrowOnFixedUpdateBehaviour, Ursa.SessionFixtures");
+		auto updateFailure =
+		    addFailureProbe("UpdateFailure", "Ursa.SessionFixtures.NativeThrowOnUpdateBehaviour, Ursa.SessionFixtures");
 		auto serializedOwner = Take(scene.CreateGameObject("Serialized"));
 		const ComponentId serializedComponent = Take(scene.AddComponent<ScriptBehaviourComponent>(
-		    serializedOwner, "SerializedProbeBehaviour, Ursa.ManagedHost.ProtocolTests"));
+		    serializedOwner, "Ursa.SessionFixtures.NativeSerializedProbeBehaviour, Ursa.SessionFixtures"));
 		auto* serializedScript = static_cast<ScriptBehaviourComponent*>(scene.GetComponent(serializedComponent));
 		serializedScript->SetSerializedPayload(
-		    R"({"FormatVersion":1,"ScriptType":"test.serialized-probe","Version":1,"Fields":{"savedValue":17}})");
+		    R"({"FormatVersion":1,"ScriptType":"test.native.SerializedProbeBehaviour","Version":1,"Fields":{"savedValue":17}})");
 		Done(scriptRuntime.AttachSerializedComponents());
-		auto disableFailure =
-		    addFailureProbe("DisableFailure", "ThrowOnDisableBehaviour, Ursa.ManagedHost.ProtocolTests");
-		auto destroyFailure =
-		    addFailureProbe("DestroyFailure", "ThrowOnDestroyBehaviour, Ursa.ManagedHost.ProtocolTests");
+		auto disableFailure = addFailureProbe(
+		    "DisableFailure", "Ursa.SessionFixtures.NativeThrowOnDisableBehaviour, Ursa.SessionFixtures");
+		auto destroyFailure = addFailureProbe(
+		    "DestroyFailure", "Ursa.SessionFixtures.NativeThrowOnDestroyBehaviour, Ursa.SessionFixtures");
 		FrameContext frame;
 		frame.deltaSeconds = 1.0f / 60.0f;
 		frame.fixedDeltaSeconds = 1.0f / 50.0f;
@@ -457,7 +530,8 @@ int main(int argumentCount, char** arguments)
 		Done(scene.DestroyGameObject(updateFailure.first));
 		Done(scene.DestroyGameObject(serializedOwner));
 		auto mover = Take(scene.CreateGameObject("Mover"));
-		Take(scriptRuntime.CreateAndAdd(mover, "MoveWithInputBehaviour, Ursa.ManagedHost.ProtocolTests"));
+		Take(scriptRuntime.CreateAndAdd(mover,
+		                                "Ursa.SessionFixtures.NativeMoveWithInputBehaviour, Ursa.SessionFixtures"));
 		FrameContext moveFrame;
 		moveFrame.deltaSeconds = 1.0f / 60.0f;
 		moveFrame.fixedDeltaSeconds = 1.0f / 50.0f;
@@ -471,7 +545,9 @@ int main(int argumentCount, char** arguments)
 		Expect(movedTransform.position.x == 1.0f,
 		       "Managed input did not move the native Transform through the backend-neutral API");
 		Done(scene.DestroyGameObject(mover));
+		Done(host->CloseScriptSession(protocolSession));
 		Expect(messages.size() >= 2, "Managed lifecycle dispatch damaged the host logging callback");
+		TestManagedGui(*host, sessionContentPath);
 		TestManagedRenderingComponentSerialization(*host, filesystem, sessionContentPath);
 		TestClassicRenderingExample(*host, sessionContentPath);
 		TestClassicRenderingExample(*host, sessionContentPath, 64);

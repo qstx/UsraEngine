@@ -42,6 +42,14 @@ void TestHandleLifetime()
 	       "Reused handle index did not advance its generation");
 	Expect(!registry.value->Resolve(first.value, Ursa::Scripting::ManagedHandleKind::GameObject),
 	       "A stale handle resolved after index reuse");
+	int assetObject = 3;
+	auto asset = registry.value->Register(&assetObject, Ursa::Scripting::ManagedHandleKind::Asset);
+	Expect(static_cast<bool>(asset), "Could not register a run-level asset");
+	Expect(static_cast<bool>(registry.value->InvalidateKind(Ursa::Scripting::ManagedHandleKind::Component)),
+	       "Could not invalidate scene-only handles");
+	Expect(!registry.value->Resolve(second.value, Ursa::Scripting::ManagedHandleKind::Component) &&
+	           registry.value->Resolve(asset.value, Ursa::Scripting::ManagedHandleKind::Asset),
+	       "Scene-only invalidation discarded a run-level asset");
 
 	auto otherSession = Ursa::Scripting::ManagedHandleRegistry::Create();
 	Expect(otherSession && otherSession.value->SessionId() != registry.value->SessionId(),

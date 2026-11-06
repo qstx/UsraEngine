@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
+#include <Gui/GuiCanvas.hpp>
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -271,7 +272,7 @@ void TestBloomAndFinalPost(const Rhi::DevicePtr& device, RenderCommandExecutor& 
 	finalMaterial->SetSampler({true, false});
 
 	const auto render = [&](UInt32 width, UInt32 height, Color sourceColor, Float32 exposure, Float32 threshold,
-	                        Float32 bloomIntensity, Float32 scatter)
+	                        Float32 bloomIntensity, Float32 scatter, bool showGui = false)
 	{
 		auto source = Take(CreateRenderTexture(*device, {width, height, 1}));
 		auto output = Take(CreateRenderTexture(*device, {width, height}));
@@ -364,10 +365,32 @@ void TestBloomAndFinalPost(const Rhi::DevicePtr& device, RenderCommandExecutor& 
 		blit.pass = 0;
 		commands.push_back(blit);
 
-		Done(executor.Begin(output));
+		std::shared_ptr<Gui::Canvas> canvas;
+		if (showGui)
+		{
+			canvas = Take(Gui::Canvas::Create(device, engineFiles));
+			Gui::Session gui;
+			auto image = Take(MaterialTexture::Create(1, 1, TextureColorSpace::Linear, {50, 50, 50, 255}));
+			for (const auto type : {Gui::EventType::Layout, Gui::EventType::Repaint})
+			{
+				gui.BeginEvent({type}, {Float32(width), Float32(height)});
+				gui.BeginComponent(1);
+				gui.DrawTexture({0, 0, Float32(width), Float32(height)}, image);
+				gui.EndComponent();
+				gui.EndEvent();
+			}
+			Done(canvas->Build(gui, {Float32(width), Float32(height)}));
+		}
+		Done(executor.Begin(output, Rhi::ResourceState::ShaderRead, {}, {42, 1, canvas}));
 		Done(executor.Execute(commands));
 		Done(executor.Submit());
 		Done(Take(executor.End())->Wait());
+		if (showGui)
+		{
+			const auto pixels = Take(ReadRenderTexture(*device, *output));
+			const Size center = ((height / 2) * width + width / 2) * 4;
+			return Array<UInt8, 4>{pixels[center], pixels[center + 1], pixels[center + 2], pixels[center + 3]};
+		}
 		return ReadPixel(device, output);
 	};
 
@@ -384,6 +407,13 @@ void TestBloomAndFinalPost(const Rhi::DevicePtr& device, RenderCommandExecutor& 
 	       "Bloom scatter did not change the multi-level upsample contribution");
 	const auto exposed = render(127, 95, hdr, 1, 10, 0, 0.7f);
 	Expect(exposed[0] > noBloom[0], "One exposure EV did not increase a known HDR value");
+	for (const auto exposure : {-2.f, 0.f, 3.f})
+	{
+		const auto gui = render(127, 95, hdr, exposure, 1, 2, 0.7f, true);
+		Expect(std::abs(Int32(gui[0]) - 50) <= 2 && std::abs(Int32(gui[1]) - 50) <= 2 &&
+		           std::abs(Int32(gui[2]) - 50) <= 2,
+		       "Scene exposure, Bloom or display conversion changed the final GUI color");
+	}
 	const auto onePixel = render(1, 1, hdr, 0, 1, 0.5f, 0.7f);
 	Expect(onePixel[0] > 0, "Bloom failed for a one-pixel target");
 
@@ -967,7 +997,23 @@ void TestShadowAtlasAndCameraRestore(const Rhi::DevicePtr& device, RenderCommand
 	auto makeMaterial = [&](AlphaMode alphaMode, Color color)
 	{
 		auto material = std::make_shared<MaterialInstance>(MaterialType::PbrMetallicRoughness);
-		Done(material->SetShaderAsset(shader));
+		auto selectedShader = shader;
+		if (alphaMode == AlphaMode::Blend)
+		{
+			// An explicit Shader Queue tag overrides the material's alpha-mode default.
+			selectedShader = std::make_shared<Shader::ShaderAsset>(*shader);
+			for (auto& subShader : selectedShader->subShaders)
+			{
+				for (auto& tag : subShader.tags)
+				{
+					if (tag.name == "Queue")
+					{
+						tag.value = "Transparent";
+					}
+				}
+			}
+		}
+		Done(material->SetShaderAsset(selectedShader));
 		Done(material->SetAlphaMode(alphaMode, 0.5f));
 		Done(material->SetBaseColor(color));
 		return material;
@@ -991,12 +1037,13 @@ void TestShadowAtlasAndCameraRestore(const Rhi::DevicePtr& device, RenderCommand
 	LocalTransform skinnedTransform;
 	skinnedTransform.position = {3, 0, 0};
 	Done(skinnedObject->SetLocalTransform(skinnedTransform));
-	MeshPtr skinnedMesh = Take(Test::Cube());
+	MeshPtr skinnedMesh = Take(Take(Test::Cube())->Clone());
 	MeshData skinnedData = Take(skinnedMesh->GetData());
 	auto skeleton = std::make_shared<ModelSkeleton>();
 	SkeletonJoint joint;
 	joint.nodeLocalFileId = 1;
-	joint.bindLocalTransform.position = {3, 0, 0};
+	// The skeleton is parented to the renderer at x=3; its bind pose is local.
+	joint.bindLocalTransform.position = {};
 	joint.inverseBindMatrix = Mat4::Identity();
 	skeleton->joints = {joint};
 	skeleton->modelGuid = ResourceId::Generate();
@@ -1067,6 +1114,18 @@ void TestShadowAtlasAndCameraRestore(const Rhi::DevicePtr& device, RenderCommand
 	const auto secondCulling = Take(renderContext.CullShadowCasters(receiver, secondCascadeViewProjection));
 	const auto firstShadowDraws = makeDrawList(firstCulling);
 	const auto secondShadowDraws = makeDrawList(secondCulling);
+	if (firstShadowDraws.draws.size() != 3 || secondShadowDraws.draws.size() != 2)
+	{
+		std::cerr << "Shadow list sizes: " << firstShadowDraws.draws.size() << ", " << secondShadowDraws.draws.size()
+		          << '\n';
+		for (const auto& object : snapshot.Objects())
+		{
+			const auto owner = scene.GameObjectById(object.objectId);
+			std::cerr << (owner ? ToStdString(Take(owner.value->Name())) : "unknown")
+			          << " bounds x=" << object.worldBounds.minimum.x << ".." << object.worldBounds.maximum.x
+			          << " alpha=" << int(object.parameters.alphaMode) << '\n';
+		}
+	}
 	Expect(firstShadowDraws.draws.size() == 3 && secondShadowDraws.draws.size() == 2,
 	       "Shadow caster lists did not include static, skinned and Mask geometry while filtering Blend and off-tile "
 	       "objects");

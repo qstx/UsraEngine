@@ -4,7 +4,8 @@
 #include <Core/Types.hpp>
 #include <Vfs/VirtualFileSystem.hpp>
 #include <Rhi/RHI.hpp>
-#include <imgui.h>
+#include <Rendering/Gui/ImGuiRenderer.hpp>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -15,6 +16,23 @@ namespace Ursa::Editor
 class ImGuiBridge final
 {
 public:
+	struct InputEvent
+	{
+		std::shared_ptr<Window> window;
+		WindowEvent event;
+		Float32 screenX = 0;
+		Float32 screenY = 0;
+	};
+
+	Vector<InputEvent> DrainInputEvents();
+
+	// Raw events are still queued for the runtime. Returning true keeps a key
+	// press/character out of Editor widgets; releases always clear Editor state.
+	void SetRuntimeInputOwner(std::function<bool(Window*, const WindowEvent&)> owner)
+	{
+		runtimeInputOwner = std::move(owner);
+	}
+
 	static ImGuiBridge* Current();
 
 	static Result<std::unique_ptr<ImGuiBridge>>
@@ -53,7 +71,7 @@ public:
 
 	Size RegisteredTextureCount() const
 	{
-		return groups.size();
+		return renderer ? renderer->RegisteredTextureCount() : 0;
 	}
 
 	ImGuiContext* Context() const
@@ -82,8 +100,6 @@ private:
 	                     const String& layoutKey);
 
 	Result<void> Initialize();
-
-	Result<void> LoadShaders(const VirtualFileSystem& files);
 
 	Result<void> AttachInputWindow(const std::shared_ptr<Window>& inputWindow);
 
@@ -131,10 +147,6 @@ private:
 
 	void RenderPlatformWindow(ImGuiViewport* viewport);
 
-	Result<void> UpdateAtlas();
-
-	Result<void> UploadAtlas(ImTextureData* data);
-
 	Result<ImTextureID> UploadImage(const UInt8* pixels, UInt32 width, UInt32 height);
 
 	Result<void> LoadEditorIcons(const VirtualFileSystem& files);
@@ -162,27 +174,12 @@ private:
 	bool rightAlt = false;
 	bool leftSuper = false;
 	bool rightSuper = false;
-	Rhi::LayoutPtr layout;
-	Rhi::ShaderPtr vertexShader;
-	Rhi::ShaderPtr fragmentShader;
-	Ursa::UInt32 textureBinding = 0;
-	Ursa::UInt32 samplerBinding = 0;
-	Rhi::BlendState blendState;
-	Rhi::CullMode cullMode = Rhi::CullMode::None;
-	Rhi::Compare depthCompare = Rhi::Compare::Less;
-	bool blendEnabled = false;
-	bool depthTestEnabled = false;
-	bool depthWriteEnabled = false;
-	Rhi::SamplerPtr atlasSampler;
+	std::unique_ptr<Rendering::ImGuiRenderer> renderer;
 	ImTextureID editorIconsId = 0;
-	Vector<Ursa::UInt8> editorFontBytes;
-	Rhi::BufferPtr vertexBuffer;
-	Rhi::BufferPtr indexBuffer;
-	UnorderedMap<int, Rhi::PipelinePtr> pipelines;
-	UnorderedMap<ImTextureID, Rhi::BindGroupPtr> groups;
+	Vector<UInt8> editorFontBytes;
 	Vector<ImTextureID> retiredTextures;
-	UnorderedMap<ImTextureID, Vector<Rhi::BindingResource>> textureResources;
-	UnorderedMap<ImTextureData*, ImTextureID> atlasIds;
-	ImTextureID nextTextureId = 1;
+	Vector<InputEvent> rawInputEvents;
+	std::function<bool(Window*, const WindowEvent&)> runtimeInputOwner;
+	std::unordered_map<Window*, std::pair<Float64, Float64>> rawPointerPositions;
 };
 } // namespace Ursa::Editor

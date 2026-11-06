@@ -1,5 +1,8 @@
 #include <Scripting/DotNet/ManagedScriptRuntime.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
+#include <Core/StringInterop.hpp>
+#include <Serialization/SerializationContext.hpp>
+#include <nlohmann/json.hpp>
 
 namespace Ursa::Scripting
 {
@@ -147,6 +150,135 @@ ManagedScriptRuntime::~ManagedScriptRuntime()
 		revokePreparation();
 	}
 	sceneApi.SetBehaviourRuntime(nullptr);
+}
+
+Result<void> ManagedScriptRuntime::ValidateCandidate(Scene& candidate)
+{
+	const bool previousValidation = sceneApi.SetCandidateValidation(true);
+
+	struct ValidationScope
+	{
+		ManagedSceneApi& api;
+		bool previous;
+
+		~ValidationScope()
+		{
+			api.SetCandidateValidation(previous);
+		}
+	} validationScope{sceneApi, previousValidation};
+
+	if (!sessionId)
+	{
+		return Result<void>::Failure("Scene candidate validation requires a script session");
+	}
+	auto selected = host.SelectScriptSession(sessionId);
+	if (!selected)
+	{
+		return selected;
+	}
+	nlohmann::json objects = nlohmann::json::array();
+	nlohmann::json components = nlohmann::json::object();
+	Vector<ScriptBehaviourComponent*> scripts;
+	Vector<GameObject::Ptr> pending = candidate.RootGameObjects();
+	while (!pending.empty())
+	{
+		auto object = pending.back();
+		pending.pop_back();
+		objects.push_back(ToStdString(object->Id().ToString()));
+		for (const auto& child : object->Children())
+		{
+			pending.push_back(child);
+		}
+		for (auto* component : object->Components())
+		{
+			String type = component->SerializationType();
+			if (auto* script = dynamic_cast<ScriptBehaviourComponent*>(component))
+			{
+				auto resolved = host.ResolveBehaviourType(sessionId, script->SerializedPayload(), script->TypeName());
+				if (!resolved)
+				{
+					return Result<void>::Failure(resolved.error);
+				}
+				type = resolved.value;
+				script->SetTypeName(type);
+				scripts.push_back(script);
+			}
+			components[ToStdString(component->PersistentId().ToString())] = ToStdString(type);
+		}
+	}
+	for (auto* script : scripts)
+	{
+		try
+		{
+			nlohmann::json payload = script->SerializedPayload().empty()
+			                             ? nlohmann::json(nullptr)
+			                             : nlohmann::json::parse(ToStdString(script->SerializedPayload()));
+			const auto archive = ToUrsaString(
+			    nlohmann::json{{"objects", objects}, {"components", components}, {"payload", payload}}.dump());
+			auto valid = script->WithFieldResources(
+			    [&]() -> Result<void>
+			    {
+				    auto* context = SerializationContext::Active();
+				    auto* loader =
+				        context && context->ResourceLoader() ? context->ResourceLoader() : sceneApi.Resources();
+				    const auto checkResources = [&](auto&& self, const nlohmann::json& value) -> Result<void>
+				    {
+					    if (value.is_object() && value.contains("$ursaReference"))
+					    {
+						    const auto& reference = value["$ursaReference"];
+						    const auto kind = reference.value("Kind", std::string{});
+						    if (kind == "Texture" || kind == "Shader" || kind == "ComputeShader")
+						    {
+							    if (!loader || !reference.contains("Resource"))
+							    {
+								    return Result<void>::Failure(
+								        "Candidate asset reference has no ResourceSession or identity");
+							    }
+							    auto asset = AssetReferenceFromJson(reference["Resource"], "Candidate script asset");
+							    if (!asset)
+							    {
+								    return Result<void>::Failure(asset.error);
+							    }
+							    if (kind == "Texture")
+							    {
+								    auto loaded = loader->LoadTexture(asset.value.guid, asset.value.localFileId);
+								    return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
+							    }
+							    if (asset.value.localFileId)
+							    {
+								    return Result<void>::Failure("Candidate Shader requires a root asset reference");
+							    }
+							    auto loaded = loader->LoadShader(asset.value.guid);
+							    return loaded ? Result<void>{} : Result<void>::Failure(loaded.error);
+						    }
+					    }
+					    if (value.is_structured())
+					    {
+						    for (const auto& item : value)
+						    {
+							    auto checked = self(self, item);
+							    if (!checked)
+							    {
+								    return checked;
+							    }
+						    }
+					    }
+					    return {};
+				    };
+				    auto assets = checkResources(checkResources, payload);
+				    return assets ? host.ValidateSceneScript(sessionId, script->TypeName(), archive) : assets;
+			    });
+			if (!valid)
+			{
+				return Result<void>::Failure("Candidate script " + script->TypeName() + ": " + valid.error);
+			}
+		}
+		catch (const std::exception& error)
+		{
+			return Result<void>::Failure(ToUrsaString(error.what()));
+		}
+	}
+	return {};
 }
 
 Result<ManagedHandle> ManagedScriptRuntime::BoundHandle(UInt64 instanceToken) const

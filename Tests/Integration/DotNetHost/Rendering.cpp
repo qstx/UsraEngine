@@ -12,12 +12,65 @@
 #include <Rendering/Pipeline/NativeForwardPipeline.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
+#include <Vfs/AssetRoots.hpp>
+#include <Gui/GuiCanvas.hpp>
 #include <cmath>
 #include <iostream>
 #include <nlohmann/json.hpp>
 
 namespace Ursa::Test
 {
+namespace
+{
+void VerifyFinalGui(Scene& scene, ManagedSceneApi& api, const Rhi::DevicePtr& device,
+                    const std::shared_ptr<Rendering::RenderTextureResource>& output, UInt32 width, UInt32 height,
+                    const std::function<Result<void>()>& render = {})
+{
+	const auto baseline = Take(Rendering::ReadRenderTexture(*device, *output));
+	auto files = Take(OpenEngineFileSystem());
+	auto canvas = Take(Gui::Canvas::Create(device, files));
+	Gui::Session gui;
+	auto opaqueImage = Take(MaterialTexture::Create(1, 1, TextureColorSpace::Linear, {50, 50, 50, 255}));
+	auto image = Take(MaterialTexture::Create(1, 1, TextureColorSpace::Linear, {255, 0, 0, 128}));
+	for (const auto type : {Gui::EventType::Layout, Gui::EventType::Repaint})
+	{
+		gui.BeginEvent({type}, {Float32(width), Float32(height)});
+		gui.BeginComponent(1);
+		gui.DrawTexture({4, 4, 12, 12}, opaqueImage);
+		gui.DrawTexture({20, 4, 8, 8}, image);
+		gui.EndComponent();
+		gui.EndEvent();
+	}
+	Done(canvas->Build(gui, {Float32(width), Float32(height)}));
+	api.SetGameGuiOutput(99, canvas);
+	FrameContext frame;
+	frame.frameIndex = 99;
+	if (render)
+	{
+		Done(render());
+	}
+	else
+	{
+		scene.BeginFrame();
+		Done(scene.Update(frame));
+	}
+	const auto actual = Take(Rendering::ReadRenderTexture(*device, *output));
+	const Size opaque = (6 * width + 6) * 4, alpha = (6 * width + 22) * 4;
+	for (Size channel = 0; channel < 3; ++channel)
+	{
+		Expect(std::abs(Int32(actual[opaque + channel]) - 50) <= 2,
+		       "Final GUI color was processed by the scene pipeline or display conversion twice");
+		const Float32 expected = (channel == 0 ? 128.f : 0.f) + baseline[alpha + channel] * (127.f / 255.f);
+		Expect(std::abs(Float32(actual[alpha + channel]) - expected) <= 2,
+		       "GUI alpha was composed before final output, more than once, or in a secondary camera target");
+	}
+	const Size outside = ((height - 1) * width) * 4;
+	Expect(std::equal(actual.begin() + outside, actual.begin() + outside + 4, baseline.begin() + outside),
+	       "Final GUI changed a scene pixel outside its drawing region");
+	api.SetGameGuiOutput(100, {});
+}
+} // namespace
+
 void TestClassicRenderingExample(DotNetHost& host, const VirtualPath& contentPath, UInt32 objectCount)
 {
 	Rhi::DeviceDesc description;
@@ -334,10 +387,14 @@ void TestManagedForward(DotNetHost& host, const VirtualPath& content)
 				    std::to_string(expected[center + 1]));
 			}
 		}
+		if (scenario == 0)
+		{
+			VerifyFinalGui(scene, api, device, output, 64, 64, [&] { return host.RenderScene(session, 1); });
+		}
 		scene.Clear();
 		Done(host.CloseScriptSession(session));
 	}
-	std::cout << "Managed Forward: Unlit/PBR/texture/transparent/submesh/moving skin baseline passed\n";
+	std::cout << "Managed Forward: Unlit/PBR/texture/transparent/submesh/moving skin baseline and final GUI passed\n";
 }
 
 void TestDocumentedCustomPipeline(DotNetHost& host, const VirtualPath& content)
@@ -371,6 +428,7 @@ void TestDocumentedCustomPipeline(DotNetHost& host, const VirtualPath& content)
 	Expect(std::abs(int(pixels[0]) - 26) <= 1 && std::abs(int(pixels[1]) - 77) <= 1 &&
 	           std::abs(int(pixels[2]) - 179) <= 1,
 	       "The documented public C# pipeline did not produce its declared clear color");
+	VerifyFinalGui(scene, api, device, output, 64, 64);
 	Done(scene.DestroyGameObject(camera));
 	Done(scene.CommitChanges());
 	Done(host.CloseScriptSession(session));
@@ -553,6 +611,7 @@ void TestUniversalPostProcessingBacking(DotNetHost& host, const VirtualPath& con
 	       "Depth/Nothing cameras reprocessed display output instead of the preserved linear HDR backing");
 	Expect(pixels[outsideViewport] == 0 && pixels[outsideViewport + 1] == 0 && pixels[outsideViewport + 2] == 0,
 	       "Universal split-screen processing changed pixels outside the camera viewport");
+	VerifyFinalGui(scene, api, device, output, 32, 32, [&] { return host.RenderScene(session, 1); });
 	scene.Clear();
 	Done(host.CloseScriptSession(session));
 	std::cout << "Universal postprocessing retained raw linear output through Depth/Nothing cameras\n";

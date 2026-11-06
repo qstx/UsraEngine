@@ -1,0 +1,13 @@
+diff --git a/ProjectSettings/ManagedImportRules.json b/ProjectSettings/ManagedImportRules.json
+index 9a6e12d..8f17a93 100644
+--- a/ProjectSettings/ManagedImportRules.json
++++ b/ProjectSettings/ManagedImportRules.json
+@@ -9,7 +9,7 @@
+       "path": "prj:Scripts/Editor/SnakeEditor.cs"
+     },
+     {
+-      "fingerprint": "9dfb3549d35423bc",
++      "fingerprint": "ffd341d391e6daf7",
+       "guid": "61ebf261-67a3-42c0-95e1-a5956b877d59",
+       "identities": {
+         "Types": [

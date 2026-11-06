@@ -1,0 +1,296 @@
+{
+  "version": 1,
+  "baseline": "Demo Assets followed by Engine SampleAssets; existing fixture paths win",
+  "references": [
+    "SnakeLogicTests",
+    "ProjectSnakePlayer/Gameplay/PakSmoke",
+    "ProjectScenePrefabRoundTripTests",
+    "ProjectPlaySessionTests",
+    "ProjectEditorExtensionsTests",
+    "ProfilerEditorWindowTests",
+    "ProjectPipelineSamplesTests",
+    "Unified IDE/debug acceptance"
+  ],
+  "managedRulesBackup": "LegacyDemoSettings/ManagedImportRules.pre-suite.json",
+  "entries": [
+    {
+      "source": "Demo/Assets/README.md",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/README.md",
+      "effectiveSource": "existing Engine fixture",
+      "sourceSha256": "f71621fc1ac9463a97ab85d5d4303bbdd8c7c7e14a43a56df08dec539e521cf7",
+      "effectiveSha256": "24d7684c62cb7474e1b4d3561ce23525b238fb4957209357f93e96d3f87b9aad"
+    },
+    {
+      "source": "Demo/Assets/README.md.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/README.md.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "7861cd5b0511b52702a481c7ac827ff54299d4bb39b7a50ff456ceb56a848081",
+      "effectiveSha256": "7861cd5b0511b52702a481c7ac827ff54299d4bb39b7a50ff456ceb56a848081",
+      "sourceGuid": "e00bbbda-2a6e-432d-b44c-61b8dee7e178",
+      "effectiveGuid": "e00bbbda-2a6e-432d-b44c-61b8dee7e178"
+    },
+    {
+      "source": "Demo/Assets/Rendering/README.md",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering/README.md",
+      "effectiveSource": "existing Engine fixture",
+      "sourceSha256": "c906d427fe078d67c6c553ff8b3852fc3bc79d0f80ed11d094ffe331bd644231",
+      "effectiveSha256": "6b69cab6558ff0e9cefcc4b0f1a824aeed08cbbd4c6b0a81ffbb8ccd11011408"
+    },
+    {
+      "source": "Demo/Assets/Rendering/README.md.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering/README.md.meta",
+      "effectiveSource": "existing Engine fixture",
+      "sourceSha256": "0b907a86eee19011a3eb827c0872e7eca2df9b939aa21dcf75b8752f0e99cc60",
+      "effectiveSha256": "2d54c319c82558ceb93007dd645420896dce001210e191c902790cb019c7ac30",
+      "sourceGuid": "ee1a953f-9efb-4e98-874b-ffc75373a8cd",
+      "effectiveGuid": "6ce82ed2-f3b0-46f6-bd53-4bef64a04573"
+    },
+    {
+      "source": "Demo/Assets/Rendering/ScreenTintFeature.ursaasset",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering/ScreenTintFeature.ursaasset",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "d140c17088137a1ccab7a1dbc21d7d65e5c0d0227d431746e3de5911fe645d49",
+      "effectiveSha256": "d140c17088137a1ccab7a1dbc21d7d65e5c0d0227d431746e3de5911fe645d49"
+    },
+    {
+      "source": "Demo/Assets/Rendering/ScreenTintFeature.ursaasset.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering/ScreenTintFeature.ursaasset.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "0a986eae7747696c7339461ce715a26203e3acb55150b8d5700938a23bfb314e",
+      "effectiveSha256": "0a986eae7747696c7339461ce715a26203e3acb55150b8d5700938a23bfb314e",
+      "sourceGuid": "d0d64deb-e492-4b22-8aab-85de9c8fd5fb",
+      "effectiveGuid": "d0d64deb-e492-4b22-8aab-85de9c8fd5fb"
+    },
+    {
+      "source": "Demo/Assets/Rendering/UniversalPipelineSample.ursaasset",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering/UniversalPipelineSample.ursaasset",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "9e44fc42457cf6cb16138b87032d1d2e4c56a0ff0cefd589fc583b3645263afa",
+      "effectiveSha256": "9e44fc42457cf6cb16138b87032d1d2e4c56a0ff0cefd589fc583b3645263afa"
+    },
+    {
+      "source": "Demo/Assets/Rendering/UniversalPipelineSample.ursaasset.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering/UniversalPipelineSample.ursaasset.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "f20c030f208643a49b82201da717ee8fe2992afe08aa5d670c68a19cecc121aa",
+      "effectiveSha256": "f20c030f208643a49b82201da717ee8fe2992afe08aa5d670c68a19cecc121aa",
+      "sourceGuid": "3c21708c-1bcd-4b57-a8f1-b5fe719bfe2d",
+      "effectiveGuid": "3c21708c-1bcd-4b57-a8f1-b5fe719bfe2d"
+    },
+    {
+      "source": "Demo/Assets/Rendering/UniversalRendererData.ursaasset",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering/UniversalRendererData.ursaasset",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "f8fd930911d300e10df804f3958b4b1d42677815ec41ee44e25eecb617bda964",
+      "effectiveSha256": "f8fd930911d300e10df804f3958b4b1d42677815ec41ee44e25eecb617bda964"
+    },
+    {
+      "source": "Demo/Assets/Rendering/UniversalRendererData.ursaasset.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering/UniversalRendererData.ursaasset.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "86b051f0f6c10d5836ffb0a46c855b41e589585b57697bfd3d56a8db26495ee6",
+      "effectiveSha256": "86b051f0f6c10d5836ffb0a46c855b41e589585b57697bfd3d56a8db26495ee6",
+      "sourceGuid": "f4f2e337-6555-4d79-b8a7-3f1b718f5bd8",
+      "effectiveGuid": "f4f2e337-6555-4d79-b8a7-3f1b718f5bd8"
+    },
+    {
+      "source": "Demo/Assets/Rendering.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Rendering.meta",
+      "effectiveSource": "existing Engine fixture",
+      "sourceSha256": "5dc4e926d4933300dbcb21dbc25e7142b9a4c348ca4422e3e7ba45bf50e783cb",
+      "effectiveSha256": "dfff8103f342d3a5ffe69dce445e054a5b46d516ad20956fa48e9c79f06ad9d6",
+      "sourceGuid": "f3d366c1-4892-4114-898e-be4234ca0733",
+      "effectiveGuid": "ec79ffec-7622-414b-bac0-ced583dc719d"
+    },
+    {
+      "source": "Demo/Assets/Scripts/Editor/SnakeEditor.cs",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Editor/SnakeEditor.cs",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "9983222b76f64cc8dd388bdc272d77f1ce81d7dd0f8992f73abdf5d6c497a386",
+      "effectiveSha256": "9983222b76f64cc8dd388bdc272d77f1ce81d7dd0f8992f73abdf5d6c497a386",
+      "declaredTypes": [
+        "SnakeControllerInspector",
+        "SnakeEditorMenus",
+        "SnakeControlsWindow"
+      ],
+      "scriptIdentityBaseline": {}
+    },
+    {
+      "source": "Demo/Assets/Scripts/Editor/SnakeEditor.cs.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Editor/SnakeEditor.cs.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "04f0e9968ca7c7aa4ec33297c11f56db560bc327dd0afccd5c4d2eb091a22f07",
+      "effectiveSha256": "04f0e9968ca7c7aa4ec33297c11f56db560bc327dd0afccd5c4d2eb091a22f07",
+      "sourceGuid": "9bf784f0-7489-4622-9ce5-334ae31c0fd2",
+      "effectiveGuid": "9bf784f0-7489-4622-9ce5-334ae31c0fd2"
+    },
+    {
+      "source": "Demo/Assets/Scripts/Editor.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Editor.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "1f97e055f1b7f076d6d2d4de427f5b85cc7b0c9bacf9b7afd17c234b4b511dab",
+      "effectiveSha256": "1f97e055f1b7f076d6d2d4de427f5b85cc7b0c9bacf9b7afd17c234b4b511dab",
+      "sourceGuid": "810d7b6e-2da8-4511-845a-23350c4208e3",
+      "effectiveGuid": "810d7b6e-2da8-4511-845a-23350c4208e3"
+    },
+    {
+      "source": "Demo/Assets/Scripts/Rendering/ScreenTintFeature.cs",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Rendering/ScreenTintFeature.cs",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "af1f8b0e0d3c8ee53917a892effaa202fa3285b23a5ad9489bbb2c36eb79ce31",
+      "effectiveSha256": "af1f8b0e0d3c8ee53917a892effaa202fa3285b23a5ad9489bbb2c36eb79ce31",
+      "declaredTypes": [
+        "ScreenTintFeatureAsset",
+        "ScreenTintFeature",
+        "ScreenTintPass"
+      ],
+      "scriptIdentityBaseline": {
+        "Types": [
+          {
+            "Id": "auto:61ebf261-67a3-42c0-95e1-a5956b877d59:Ursa.Demo.Rendering.ScreenTintFeatureAsset",
+            "Legacy": false,
+            "LocalFileId": 838856799468303050,
+            "Primary": true,
+            "TypeName": "Ursa.Demo.Rendering.ScreenTintFeatureAsset",
+            "Version": 1
+          }
+        ],
+        "Version": 1
+      }
+    },
+    {
+      "source": "Demo/Assets/Scripts/Rendering/ScreenTintFeature.cs.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Rendering/ScreenTintFeature.cs.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "2c84c86d4819fc9c933317bf0e5b7e03056166788eb33169b7d43b71152b03db",
+      "effectiveSha256": "2c84c86d4819fc9c933317bf0e5b7e03056166788eb33169b7d43b71152b03db",
+      "sourceGuid": "61ebf261-67a3-42c0-95e1-a5956b877d59",
+      "effectiveGuid": "61ebf261-67a3-42c0-95e1-a5956b877d59"
+    },
+    {
+      "source": "Demo/Assets/Scripts/Rendering.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Rendering.meta",
+      "effectiveSource": "existing Engine fixture",
+      "sourceSha256": "1419a3a472bb2c2692ebd722484d6c77b25a3fcf338b98b36cafa91720e391e8",
+      "effectiveSha256": "f2e949d18955fc7113ab273838d56cb2ed02f278470c8c5a45d004f65f96ce85",
+      "sourceGuid": "c3f47ff6-3241-4821-b7a1-95efa39e5a78",
+      "effectiveGuid": "e48dd763-351d-43cd-8d5c-097b01b787ba"
+    },
+    {
+      "source": "Demo/Assets/Scripts/Snake/SnakeController.cs",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Snake/SnakeController.cs",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "8f90850ec8c827d93c02aa7c9bf137e40d6dfbc17ea99e515eb3df32a11cbcaa",
+      "effectiveSha256": "8f90850ec8c827d93c02aa7c9bf137e40d6dfbc17ea99e515eb3df32a11cbcaa",
+      "declaredTypes": [
+        "SnakeController"
+      ],
+      "scriptIdentityBaseline": {
+        "Types": [
+          {
+            "Id": "demo.snake-controller",
+            "Legacy": false,
+            "LocalFileId": 4788986422269556870,
+            "Primary": true,
+            "TypeName": "Ursa.Demo.SnakeController",
+            "Version": 1
+          }
+        ],
+        "Version": 1
+      }
+    },
+    {
+      "source": "Demo/Assets/Scripts/Snake/SnakeController.cs.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Snake/SnakeController.cs.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "1ffe9a4c3a56902adabb8a39e7e7195f55c9daa09bb716b69d52b86f7c447952",
+      "effectiveSha256": "1ffe9a4c3a56902adabb8a39e7e7195f55c9daa09bb716b69d52b86f7c447952",
+      "sourceGuid": "7f6ce254-214b-45bb-afa8-e3bb99f58c88",
+      "effectiveGuid": "7f6ce254-214b-45bb-afa8-e3bb99f58c88"
+    },
+    {
+      "source": "Demo/Assets/Scripts/Snake/SnakeGame.cs",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Snake/SnakeGame.cs",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "19243f3524bbd07b4f2499ccc4f4eccbd7734ebbddc34cb3184c62d4ae99c3b6",
+      "effectiveSha256": "19243f3524bbd07b4f2499ccc4f4eccbd7734ebbddc34cb3184c62d4ae99c3b6",
+      "declaredTypes": [
+        "SnakeDirection",
+        "SnakeStatus",
+        "SnakeCell",
+        "SnakeGame",
+        "SnakeFixedStepClock"
+      ],
+      "scriptIdentityBaseline": {}
+    },
+    {
+      "source": "Demo/Assets/Scripts/Snake/SnakeGame.cs.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Snake/SnakeGame.cs.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "2abc02438f79bd34de62bf3d11337e31a780d5ce3cba5563d8304fedae653409",
+      "effectiveSha256": "2abc02438f79bd34de62bf3d11337e31a780d5ce3cba5563d8304fedae653409",
+      "sourceGuid": "1c59a5b2-89f6-406c-9d8d-d99229aa3956",
+      "effectiveGuid": "1c59a5b2-89f6-406c-9d8d-d99229aa3956"
+    },
+    {
+      "source": "Demo/Assets/Scripts/Snake.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts/Snake.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "af1cd39146277d33aeccbba7a9e78cbd0b9e9da2c2a6ed7083f67b37edcbcff5",
+      "effectiveSha256": "af1cd39146277d33aeccbba7a9e78cbd0b9e9da2c2a6ed7083f67b37edcbcff5",
+      "sourceGuid": "9bf784f0-7489-4622-9ce5-334ae31c0fd1",
+      "effectiveGuid": "9bf784f0-7489-4622-9ce5-334ae31c0fd1"
+    },
+    {
+      "source": "Demo/Assets/Scripts.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Scripts.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "c4fd45a3def83e0c0949587434b6650e7971826a2ba6862eed364667f2808ad1",
+      "effectiveSha256": "c4fd45a3def83e0c0949587434b6650e7971826a2ba6862eed364667f2808ad1",
+      "sourceGuid": "29d7f27f-3f83-4dc9-9412-94a39143b324",
+      "effectiveGuid": "29d7f27f-3f83-4dc9-9412-94a39143b324"
+    },
+    {
+      "source": "Demo/Assets/Snake/Board.ursaprefab",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Snake/Board.ursaprefab",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "f672bf543d41375cba63164b3d7a211e56ca3a0b70cc0a47be220c690e458a1b",
+      "effectiveSha256": "f672bf543d41375cba63164b3d7a211e56ca3a0b70cc0a47be220c690e458a1b"
+    },
+    {
+      "source": "Demo/Assets/Snake/Board.ursaprefab.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Snake/Board.ursaprefab.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "46b7ba567b9de5b8beeedf0a732a3d394a5a16abc1a8b154421787863e66d2ba",
+      "effectiveSha256": "46b7ba567b9de5b8beeedf0a732a3d394a5a16abc1a8b154421787863e66d2ba",
+      "sourceGuid": "75727361-0000-0000-0300-000000000001",
+      "effectiveGuid": "75727361-0000-0000-0300-000000000001"
+    },
+    {
+      "source": "Demo/Assets/Snake/Snake.ursascene",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Snake/Snake.ursascene",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "3c30af7533777d9623038763c1046c4d864ae6a34172ccf23886697c08fc87bd",
+      "effectiveSha256": "3c30af7533777d9623038763c1046c4d864ae6a34172ccf23886697c08fc87bd"
+    },
+    {
+      "source": "Demo/Assets/Snake/Snake.ursascene.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Snake/Snake.ursascene.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "dc770a8e98ee02f082b32cffef00c91d03a71fb10c3001a57e60253d69d919b7",
+      "effectiveSha256": "dc770a8e98ee02f082b32cffef00c91d03a71fb10c3001a57e60253d69d919b7",
+      "sourceGuid": "75727361-0000-0000-0300-000000000002",
+      "effectiveGuid": "75727361-0000-0000-0300-000000000002"
+    },
+    {
+      "source": "Demo/Assets/Snake.meta",
+      "destination": "Engine/Tests/Fixtures/SampleAssets/Snake.meta",
+      "effectiveSource": "legacy Demo",
+      "sourceSha256": "da4ed4baa38ed150b4994bb8dfdf3bb78e468433c378016fb6bee8512fdff88c",
+      "effectiveSha256": "da4ed4baa38ed150b4994bb8dfdf3bb78e468433c378016fb6bee8512fdff88c",
+      "sourceGuid": "97c0fbe0-231c-4f02-8dfc-7db0f271dcfa",
+      "effectiveGuid": "97c0fbe0-231c-4f02-8dfc-7db0f271dcfa"
+    }
+  ],
+  "fixtureMetaCount": 41
+}

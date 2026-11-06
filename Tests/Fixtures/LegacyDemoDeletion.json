@@ -1,0 +1,118 @@
+{
+  "scope": "G:\\GitRepositories\\UrsaEngine\\Demo\\Assets",
+  "files": [
+    {
+      "path": "Demo/Assets/README.md",
+      "sha256": "f71621fc1ac9463a97ab85d5d4303bbdd8c7c7e14a43a56df08dec539e521cf7"
+    },
+    {
+      "path": "Demo/Assets/README.md.meta",
+      "sha256": "7861cd5b0511b52702a481c7ac827ff54299d4bb39b7a50ff456ceb56a848081"
+    },
+    {
+      "path": "Demo/Assets/Rendering.meta",
+      "sha256": "5dc4e926d4933300dbcb21dbc25e7142b9a4c348ca4422e3e7ba45bf50e783cb"
+    },
+    {
+      "path": "Demo/Assets/Scripts.meta",
+      "sha256": "c4fd45a3def83e0c0949587434b6650e7971826a2ba6862eed364667f2808ad1"
+    },
+    {
+      "path": "Demo/Assets/Snake.meta",
+      "sha256": "da4ed4baa38ed150b4994bb8dfdf3bb78e468433c378016fb6bee8512fdff88c"
+    },
+    {
+      "path": "Demo/Assets/Rendering/README.md",
+      "sha256": "c906d427fe078d67c6c553ff8b3852fc3bc79d0f80ed11d094ffe331bd644231"
+    },
+    {
+      "path": "Demo/Assets/Rendering/README.md.meta",
+      "sha256": "0b907a86eee19011a3eb827c0872e7eca2df9b939aa21dcf75b8752f0e99cc60"
+    },
+    {
+      "path": "Demo/Assets/Rendering/ScreenTintFeature.ursaasset",
+      "sha256": "d140c17088137a1ccab7a1dbc21d7d65e5c0d0227d431746e3de5911fe645d49"
+    },
+    {
+      "path": "Demo/Assets/Rendering/ScreenTintFeature.ursaasset.meta",
+      "sha256": "0a986eae7747696c7339461ce715a26203e3acb55150b8d5700938a23bfb314e"
+    },
+    {
+      "path": "Demo/Assets/Rendering/UniversalPipelineSample.ursaasset",
+      "sha256": "9e44fc42457cf6cb16138b87032d1d2e4c56a0ff0cefd589fc583b3645263afa"
+    },
+    {
+      "path": "Demo/Assets/Rendering/UniversalPipelineSample.ursaasset.meta",
+      "sha256": "f20c030f208643a49b82201da717ee8fe2992afe08aa5d670c68a19cecc121aa"
+    },
+    {
+      "path": "Demo/Assets/Rendering/UniversalRendererData.ursaasset",
+      "sha256": "f8fd930911d300e10df804f3958b4b1d42677815ec41ee44e25eecb617bda964"
+    },
+    {
+      "path": "Demo/Assets/Rendering/UniversalRendererData.ursaasset.meta",
+      "sha256": "86b051f0f6c10d5836ffb0a46c855b41e589585b57697bfd3d56a8db26495ee6"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Editor.meta",
+      "sha256": "1f97e055f1b7f076d6d2d4de427f5b85cc7b0c9bacf9b7afd17c234b4b511dab"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Rendering.meta",
+      "sha256": "1419a3a472bb2c2692ebd722484d6c77b25a3fcf338b98b36cafa91720e391e8"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Snake.meta",
+      "sha256": "af1cd39146277d33aeccbba7a9e78cbd0b9e9da2c2a6ed7083f67b37edcbcff5"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Editor/SnakeEditor.cs",
+      "sha256": "9983222b76f64cc8dd388bdc272d77f1ce81d7dd0f8992f73abdf5d6c497a386"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Editor/SnakeEditor.cs.meta",
+      "sha256": "04f0e9968ca7c7aa4ec33297c11f56db560bc327dd0afccd5c4d2eb091a22f07"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Rendering/ScreenTintFeature.cs",
+      "sha256": "af1f8b0e0d3c8ee53917a892effaa202fa3285b23a5ad9489bbb2c36eb79ce31"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Rendering/ScreenTintFeature.cs.meta",
+      "sha256": "2c84c86d4819fc9c933317bf0e5b7e03056166788eb33169b7d43b71152b03db"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Snake/SnakeController.cs",
+      "sha256": "8f90850ec8c827d93c02aa7c9bf137e40d6dfbc17ea99e515eb3df32a11cbcaa"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Snake/SnakeController.cs.meta",
+      "sha256": "1ffe9a4c3a56902adabb8a39e7e7195f55c9daa09bb716b69d52b86f7c447952"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Snake/SnakeGame.cs",
+      "sha256": "19243f3524bbd07b4f2499ccc4f4eccbd7734ebbddc34cb3184c62d4ae99c3b6"
+    },
+    {
+      "path": "Demo/Assets/Scripts/Snake/SnakeGame.cs.meta",
+      "sha256": "2abc02438f79bd34de62bf3d11337e31a780d5ce3cba5563d8304fedae653409"
+    },
+    {
+      "path": "Demo/Assets/Snake/Board.ursaprefab",
+      "sha256": "f672bf543d41375cba63164b3d7a211e56ca3a0b70cc0a47be220c690e458a1b"
+    },
+    {
+      "path": "Demo/Assets/Snake/Board.ursaprefab.meta",
+      "sha256": "46b7ba567b9de5b8beeedf0a732a3d394a5a16abc1a8b154421787863e66d2ba"
+    },
+    {
+      "path": "Demo/Assets/Snake/Snake.ursascene",
+      "sha256": "3c30af7533777d9623038763c1046c4d864ae6a34172ccf23886697c08fc87bd"
+    },
+    {
+      "path": "Demo/Assets/Snake/Snake.ursascene.meta",
+      "sha256": "dc770a8e98ee02f082b32cffef00c91d03a71fb10c3001a57e60253d69d919b7"
+    }
+  ],
+  "gitStatus": " M ProjectSettings/ManagedImportRules.json\n"
+}

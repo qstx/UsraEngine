@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace Ursa;
@@ -38,6 +40,7 @@ internal static class BehaviourRegistry
 
 	internal static void ReleaseSession(ulong session)
 	{
+		SceneManagement.SceneManager.ReleaseSession(session);
 		foreach (ulong token in new List<ulong>(instances.Keys))
 		{
 			if (instanceSessions[token] == session)
@@ -156,8 +159,21 @@ internal static class BehaviourRegistry
 			case 5: behaviour.LateUpdate(); break;
 			case 6: behaviour.OnDisable(); break;
 			case 7: behaviour.OnDestroy(); break;
+			case 8:
+				InvokeGui(behaviour);
+				break;
 			default: throw new ArgumentOutOfRangeException(nameof(eventId));
 		}
+	}
+
+	// ExitGUI crosses project code as normal control flow. Keep its handler visible
+	// to the debugger even when this framework assembly is optimized or has no PDB.
+	[DebuggerDisableUserUnhandledExceptions]
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	internal static void InvokeGui(Behaviour behaviour)
+	{
+		try { behaviour.OnGUI(); }
+		catch (ExitGUIException) { }
 	}
 
 	internal static Behaviour FindByNativeHandle(NativeHandle handle, Type expectedType)

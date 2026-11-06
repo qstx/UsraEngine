@@ -2181,7 +2181,7 @@
     {
       "Id": 14281836054586644981,
       "Name": "ManagedHost",
-      "Hash": "7f3e79617db2f014a516faf1879a2d5dd7766cdbbd7a1a139656f03dab0f279d",
+      "Hash": "e4c65bab63fdd0a92b43390a28c5b3bd3d2a16f3e46c761f6b6273f37cb5304e",
       "CommandHash": "",
       "Required": true,
       "CallScoped": false,
@@ -2704,6 +2704,33 @@
           "NativeOnly": false
         },
         {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.NotifySceneChange",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "scene",
+              "Type": "global::Ursa.SceneManagement.SceneData",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "loaded",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
           "Identity": "Ursa.ManagedHost.ManagedHostBindings.PrepareEditorExtensions",
           "Direction": "ManagedCallback",
           "Return": "global::Ursa.EditorExtensionInfo[]",
@@ -2846,6 +2873,33 @@
             {
               "Name": "candidate",
               "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.ManagedHost.ManagedHostBindings.ValidateSceneScript",
+          "Direction": "ManagedCallback",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": true
+            },
+            {
+              "Name": "typeName",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "archive",
+              "Type": "global::Ursa.ManagedHost.BehaviourFieldArchive",
               "HandleKind": 0,
               "Session": false
             }
@@ -4103,12 +4157,365 @@
     {
       "Id": 11788884058683052816,
       "Name": "Runtime",
-      "Hash": "2217a8af4f5476a1ce1147b497c2f13deff2eef63634130c4209d0b296a42a24",
+      "Hash": "a98b0fb0191003650c10f1c0f7c1a84492ca691f981f722b6d60656595c6321e",
       "CommandHash": "",
       "Required": true,
       "CallScoped": false,
       "Dependencies": [],
       "Methods": [
+        {
+          "Identity": "Ursa.NativeGuiBindings.BeginGroup",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.Button",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "text",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.DrawTexture",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "texture",
+              "Type": "global::Ursa.NativeHandle",
+              "HandleKind": 3,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.EndGroup",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.Exit",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.GetChanged",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.GetControlId",
+          "Direction": "NativeMethod",
+          "Return": "int",
+          "Parameters": [
+            {
+              "Name": "hint",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "focus",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.GetEvent",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.GuiEventData",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.GetHotControl",
+          "Direction": "NativeMethod",
+          "Return": "int",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.GetKeyboardControl",
+          "Direction": "NativeMethod",
+          "Return": "int",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.GetTypeForControl",
+          "Direction": "NativeMethod",
+          "Return": "uint",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "id",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.HorizontalSlider",
+          "Direction": "NativeMethod",
+          "Return": "float",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "minimum",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "maximum",
+              "Type": "float",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.Label",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "text",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.PopId",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.PushId",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.SetChanged",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "changed",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.SetHotControl",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.SetKeyboardControl",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.TextField",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.Toggle",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "rect",
+              "Type": "global::Ursa.Rect",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "value",
+              "Type": "bool",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "text",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.Use",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.NativeGuiBindings.ViewportSize",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.Vector2",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
         {
           "Identity": "Ursa.NativeMaterialBindings.Clone",
           "Direction": "NativeMethod",
@@ -6323,6 +6730,120 @@
               "Name": "mesh",
               "Type": "global::Ursa.NativeHandle",
               "HandleKind": 4,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.SceneManagement.NativeSceneBindings.GetActiveScene",
+          "Direction": "NativeMethod",
+          "Return": "global::Ursa.SceneManagement.SceneData",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.SceneManagement.NativeSceneBindings.GetIsLoading",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.SceneManagement.NativeSceneBindings.GetLastLoadError",
+          "Direction": "NativeMethod",
+          "Return": "string",
+          "Parameters": [],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.SceneManagement.NativeSceneBindings.IsSceneLoaded",
+          "Direction": "NativeMethod",
+          "Return": "bool",
+          "Parameters": [
+            {
+              "Name": "session",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "token",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.SceneManagement.NativeSceneBindings.LoadByIndex",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "buildIndex",
+              "Type": "int",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mode",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.SceneManagement.NativeSceneBindings.LoadByName",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "nameOrPath",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mode",
+              "Type": "uint",
+              "HandleKind": 0,
+              "Session": false
+            }
+          ],
+          "Thread": 0,
+          "NativeOnly": false
+        },
+        {
+          "Identity": "Ursa.SceneManagement.NativeSceneBindings.LoadByReference",
+          "Direction": "NativeMethod",
+          "Return": "void",
+          "Parameters": [
+            {
+              "Name": "guid",
+              "Type": "string",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "localFileId",
+              "Type": "ulong",
+              "HandleKind": 0,
+              "Session": false
+            },
+            {
+              "Name": "mode",
+              "Type": "uint",
+              "HandleKind": 0,
               "Session": false
             }
           ],

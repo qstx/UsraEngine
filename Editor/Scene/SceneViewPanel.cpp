@@ -606,9 +606,8 @@ void DrawSceneGrid(ImDrawList* drawList, const Camera& camera, Float32 aspect, c
 	}
 	const Vec3 viewDirection = camera.target - camera.position;
 	const Float32 viewDistance = std::sqrt(Dot(viewDirection, viewDirection));
-	const Float32 halfHeight = camera.orthographic
-	                                ? camera.orthographicSize
-	                                : viewDistance * std::tan(camera.verticalFovRadians * 0.5f);
+	const Float32 halfHeight =
+	    camera.orthographic ? camera.orthographicSize : viewDistance * std::tan(camera.verticalFovRadians * 0.5f);
 	if (!std::isfinite(halfHeight) || halfHeight <= 0.f)
 	{
 		return;
@@ -619,9 +618,9 @@ void DrawSceneGrid(ImDrawList* drawList, const Camera& camera, Float32 aspect, c
 	{
 		return;
 	}
-	Float32 spacing = gridSize * std::pow(
-	                            10.f, std::floor(std::log10(std::max(0.0001f, std::min(halfWidth, halfHeight) / 8.f) /
-	                                                       gridSize)));
+	Float32 spacing =
+	    gridSize *
+	    std::pow(10.f, std::floor(std::log10(std::max(0.0001f, std::min(halfWidth, halfHeight) / 8.f) / gridSize)));
 	while (halfSpan / spacing > 80.f)
 	{
 		spacing *= 10.f;
@@ -645,10 +644,7 @@ void DrawSceneGrid(ImDrawList* drawList, const Camera& camera, Float32 aspect, c
 	const Int64 lastOther = static_cast<Int64>(std::floor((centerOther + halfSpan) / spacing));
 	const Mat4 viewProjection = camera.ViewProjection(aspect);
 	auto project = [&](Float32 x, Float32 other, ImVec2& screen)
-	{
-		return ProjectScenePoint(viewProjection, layout,
-		                        twoDMode ? Vec3{x, other, 0.f} : Vec3{x, 0.f, other}, screen);
-	};
+	{ return ProjectScenePoint(viewProjection, layout, twoDMode ? Vec3{x, other, 0.f} : Vec3{x, 0.f, other}, screen); };
 	for (Int64 index = firstX; index <= lastX; ++index)
 	{
 		const Float32 x = static_cast<Float32>(index) * spacing;
@@ -656,9 +652,9 @@ void DrawSceneGrid(ImDrawList* drawList, const Camera& camera, Float32 aspect, c
 		ImVec2 second{};
 		if (project(x, centerOther - halfSpan, first) && project(x, centerOther + halfSpan, second))
 		{
-			const ImU32 color = index == 0 ? IM_COL32(224, 92, 92, 190)
-			                             : index % 10 == 0 ? IM_COL32(150, 160, 174, 110)
-			                                               : IM_COL32(140, 150, 164, 48);
+			const ImU32 color = index == 0        ? IM_COL32(224, 92, 92, 190)
+			                    : index % 10 == 0 ? IM_COL32(150, 160, 174, 110)
+			                                      : IM_COL32(140, 150, 164, 48);
 			drawList->AddLine(first, second, color, index == 0 ? 1.4f : 1.f);
 		}
 	}
@@ -670,8 +666,8 @@ void DrawSceneGrid(ImDrawList* drawList, const Camera& camera, Float32 aspect, c
 		if (project(centerX - halfSpan, other, first) && project(centerX + halfSpan, other, second))
 		{
 			const ImU32 color = index == 0 ? (twoDMode ? IM_COL32(110, 205, 128, 190) : IM_COL32(105, 155, 230, 190))
-			                             : index % 10 == 0 ? IM_COL32(150, 160, 174, 110)
-			                                               : IM_COL32(140, 150, 164, 48);
+			                    : index % 10 == 0 ? IM_COL32(150, 160, 174, 110)
+			                                      : IM_COL32(140, 150, 164, 48);
 			drawList->AddLine(first, second, color, index == 0 ? 1.4f : 1.f);
 		}
 	}
@@ -1851,11 +1847,10 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	constexpr Float32 scaleLabelWidth = 40.f;
 	constexpr Float32 scaleValueWidth = 40.f;
 	const Float32 availableToolbarWidth = ImGui::GetContentRegionAvail().x;
-	const Float32 selectedValueWidth = ImGui::CalcTextSize(selectedLabel).x +
-	                                   ImGui::GetStyle().FramePadding.x * 2.f + compactButtonWidth;
-	const Float32 availableResolutionWidth =
-	    availableToolbarWidth - scaleLabelWidth - scaleValueWidth - toolbarSpacing * 2.f - postScaleControlsWidth -
-	    customActionsWidth;
+	const Float32 selectedValueWidth =
+	    ImGui::CalcTextSize(selectedLabel).x + ImGui::GetStyle().FramePadding.x * 2.f + compactButtonWidth;
+	const Float32 availableResolutionWidth = availableToolbarWidth - scaleLabelWidth - scaleValueWidth -
+	                                         toolbarSpacing * 2.f - postScaleControlsWidth - customActionsWidth;
 	const Float32 resolutionWidth = std::max(selectedValueWidth, std::min(220.f, availableResolutionWidth));
 	ImGui::SetNextItemWidth(resolutionWidth);
 	if (ImGui::BeginCombo("##GameResolution", selectedLabel))
@@ -2052,13 +2047,14 @@ void SceneViewPanel::DrawGameToolbar(VirtualFileSystem* userFiles, const String&
 	Icons::SameLine();
 	ImGui::TextDisabled("Scale");
 	Icons::SameLine();
-	const Float32 scaleWidth = std::max(
-	    30.f, std::min(150.f, ImGui::GetContentRegionAvail().x - postScaleControlsWidth - scaleValueWidth - toolbarSpacing));
+	const Float32 scaleWidth =
+	    std::max(30.f, std::min(150.f, ImGui::GetContentRegionAvail().x - postScaleControlsWidth - scaleValueWidth -
+	                                       toolbarSpacing));
 	const ImVec2 scaleDpi = CurrentViewportFramebufferScale();
 	const ImVec2 gameContent = ImGui::GetContentRegionAvail();
 	const Float32 viewHeight = std::max(0.f, gameContent.y - ImGui::GetFrameHeightWithSpacing());
-	const ViewportScaleLimits scaleLimits = GetViewportScaleLimits(
-	    {0.f, 0.f, gameContent.x, viewHeight}, scaleDpi.x, gameTarget.size);
+	const ViewportScaleLimits scaleLimits =
+	    GetViewportScaleLimits({0.f, 0.f, gameContent.x, viewHeight}, scaleDpi.x, gameTarget.size);
 	ImGui::SetNextItemWidth(scaleWidth);
 	if (ImGui::SliderFloat("##GameScale", &gameScale, scaleLimits.minimum, scaleLimits.maximum, "",
 	                       ImGuiSliderFlags_Logarithmic))
@@ -2141,6 +2137,10 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 	}
 	sceneTarget.visible = false;
 	gameTarget.visible = false;
+	gameLayout = {};
+	gameViewport = nullptr;
+	gameGestureCaptured = false;
+	gameInputControlId = 0;
 	if (!showScene)
 	{
 		sceneNavigationGesture = SceneNavigationGesture::None;
@@ -2186,15 +2186,14 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 		                                : 1.f;
 		const Float32 sceneAspectFactor = std::min(sceneAspect, 1.f);
 		const String aspectStateKey = projectKey + "/" + document.Id().ToString();
-		auto aspectState = std::find_if(sceneCameraAspectStates.begin(), sceneCameraAspectStates.end(),
-		                               [&](const SceneCameraAspectState& state)
-		                               { return state.key == aspectStateKey; });
+		auto aspectState =
+		    std::find_if(sceneCameraAspectStates.begin(), sceneCameraAspectStates.end(),
+		                 [&](const SceneCameraAspectState& state) { return state.key == aspectStateKey; });
 		auto initializeOrthographicAspect = [&]()
 		{
 			if (camera.orthographic && sceneAspectFactor < 1.f)
 			{
-				camera.orthographicSize =
-				    std::clamp(camera.orthographicSize / sceneAspectFactor, 0.05f, 2'000'000.f);
+				camera.orthographicSize = std::clamp(camera.orthographicSize / sceneAspectFactor, 0.05f, 2'000'000.f);
 			}
 		};
 		if (aspectState == sceneCameraAspectStates.end())
@@ -2213,9 +2212,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 			if (camera.orthographic && aspectState->aspectFactor > 0.f &&
 			    std::abs(aspectState->aspectFactor - sceneAspectFactor) > 1.0e-5f)
 			{
-				camera.orthographicSize =
-				    std::clamp(camera.orthographicSize * aspectState->aspectFactor / sceneAspectFactor, 0.05f,
-				               2'000'000.f);
+				camera.orthographicSize = std::clamp(
+				    camera.orthographicSize * aspectState->aspectFactor / sceneAspectFactor, 0.05f, 2'000'000.f);
 			}
 			aspectState->aspectFactor = sceneAspectFactor;
 		}
@@ -2225,8 +2223,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 		if (sceneCameraDynamicClipping)
 		{
 			const Vec3 view = camera.target - camera.position;
-			const double viewDistance = std::hypot(static_cast<double>(view.x), static_cast<double>(view.y),
-			                                       static_cast<double>(view.z));
+			const double viewDistance =
+			    std::hypot(static_cast<double>(view.x), static_cast<double>(view.y), static_cast<double>(view.z));
 			const double viewSize = camera.orthographic
 			                            ? static_cast<double>(camera.orthographicSize) * std::min(sceneAspect, 1.f)
 			                            : viewDistance * std::sin(static_cast<double>(sceneCameraFieldOfView) *
@@ -2413,8 +2411,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				settingsChanged = ImGui::Checkbox("3D Icons", &sceneGizmo3DIcons) || settingsChanged;
 				if (sceneGizmo3DIcons)
 				{
-					settingsChanged = ImGui::SliderFloat("Icon Size", &sceneGizmoIconSize, 0.1f, 3.f, "%.1fx") ||
-					                   settingsChanged;
+					settingsChanged =
+					    ImGui::SliderFloat("Icon Size", &sceneGizmoIconSize, 0.1f, 3.f, "%.1fx") || settingsChanged;
 				}
 				ImGui::EndPopup();
 			}
@@ -2430,9 +2428,10 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				if (ImGui::SliderFloat("Field of View", &fieldOfView, 1.f, 179.f, "%.1f°"))
 				{
 					sceneCameraFieldOfView = fieldOfView;
-					const Float32 sceneAspect = sceneTarget.size.width > 0 && sceneTarget.size.height > 0
-					                                ? static_cast<Float32>(sceneTarget.size.width) / sceneTarget.size.height
-					                                : 1.f;
+					const Float32 sceneAspect =
+					    sceneTarget.size.width > 0 && sceneTarget.size.height > 0
+					        ? static_cast<Float32>(sceneTarget.size.width) / sceneTarget.size.height
+					        : 1.f;
 					sceneTarget.preview->GetCamera().verticalFovRadians =
 					    SceneViewVerticalFovRadians(sceneAspect, fieldOfView);
 					settingsChanged = true;
@@ -2490,8 +2489,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					settingsChanged = true;
 				}
 				ImGui::BeginDisabled(!sceneFlythroughAccelerationEnabled);
-				if (ImGui::SliderFloat("Acceleration Speed", &sceneFlythroughAccelerationSpeed, 0.1f, 4.f,
-				                       "%.1f"))
+				if (ImGui::SliderFloat("Acceleration Speed", &sceneFlythroughAccelerationSpeed, 0.1f, 4.f, "%.1f"))
 				{
 					sceneFlythroughAccelerationSpeed = std::nearbyint(sceneFlythroughAccelerationSpeed * 10.f) / 10.f;
 					settingsChanged = true;
@@ -2535,9 +2533,10 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					sceneCameraFieldOfView = 60.f;
 					sceneCameraNearClip = 0.1f;
 					sceneCameraFarClip = 100.f;
-					const Float32 sceneAspect = sceneTarget.size.width > 0 && sceneTarget.size.height > 0
-					                                ? static_cast<Float32>(sceneTarget.size.width) / sceneTarget.size.height
-					                                : 1.f;
+					const Float32 sceneAspect =
+					    sceneTarget.size.width > 0 && sceneTarget.size.height > 0
+					        ? static_cast<Float32>(sceneTarget.size.width) / sceneTarget.size.height
+					        : 1.f;
 					sceneTarget.preview->GetCamera().verticalFovRadians =
 					    SceneViewVerticalFovRadians(sceneAspect, sceneCameraFieldOfView);
 					sceneTarget.preview->GetCamera().nearPlane = sceneCameraNearClip;
@@ -2600,7 +2599,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				}
 				else if (sceneView2DModePending && sceneTarget.preview &&
 				         SetSceneView2DMode(sceneTarget.preview->GetCamera(), sceneView2DMode,
-				                           sceneView2DModePendingTarget))
+				                            sceneView2DModePendingTarget))
 				{
 					sceneView2DModePending = false;
 					sceneViewLockedTarget = {};
@@ -2622,27 +2621,28 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				                    true);
 				ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 				ImGui::Image(sceneTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
-				const Float32 sceneAspect = static_cast<Float32>(sceneTarget.size.width) /
-				                            static_cast<Float32>(sceneTarget.size.height);
+				const Float32 sceneAspect =
+				    static_cast<Float32>(sceneTarget.size.width) / static_cast<Float32>(sceneTarget.size.height);
 				if (draft.Kind() == ResourceKind::Scene && showSceneGrid)
 				{
 					DrawSceneGrid(ImGui::GetWindowDrawList(), sceneTarget.preview->GetCamera(), sceneAspect, layout,
-					             sceneView2DMode, sceneGridSize);
+					              sceneView2DMode, sceneGridSize);
 				}
 				if (draft.Kind() == ResourceKind::Scene && layout.visible && showSceneGizmos &&
 				    (showSceneCameraGizmos || showSceneLightGizmos))
 				{
 					struct SceneGizmoHit
 					{
-					ResourceId id;
-					GameObject::Ptr object;
-					ViewportPoint screen;
-					String label;
-					bool camera = false;
+						ResourceId id;
+						GameObject::Ptr object;
+						ViewportPoint screen;
+						String label;
+						bool camera = false;
 						Int32 iconIndex = 0;
 						Int32 iconCount = 1;
 						bool occluded = false;
-				};
+					};
+
 					Vector<SceneGizmoHit> gizmos;
 					const Float32 aspect = sceneAspect;
 					auto* drawList = ImGui::GetWindowDrawList();
@@ -2653,7 +2653,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						if (renderData)
 						{
 							FilterSceneViewRenderObjects(renderData.value.objects, hierarchy, false);
-						sceneGizmoOccluders = std::move(renderData.value.objects);
+							sceneGizmoOccluders = std::move(renderData.value.objects);
 						}
 					}
 					std::function<void(const GameObject::Ptr&)> drawObjectGizmos = [&](const GameObject::Ptr& object)
@@ -2662,29 +2662,32 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						if (identity && hierarchy.SceneObjectVisible(identity.value))
 						{
 							ViewportPoint screen;
-							if (ProjectObjectOrigin(sceneTarget.preview->GetCamera(), aspect, layout, scene, object, screen))
+							if (ProjectObjectOrigin(sceneTarget.preview->GetCamera(), aspect, layout, scene, object,
+							                        screen))
 							{
 								auto name = scene.GameObjectName(object);
 								const String objectName = name ? name.value : String("GameObject");
-									auto world = scene.WorldTransform(object);
-									const Camera& editorCamera = sceneTarget.preview->GetCamera();
-									const bool occluded = sceneGizmo3DIcons && world &&
-									                     SceneGizmoOccluded(
-									                         editorCamera.position,
-									                         {world.value.At(0, 3), world.value.At(1, 3), world.value.At(2, 3)},
-									                         identity.value, sceneGizmoOccluders);
+								auto world = scene.WorldTransform(object);
+								const Camera& editorCamera = sceneTarget.preview->GetCamera();
+								const bool occluded = sceneGizmo3DIcons && world &&
+								                      SceneGizmoOccluded(editorCamera.position,
+								                                         {world.value.At(0, 3), world.value.At(1, 3),
+								                                          world.value.At(2, 3)},
+								                                         identity.value, sceneGizmoOccluders);
 								Vector<SceneGizmoHit> objectGizmos;
 								for (Component* component : object->Components())
 								{
 									if (showSceneCameraGizmos && dynamic_cast<CameraComponent*>(component))
 									{
-										objectGizmos.push_back({identity.value, object, screen, "Camera: " + objectName, true});
+										objectGizmos.push_back(
+										    {identity.value, object, screen, "Camera: " + objectName, true});
 									}
 									else if (showSceneLightGizmos &&
 									         (dynamic_cast<DirectionalLightComponent*>(component) ||
 									          dynamic_cast<PointLightComponent*>(component)))
 									{
-										objectGizmos.push_back({identity.value, object, screen, "Light: " + objectName, false});
+										objectGizmos.push_back(
+										    {identity.value, object, screen, "Light: " + objectName, false});
 									}
 								}
 								for (Size index = 0; index < objectGizmos.size(); ++index)
@@ -2716,7 +2719,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							continue;
 						}
 						const Float32 iconOffset =
-						    (static_cast<Float32>(gizmo.iconIndex) - static_cast<Float32>(gizmo.iconCount - 1) * 0.5f) * 14.f;
+						    (static_cast<Float32>(gizmo.iconIndex) - static_cast<Float32>(gizmo.iconCount - 1) * 0.5f) *
+						    14.f;
 						const ImVec2 center{gizmo.screen.x + iconOffset, gizmo.screen.y};
 						Float32 iconScale = sceneGizmoIconSize;
 						if (sceneGizmo3DIcons)
@@ -2733,9 +2737,9 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							}
 						}
 						const Float32 iconRadius = 7.f * iconScale;
-						const bool hovered = ImGui::IsMouseHoveringRect(
-						    {center.x - 11.f * iconScale, center.y - 11.f * iconScale},
-						    {center.x + 11.f * iconScale, center.y + 11.f * iconScale});
+						const bool hovered =
+						    ImGui::IsMouseHoveringRect({center.x - 11.f * iconScale, center.y - 11.f * iconScale},
+						                               {center.x + 11.f * iconScale, center.y + 11.f * iconScale});
 						const ImU32 color = gizmo.camera ? IM_COL32(90, 190, 255, 255) : IM_COL32(255, 205, 80, 255);
 						drawList->AddCircleFilled(center, iconRadius, IM_COL32(25, 31, 40, 235), 16);
 						if (gizmo.camera)
@@ -2744,9 +2748,9 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							                  {center.x + 2.f * iconScale, center.y + 3.5f * iconScale}, color,
 							                  iconScale, 0, 1.5f * iconScale);
 							drawList->AddTriangle({center.x + 2.f * iconScale, center.y - 2.5f * iconScale},
-							                     {center.x + 6.f * iconScale, center.y - 5.f * iconScale},
-							                     {center.x + 6.f * iconScale, center.y + 5.f * iconScale}, color,
-							                     1.4f * iconScale);
+							                      {center.x + 6.f * iconScale, center.y - 5.f * iconScale},
+							                      {center.x + 6.f * iconScale, center.y + 5.f * iconScale}, color,
+							                      1.4f * iconScale);
 						}
 						else
 						{
@@ -2776,14 +2780,21 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 							{
 								sceneGizmoSelectionHandled = true;
-								bool accepted = selection ? selection->SelectGameObject(document.Id(), gizmo.id, play.Active())
-								                          : true;
+								bool accepted =
+								    selection ? selection->SelectGameObject(document.Id(), gizmo.id, play.Active())
+								              : true;
 								if (accepted)
 								{
 									auto selected = hierarchy.Select(scene, gizmo.object);
-									if (!selected) diagnostic = selected.error;
+									if (!selected)
+									{
+										diagnostic = selected.error;
+									}
 								}
-								else diagnostic = "Scene selection could not be updated";
+								else
+								{
+									diagnostic = "Scene selection could not be updated";
+								}
 							}
 						}
 					}
@@ -2792,8 +2803,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 				if (draft.Kind() == ResourceKind::Scene && hierarchySearch[0] != '\0' &&
 				    hierarchy.HasDirectSearchMatches() && layout.visible)
 				{
-					const Float32 aspect = static_cast<Float32>(sceneTarget.size.width) /
-					                       static_cast<Float32>(sceneTarget.size.height);
+					const Float32 aspect =
+					    static_cast<Float32>(sceneTarget.size.width) / static_cast<Float32>(sceneTarget.size.height);
 					auto searchRenderData = scene.CollectPreviewRenderData(sceneTarget.preview->GetCamera(), aspect);
 					Vector<ResourceId> highlightedObjects;
 					auto* drawList = ImGui::GetWindowDrawList();
@@ -2809,8 +2820,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 								continue;
 							}
 							highlightedObjects.push_back(object.objectId);
-							DrawProjectedBounds(drawList, searchRenderData.value.viewProjection, layout, object.worldBounds,
-							                   IM_COL32(255, 166, 48, 235));
+							DrawProjectedBounds(drawList, searchRenderData.value.viewProjection, layout,
+							                    object.worldBounds, IM_COL32(255, 166, 48, 235));
 						}
 					}
 					std::function<void(const GameObject::Ptr&)> drawSearchMarker = [&](const GameObject::Ptr& object)
@@ -2822,7 +2833,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						        highlightedObjects.end())
 						{
 							ViewportPoint screen;
-							if (ProjectObjectOrigin(sceneTarget.preview->GetCamera(), aspect, layout, scene, object, screen))
+							if (ProjectObjectOrigin(sceneTarget.preview->GetCamera(), aspect, layout, scene, object,
+							                        screen))
 							{
 								drawList->AddCircleFilled({screen.x, screen.y}, 7.f, IM_COL32(255, 166, 48, 90), 16);
 								drawList->AddCircle({screen.x, screen.y}, 7.f, IM_COL32(255, 190, 92, 245), 16, 2.f);
@@ -3582,8 +3594,8 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							sceneZoomUseYSign = std::abs(deltaY) > std::abs(deltaX);
 						}
 						const Float32 signedAxisDelta = sceneZoomUseYSign ? deltaY : deltaX;
-						const Float32 signedDelta = (signedAxisDelta < 0.f ? -1.f : 1.f) *
-						                            std::sqrt(deltaX * deltaX + deltaY * deltaY);
+						const Float32 signedDelta =
+						    (signedAxisDelta < 0.f ? -1.f : 1.f) * std::sqrt(deltaX * deltaX + deltaY * deltaY);
 						// Unity's niceMouseDeltaZoom applies Alt's 0.25 acceleration; Shift adds 4x,
 						// while the Scene View tool applies 9x instead of 3x.
 						const Float32 zoomSensitivity = io.KeyShift ? 9.f : 0.75f;
@@ -3609,10 +3621,10 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						    (ImGui::IsKeyDown(ImGuiKey_E) ? 1.f : 0.f) - (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.f : 0.f);
 						const Float32 movementMagnitude = std::sqrt(movement.x * movement.x + movement.y * movement.y +
 						                                            verticalMovement * verticalMovement);
-						AdvanceSceneViewMovementSpeed(
-						    movementMagnitude > 0.f, io.DeltaTime, sceneFlythroughTargetSpeed, sceneFlythroughCurrentSpeed,
-						    sceneFlythroughAccelerationEnabled, sceneFlythroughAccelerationSpeed,
-						    sceneFlythroughEasingEnabled, sceneFlythroughEasingDuration);
+						AdvanceSceneViewMovementSpeed(movementMagnitude > 0.f, io.DeltaTime, sceneFlythroughTargetSpeed,
+						                              sceneFlythroughCurrentSpeed, sceneFlythroughAccelerationEnabled,
+						                              sceneFlythroughAccelerationSpeed, sceneFlythroughEasingEnabled,
+						                              sceneFlythroughEasingDuration);
 						FlythroughSceneView(camera, {io.MouseDelta.x, io.MouseDelta.y}, movement, verticalMovement,
 						                    io.DeltaTime, sceneFlythroughCurrentSpeed * sceneFlythroughSpeed,
 						                    io.KeyShift, sceneFlythroughSpeedModifier);
@@ -3627,17 +3639,17 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						                                      (ImGui::IsKeyDown(ImGuiKey_DownArrow) ? 1.f : 0.f)};
 						const Float32 movementMagnitude =
 						    std::sqrt(arrowMovement.x * arrowMovement.x + arrowMovement.y * arrowMovement.y);
-						AdvanceSceneViewMovementSpeed(
-						    movementMagnitude > 0.f, io.DeltaTime, sceneFlythroughTargetSpeed, sceneFlythroughCurrentSpeed,
-						    sceneFlythroughAccelerationEnabled, sceneFlythroughAccelerationSpeed,
-						    sceneFlythroughEasingEnabled, sceneFlythroughEasingDuration);
+						AdvanceSceneViewMovementSpeed(movementMagnitude > 0.f, io.DeltaTime, sceneFlythroughTargetSpeed,
+						                              sceneFlythroughCurrentSpeed, sceneFlythroughAccelerationEnabled,
+						                              sceneFlythroughAccelerationSpeed, sceneFlythroughEasingEnabled,
+						                              sceneFlythroughEasingDuration);
 						if (arrowMovement.x != 0.f || arrowMovement.y != 0.f)
 						{
 							sceneFocusTransition.active = false;
 							clearSceneViewLock();
 							MoveSceneView(camera, arrowMovement, io.DeltaTime,
 							              sceneFlythroughCurrentSpeed * sceneFlythroughSpeed, io.KeyShift,
-						              sceneView2DMode || camera.orthographic, sceneFlythroughSpeedModifier);
+							              sceneView2DMode || camera.orthographic, sceneFlythroughSpeedModifier);
 						}
 					}
 					if (imageHovered && io.MouseWheel != 0.f &&
@@ -3685,8 +3697,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 								{
 									if (entry.kind != EditorSelectionKind::GameObject ||
 									    entry.documentId != document.Id() || entry.playSession != play.Active() ||
-									    entry.IsMissing() ||
-									    (activeEntry && entry.SameIdentity(*activeEntry)))
+									    entry.IsMissing() || (activeEntry && entry.SameIdentity(*activeEntry)))
 									{
 										continue;
 									}
@@ -3845,27 +3856,40 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 						gameScale = snappedScale;
 						gameScaleSnapPending = false;
 					}
-					const auto layout = ComputeViewportLayout(content, dpi.x, gameTarget.size, gameScale, gamePan, gameFit);
+					const auto layout =
+					    ComputeViewportLayout(content, dpi.x, gameTarget.size, gameScale, gamePan, gameFit);
 					const Float32 clipX = std::max(content.x, layout.displayRect.x);
 					const Float32 clipY = std::max(content.y, layout.displayRect.y);
 					ImGui::PushClipRect({clipX, clipY}, {clipX + layout.clipRect.width, clipY + layout.clipRect.height},
 					                    true);
 					ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 					ImGui::Image(gameTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
-					const bool viewportHovered = ImGui::IsWindowHovered() &&
-					                             ImGui::IsMouseHoveringRect({content.x, content.y},
-					                                                         {content.x + content.width,
-					                                                          content.y + content.height}, false);
+					if (play.Active())
+					{
+						// Own image clicks without enabling ImGui keyboard navigation or
+						// treating a runtime drag as moving the Editor window background.
+						ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
+						gameInputControlId = ImGui::GetID("##RuntimeGuiInput");
+						ImGui::InvisibleButton("##RuntimeGuiInput",
+						                       {layout.displayRect.width, layout.displayRect.height},
+						                       ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_NoNavFocus);
+					}
+					const bool viewportHovered =
+					    ImGui::IsWindowHovered() &&
+					    ImGui::IsMouseHoveringRect({content.x, content.y},
+					                               {content.x + content.width, content.y + content.height}, false);
 					if (warnIfNoGameCamera)
 					{
 						const char* warning = "The current scene has no active game camera.";
 						const ImVec2 textSize = ImGui::CalcTextSize(warning);
-						const ImVec2 warningPosition{layout.displayRect.x + (layout.displayRect.width - textSize.x) * 0.5f,
+						const ImVec2 warningPosition{layout.displayRect.x +
+						                                 (layout.displayRect.width - textSize.x) * 0.5f,
 						                             layout.displayRect.y + 12.f};
 						auto* drawList = ImGui::GetWindowDrawList();
-						drawList->AddRectFilled({warningPosition.x - 8.f, warningPosition.y - 4.f},
-						                        {warningPosition.x + textSize.x + 8.f, warningPosition.y + textSize.y + 4.f},
-						                        IM_COL32(20, 22, 26, 224), 4.f);
+						drawList->AddRectFilled(
+						    {warningPosition.x - 8.f, warningPosition.y - 4.f},
+						    {warningPosition.x + textSize.x + 8.f, warningPosition.y + textSize.y + 4.f},
+						    IM_COL32(20, 22, 26, 224), 4.f);
 						drawList->AddText(warningPosition, IM_COL32(245, 205, 120, 255), warning);
 					}
 					const ImGuiIO& gameInput = ImGui::GetIO();
@@ -3936,16 +3960,18 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							settingsChanged = true;
 						}
 					}
+					gameLayout = layout;
+					gameViewport = ImGui::GetWindowViewport();
 					const Float32 clipX = std::max(content.x, layout.displayRect.x);
 					const Float32 clipY = std::max(content.y, layout.displayRect.y);
 					ImGui::PushClipRect({clipX, clipY}, {clipX + layout.clipRect.width, clipY + layout.clipRect.height},
 					                    true);
 					ImGui::SetCursorScreenPos({layout.displayRect.x, layout.displayRect.y});
 					ImGui::Image(gameTarget.imageId, {layout.displayRect.width, layout.displayRect.height});
-					const bool viewportHovered = ImGui::IsWindowHovered() &&
-					                             ImGui::IsMouseHoveringRect({content.x, content.y},
-					                                                         {content.x + content.width,
-					                                                          content.y + content.height}, false);
+					const bool viewportHovered =
+					    ImGui::IsWindowHovered() &&
+					    ImGui::IsMouseHoveringRect({content.x, content.y},
+					                               {content.x + content.width, content.y + content.height}, false);
 					const ImGuiIO& gameInput = ImGui::GetIO();
 					if (viewportHovered && gameInput.MouseWheel != 0.f && (!play.Active() || play.Paused()))
 					{
@@ -3991,12 +4017,12 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 							for (const Rendering::RenderObject& object : renderData.value.objects)
 							{
 								if (std::find(selectedObjects.begin(), selectedObjects.end(), object.objectId) ==
-								        selectedObjects.end())
+								    selectedObjects.end())
 								{
 									continue;
 								}
-								DrawProjectedBounds(drawList, renderData.value.viewProjection, layout, object.worldBounds,
-								                   IM_COL32(112, 176, 255, 235));
+								DrawProjectedBounds(drawList, renderData.value.viewProjection, layout,
+								                    object.worldBounds, IM_COL32(112, 176, 255, 235));
 							}
 						}
 						if (showGameStats)
@@ -4055,6 +4081,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					}
 					const bool panning = viewportHovered && (!play.Active() || play.Paused()) &&
 					                     ImGui::IsMouseDragging(ImGuiMouseButton_Middle);
+					gameGestureCaptured = panning || (viewportHovered && play.Paused() && gameInput.MouseWheel != 0);
 					if (panning)
 					{
 						const ImVec2 delta = ImGui::GetIO().MouseDelta;
@@ -4069,8 +4096,7 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 					    gamePan,
 					    {static_cast<UInt32>(std::ceil(panLayout.displayRect.width)),
 					     static_cast<UInt32>(std::ceil(panLayout.displayRect.height))},
-					    {static_cast<UInt32>(std::floor(available.x)),
-					     static_cast<UInt32>(std::floor(available.y))});
+					    {static_cast<UInt32>(std::floor(available.x)), static_cast<UInt32>(std::floor(available.y))});
 					if (clampedPan.x != gamePan.x || clampedPan.y != gamePan.y)
 					{
 						gamePan = clampedPan;
@@ -4132,18 +4158,20 @@ Result<void> SceneViewPanel::Draw(SceneDraft& draft, EditorDocument& document, E
 }
 
 Result<void> SceneViewPanel::TransformSelectionToView(Scene& scene, const EditorSelectionContext& selection,
-                                                     ResourceId documentId, bool playSession, bool alignRotation)
+                                                      ResourceId documentId, bool playSession, bool alignRotation)
 {
 	if (!sceneTarget.preview || selection.entries.empty())
 	{
 		return Result<void>::Failure("Open the Scene view and select one or more GameObjects");
 	}
+
 	struct TransformSnapshot
 	{
 		GameObject::Ptr object;
 		Mat4 original;
 		Mat4 target;
 	};
+
 	Vector<TransformSnapshot> snapshots;
 	snapshots.reserve(selection.entries.size());
 	const Camera& camera = sceneTarget.preview->GetCamera();

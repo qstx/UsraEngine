@@ -44,6 +44,8 @@ if(URSA_BUILD_EDITOR)
   set_target_properties(UrsaAssetImport PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${URSA_BINARY_ROOT}/Editor/$<CONFIG>")
   ursa_add_tool(UrsaAssetMigrate AssetMigrate)
   target_link_libraries(UrsaAssetMigrate PRIVATE Ursa::Editor)
+  ursa_add_tool(UrsaSceneAuthor SceneAuthor)
+  target_link_libraries(UrsaSceneAuthor PRIVATE Ursa::Editor)
   target_link_libraries(UrsaPak PRIVATE Ursa::Editor)
   target_compile_definitions(UrsaPak PRIVATE URSA_HAS_EDITOR_ASSET_PIPELINE=1)
 
@@ -62,7 +64,7 @@ if(URSA_BUILD_EDITOR)
       set_target_properties(UrsaScriptCompile PROPERTIES
         VS_DEBUGGER_COMMAND_ARGUMENTS "\"${URSA_PROJECT_DIR}\" $<CONFIG>")
       set_target_properties(UrsaScriptPlayer PROPERTIES
-        VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\" --scene Snake/Snake.ursascene")
+        VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\"")
     endif()
   endif()
   if(NOT URSA_PROJECT_DIR STREQUAL "")

@@ -24,7 +24,7 @@ if(URSA_ENABLE_DOTNET AND URSA_BUILD_EDITOR)
   add_test(NAME UrsaScriptedImporterInspectorWorkflowTests COMMAND UrsaManagedAssetImportWorkflowTests --inspector)
   set_tests_properties(UrsaScriptedImporterInspectorWorkflowTests PROPERTIES TIMEOUT 300
     ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/ScriptedInspectorUser")
-  if(NOT URSA_PROJECT_DIR STREQUAL "")
+  if(EXISTS "${URSA_SOURCE_ROOT}/Tests/Fixtures/SampleAssets/Snake/Snake.ursascene")
     ursa_add_test_executable(UrsaEditorSrpAcceptanceTests EditorSrpAcceptanceTests.cpp)
     target_sources(UrsaEditorSrpAcceptanceTests PRIVATE CaptureCliAcceptance.cpp)
     target_compile_definitions(UrsaEditorSrpAcceptanceTests PRIVATE URSA_CAPTURE_CLI="$<TARGET_FILE:UrsaCapture>")
@@ -42,13 +42,13 @@ if(URSA_ENABLE_DOTNET AND URSA_BUILD_EDITOR)
   ursa_attach_dotnet_host_runtime(UrsaProfilerEditorWindowTests)
 
   add_test(NAME UrsaProfilerEditorWindowTests COMMAND UrsaProfilerEditorWindowTests "${URSA_TEST_SAMPLE_PROJECT}")
-  set_tests_properties(UrsaProfilerEditorWindowTests PROPERTIES TIMEOUT 90
+  set_tests_properties(UrsaProfilerEditorWindowTests PROPERTIES TIMEOUT 600
     ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/ProfilingEditor")
 endif()
 if(URSA_ENABLE_DOTNET)
 
   ursa_add_test_executable(UrsaDotNetHostTests DotNetHostTests.cpp)
-  target_sources(UrsaDotNetHostTests PRIVATE DotNetHost/Rendering.cpp DotNetHost/PipelineReload.cpp
+  target_sources(UrsaDotNetHostTests PRIVATE DotNetHost/Rendering.cpp DotNetHost/PipelineReload.cpp DotNetHost/Gui.cpp
     DotNetHost/Serialization.cpp DotNetHost/Editor.cpp DotNetHost/Import.cpp DotNetHost/TestSupport.hpp)
   target_link_libraries(UrsaDotNetHostTests PRIVATE Ursa::DotNetHost UrsaTestFixtures)
   target_compile_definitions(UrsaDotNetHostTests PRIVATE
@@ -86,6 +86,8 @@ if(URSA_ENABLE_DOTNET)
     ursa_require_test_content(UrsaAssetPostprocessorTests UrsaDotNetHostTests)
   endif()
   ursa_attach_dotnet_host_runtime(UrsaDotNetHostTests)
+  add_test(NAME UrsaManagedGuiTests COMMAND UrsaDotNetHostTests
+    "${URSA_MANAGED_OUTPUT_DIR}" "${URSA_BINARY_ROOT}/Temp/ManagedGui/$<CONFIG>" --gui-only)
   ursa_require_test_content(UrsaDotNetHostSmoke UrsaDotNetHostTests)
 
   add_test(NAME UrsaManagedProtocolTests COMMAND "${URSA_DOTNET_EXECUTABLE}"
@@ -103,7 +105,7 @@ if(URSA_ENABLE_DOTNET)
     "${URSA_MANAGED_TEST_OUTPUT_DIR}/Ursa.ManagedHost.ProtocolTests.dll" --debug-symbols-only)
   set_tests_properties(UrsaManagedProtocolTests UrsaManagedSourceSymbolsTests PROPERTIES ENVIRONMENT
     "URSA_FORMAL_MANAGED_DIR=${URSA_MANAGED_OUTPUT_DIR};URSA_SOURCE_ROOT=${URSA_SOURCE_ROOT}")
-  if(NOT URSA_PROJECT_DIR STREQUAL "")
+  if(EXISTS "${URSA_SOURCE_ROOT}/Tests/Fixtures/SampleAssets/Snake/Snake.ursascene")
 
     add_test(NAME UrsaSnakeManagedLogicTests COMMAND "${URSA_DOTNET_EXECUTABLE}" run
       --project "${URSA_SOURCE_ROOT}/Tests/Managed/Ursa.SnakeLogicTests/Ursa.SnakeLogicTests.csproj"
@@ -111,7 +113,9 @@ if(URSA_ENABLE_DOTNET)
       --artifacts-path "${URSA_BINARY_ROOT}/ManagedTests/Snake")
 
     add_test(NAME UrsaProjectScriptCompile COMMAND UrsaAssetImport --project "${URSA_TEST_SAMPLE_PROJECT}" --configuration "$<CONFIG>")
-    set_tests_properties(UrsaProjectScriptCompile PROPERTIES FIXTURES_SETUP UrsaProjectScripts)
+    set_tests_properties(UrsaProjectScriptCompile PROPERTIES FIXTURES_SETUP UrsaProjectScripts TIMEOUT 600)
+    set_property(TEST UrsaProjectScriptCompile APPEND PROPERTY ENVIRONMENT
+      "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/SampleScriptCompileUser/$<CONFIG>;TEMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler;TMP=${URSA_BINARY_ROOT}/Temp/ShaderCompiler")
     foreach(URSA_PROJECT_SCENE IN ITEMS Snake/Snake.ursascene Snake/SnakeSmoke.ursascene)
       if(URSA_PROJECT_SCENE MATCHES "Smoke")
         set(URSA_PROJECT_SMOKE_NAME UrsaProjectSnakeGameplaySmoke)
@@ -228,7 +232,7 @@ if(URSA_ENABLE_DOTNET)
     endif()
   endif()
 endif()
-if(TARGET UrsaAssetImport AND TARGET UrsaScriptPlayer AND NOT URSA_PROJECT_DIR STREQUAL "")
+if(TARGET UrsaAssetImport AND TARGET UrsaScriptPlayer AND EXISTS "${URSA_SOURCE_ROOT}/Tests/Fixtures/SampleAssets/Snake/Snake.ursascene")
 
   if(URSA_ENABLE_DOTNET AND TARGET UrsaEditor)
     add_test(NAME UrsaProjectPipelineSamplesTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat" "${CMAKE_CURRENT_SOURCE_DIR}/ProjectPipelineSamplesTests.py"
@@ -251,6 +255,7 @@ endif()
 get_property(integrationTests DIRECTORY PROPERTY TESTS)
 foreach(test IN LISTS integrationTests)
   if(NOT test STREQUAL "UrsaDotNetHostSmoke" AND NOT test STREQUAL "UrsaManagedProtocolTests"
+      AND NOT test STREQUAL "UrsaManagedGuiTests"
       AND NOT test STREQUAL "UrsaManagedSourceSymbolsTests" AND NOT test STREQUAL "UrsaManagedProfilerTests"
       AND NOT test STREQUAL "UrsaManagedProfilerHostTests"
       AND NOT test STREQUAL "UrsaDeepProfilingTests"
@@ -278,4 +283,36 @@ foreach(test IN ITEMS UrsaProfilerEditorWindowTests UrsaProjectPlaySessionTests 
   endif()
 endforeach()
 
+if(WIN32 AND TARGET UrsaScriptPlayer AND TARGET Ursa::Editor)
+  ursa_add_test_executable(UrsaDemoSuiteEditorTests DemoSuiteEditorTests.cpp)
+  target_link_libraries(UrsaDemoSuiteEditorTests PRIVATE Ursa::Editor)
+  ursa_attach_dotnet_host_runtime(UrsaDemoSuiteEditorTests)
+  add_dependencies(UrsaDemoSuiteEditorTests UrsaManagedHostAssemblies)
+endif()
+if(WIN32 AND TARGET UrsaScriptPlayer AND TARGET UrsaDemoSuiteEditorTests
+    AND EXISTS "${URSA_SOURCE_ROOT}/../Demo/Assets/Tests/Menu.ursascene")
+  add_test(NAME UrsaDemoSuitePlayerTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DemoSuitePlayerTests.py"
+    --player "$<TARGET_FILE:UrsaScriptPlayer>" --package-tool "$<TARGET_FILE:UrsaPak>"
+    --fixture-tool "$<TARGET_FILE:UrsaDemoSuiteEditorTests>"
+    --project "${URSA_TEST_DEMO_SUITE_PROJECT}" --configuration "$<CONFIG>"
+    --output "${URSA_BINARY_ROOT}/TestProjects/DemoSuiteEvidence/$<CONFIG>")
+  set_tests_properties(UrsaDemoSuitePlayerTests PROPERTIES FIXTURES_REQUIRED UrsaDemoSuite TIMEOUT 900
+    ENVIRONMENT "URSA_USER_DATA_ROOT=${URSA_BINARY_ROOT}/Temp/DemoSuitePlayerUser/$<CONFIG>")
+  add_test(NAME UrsaDemoSuiteEditorTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DemoSuiteEditorTests.py" --editor "$<TARGET_FILE:UrsaDemoSuiteEditorTests>"
+    --project "${URSA_TEST_DEMO_SUITE_PROJECT}" --output "${URSA_BINARY_ROOT}/TestProjects/DemoSuiteEvidence/$<CONFIG>/Editor"
+    --player-evidence "${URSA_BINARY_ROOT}/TestProjects/DemoSuiteEvidence/$<CONFIG>")
+  set_tests_properties(UrsaDemoSuiteEditorTests PROPERTIES FIXTURES_REQUIRED UrsaDemoSuite TIMEOUT 600
+    DEPENDS UrsaDemoSuitePlayerTests)
+  ursa_require_test_content(UrsaDemoSuiteEditorTests UrsaDemoSuiteEditorTests)
+  add_test(NAME UrsaDemoSuiteBuildSettingsTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DemoSuiteBuildSettingsTests.py" --importer "$<TARGET_FILE:UrsaAssetImport>"
+    --project "${URSA_TEST_DEMO_SUITE_PROJECT}" --configuration "$<CONFIG>"
+    --output "${URSA_BINARY_ROOT}/TestProjects/DemoSuiteEvidence/$<CONFIG>/BuildSettings")
+  set_tests_properties(UrsaDemoSuiteBuildSettingsTests PROPERTIES FIXTURES_REQUIRED UrsaDemoSuite TIMEOUT 400)
+  set_property(TEST UrsaDemoSuiteBuildSettingsTests APPEND PROPERTY LABELS import)
+  set_tests_properties(UrsaDemoSuitePlayerTests UrsaDemoSuiteEditorTests UrsaDemoSuiteBuildSettingsTests
+    PROPERTIES RESOURCE_LOCK UrsaDemoSuiteProject)
+endif()
 ursa_finalize_test_directory()

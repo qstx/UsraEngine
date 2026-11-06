@@ -471,8 +471,10 @@ internal static class ScriptSessions
 			foreach (ScriptFieldDescriptor descriptor in ScriptFieldSchema.Describe(type))
 			{
 				foreach (string former in descriptor.FormerNames) formerNames.Add(former);
-				if (descriptor.Kind is ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference ||
-				    descriptor.ElementKind is ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference)
+				// These references are deferred until the complete graph is available.
+				// Normalizing an unattached candidate must preserve their archived identities.
+				if (descriptor.Kind is ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference or ScriptSerializedFieldKind.ScriptableObjectReference ||
+				    descriptor.ElementKind is ScriptSerializedFieldKind.GameObjectReference or ScriptSerializedFieldKind.ComponentReference or ScriptSerializedFieldKind.ScriptableObjectReference)
 				{
 					if (oldFields.TryGetValue(descriptor.Name, out JsonElement reference)) fields[descriptor.Name] = reference;
 					else foreach (string former in descriptor.FormerNames)

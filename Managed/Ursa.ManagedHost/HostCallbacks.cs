@@ -4,6 +4,8 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Collections.Generic;
+using System.Text.Json;
 using Ursa;
 using Ursa.Bindings;
 
@@ -65,6 +67,33 @@ internal static class HostCallbacks
 		BehaviourRegistry.Invoke(token, eventId);
 	}
 	internal static void DestroyBehaviour(ulong token) => BehaviourRegistry.Destroy(token);
+	internal static void ValidateSceneScript(ulong session, string typeName, BehaviourFieldArchive archive)
+	{
+		if (ImportExecution.Active || archive.Version != 1 || archive.Json.Length > 64 * 1024 * 1024)
+			throw new InvalidOperationException("Invalid candidate Scene script validation request.");
+		ScriptSessions.Select(session);
+		Type type = BehaviourRegistry.ResolveType(typeName) ?? throw new InvalidOperationException($"Missing candidate script {typeName}.");
+		if (type.IsAbstract || !typeof(Behaviour).IsAssignableFrom(type)) throw new InvalidOperationException("Scene candidate requires a concrete Behaviour.");
+		using JsonDocument document = JsonDocument.Parse(archive.Json);
+		JsonElement root = document.RootElement;
+		if (root.GetProperty("payload").ValueKind == JsonValueKind.Null) return;
+		var objects = new HashSet<string>(StringComparer.Ordinal);
+		foreach (JsonElement value in root.GetProperty("objects").EnumerateArray()) objects.Add(value.GetString()!);
+		var components = new Dictionary<string, Type>(StringComparer.Ordinal);
+		foreach (JsonProperty value in root.GetProperty("components").EnumerateObject())
+		{
+			Type? componentType = Component.FindConcreteType(value.Value.GetString()!);
+			if (componentType != null) components.Add(value.Name, componentType);
+		}
+		ScriptFieldSchema.ValidateScenePayload(type, root.GetProperty("payload").GetRawText(), objects, components);
+	}
+
+	internal static void NotifySceneChange(ulong session, Ursa.SceneManagement.SceneData scene, bool loaded)
+	{
+		if (ImportExecution.Active) throw new InvalidOperationException("Import cannot dispatch Scene lifecycle.");
+		ScriptSessions.Select(session);
+		Ursa.SceneManagement.SceneManager.Notify(scene, loaded);
+	}
 	internal static BehaviourFieldArchive SerializeBehaviour(ulong token) => new() { Version = 1, Json = BehaviourRegistry.Serialize(token) };
 	internal static void DeserializeBehaviour(ulong token, BehaviourFieldArchive archive)
 	{

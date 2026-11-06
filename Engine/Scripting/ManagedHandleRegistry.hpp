@@ -50,6 +50,7 @@ public:
 	Result<void> Invalidate(const ManagedHandle& handle);
 
 	Result<void> InvalidateAll();
+	Result<void> InvalidateKind(ManagedHandleKind kind);
 
 	UInt64 SessionId() const
 	{

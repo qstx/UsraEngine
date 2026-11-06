@@ -527,6 +527,7 @@ internal static unsafe partial class Program
 		ScriptableAssetSnapshotTests.Run();
 		ScriptDebugSymbolsTests.Run();
 		CustomEditorRegistrationTests.Run();
+		GuiDebuggerBoundaryTests.Run();
 		delegate* unmanaged[Stdcall]<nint, int, int> bootstrap = &Bootstrap.InitializeBindings;
 		Expect(bootstrap(0, sizeof(BindingBootstrap)) != 0, "Null binding bootstrap pointer was accepted");
 		BindingBootstrap invalidBootstrap = default;

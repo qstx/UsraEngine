@@ -17,6 +17,7 @@ public:
 	Result<ComponentId> CreateAndAdd(const GameObject::Ptr& owner, const String& typeName) override;
 
 	Result<void> AttachSerializedComponents();
+	Result<void> ValidateCandidate(Scene& candidate);
 
 	~ManagedScriptRuntime() override;
 

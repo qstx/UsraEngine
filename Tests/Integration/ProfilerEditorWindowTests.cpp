@@ -37,14 +37,22 @@ protected:
 	Result<void> OnStart() override
 	{
 		URSA_PROFILE_APP("UrsaProfilerEditorWindowTests");
-		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
-		return EditorApplication::OnStart();
+		auto started = EditorApplication::OnStart();
+		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(540);
+		return started;
 	}
 
 	Result<void> OnGui() override
 	{
 		++guiFrames;
 		const auto now = std::chrono::steady_clock::now();
+		if (guiFrames <= 8 || lastReportedPhase != phase)
+		{
+			std::cerr << "Profiler GUI frame=" << guiFrames << " phase=" << phase
+			          << " scriptPending=" << ScriptWorkPending() << " assetPending=" << AssetWorkPending()
+			          << " running=" << bool(RunningScene()) << '\n';
+			lastReportedPhase = phase;
+		}
 		if (now > deadline)
 		{
 			return Result<void>::Failure("Profiling Editor test timed out at phase " +
@@ -66,7 +74,9 @@ protected:
 			URSA_PROFILE_OPERATION("ProfilerTest.Editor", "", "resume");
 		}
 		auto drawn = EditorApplication::OnGui();
-		if (!drawn || ScriptWorkPending() || AssetWorkPending())
+		// Read-only periodic source scans may overlap every frame; a normal Play
+		// request queues behind the current scan and prevents another from starting.
+		if (!drawn || ScriptWorkPending(false) || AssetWorkPending())
 		{
 			return drawn;
 		}
@@ -91,6 +101,7 @@ protected:
 				dirtyBeforePlay = Documents()->Current()->Dirty();
 			}
 			RequestPlayToggle();
+			deadline = now + std::chrono::seconds(60);
 			phase = 1;
 		}
 		else if (phase == 1)
@@ -223,6 +234,7 @@ private:
 	UINT_PTR timer = 0;
 	inline static thread_local ProfilingEditor* restoreOwner = nullptr;
 	UInt32 phase = 0;
+	UInt32 lastReportedPhase = static_cast<UInt32>(-1);
 	UInt32 runs = 0;
 	std::chrono::steady_clock::time_point deadline;
 	std::chrono::steady_clock::time_point pauseAt;

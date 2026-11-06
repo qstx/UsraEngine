@@ -288,6 +288,25 @@ ResourceSession::AssetPathResolver ProjectWorkspace::AssetResolver() const
 	};
 }
 
+ResourceSession::AssetPathResolver ProjectWorkspace::SourceAssetResolver() const
+{
+	return [this](ResourceId guid, UInt64 localFileId) -> Result<VirtualPath>
+	{
+		if (localFileId != 0)
+		{
+			return Result<VirtualPath>::Failure("A source asset reference requires local file ID zero");
+		}
+		for (const auto& asset : Assets())
+		{
+			if (asset.metadata.guid == guid)
+			{
+				return Result<VirtualPath>::Success(asset.path);
+			}
+		}
+		return Result<VirtualPath>::Failure("Missing source asset GUID " + guid.ToString());
+	};
+}
+
 Result<std::unique_ptr<ProjectWorkspace>>
 ProjectWorkspace::FromFilesystem(const std::filesystem::path& projectDirectory, const VirtualFileSystem& filesystem)
 {

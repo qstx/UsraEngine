@@ -2,7 +2,7 @@ ursa_collect_sources(URSA_ENGINE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/Application" "${CMAKE_CURRENT_SOURCE_DIR}/Animation"
   "${CMAKE_CURRENT_SOURCE_DIR}/Math" "${CMAKE_CURRENT_SOURCE_DIR}/Material" "${CMAKE_CURRENT_SOURCE_DIR}/Mesh"
   "${CMAKE_CURRENT_SOURCE_DIR}/Shader" "${CMAKE_CURRENT_SOURCE_DIR}/Scene"
-  "${CMAKE_CURRENT_SOURCE_DIR}/Rendering"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Rendering" "${CMAKE_CURRENT_SOURCE_DIR}/Gui"
   "${CMAKE_CURRENT_SOURCE_DIR}/ScriptableAssets" "${CMAKE_CURRENT_SOURCE_DIR}/Serialization"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scripting")
 list(FILTER URSA_ENGINE_SOURCES EXCLUDE REGEX "/Scripting/DotNet/")
@@ -14,7 +14,7 @@ target_include_directories(UrsaEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 if(NOT URSA_ENABLE_DOTNET)
   target_include_directories(UrsaEngine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/Bindings/Generated/Native")
 endif()
-target_link_libraries(UrsaEngine PUBLIC Ursa::Runtime nlohmann_json::nlohmann_json)
+target_link_libraries(UrsaEngine PUBLIC Ursa::Runtime nlohmann_json::nlohmann_json UrsaImGui)
 
 if(MSVC)
   target_compile_options(UrsaEngine PRIVATE /W4 /permissive-)

@@ -14,6 +14,10 @@
 #include <Vfs/RuntimeContent.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
 #include <Rendering/Pipeline/GraphicsSettings.hpp>
+#include <Gui/GuiCanvas.hpp>
+#include <Gui/GuiInput.hpp>
+#include <Application/RuntimeSceneManager.hpp>
+#include <Application/FrameReplay.hpp>
 #include <iostream>
 #include <stdexcept>
 
@@ -47,6 +51,13 @@ VirtualPath Path(const char* value)
 class ScriptPlayer final : public Application
 {
 public:
+	std::unique_ptr<FrameReplay> replay;
+
+	Result<void> FinishReplay()
+	{
+		return replay ? replay->Finish() : Result<void>{};
+	}
+
 	~ScriptPlayer() override
 	{
 		if (scene)
@@ -67,6 +78,29 @@ private:
 	Result<void> OnStart() override
 	{
 		URSA_LOG_INFO("RHI", "Vulkan adapter: " + device->AdapterInfo().name);
+		auto builds = Take(ReadSceneBuildSettings(*files, {}, true));
+		if (scenePath.empty())
+		{
+			if (!builds.configured || builds.scenes.empty())
+			{
+				return Result<void>::Failure(
+				    "Player has no startup Scene. Configure enabled scenes in ProjectSettings/BuildSettings.json and "
+				    "reimport, or pass --scene <asset path>.");
+			}
+			scenePath = builds.scenes.front().path.relative;
+		}
+		if (scenePath.rfind("prj:", 0) == 0)
+		{
+			scenePath.erase(0, 4);
+		}
+		if (scenePath.rfind("Assets/", 0) == 0)
+		{
+			scenePath.erase(0, 7);
+		}
+		if (const auto configured = builds.Resolve(scenePath); configured)
+		{
+			scenePath = configured.value.path.relative;
+		}
 		resources = Take(ResourceSession::Open(*files));
 		ComponentRegistry registry;
 		Done(RegisterBuiltinComponents(registry));
@@ -118,7 +152,141 @@ private:
 		const auto graphics = Take(Rendering::ReadGraphicsSettings(*files, true));
 		Done(host->ConfigureRenderPipeline(domain, graphics.renderPipeline));
 		runtime = std::make_unique<ManagedScriptRuntime>(*scene, *host, *sceneApi, domain);
-		return runtime->AttachSerializedComponents();
+		Done(runtime->AttachSerializedComponents());
+		auto configuredScene = builds.Resolve(scenePath);
+		BuildScene initial;
+		if (configuredScene)
+		{
+			initial = std::move(configuredScene.value);
+		}
+		else
+		{
+			const auto path = Take(VirtualPath::Parse("prj:" + scenePath));
+			const auto header = Take(ReadResourceHeader(*files, path));
+			String name = path.FileName();
+			if (name.size() > 10)
+			{
+				name.resize(name.size() - 10);
+			}
+			initial = {{header.id, 0}, name, path, -1};
+		}
+		sceneManager = std::make_unique<RuntimeSceneManager>(*scene, *resources, std::move(builds), std::move(initial));
+		sceneApi->SetSceneManager(sceneManager.get());
+		sceneManager->validateCandidate = [this](Scene& candidate) { return runtime->ValidateCandidate(candidate); };
+		sceneManager->invalidateOldObjects = [this]() { return sceneApi->InvalidateSceneObjects(); };
+		sceneManager->notify = [this](const RuntimeScene& info, bool loaded)
+		{ return host->NotifySceneChange(domain, info, sceneApi->SessionIdentity(), loaded); };
+		sceneManager->cancelInput = [this]()
+		{
+			gui.Reset();
+			guiInput.Cancel();
+			if (guiCanvas)
+			{
+				guiCanvas->Discard();
+			}
+			FrameRunner().ResetAccumulator();
+			FrameRunner().SynchronizeInput(FrameInput::Capture(*window));
+		};
+		guiCanvas = Take(Gui::Canvas::Create(device, *files));
+		gui.measureText = [canvas = std::weak_ptr(guiCanvas)](const String& text)
+		{
+			auto owner = canvas.lock();
+			if (!owner)
+			{
+				throw std::logic_error("Runtime GUI font session is closed");
+			}
+			return owner->MeasureText(text);
+		};
+		Done(guiInput.Attach(window));
+		gui.readClipboard = [this]() { return window->ClipboardText(); };
+		gui.writeClipboard = [this](const String& value) { window->SetClipboardText(value); };
+		return {};
+	}
+
+	Result<void> OnSceneFrame(Float32 elapsed) override
+	{
+		auto result = RunSceneFrame(elapsed);
+		if (!result || !replay)
+		{
+			return result;
+		}
+		ComponentRegistry registry;
+		Done(RegisterBuiltinComponents(registry));
+		auto graph = Take(EncodeSceneDocument(sceneManager->ActiveScene().asset.path.ToString(),
+		                                      sceneManager->ActiveScene().asset.reference.guid, *scene, registry));
+		nlohmann::json state = {{"scene", ToStdString(sceneManager->ActiveScene().asset.name)},
+		                        {"buildIndex", sceneManager->ActiveScene().asset.buildIndex},
+		                        {"objects", graph["gameObjects"].size()},
+		                        {"hasLoadError", !sceneManager->LastLoadError().empty()},
+		                        {"hasTextFocus", gui.HasTextFocus()},
+		                        {"hasPointerCapture", gui.HasPointerCapture()},
+		                        {"token", sceneManager->ActiveScene().token},
+		                        {"behaviours", nlohmann::json::object()}};
+		for (const auto& object : graph["gameObjects"])
+		{
+			for (const auto& component : object["components"])
+			{
+				if (component["type"] == "ursa.ScriptBehaviour")
+				{
+					state["behaviours"][component["data"]["typeName"].get<std::string>()] =
+					    component["data"]["scriptPayload"]["Fields"];
+				}
+			}
+		}
+		return replay->Verify(frame, state);
+	}
+
+	Result<void> RunSceneFrame(Float32 elapsed)
+	{
+		const auto beforeLoad = FrameRunner().CurrentContext(window.get(), FrameInput::Capture(*window));
+		if (!sceneInitialized)
+		{
+			Done(sceneManager->Initialize(beforeLoad));
+			sceneInitialized = true;
+		}
+		else if (sceneManager->IsLoading())
+		{
+			auto activated = sceneManager->ActivatePending(beforeLoad);
+			RestartFrameClock();
+			if (!activated)
+			{
+				return Result<void>::Failure(activated.error);
+			}
+			if (activated.value)
+			{
+				elapsed = 0;
+			}
+		}
+		auto events = guiInput.Drain();
+		if (guiInput.TakeFocusLost())
+		{
+			gui.CancelInput();
+			FrameRunner().SynchronizeInput(FrameInput::Capture(*window));
+		}
+		auto input = FrameInput::Capture(*window);
+		const Gui::Point viewport{Float32(window->FramebufferWidth()), Float32(window->FramebufferHeight())};
+		if (viewport.x <= 0 || viewport.y <= 0 || !scene->CollectRenderData(viewport.x / viewport.y))
+		{
+			gui.CancelInput();
+			guiCanvas->Discard();
+			return FrameRunner().Tick(*scene, elapsed, window.get(), input);
+		}
+		const Float32 scaleX = viewport.x / Float32(std::max<UInt32>(1, window->Width()));
+		const Float32 scaleY = viewport.y / Float32(std::max<UInt32>(1, window->Height()));
+		for (auto& event : events)
+		{
+			event.mousePosition.x *= scaleX;
+			event.mousePosition.y *= scaleY;
+			if (event.type != Gui::EventType::ScrollWheel)
+			{
+				event.delta.x *= scaleX;
+				event.delta.y *= scaleY;
+			}
+		}
+		input.mouseX *= scaleX;
+		input.mouseY *= scaleY;
+		Done(FrameRunner().TickGui(*scene, elapsed, window.get(), input, gui, events, viewport));
+		return guiCanvas->Build(gui, viewport);
 	}
 
 	Result<void> OnRender(Rendering::FrameCapture* capture) override
@@ -130,6 +298,7 @@ private:
 			return {};
 		}
 		sceneApi->SetFrameCapture(capture);
+		sceneApi->SetGameGuiOutput(++guiSequence, guiCanvas);
 		auto result = host->RenderScene(domain, Float32(width) / Float32(height));
 		// The surface can become suspended after the size sample but before image acquisition.
 		if (!result &&
@@ -145,8 +314,32 @@ private:
 		return {};
 	}
 
+	void OnSuspended() override
+	{
+		guiInput.Cancel();
+		gui.CancelInput();
+		if (guiCanvas)
+		{
+			guiCanvas->Discard();
+		}
+		FrameRunner().SynchronizeInput(FrameInput::Capture(*window));
+	}
+
 	void OnStop() override
 	{
+		if (sceneManager)
+		{
+			sceneManager->Close();
+		}
+		if (sceneApi)
+		{
+			sceneApi->SetSceneManager(nullptr);
+		}
+		sceneManager.reset();
+		sceneInitialized = false;
+		guiInput.Detach();
+		gui.Reset();
+		guiCanvas.reset();
 		runtime.reset();
 		if (host && domain)
 		{
@@ -164,6 +357,10 @@ private:
 	Result<void> OnFrame(Float32) override
 	{
 		++frame;
+		if (replay)
+		{
+			Done(replay->Feed(frame, *window));
+		}
 		if (stressWindow && frame == 5)
 		{
 			window->Resize(800, 600);
@@ -189,6 +386,10 @@ private:
 	}
 
 	std::shared_ptr<VirtualFileSystem> files;
+	Gui::Session gui;
+	Gui::InputQueue guiInput;
+	std::shared_ptr<Gui::Canvas> guiCanvas;
+	UInt64 guiSequence = 0;
 	String scenePath;
 	String manifestPath;
 	bool stressWindow = false;
@@ -198,6 +399,8 @@ private:
 	std::unique_ptr<DotNetHost> host;
 	std::unique_ptr<ManagedSceneApi> sceneApi;
 	std::unique_ptr<ManagedScriptRuntime> runtime;
+	std::unique_ptr<RuntimeSceneManager> sceneManager;
+	bool sceneInitialized = false;
 	UInt64 domain = 0;
 };
 } // namespace
@@ -216,7 +419,8 @@ int main(int argc, char** argv)
 		std::filesystem::path project;
 		std::filesystem::path engineAssets;
 		std::filesystem::path package;
-		String scenePath = "Snake/Snake.ursascene";
+		String scenePath;
+		std::filesystem::path replayPath;
 		bool stressWindow = false;
 		for (int index = 1; index < argc; ++index)
 		{
@@ -224,6 +428,10 @@ int main(int argc, char** argv)
 			if (argument == "--hidden")
 			{
 				visible = false;
+			}
+			else if (argument == "--replay" && index + 1 < argc)
+			{
+				replayPath = std::filesystem::u8path(argv[++index]);
 			}
 			else if (argument == "--frames" && index + 1 < argc)
 			{
@@ -334,11 +542,16 @@ int main(int argc, char** argv)
 		auto files = std::make_shared<VirtualFileSystem>(Take(OpenRuntimeFileSystem(profile)));
 		ConfigureEngineFileSystem(files);
 		ScriptPlayer player(files, scenePath, manifestPath, stressWindow);
+		if (!replayPath.empty())
+		{
+			player.replay = Take(FrameReplay::Open(replayPath));
+		}
 		if (!captureOutput.empty())
 		{
 			Done(player.SetFrameCapture(captureOutput, captureFrame));
 		}
 		Done(player.Run(1024, 720, "Ursa Script Player", visible, frames));
+		Done(player.FinishReplay());
 		return 0;
 	}
 	catch (const std::exception& error)

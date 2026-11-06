@@ -67,9 +67,12 @@ internal static class CustomEditorRegistrationTests
 			throw new InvalidOperationException("The removed string-based Inspector attribute is still exposed.");
 
 		MethodInfo factory = typeof(Inspector).Assembly.GetType("Ursa.Editor.ExtensionRegistry", throwOnError: true)!
-			.GetMethod("Create", BindingFlags.Static | BindingFlags.NonPublic)!;
+			.GetMethod("CreateForTypes", BindingFlags.Static | BindingFlags.NonPublic)!;
 		IEditorExtensionSession Create() => (IEditorExtensionSession)factory.Invoke(null,
-			new object[] { new[] { typeof(CustomEditorRegistrationTests).Assembly } })!;
+			// Register the built-in under test, as the real host does. Without it,
+			// this isolated registry cannot exercise the Camera multi-edit fallback.
+			new object[] { typeof(CustomEditorRegistrationTests).Assembly.GetTypes()
+				.Append(typeof(CameraComponentInspector)).ToArray() })!;
 		var previousResolver = BehaviourRegistry.identityResolver;
 		try
 		{
@@ -83,7 +86,8 @@ internal static class CustomEditorRegistrationTests
 					!descriptors.Any(item => item.Target == "ursa.Camera" && item.Id == "inspector:ursa.Camera") ||
 					!descriptors.Single(item => item.Target == "ursa.Camera").CanEditMultipleObjects ||
 					!new[] { "asset:ursa.Material", "scene:ursa.GameObject", "asset:test.catalog-asset", "importer:ursa.Texture" }.All(target => descriptors.Any(item => item.Target == target)))
-					throw new InvalidOperationException("Typed Inspectors did not resolve target identities or retain the built-in Camera multi-edit fallback.");
+					throw new InvalidOperationException("Typed Inspectors did not resolve target identities or retain the built-in Camera multi-edit fallback. Actual: " +
+						string.Join("; ", descriptors.Select(item => $"{item.Id} target={item.Target} multi={item.CanEditMultipleObjects}")));
 				var window = descriptors.Single(item => item.Kind == EditorExtensionKind.Window);
 				StateProbeWindow.LastDrawCount = 0;
 				var callbacks = (Dictionary<string, Action>)session.GetType()

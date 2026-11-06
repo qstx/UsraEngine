@@ -180,6 +180,11 @@ int main()
 		           !Editor::SelectPlayInput(pressed, true, Editor::EditorInputBlocksPlay(false, false, true, false))
 		                .KeyDown(Key::Space),
 		       "Search, menu, popup or drag input leaked to the game viewport");
+		Expect(!Editor::EditorInputBlocksPlay(true, false, false, false, true) &&
+		           Editor::EditorInputBlocksPlay(true, true, false, false, true) &&
+		           Editor::EditorInputBlocksPlay(true, false, true, false, true) &&
+		           Editor::EditorInputBlocksPlay(true, false, false, true, true),
+		       "Game window navigation canceled runtime text focus or bypassed external Editor capture");
 		auto missing = play.Start(*draft, documentId, registry, documents->Session());
 		Expect(!missing && !play.Active() && documents->Current()->Dirty(),
 		       "Missing runtime service changed Edit mode");

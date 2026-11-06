@@ -39,6 +39,21 @@ protected:
 
 	virtual Result<void> OnRender(Rendering::FrameCapture* capture);
 	virtual Result<void> InitializeRenderPipeline();
+	virtual Result<void> OnSceneFrame(Float32 elapsedSeconds);
+
+	virtual void OnSuspended()
+	{
+	}
+
+	SceneFrameRunner& FrameRunner()
+	{
+		return sceneFrameRunner;
+	}
+
+	void RestartFrameClock()
+	{
+		restartFrameClock = true;
+	}
 
 	std::shared_ptr<Window> window;
 	Rhi::DevicePtr device;
@@ -49,5 +64,6 @@ private:
 	Rendering::FrameCapture frameCapture;
 	SceneFrameRunner sceneFrameRunner;
 	std::unique_ptr<Rendering::NativeForwardPipeline> sceneRenderer;
+	bool restartFrameClock = false;
 };
 } // namespace Ursa

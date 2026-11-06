@@ -33,4 +33,8 @@ public abstract class Behaviour : Component
 	public virtual void OnDestroy()
 	{
 	}
+
+	public virtual void OnGUI()
+	{
+	}
 }

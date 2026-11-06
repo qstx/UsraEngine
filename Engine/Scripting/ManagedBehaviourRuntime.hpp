@@ -17,7 +17,8 @@ enum class BehaviourEvent : UInt32
 	Update,
 	LateUpdate,
 	OnDisable,
-	OnDestroy
+	OnDestroy,
+	OnGUI
 };
 
 class ManagedBehaviourRuntime

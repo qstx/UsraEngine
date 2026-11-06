@@ -7,6 +7,12 @@ ursa_add_test_executable(UrsaFrameSchedulerTests FrameSchedulerTests.cpp)
 target_link_libraries(UrsaFrameSchedulerTests PRIVATE Ursa::Engine)
 
 add_test(NAME UrsaFrameSchedulerTests COMMAND UrsaFrameSchedulerTests)
+ursa_add_test_executable(UrsaSceneBuildSettingsTests SceneBuildSettingsTests.cpp)
+target_link_libraries(UrsaSceneBuildSettingsTests PRIVATE Ursa::Engine)
+add_test(NAME UrsaSceneBuildSettingsTests COMMAND UrsaSceneBuildSettingsTests)
+ursa_add_test_executable(UrsaRuntimeSceneManagerTests RuntimeSceneManagerTests.cpp)
+target_link_libraries(UrsaRuntimeSceneManagerTests PRIVATE Ursa::Engine)
+add_test(NAME UrsaRuntimeSceneManagerTests COMMAND UrsaRuntimeSceneManagerTests)
 
 ursa_add_test_executable(UrsaApplicationSceneTests ApplicationSceneTests.cpp)
 target_link_libraries(UrsaApplicationSceneTests PRIVATE Ursa::Engine)

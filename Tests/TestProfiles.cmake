@@ -5,7 +5,7 @@ function(ursa_classify_test test folder)
     UrsaMaterialSceneSmoke UrsaRendererWindowTests UrsaRenderFrameTests
     UrsaRenderCommandExecutorTests UrsaRenderingBindingsTests UrsaManagedSceneApiTests
     UrsaMeshRendererTests UrsaShaderReflectionTests UrsaShaderPackageTests UrsaShaderExampleImportTests
-    UrsaImGuiBridgeTests UrsaFrameCaptureTests UrsaEditorCompositeWindowTests
+    UrsaImGuiBridgeTests UrsaImGuiRendererTests UrsaGuiCanvasTests UrsaFrameCaptureTests UrsaEditorCompositeWindowTests
     UrsaEditorPreviewTests UrsaEditorGizmoInteractionTests UrsaMaterialDraftTests
     UrsaTextureImporterTests UrsaScriptableAssetInspectorTests UrsaEditorShaderImportTests
     UrsaMeshEditorWindowTests UrsaAssetRefreshWindowTests UrsaEditorWorkspaceWindowTests
@@ -14,13 +14,14 @@ function(ursa_classify_test test folder)
     UrsaProjectModelImportTests UrsaProjectPlaySessionTests UrsaProjectPipelineSamplesTests
     UrsaAssetImportCliTests UrsaProjectSnakePlayerSmoke UrsaProjectSnakeGameplaySmoke
     UrsaProjectMaterialPlayerSmoke UrsaProjectMaterialEditorSmoke UrsaProjectEditorOpenSmoke
-    UrsaProjectSnakePakSmoke)
+    UrsaProjectSnakePakSmoke UrsaDemoSuitePlayerTests UrsaDemoSuiteEditorTests)
   set(windowTests
     UrsaWindowInputTests UrsaImGuiBridgeTests UrsaRendererWindowTests UrsaEditorCompositeWindowTests
     UrsaMeshEditorWindowTests UrsaAssetRefreshWindowTests UrsaEditorWorkspaceWindowTests
     UrsaProfilerEditorWindowTests UrsaEditorSrpAcceptanceTests UrsaAssetPreviewWorkspaceTests
     UrsaProjectMaterialEditorSmoke UrsaProjectEditorOpenSmoke UrsaProjectPipelineSamplesTests
-    UrsaProjectSnakePlayerSmoke UrsaProjectSnakeGameplaySmoke UrsaProjectSnakePakSmoke)
+    UrsaProjectSnakePlayerSmoke UrsaProjectSnakeGameplaySmoke UrsaProjectSnakePakSmoke
+    UrsaDemoSuitePlayerTests UrsaDemoSuiteEditorTests)
   set(buildTests
     UrsaBindingsGeneratorTests UrsaBindingsSignatureTests UrsaBindingsTests
     UrsaShaderCompilerTests UrsaShaderCompileCacheTests UrsaSnakeManagedLogicTests)

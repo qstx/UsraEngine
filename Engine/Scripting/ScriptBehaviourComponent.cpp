@@ -1,4 +1,5 @@
 #include <Core/Log.hpp>
+#include <Gui/GuiSession.hpp>
 #include <Core/Profiler.hpp>
 #include <Core/StringInterop.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
@@ -184,8 +185,10 @@ Result<void> ScriptBehaviourComponent::RemapReferences(ComponentLoadContext& con
 			if (value.contains("$ursaReference"))
 			{
 				auto& reference = value["$ursaReference"];
-				if (reference.is_object() && (reference.value("Kind", std::string{}) == "Mesh" ||
-				                              reference.value("Kind", std::string{}) == "Material"))
+				const auto referenceKind =
+				    reference.is_object() ? reference.value("Kind", std::string{}) : std::string{};
+				if (referenceKind == "Mesh" || referenceKind == "Material" || referenceKind == "ScriptableObject" ||
+				    referenceKind == "Texture" || referenceKind == "Shader" || referenceKind == "ComputeShader")
 				{
 					return {};
 				}
@@ -261,14 +264,23 @@ Result<void> ScriptBehaviourComponent::RestoreSerializedPayload()
 	{
 		return Result<void>::Failure("Cannot restore script fields before creating a managed instance");
 	}
+	return WithFieldResources(
+	    [&]()
+	    {
+		    return runtime ? runtime->DeserializeFields(instanceToken, serializedPayload)
+		                   : Result<void>::Failure("Managed Behaviour runtime is not attached");
+	    });
+}
+
+Result<void> ScriptBehaviourComponent::WithFieldResources(const std::function<Result<void>()>& action) const
+{
 	SerializationContext context(fieldResourceSession);
 	if (fieldResources)
 	{
 		context.Provide<RenderResourceReferences>(*fieldResources);
 	}
 	SerializationScope scope(&context);
-	return runtime ? runtime->DeserializeFields(instanceToken, serializedPayload)
-	               : Result<void>::Failure("Managed Behaviour runtime is not attached");
+	return action();
 }
 
 Result<void> ScriptBehaviourComponent::AttachManagedRuntime(ManagedBehaviourRuntime& managedRuntime, UInt64 token)
@@ -320,6 +332,31 @@ Result<void> ScriptBehaviourComponent::LateUpdate(const FrameContext& context)
 void ScriptBehaviourComponent::OnDisable()
 {
 	Dispatch(BehaviourEvent::OnDisable, nullptr, false);
+}
+
+Result<void> ScriptBehaviourComponent::OnGUI(const FrameContext& context)
+{
+	if (destroyed || callbackFailed || !runtime || !instanceToken)
+	{
+		return {};
+	}
+	if (!context.gui)
+	{
+		return Result<void>::Failure("OnGUI requires an active GUI session");
+	}
+	context.gui->BeginComponent(instanceToken);
+	auto result = Dispatch(BehaviourEvent::OnGUI, &context, true);
+	try
+	{
+		context.gui->EndComponent(callbackFailed);
+	}
+	catch (const std::exception& error)
+	{
+		callbackFailed = true;
+		URSA_LOG_ERROR("Script", "托管行为 " + typeName + " OnGUI 作用域失败：" + ToUrsaString(error.what()));
+		SetEnabled(false);
+	}
+	return result;
 }
 
 void ScriptBehaviourComponent::OnDestroy()
@@ -380,16 +417,28 @@ Result<void> ScriptBehaviourComponent::Dispatch(BehaviourEvent event, const Fram
 		case BehaviourEvent::OnDestroy:
 			callbackName = "OnDestroy";
 			break;
+		case BehaviourEvent::OnGUI:
+			callbackName = "OnGUI";
+			break;
 	}
 	const String zoneName = typeName + "::" + callbackName;
 	URSA_PROFILE_SCOPE_DYNAMIC(zoneName.data(), zoneName.size());
 	auto invoked = runtime->Dispatch(instanceToken, event, context, this);
-	if (invoked)
+	if (invoked || (event == BehaviourEvent::OnGUI && context && context->gui && context->gui->Exited()))
 	{
 		return {};
 	}
 	callbackFailed = true;
-	URSA_LOG_ERROR("Script", "托管行为 " + typeName + " 回调失败：" + invoked.error);
+	String details = typeName + "::" + callbackName;
+	if (auto object = GetGameObject())
+	{
+		details += " object=" + object->Id().ToString();
+	}
+	if (event == BehaviourEvent::OnGUI && context && context->gui)
+	{
+		details += " event=" + ToUrsaString(std::to_string(static_cast<UInt32>(context->gui->Current().rawType)));
+	}
+	URSA_LOG_ERROR("Script", "托管行为 " + details + " 回调失败：" + invoked.error);
 	if (disableOnFailure && IsEnabled())
 	{
 		SetEnabled(false);

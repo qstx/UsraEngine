@@ -33,6 +33,7 @@ struct Table
 	Int32 (*ManagedHostBindings_LoadEditorApi)(void*, const DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_LoadScriptAssembly)(void*, const DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_LoadScriptContent)(void*, UInt64, const Wire::Value_Ursa_ManagedHost_ScriptContentArchive*, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_NotifySceneChange)(void*, UInt64, const Wire::Value_Ursa_SceneManagement_SceneData*, UInt32, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_PrepareEditorExtensions)(void*, UInt64, DataView*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_PrepareScriptReload)(void*, UInt64, const Wire::Value_Ursa_ManagedHost_ScriptReloadArchive*, Wire::Value_Ursa_ManagedHost_ScriptReloadArchive*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_PrepareScriptedImporters)(void*, UInt64, const DataView*, DataView*, BindingOutcome*) = nullptr;
@@ -41,6 +42,7 @@ struct Table
 	Int32 (*ManagedHostBindings_SerializeBehaviour)(void*, UInt64, Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_SerializeImportScriptableObject)(void*, UInt64, UInt64, Wire::Value_Ursa_ManagedHost_ImportObjectArchive*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_TransferScriptableAssets)(void*, UInt64, UInt64, BindingOutcome*) = nullptr;
+	Int32 (*ManagedHostBindings_ValidateSceneScript)(void*, UInt64, const Utf8View*, const Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive*, BindingOutcome*) = nullptr;
 	Int32 (*ManagedHostBindings_ValidateScriptSession)(void*, UInt64, BindingOutcome*) = nullptr;
 };
 inline const BindingModuleDescriptor& NativeDescriptor()
@@ -82,8 +84,10 @@ inline const BindingModuleDescriptor& NativeDescriptor()
 		nullptr,
 		nullptr,
 		nullptr,
+		nullptr,
+		nullptr,
 	};
-	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 35, &table, &ValidateBindingContext, {0x7f, 0x3e, 0x79, 0x61, 0x7d, 0xb2, 0xf0, 0x14, 0xa5, 0x16, 0xfa, 0xf1, 0x87, 0x9a, 0x2d, 0x5d, 0xd7, 0x76, 0x6c, 0xdb, 0xbd, 0x7a, 0x1a, 0x13, 0x96, 0x56, 0xf0, 0x3d, 0xab, 0x0f, 0x27, 0x9d}};
+	static const BindingModuleDescriptor descriptor{1, sizeof(BindingModuleDescriptor), sizeof(void*), 37, &table, &ValidateBindingContext, {0xe4, 0xc6, 0x5b, 0xab, 0x63, 0xfd, 0xd0, 0xa9, 0x2b, 0x43, 0x39, 0x0a, 0x28, 0xc5, 0xb3, 0xbd, 0x3d, 0x2a, 0x16, 0xf3, 0xe4, 0x6c, 0x76, 0x1f, 0x6b, 0x62, 0x73, 0xf3, 0x7c, 0xb5, 0x30, 0x4e}};
 	return descriptor;
 }
 inline Result<CallbackModule<Table>> ConnectCallbacks(const BindingModuleDescriptor* descriptor, void* context)
@@ -116,6 +120,7 @@ inline Result<CallbackModule<Table>> ConnectCallbacks(const BindingModuleDescrip
 	if (!result.value.table.ManagedHostBindings_LoadEditorApi) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.LoadEditorApi");
 	if (!result.value.table.ManagedHostBindings_LoadScriptAssembly) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.LoadScriptAssembly");
 	if (!result.value.table.ManagedHostBindings_LoadScriptContent) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.LoadScriptContent");
+	if (!result.value.table.ManagedHostBindings_NotifySceneChange) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.NotifySceneChange");
 	if (!result.value.table.ManagedHostBindings_PrepareEditorExtensions) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.PrepareEditorExtensions");
 	if (!result.value.table.ManagedHostBindings_PrepareScriptReload) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.PrepareScriptReload");
 	if (!result.value.table.ManagedHostBindings_PrepareScriptedImporters) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.PrepareScriptedImporters");
@@ -124,6 +129,7 @@ inline Result<CallbackModule<Table>> ConnectCallbacks(const BindingModuleDescrip
 	if (!result.value.table.ManagedHostBindings_SerializeBehaviour) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.SerializeBehaviour");
 	if (!result.value.table.ManagedHostBindings_SerializeImportScriptableObject) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.SerializeImportScriptableObject");
 	if (!result.value.table.ManagedHostBindings_TransferScriptableAssets) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.TransferScriptableAssets");
+	if (!result.value.table.ManagedHostBindings_ValidateSceneScript) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.ValidateSceneScript");
 	if (!result.value.table.ManagedHostBindings_ValidateScriptSession) return Result<CallbackModule<Table>>::Failure("Missing callback: Ursa.ManagedHost.ManagedHostBindings.ValidateScriptSession");
 	return result;
 }
@@ -309,6 +315,13 @@ inline CallbackResult<void> Call_ManagedHostBindings_LoadScriptContent(const Cal
 	result.status = module.table.ManagedHostBindings_LoadScriptContent(module.context, p_session, &p_archive, &result.outcome);
 	return result;
 }
+inline CallbackResult<void> Call_ManagedHostBindings_NotifySceneChange(const CallbackModule<Table>& module, UInt64 p_session, const Wire::Value_Ursa_SceneManagement_SceneData& p_scene, UInt32 p_loaded)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.NotifySceneChange";
+	result.status = module.table.ManagedHostBindings_NotifySceneChange(module.context, p_session, &p_scene, p_loaded, &result.outcome);
+	return result;
+}
 inline CallbackResult<DataView> Call_ManagedHostBindings_PrepareEditorExtensions(const CallbackModule<Table>& module, UInt64 p_session)
 {
 	CallbackResult<DataView> result;
@@ -363,6 +376,13 @@ inline CallbackResult<void> Call_ManagedHostBindings_TransferScriptableAssets(co
 	CallbackResult<void> result;
 	result.entry = "Ursa.ManagedHost.ManagedHostBindings.TransferScriptableAssets";
 	result.status = module.table.ManagedHostBindings_TransferScriptableAssets(module.context, p_source, p_candidate, &result.outcome);
+	return result;
+}
+inline CallbackResult<void> Call_ManagedHostBindings_ValidateSceneScript(const CallbackModule<Table>& module, UInt64 p_session, const Utf8View& p_typeName, const Wire::Value_Ursa_ManagedHost_BehaviourFieldArchive& p_archive)
+{
+	CallbackResult<void> result;
+	result.entry = "Ursa.ManagedHost.ManagedHostBindings.ValidateSceneScript";
+	result.status = module.table.ManagedHostBindings_ValidateSceneScript(module.context, p_session, &p_typeName, &p_archive, &result.outcome);
 	return result;
 }
 inline CallbackResult<void> Call_ManagedHostBindings_ValidateScriptSession(const CallbackModule<Table>& module, UInt64 p_session)

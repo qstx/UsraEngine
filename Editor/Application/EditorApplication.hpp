@@ -1,4 +1,5 @@
 #pragma once
+#include <Gui/GuiInput.hpp>
 #include <Scripting/ExternalScriptEditor.hpp>
 
 #include <Core/Containers.hpp>
@@ -139,10 +140,10 @@ protected:
 		return scriptIdeStatus;
 	}
 
-	bool ScriptWorkPending() const
+	bool ScriptWorkPending(bool includeSourceScan = true) const
 	{
-		return scriptBuildJob.valid() || scriptCheckJob.valid() || scriptIdeJob.valid() || ideGenerationRequested ||
-		       (assetImportJob.valid() && !play.Active());
+		return scriptBuildJob.valid() || (includeSourceScan && scriptCheckJob.valid()) || scriptIdeJob.valid() ||
+		       ideGenerationRequested || (assetImportJob.valid() && !play.Active());
 	}
 
 	bool ScriptCompilationPending() const
@@ -345,6 +346,8 @@ private:
 	ResourceId displayedSceneId;
 	std::unique_ptr<SceneViewPanel> sceneViewPanel;
 	PlaySession play;
+	Gui::InputQueue runtimeGuiInput;
+	bool runtimeGuiAccepted = false;
 	bool viewportFocused = false;
 	ImGuiViewport* focusedGameViewport = nullptr;
 	std::unique_ptr<ProjectWorkspace> workspace;
