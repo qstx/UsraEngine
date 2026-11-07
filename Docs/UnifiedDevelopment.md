@@ -36,7 +36,9 @@ set "URSA_PROJECT_DIR=G:\Work\My Game"
 GenerateEngineSolution.bat --tests
 ```
 
-`URSA_ENGINE_DIR` 表示引擎仓库目录。入口将其同时传给 CMake `-S` 和 `-DURSA_ENGINE_DIR`，项目目录传给 `-DURSA_PROJECT_DIR`；命令行参数优先于同名环境变量。未指定时沿用当前引擎及其相邻 Demo，默认构建目录随选定引擎变为 `<engine>/Build/VS2026`。VS 中 Editor、Player 和脚本编译工具的工作目录使用该引擎仓库路径。
+`URSA_ENGINE_DIR` 表示引擎仓库目录。顶层 `GenerateEngineSolution.bat` 显式向下传递引擎和项目目录，优先级为命令行参数、同名环境变量、该 BAT 所在工作区下的 `Engine` 和 `Demo`。因此从其他工作目录调用，或只更换引擎路径时，默认项目仍是当前工作区的 Demo。Python 再将引擎目录同时传给 CMake `-S` 和 `-DURSA_ENGINE_DIR`，项目目录传给 `-DURSA_PROJECT_DIR`。
+
+直接调用 `Engine/Tools/GenerateSolution.bat` 或 Python 时，未指定项目仍使用所选引擎旁的 Demo。各入口的默认构建目录均随选定引擎变为 `<engine>/Build/VS2026`。VS 中 Editor、Player 和脚本编译工具的工作目录使用该引擎仓库路径。
 
 完成 bat 的首次工作区引导后，也可直接重新配置：
 

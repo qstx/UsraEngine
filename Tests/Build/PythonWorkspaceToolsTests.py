@@ -139,6 +139,36 @@ EndGlobalSection
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Engine CMakeLists.txt is missing', result.stderr)
 
+    @unittest.skipUnless((ENGINE.parent / 'GenerateEngineSolution.bat').is_file(), 'Parent workspace BAT is not present in a standalone Engine checkout')
+    def test_workspace_bat_passes_directories_and_preserves_overrides(self):
+        wrapper = ENGINE.parent / 'GenerateEngineSolution.bat'
+        capture = self.root / 'Workspace configure arguments.txt'
+        cmake = self.write('Workspace cmake.cmd', '@echo off\nif "%~1"=="--version" (\n echo cmake version 4.4.5\n exit /b 0\n)\n> "' + str(capture) + '" echo %*\nexit /b 42\n')
+        engine = self.root / 'Other engine with spaces'
+        self.write('Other engine with spaces/CMakeLists.txt', '# engine fixture')
+        self.write('Other engine with spaces/ThirdParty/tracy/CMakeLists.txt', '# dependency fixture')
+        project = self.root / 'Other project with spaces'
+        self.write('Other project with spaces/Assets/Probe.cs', 'class Probe {}')
+        env = dict(os.environ)
+        env.pop('URSA_ENGINE_DIR', None)
+        env.pop('URSA_PROJECT_DIR', None)
+
+        def invoke(selected_env, extra, expected_engine, expected_project):
+            result = subprocess.run([str(wrapper), '--cmake', str(cmake), '--build-dir', str(self.root / 'Workspace build'), *map(str, extra)],
+                                    cwd=self.root, env=selected_env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 42, result.stdout + result.stderr)
+            args = capture.read_text(encoding='utf-8-sig')
+            self.assertIn('-DURSA_ENGINE_DIR=' + expected_engine.as_posix(), args)
+            self.assertIn('-DURSA_PROJECT_DIR=' + expected_project.as_posix(), args)
+            self.assertNotIn('Missing engine', args)
+            self.assertNotIn('Missing project', args)
+
+        invoke(env, [], ENGINE, ENGINE.parent / 'Demo')
+        invoke(dict(env, URSA_ENGINE_DIR=str(engine), URSA_PROJECT_DIR=str(project)), [], engine, project)
+        invoke(dict(env, URSA_ENGINE_DIR=str(self.root / 'Missing engine'), URSA_PROJECT_DIR=str(self.root / 'Missing project')),
+               ['--engine-dir', engine, '--project-dir', project], engine, project)
+        invoke(env, ['--engine-dir', engine], engine, ENGINE.parent / 'Demo')
+
     def test_managed_debugger_defaults_preserve_explicit_user_choices(self):
         toolchain = get_toolchain()
         msbuild = Path(toolchain['VisualStudio']) / 'MSBuild/Current/Bin/MSBuild.exe'
