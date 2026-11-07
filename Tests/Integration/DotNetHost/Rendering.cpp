@@ -9,7 +9,7 @@
 #include <Shader/ShaderAssetResource.hpp>
 #include <Rendering/Resources/RenderResources.hpp>
 #include <Rendering/Scene/RenderScene.hpp>
-#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
+#include <ManagedRenderingFixtures.hpp>
 #include <Serialization/ResourceSession.hpp>
 #include <Vfs/MemoryFileProvider.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -233,11 +233,12 @@ void TestManagedMatrixBindings(DotNetHost& host, VirtualFileSystem& filesystem, 
 void TestManagedForward(DotNetHost& host, const VirtualPath& content)
 {
 	auto device = Take(Rhi::CreateDevice({}));
-	auto baseline = Take(Rendering::NativeForwardPipeline::Create(device));
+	auto baseline = Take(Ursa::Test::ManagedSceneRenderer::Create(device, &host, content));
 	for (UInt32 scenario = 0; scenario < 6; ++scenario)
 	{
 		Scene scene;
-		ManagedSceneApi api(scene);
+		auto resources = Take(OpenDefaultPipelineResources(Take(OpenEngineFileSystem())));
+		ManagedSceneApi api(scene, resources.get());
 		api.SetRenderDevice(device);
 		auto output = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
 		api.SetRenderOutput(output);
@@ -357,15 +358,16 @@ void TestManagedForward(DotNetHost& host, const VirtualPath& content)
 			const auto& current = currentResult.value;
 			auto reference = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
 			const auto baselineRender = baseline->RenderOffscreen(scene, reference, Rhi::ResourceState::ShaderRead);
+			Done(host.BindScriptSession(session, api));
 			if (!baselineRender)
 			{
-				throw std::runtime_error("Native Forward baseline failed in scenario " + std::to_string(scenario) +
+				throw std::runtime_error("Default Universal baseline failed in scenario " + std::to_string(scenario) +
 				                         ": " + ToStdString(baselineRender.error));
 			}
 			auto expectedResult = Rendering::ReadRenderTexture(*device, *reference);
 			if (!expectedResult)
 			{
-				throw std::runtime_error("Native Forward reference read failed in scenario " +
+				throw std::runtime_error("Default Universal reference read failed in scenario " +
 				                         std::to_string(scenario) + ": " + ToStdString(expectedResult.error));
 			}
 			const auto& expected = expectedResult.value;
@@ -439,7 +441,8 @@ void TestForwardCameraRegions(DotNetHost& host, const VirtualPath& content)
 {
 	auto device = Take(Rhi::CreateDevice({}));
 	Scene scene;
-	ManagedSceneApi api(scene);
+	auto resources = Take(OpenDefaultPipelineResources(Take(OpenEngineFileSystem())));
+	ManagedSceneApi api(scene, resources.get());
 	api.SetRenderDevice(device);
 	auto output = Take(Rendering::CreateRenderTexture(*device, {64, 64, 0, 32}));
 	api.SetRenderOutput(output);
@@ -566,11 +569,12 @@ void TestUniversalPostProcessingBacking(DotNetHost& host, const VirtualPath& con
 	nothingCamera->rendering.clearFlags = Rendering::CameraClearFlags::Nothing;
 	// The empty UniversalRendererData above selects the pipeline's generic minimal
 	// configuration: EV=0, Reinhard, no shadows, bloom, or FXAA. Compare its complete
-	// display output with the unmanaged implementation before the managed callback
+	// display output with the default Universal implementation before the managed callback
 	// installs the Universal pipeline asset.
-	auto nativeBaseline = Take(Rendering::NativeForwardPipeline::Create(device));
+	auto nativeBaseline = Take(Ursa::Test::ManagedSceneRenderer::Create(device, &host, content));
 	auto nativeOutput = Take(Rendering::CreateRenderTexture(*device, {32, 32, 0, 32}));
 	Done(nativeBaseline->RenderOffscreen(scene, nativeOutput, Rhi::ResourceState::ShaderRead));
+	Done(host.BindScriptSession(session, api));
 	const auto nativePixels = Take(Rendering::ReadRenderTexture(*device, *nativeOutput));
 	const auto component =
 	    Take(runtime.CreateAndAdd(colorObject, "Ursa.SessionFixtures.UniversalPipelineProbe, Ursa.SessionFixtures"));
@@ -603,7 +607,7 @@ void TestUniversalPostProcessingBacking(DotNetHost& host, const VirtualPath& con
 		}
 	}
 	Expect(differingChannels < 16,
-	       "Generic minimal Universal configuration differs from the unmanaged Forward baseline");
+	       "Generic minimal Universal configuration differs from the default Universal baseline");
 	const Size preserved = (16 * 32 + 8) * 4;
 	const Size outsideViewport = (16 * 32 + 24) * 4;
 	Expect(pixels[preserved] >= 229 && pixels[preserved] <= 232 && pixels[preserved + 1] <= 2 &&

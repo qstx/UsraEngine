@@ -37,7 +37,7 @@ def main():
     toolchain = get_toolchain(args.cmake, build)
     print(f'{toolchain["Version"]}; VS2026/v145 at {toolchain["VisualStudio"]}', flush=True)
     configure = [toolchain['CMake'], '-S', engine_root, '-B', build, '-G', toolchain['Generator'], '-A', 'x64', '-T', 'v145',
-                 f'-DCMAKE_GENERATOR_INSTANCE={toolchain["VisualStudio"]}', '-DURSA_BUILD_EDITOR=ON', '-DURSA_ENABLE_DOTNET=ON',
+                 f'-DCMAKE_GENERATOR_INSTANCE={toolchain["VisualStudio"]}', '-DURSA_BUILD_EDITOR=ON',
                  '-DURSA_ENABLE_TRACY=ON', '-DURSA_MSVC_PARALLEL_COMPILE=ON', f'-DURSA_BUILD_TESTS={"ON" if args.tests else "OFF"}',
                  f'-DURSA_ENGINE_DIR={engine_root.as_posix()}', f'-DURSA_PROJECT_DIR={project.as_posix()}',
                  f'-DURSA_WORKSPACE_PYTHON={Path(sys.executable).as_posix()}']

@@ -1,14 +1,14 @@
 # C# 托管宿主
 
-本文说明当前可选的 C# 宿主如何配置、构建，以及宿主启动失败时如何定位问题。
+本文说明引擎固定提供的 C# 宿主如何配置、构建，以及宿主启动失败时如何定位问题。
 
 导入会话中的 Mesh、Material 和 Texture2D CPU 候选 API、生命周期及无 GPU 验证见 [脚本资源导入扩展](ScriptedAssetImporters.md#import-cpu-资源-api)。候选 Texture2D 创建仅用于活动 Import 调用。
 
 ## 支持范围
 
 - 当前宿主仅支持 Windows x64。
-- 需要安装 .NET 10 SDK 和 `Microsoft.NETCore.App 10` 运行时。关闭脚本时，引擎不要求安装 .NET。
-- 原生宿主通过 .NET host pack 中的 `nethost` 定位 `hostfxr`，再由 `hostfxr` 初始化 CoreCLR。`URSA_ENABLE_DOTNET` 默认关闭。
+- 需要安装 .NET 10 SDK 和 `Microsoft.NETCore.App 10` 运行时。发行 Player 不要求 SDK，但仍需要兼容运行时。
+- 原生宿主通过 .NET host pack 中的 `nethost` 定位 `hostfxr`，再由 `hostfxr` 初始化 CoreCLR。C# 固定可用，配置时检查完整工具链。
 - 当前版本在一个进程内只允许初始化一次 CoreCLR；CLR 不支持在进程内完整卸载，因此关闭或重建游戏脚本会话不应再次初始化运行时。
 
 ## 配置与构建
@@ -16,22 +16,22 @@
 从 `Engine` 目录配置：
 
 ```powershell
-cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON
+cmake -S . -B Build
 cmake --build Build --parallel --config Debug
 ctest --test-dir Build -C Debug --output-on-failure
 ```
 
-发布构建将 `Debug` 替换为 `Release`。若要验证不依赖 .NET 的原生构建，配置时使用 `-DURSA_ENABLE_DOTNET=OFF`。
+其他程序配置可使用 Release 或 Publish。旧开关与缓存迁移见 [迁移说明](DotNetAndRenderingMigration.md)。
 
 配置会通过 `dotnet --list-sdks` 和 `dotnet --list-runtimes` 检查 SDK 与运行时，并根据已安装的 .NET 10 运行时定位 Windows x64 host pack。若机器上存在多个 `dotnet.exe`，可显式指定：
 
 ```powershell
-cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON -DURSA_DOTNET_EXECUTABLE="C:/Program Files/dotnet/dotnet.exe"
+cmake -S . -B Build -DURSA_DOTNET_EXECUTABLE="C:/Program Files/dotnet/dotnet.exe"
 ```
 
 切换 `dotnet.exe` 后若 CMake 仍使用旧路径，请在重新配置时增加 `-UURSA_DOTNET_EXECUTABLE`，清除缓存的程序路径。
 
-启用后，CMake 会验证 host pack 中的 `nethost.h`、`hostfxr.h`、`coreclr_delegates.h`、`nethost.lib` 和 `nethost.dll`。正式框架及脚本目录工具直接编译 `Engine/Managed` 下的原始 csproj 和源码，不复制到 `Managed/Source`。`--artifacts-path` 将项目和配置的中间产物放在 `<build>/Managed/Artifacts`，正式程序集与 Portable PDB 输出到 `<build>/Managed/<配置>`，目录工具输出到 `<build>/Managed/Tools/<配置>`；源码树中的既有 bin/obj 不参与源码发现，也不会由这些构建新增或改写。PDB 中的手写 C# 文件路径与解决方案编辑的原始文件一致。原生宿主目标链接 `nethost.lib`，可执行程序旁会复制对应的 `nethost.dll`。
+CMake 会验证 host pack 中的 `nethost.h`、`hostfxr.h`、`coreclr_delegates.h`、`nethost.lib` 和 `nethost.dll`。正式框架及脚本目录工具直接编译 `Engine/Managed` 下的原始 csproj 和源码，不复制到 `Managed/Source`。`--artifacts-path` 将项目和配置的中间产物放在 `<build>/Managed/Artifacts`，正式程序集与 Portable PDB 输出到 `<build>/Managed/<配置>`，目录工具输出到 `<build>/Managed/Tools/<配置>`；源码树中的既有 bin/obj 不参与源码发现，也不会由这些构建新增或改写。PDB 中的手写 C# 文件路径与解决方案编辑的原始文件一致。原生宿主目标链接 `nethost.lib`，可执行程序旁会复制对应的 `nethost.dll`。
 
 ## VFS 与原生宿主边界
 
@@ -47,7 +47,7 @@ cmake -S . -B Build -DURSA_ENABLE_DOTNET=ON -DURSA_DOTNET_EXECUTABLE="C:/Program
 
 IDE 工程与正式脚本构建的输入模型、生成目录和输出隔离见 [C# 工程与外部编辑器](CSharpIdeIntegration.md)。IDE 的结构指纹与包含源码内容的正式构建指纹分别管理；打开 IDE 工程不要求脚本语义校验成功，IDE 构建不会替代正式内容发布。
 
-启用 `URSA_ENABLE_DOTNET` 后，项目 `Assets` 中的 `.cs` 文件由 AssetDatabase 自动发现并维护 `.meta` GUID。路径中包含独立目录段 `Editor` 的脚本归入 Editor 程序集；其余脚本归入 Game 程序集。Game 程序集引用 `Ursa.Runtime`/`Ursa.Rendering`，Editor 额外引用 Game 与 `Ursa.Editor`；`Ursa.Bindings` 为引擎共享支持依赖，Player 不加载 Editor 脚本或 Editor 模块。
+项目 `Assets` 中的 `.cs` 文件由 AssetDatabase 自动发现并维护 `.meta` GUID。路径中包含独立目录段 `Editor` 的脚本归入 Editor 程序集；其余脚本归入 Game 程序集。Game 程序集引用 `Ursa.Runtime`/`Ursa.Rendering`，Editor 额外引用 Game 与 `Ursa.Editor`；`Ursa.Bindings` 为引擎共享支持依赖，Player 不加载 Editor 脚本或 Editor 模块。
 
 Editor 会在项目的 `Library/ScriptBuild` 下生成 MSBuild 工程、脚本类型目录、编译暂存区和输出，不需要手工维护 `.csproj`。在编辑器中使用 `Scripts > Compile Scripts` 编译 Game 与 Editor 程序集；编译在后台运行，诊断显示在 Script Build 面板。Run 会检查脚本输入指纹；脚本尚未编译或编译后输入有变化时，Run 会后台编译最新输入，成功后才启动运行场景。清空项目 `Library` 后，下一次编译会重新发现脚本、生成目录并构建程序集。
 

@@ -1,76 +1,73 @@
-if(URSA_ENABLE_DOTNET)
-  if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "URSA_ENABLE_DOTNET currently supports Windows x64 only")
-  endif()
-
-  find_program(URSA_DOTNET_EXECUTABLE NAMES dotnet)
-  if(NOT URSA_DOTNET_EXECUTABLE)
-    message(FATAL_ERROR "URSA_ENABLE_DOTNET requires the .NET 10 SDK and runtime. Install .NET 10 or configure with -DURSA_ENABLE_DOTNET=OFF")
-  endif()
-
-  execute_process(
-    COMMAND "${URSA_DOTNET_EXECUTABLE}" --list-sdks
-    RESULT_VARIABLE URSA_DOTNET_SDK_RESULT
-    OUTPUT_VARIABLE URSA_DOTNET_SDKS
-    ERROR_VARIABLE URSA_DOTNET_SDK_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  execute_process(
-    COMMAND "${URSA_DOTNET_EXECUTABLE}" --list-runtimes
-    RESULT_VARIABLE URSA_DOTNET_RUNTIME_RESULT
-    OUTPUT_VARIABLE URSA_DOTNET_RUNTIMES
-    ERROR_VARIABLE URSA_DOTNET_RUNTIME_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(NOT URSA_DOTNET_SDK_RESULT STREQUAL "0" OR NOT URSA_DOTNET_RUNTIME_RESULT STREQUAL "0")
-    message(FATAL_ERROR "Cannot inspect the installed .NET SDK/runtime: ${URSA_DOTNET_SDK_ERROR}${URSA_DOTNET_RUNTIME_ERROR}")
-  endif()
-
-  string(REGEX MATCH "(^|\n)10\\.[0-9]+\\.[0-9]+([ \t]|$)" URSA_DOTNET_SDK_10 "${URSA_DOTNET_SDKS}")
-  string(REGEX MATCH "Microsoft\\.NETCore\\.App 10\\.[0-9]+\\.[0-9]+" URSA_DOTNET_RUNTIME_10 "${URSA_DOTNET_RUNTIMES}")
-  if(NOT URSA_DOTNET_SDK_10 OR NOT URSA_DOTNET_RUNTIME_10)
-    message(FATAL_ERROR "URSA_ENABLE_DOTNET requires both a .NET 10 SDK and Microsoft.NETCore.App 10 runtime. Installed SDKs: ${URSA_DOTNET_SDKS}; runtimes: ${URSA_DOTNET_RUNTIMES}")
-  endif()
-
-  get_filename_component(URSA_DOTNET_ROOT "${URSA_DOTNET_EXECUTABLE}" DIRECTORY)
-  execute_process(COMMAND "${URSA_DOTNET_EXECUTABLE}" --version
-    WORKING_DIRECTORY "${URSA_SOURCE_ROOT}" OUTPUT_VARIABLE URSA_DOTNET_ACTIVE_SDK
-    OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-  if(NOT URSA_DOTNET_ACTIVE_SDK MATCHES "^10\\.")
-    message(FATAL_ERROR "The active dotnet SDK must be .NET 10; found ${URSA_DOTNET_ACTIVE_SDK}")
-  endif()
-  set(URSA_ROSLYN_DIRECTORY "${URSA_DOTNET_ROOT}/sdk/${URSA_DOTNET_ACTIVE_SDK}/Roslyn/bincore")
-  string(REGEX MATCH "10\\.[0-9]+\\.[0-9]+" URSA_DOTNET_HOST_PACK_VERSION "${URSA_DOTNET_RUNTIME_10}")
-  set(URSA_DOTNET_HOST_PACK "${URSA_DOTNET_ROOT}/packs/Microsoft.NETCore.App.Host.win-x64/${URSA_DOTNET_HOST_PACK_VERSION}/runtimes/win-x64/native")
-  set(URSA_DOTNET_REFERENCE_PACK "${URSA_DOTNET_ROOT}/packs/Microsoft.NETCore.App.Ref/${URSA_DOTNET_HOST_PACK_VERSION}/ref/net10.0")
-  foreach(URSA_DOTNET_HOST_FILE IN ITEMS nethost.h hostfxr.h coreclr_delegates.h)
-    if(NOT EXISTS "${URSA_DOTNET_HOST_PACK}/${URSA_DOTNET_HOST_FILE}")
-      message(FATAL_ERROR "The .NET host pack is incomplete: missing ${URSA_DOTNET_HOST_PACK}/${URSA_DOTNET_HOST_FILE}")
-    endif()
-  endforeach()
-  foreach(URSA_DOTNET_BINARY IN ITEMS nethost.lib nethost.dll)
-    if(NOT EXISTS "${URSA_DOTNET_HOST_PACK}/${URSA_DOTNET_BINARY}")
-      message(FATAL_ERROR "The .NET host pack is incomplete: missing ${URSA_DOTNET_BINARY}")
-    endif()
-  endforeach()
-  if(NOT EXISTS "${URSA_DOTNET_REFERENCE_PACK}/System.Runtime.dll")
-    message(FATAL_ERROR "The .NET reference pack is incomplete: missing ${URSA_DOTNET_REFERENCE_PACK}/System.Runtime.dll")
-  endif()
-
-  message(STATUS "Ursa C# scripting enabled with .NET SDK/runtime and Windows x64 host pack ${URSA_DOTNET_HOST_PACK_VERSION}")
+if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8
+   OR NOT CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+  message(FATAL_ERROR "Ursa currently supports Windows x64 only")
 endif()
 
-function(ursa_attach_dotnet_host_runtime target)
-  if(URSA_ENABLE_DOTNET)
-    if(NOT TARGET ${target})
-      message(FATAL_ERROR "Cannot configure the .NET native host for missing target ${target}")
-    endif()
-    if(CMAKE_GENERATOR STREQUAL "Visual Studio 18 2026")
-      set_property(TARGET ${target} PROPERTY VS_USER_PROPS "${URSA_SOURCE_ROOT}/CMake/ManagedDebugger.props")
-    endif()
-    get_target_property(nethostDll UrsaDotNetHostSupport URSA_NETHOST_DLL)
-    add_custom_command(TARGET ${target} POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${nethostDll}" "$<TARGET_FILE_DIR:${target}>"
-      VERBATIM)
+find_program(URSA_DOTNET_EXECUTABLE NAMES dotnet)
+if(NOT URSA_DOTNET_EXECUTABLE)
+  message(FATAL_ERROR "Ursa requires the .NET 10 SDK and runtime. Install .NET 10 before configuring the engine")
+endif()
+
+execute_process(
+  COMMAND "${URSA_DOTNET_EXECUTABLE}" --list-sdks
+  RESULT_VARIABLE URSA_DOTNET_SDK_RESULT
+  OUTPUT_VARIABLE URSA_DOTNET_SDKS
+  ERROR_VARIABLE URSA_DOTNET_SDK_ERROR
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(
+  COMMAND "${URSA_DOTNET_EXECUTABLE}" --list-runtimes
+  RESULT_VARIABLE URSA_DOTNET_RUNTIME_RESULT
+  OUTPUT_VARIABLE URSA_DOTNET_RUNTIMES
+  ERROR_VARIABLE URSA_DOTNET_RUNTIME_ERROR
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT URSA_DOTNET_SDK_RESULT STREQUAL "0" OR NOT URSA_DOTNET_RUNTIME_RESULT STREQUAL "0")
+  message(FATAL_ERROR "Cannot inspect the installed .NET SDK/runtime: ${URSA_DOTNET_SDK_ERROR}${URSA_DOTNET_RUNTIME_ERROR}")
+endif()
+
+string(REGEX MATCH "(^|\n)10\\.[0-9]+\\.[0-9]+([ \t]|$)" URSA_DOTNET_SDK_10 "${URSA_DOTNET_SDKS}")
+string(REGEX MATCH "Microsoft\\.NETCore\\.App 10\\.[0-9]+\\.[0-9]+" URSA_DOTNET_RUNTIME_10 "${URSA_DOTNET_RUNTIMES}")
+if(NOT URSA_DOTNET_SDK_10 OR NOT URSA_DOTNET_RUNTIME_10)
+  message(FATAL_ERROR "Ursa requires both a .NET 10 SDK and Microsoft.NETCore.App 10 runtime. Installed SDKs: ${URSA_DOTNET_SDKS}; runtimes: ${URSA_DOTNET_RUNTIMES}")
+endif()
+
+get_filename_component(URSA_DOTNET_ROOT "${URSA_DOTNET_EXECUTABLE}" DIRECTORY)
+execute_process(COMMAND "${URSA_DOTNET_EXECUTABLE}" --version
+  WORKING_DIRECTORY "${URSA_SOURCE_ROOT}" OUTPUT_VARIABLE URSA_DOTNET_ACTIVE_SDK
+  OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+if(NOT URSA_DOTNET_ACTIVE_SDK MATCHES "^10\\.")
+  message(FATAL_ERROR "The active dotnet SDK must be .NET 10; found ${URSA_DOTNET_ACTIVE_SDK}")
+endif()
+set(URSA_ROSLYN_DIRECTORY "${URSA_DOTNET_ROOT}/sdk/${URSA_DOTNET_ACTIVE_SDK}/Roslyn/bincore")
+string(REGEX MATCH "10\\.[0-9]+\\.[0-9]+" URSA_DOTNET_HOST_PACK_VERSION "${URSA_DOTNET_RUNTIME_10}")
+set(URSA_DOTNET_HOST_PACK "${URSA_DOTNET_ROOT}/packs/Microsoft.NETCore.App.Host.win-x64/${URSA_DOTNET_HOST_PACK_VERSION}/runtimes/win-x64/native")
+set(URSA_DOTNET_REFERENCE_PACK "${URSA_DOTNET_ROOT}/packs/Microsoft.NETCore.App.Ref/${URSA_DOTNET_HOST_PACK_VERSION}/ref/net10.0")
+foreach(URSA_DOTNET_HOST_FILE IN ITEMS nethost.h hostfxr.h coreclr_delegates.h)
+  if(NOT EXISTS "${URSA_DOTNET_HOST_PACK}/${URSA_DOTNET_HOST_FILE}")
+    message(FATAL_ERROR "The .NET host pack is incomplete: missing ${URSA_DOTNET_HOST_PACK}/${URSA_DOTNET_HOST_FILE}")
   endif()
+endforeach()
+foreach(URSA_DOTNET_BINARY IN ITEMS nethost.lib nethost.dll)
+  if(NOT EXISTS "${URSA_DOTNET_HOST_PACK}/${URSA_DOTNET_BINARY}")
+    message(FATAL_ERROR "The .NET host pack is incomplete: missing ${URSA_DOTNET_BINARY}")
+  endif()
+endforeach()
+if(NOT EXISTS "${URSA_DOTNET_REFERENCE_PACK}/System.Runtime.dll")
+  message(FATAL_ERROR "The .NET reference pack is incomplete: missing ${URSA_DOTNET_REFERENCE_PACK}/System.Runtime.dll")
+endif()
+
+message(STATUS "Ursa C# scripting enabled with .NET SDK/runtime and Windows x64 host pack ${URSA_DOTNET_HOST_PACK_VERSION}")
+
+function(ursa_attach_dotnet_host_runtime target)
+  if(NOT TARGET ${target})
+    message(FATAL_ERROR "Cannot configure the .NET native host for missing target ${target}")
+  endif()
+  if(CMAKE_GENERATOR STREQUAL "Visual Studio 18 2026")
+    set_property(TARGET ${target} PROPERTY VS_USER_PROPS "${URSA_SOURCE_ROOT}/CMake/ManagedDebugger.props")
+  endif()
+  get_target_property(nethostDll UrsaDotNetHostSupport URSA_NETHOST_DLL)
+  add_custom_command(TARGET ${target} POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${nethostDll}" "$<TARGET_FILE_DIR:${target}>"
+    VERBATIM)
 endfunction()
 
 

@@ -62,10 +62,9 @@ struct ManagedImportEnvironment::Impl
 	std::condition_variable changed;
 	std::deque<std::function<void()>> jobs;
 	bool stopping = false;
-#if defined(URSA_ENABLE_DOTNET)
 	std::unique_ptr<Scripting::DotNetHost> host;
 	UInt64 session = 0;
-#endif
+
 	~Impl()
 	{
 		{
@@ -143,7 +142,6 @@ struct ManagedImportEnvironment::Impl
 
 	void Initialize()
 	{
-#if defined(URSA_ENABLE_DOTNET)
 		const auto hostFramework = std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path();
 		const auto compileFramework = hostFramework.parent_path() / ToStdString(configuration);
 		Done(files.Mount("importframework", hostFramework, MountAccess::ReadOnly));
@@ -154,6 +152,15 @@ struct ManagedImportEnvironment::Impl
 		                                  compileFramework / "Ursa.Runtime.dll", compileFramework / "Ursa.Editor.dll",
 		                                  std::filesystem::u8path(URSA_DOTNET_CATALOG_GENERATOR_PATH),
 		                                  std::filesystem::u8path(URSA_DOTNET_REFERENCE_PACK_PATH)));
+		if (database->ScriptSources().empty())
+		{
+			Take(compiler->GenerateFrameworkCatalog(configuration));
+			types = compiler->ScriptTypes();
+			sourceFingerprint = Take(compiler->SourceFingerprint());
+			compiledFingerprint = sourceFingerprint;
+			rules = std::make_shared<const AssetImportRules>(Take(AssetImportRules::Create({}, {}, {}, generation)));
+			return;
+		}
 		const auto projects = compiler->GenerateProjects();
 		if (!projects)
 		{
@@ -236,21 +243,16 @@ struct ManagedImportEnvironment::Impl
 		Done(host->LoadScriptContent(session, Path("lib:ScriptBuild/Manifests/Editor.json")));
 		rules = std::make_shared<const AssetImportRules>(
 		    Take(DiscoverManagedImportRules(*host, session, compiledFingerprint, generation)));
-#else
-		throw std::runtime_error("Managed import environments require .NET support");
-#endif
 	}
 
 	void Shutdown()
 	{
-#if defined(URSA_ENABLE_DOTNET)
 		if (host && session)
 		{
 			host->CloseScriptSession(session);
 			session = 0;
 		}
 		host.reset();
-#endif
 	}
 };
 
@@ -400,7 +402,6 @@ const std::shared_ptr<const AssetImportRules>& ManagedImportEnvironment::Rules()
 
 Result<void> ManagedImportEnvironment::Install(ProjectAssetImporter& importer)
 {
-#if defined(URSA_ENABLE_DOTNET)
 	if (!Generation())
 	{
 		return Result<void>::Failure("Managed import rules are obsolete");
@@ -447,9 +448,5 @@ Result<void> ManagedImportEnvironment::Install(ProjectAssetImporter& importer)
 		}
 	}
 	return importer.ReplaceManagedRules(prepared, implementation->generation);
-#else
-	(void)importer;
-	return Result<void>::Failure("Managed import environments require .NET support");
-#endif
 }
 } // namespace Ursa::Editor

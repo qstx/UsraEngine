@@ -184,8 +184,6 @@ internal static class Program
 			var assetMenuNames = new Dictionary<string, string>(StringComparer.Ordinal);
 			var builtInIdentities = new Dictionary<string, (string Id, uint Version, string Origin)>(StringComparer.Ordinal)
 			{
-				["Ursa.Rendering.ForwardRenderPipelineAsset"] =
-					("ursa.rendering.forward", 1, "framework type Ursa.Rendering.ForwardRenderPipelineAsset"),
 				["Ursa.Rendering.UniversalRenderPipelineAsset"] =
 					("ursa.rendering.universal-pipeline", 2, "framework type Ursa.Rendering.UniversalRenderPipelineAsset"),
 				["Ursa.Rendering.UniversalRendererData"] =

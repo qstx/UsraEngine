@@ -1,5 +1,6 @@
 #include <Workspace/ProjectWorkspace.hpp>
 #include <Assets/ManagedImportEnvironment.hpp>
+#include <Assets/ScriptBuildService.hpp>
 #include <Assets/ManagedImportRequirements.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/DirectoryFileProvider.hpp>
@@ -76,16 +77,33 @@ Result<Vector<ScriptTypeDescriptor>> ProjectWorkspace::PrepareManagedImports(con
 				return Result<Vector<ScriptTypeDescriptor>>::Failure(replaced.error);
 			}
 		}
+		auto& files = index.Filesystem();
+		const auto framework = std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path().parent_path() /
+		                       ToStdString(configuration);
+		auto compiler = ScriptBuildService::Open(
+		    files, *assetDatabase, std::filesystem::u8path(URSA_DOTNET_EXECUTABLE_PATH), framework / "Ursa.Runtime.dll",
+		    framework / "Ursa.Editor.dll", std::filesystem::u8path(URSA_DOTNET_CATALOG_GENERATOR_PATH),
+		    std::filesystem::u8path(URSA_DOTNET_REFERENCE_PACK_PATH));
+		if (!compiler)
+		{
+			return Result<Vector<ScriptTypeDescriptor>>::Failure(compiler.error);
+		}
+		auto catalog = compiler.value->GenerateFrameworkCatalog(configuration);
+		if (!catalog)
+		{
+			return Result<Vector<ScriptTypeDescriptor>>::Failure(catalog.error);
+		}
+		const auto registered = importer.RegisterScriptableAssets(compiler.value->ScriptTypes());
+		if (!registered)
+		{
+			return Result<Vector<ScriptTypeDescriptor>>::Failure(registered.error);
+		}
 		const auto nativeRules = AssetImportRules::Create();
 		importDescriptions = std::make_shared<const AssetImportRules>(nativeRules.value);
 		const auto saved = SaveManagedImportRequirements(*assetDatabase, nativeRules.value);
-		if (!saved)
-		{
-			return Result<Vector<ScriptTypeDescriptor>>::Failure(saved.error);
-		}
-		return Result<Vector<ScriptTypeDescriptor>>::Success({});
+		return saved ? Result<Vector<ScriptTypeDescriptor>>::Success(compiler.value->ScriptTypes())
+		             : Result<Vector<ScriptTypeDescriptor>>::Failure(saved.error);
 	}
-#if defined(URSA_ENABLE_DOTNET)
 	bool current = false;
 	if (managedImports && managedConfiguration == configuration)
 	{
@@ -125,11 +143,6 @@ Result<Vector<ScriptTypeDescriptor>> ProjectWorkspace::PrepareManagedImports(con
 		return Result<Vector<ScriptTypeDescriptor>>::Failure(saved.error);
 	}
 	return Result<Vector<ScriptTypeDescriptor>>::Success(managedImports->ScriptTypes());
-#else
-	(void)configuration;
-	(void)buildScripts;
-	return Result<Vector<ScriptTypeDescriptor>>::Failure("Project script rules require a build with .NET support");
-#endif
 }
 
 Result<std::unique_ptr<ProjectWorkspace>> ProjectWorkspace::Open(const std::filesystem::path& projectDirectory,

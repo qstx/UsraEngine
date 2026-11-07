@@ -1,6 +1,5 @@
 #include <Assets/ManagedImportRules.hpp>
 
-#if defined(URSA_ENABLE_DOTNET)
 namespace Ursa::Editor
 {
 Result<AssetImportRules> DiscoverManagedImportRules(Scripting::DotNetHost& host, UInt64 session,
@@ -56,4 +55,3 @@ Result<AssetImportRules> DiscoverManagedImportRules(Scripting::DotNetHost& host,
 	                                generation);
 }
 } // namespace Ursa::Editor
-#endif

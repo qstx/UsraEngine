@@ -51,7 +51,7 @@ private:
 class SceneApp final : public Ursa::Application
 {
 public:
-	explicit SceneApp(bool shouldFail) : fail(shouldFail)
+	explicit SceneApp(bool shouldFail, bool renderProvider = true) : fail(shouldFail), provider(renderProvider)
 	{
 	}
 
@@ -108,6 +108,16 @@ private:
 		return {};
 	}
 
+	Ursa::Result<void> InitializeRenderPipeline() override
+	{
+		return provider ? Ursa::Result<void>{} : Application::InitializeRenderPipeline();
+	}
+
+	Ursa::Result<void> OnRender(Ursa::Rendering::FrameCapture*) override
+	{
+		return {};
+	}
+
 	Ursa::Result<void> OnFrame(Ursa::Float32) override
 	{
 		++legacyFrames;
@@ -120,6 +130,7 @@ private:
 	}
 
 	bool fail;
+	bool provider;
 };
 
 class LegacyApp final : public Ursa::Application
@@ -201,12 +212,12 @@ int main()
 		               Ursa::VirtualPath::Parse(Ursa::Rendering::graphicsSettingsRuntime).value, encoded.value)),
 		       "Cannot create pipeline selection fixture");
 		Ursa::ConfigureEngineFileSystem(std::make_shared<Ursa::VirtualFileSystem>(configured));
-		SceneApp unsupported(false);
+		SceneApp unsupported(false, false);
 		const auto unavailable = unsupported.Run(640, 480, "Unavailable managed pipeline", false, 1);
 		Ursa::ConfigureEngineFileSystem(std::make_shared<Ursa::VirtualFileSystem>(original.value));
-		Expect(!unavailable && unavailable.error.find(pipeline.ToString()) != Ursa::String::npos &&
-		           unavailable.error.find("managed render host") != Ursa::String::npos && unsupported.updates == 0 &&
-		           unsupported.removals == 1 && unsupported.stops == 1 && unsupported.Cleaned(),
+		Expect(!unavailable && unavailable.error.find("managed render host") != Ursa::String::npos &&
+		           unsupported.updates == 0 && unsupported.removals == 1 && unsupported.stops == 1 &&
+		           unsupported.Cleaned(),
 		       "A native app silently replaced the project pipeline or failed initialization cleanup");
 		LegacyApp legacy;
 		const auto legacyResult = legacy.Run(640, 480, "Legacy application test", false, 3);

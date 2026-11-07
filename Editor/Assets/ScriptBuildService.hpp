@@ -40,6 +40,7 @@ public:
 	     std::filesystem::path catalogGeneratorAssembly, std::filesystem::path referenceAssemblyDirectory);
 
 	Result<ScriptProjectPaths> GenerateProjects();
+	Result<VirtualPath> GenerateFrameworkCatalog(const String& configuration);
 
 	Result<ScriptProjectInput> ProjectInput();
 
@@ -76,7 +77,7 @@ private:
 	Result<void> WriteProject(const VirtualPath& path, const ScriptProjectInput& input, ScriptAssemblyGroup group,
 	                          const ScriptProjectPaths& projects);
 
-	Result<void> GenerateCatalog(const ScriptProjectInput& input, VirtualPath& catalogPath);
+	Result<void> GenerateCatalog(const ScriptProjectInput& input, VirtualPath& catalogPath, bool frameworkOnly = false);
 
 	Result<std::filesystem::path> EnsureToolDirectory(const VirtualPath& directory);
 

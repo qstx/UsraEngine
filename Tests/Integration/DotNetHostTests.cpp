@@ -1,3 +1,4 @@
+#include <tuple>
 #include "DotNetHost/TestSupport.hpp"
 #include <Scripting/ManagedSceneApi.hpp>
 #include <Scripting/Bindings/BindingRequirements.hpp>
@@ -271,6 +272,19 @@ int main(int argumentCount, char** arguments)
 		     {"Version", 1u},
 		     {"ScriptType", "test.presentation-pipeline"},
 		     {"ClrTypeName", "Ursa.Examples.PresentationPipelineAsset, Ursa.SessionFixtures"}});
+		for (const auto& type : Vector<std::tuple<String, String, UInt64, UInt32>>{
+		         {"UniversalRenderPipelineAsset", "ursa.rendering.universal-pipeline", 6973234053898343887ull, 2},
+		         {"UniversalRendererData", "ursa.rendering.universal-renderer-data", 15516842715564576692ull, 1}})
+		{
+			catalog["Scripts"].push_back(
+			    {{"SourceGuid", "c3db9aad-cd0d-4d07-a4dd-4f8a056a7410"},
+			     {"LocalFileId", std::get<2>(type)},
+			     {"Kind", "ScriptableObject"},
+			     {"Group", "Game"},
+			     {"Version", std::get<3>(type)},
+			     {"ScriptType", ToStdString(std::get<1>(type))},
+			     {"ClrTypeName", ToStdString("Ursa.Rendering." + std::get<0>(type) + ", Ursa.Rendering")}});
+		}
 		const auto catalogBytes = JsonBytes(catalog);
 		nlohmann::json content{{"Version", 2u},
 		                       {"RequiredBindings", Bindings::ScriptBindingRequirements(false)},

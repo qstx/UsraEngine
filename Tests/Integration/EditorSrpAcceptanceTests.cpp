@@ -126,7 +126,7 @@ protected:
 	Result<void> OnStart() override
 	{
 		// Includes external capture processes and diagnostic builds in Debug.
-		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(600);
+		deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1200);
 		return EditorApplication::OnStart();
 	}
 
@@ -202,6 +202,12 @@ protected:
 						}
 						return {};
 					}
+					const auto* selected = SelectionState().PrimaryEntry();
+					if (!selected || selected->IsMissing() || selected->assetPath != assetPath)
+					{
+						SelectProjectItem("AcceptancePipeline.ursaasset", "AcceptancePipeline.ursaasset");
+						return {};
+					}
 					guid = Take(Workspace()->Database()->Metadata(assetPath)).guid;
 					Expect(!Asset().Payload()["Fields"]["enabled"].get<bool>(), "Created asset lost its default");
 					SetStartupWindow("Inspector");
@@ -248,14 +254,14 @@ protected:
 					       "Graphics widgets did not apply the created pipeline");
 					FocusPanel("Scene");
 					Capture("03Scene.png");
-					if (!SelectProjectItem("Materials", "Materials"))
+					if (!SelectProjectItem("AcceptanceMaterial.ursamat", "AcceptanceMaterial.ursamat"))
 					{
 						return {};
 					}
 					Next();
 					break;
 				case 11:
-					if (!SelectProjectItem("Materials/Gold.ursamat", "Gold.ursamat"))
+					if (!SelectProjectItem("AcceptanceMaterial.ursamat", "AcceptanceMaterial.ursamat"))
 					{
 						return {};
 					}
@@ -370,7 +376,7 @@ protected:
 					Next();
 					break;
 				case 18:
-					Activate("##Combo_00", "Default Forward");
+					Activate("##Combo_00", "Default Universal");
 					Next();
 					break;
 				case 19:
@@ -379,8 +385,8 @@ protected:
 					break;
 				case 20:
 					Expect(!Take(Rendering::ReadGraphicsSettings(files)).renderPipeline.guid,
-					       "Clearing the Graphics selection did not restore default Forward");
-					Capture("07DefaultForward.png");
+					       "Clearing the Graphics selection did not restore default Universal");
+					Capture("07DefaultUniversal.png");
 					Done(Documents()->SaveCurrent());
 					Next();
 					break;
@@ -598,15 +604,18 @@ private:
 	bool SelectProjectItem(const char* path, const char* label)
 	{
 		auto* projectWindow = ImGui::FindWindowByName("Project");
-		if (projectWindow && projectWindow->Active && projectWindow->DockNode && projectWindow->Size.y < 400)
+		if (projectWindow && projectWindow->DockId)
 		{
-			ImGui::DockBuilderSetNodeSize(projectWindow->DockNode->ID, {projectWindow->Size.x, 450});
-			ImGui::SetScrollY(projectWindow, 0);
+			ImGui::SetWindowDock(projectWindow, 0, ImGuiCond_Always);
+			ImGui::SetWindowPos(projectWindow, {20, 80});
+			ImGui::SetWindowSize(projectWindow, {600, 600});
+			FocusPanel("Project");
 			return false;
 		}
 		for (auto* target : GImGui->Windows)
 		{
-			if (target->Active && std::string(target->Name).find("ProjectFolderContents") != std::string::npos)
+			if (target->Active && std::string(target->Name).find("ProjectFolderContents") != std::string::npos &&
+			    std::string(target->Name).find("ProjectBreadcrumbs") == std::string::npos)
 			{
 				ImGui::FocusWindow(target);
 				const ImGuiID item = ImHashStr(label, 0, ImHashStr(path, 0, target->ID));
@@ -615,7 +624,7 @@ private:
 				return true;
 			}
 		}
-		SetStartupWindow("Project");
+		FocusPanel("Project");
 		return false;
 	}
 
@@ -641,10 +650,15 @@ int main(int count, char** arguments)
 	try
 	{
 		Expect(count == 3, "Expected Demo project and evidence output root");
-		const auto root = std::filesystem::u8path(arguments[2]) / ToStdString(ResourceId::Generate().ToString());
+		const auto root =
+		    std::filesystem::u8path(arguments[2]) / ToStdString(ResourceId::Generate().ToString().substr(0, 8));
 		std::filesystem::create_directories(root);
 		std::filesystem::copy(std::filesystem::u8path(arguments[1]) / "Assets", root / "Assets",
 		                      std::filesystem::copy_options::recursive);
+		// Keep the material row visible without relying on folder navigation or a saved dock layout.
+		std::filesystem::rename(root / "Assets/Materials/Gold.ursamat", root / "Assets/AcceptanceMaterial.ursamat");
+		std::filesystem::rename(root / "Assets/Materials/Gold.ursamat.meta",
+		                        root / "Assets/AcceptanceMaterial.ursamat.meta");
 		std::ofstream(root / "Assets/AcceptancePipeline.cs") << pipelineSource;
 		std::filesystem::create_directories(root / "Assets/Editor");
 		std::ofstream(root / "Assets/Editor/AcceptanceMaterialEditor.cs") << previewSource;

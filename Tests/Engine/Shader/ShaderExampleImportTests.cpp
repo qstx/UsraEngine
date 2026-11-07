@@ -7,7 +7,7 @@
 #include <Core/StringInterop.hpp>
 #include <MeshFixtures.hpp>
 #include <RenderingFixtures.hpp>
-#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
+#include <ManagedRenderingFixtures.hpp>
 #include <Rhi/RHI.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <Serialization/ResourceSession.hpp>
@@ -777,7 +777,7 @@ Array<UInt8, 4> RenderImportedShader(const std::shared_ptr<const ShaderAsset>& s
 	description.validation = true;
 #endif
 	auto device = Take(CreateDevice(description));
-	auto renderer = Take(Rendering::NativeForwardPipeline::Create(device));
+	auto renderer = Take(Ursa::Test::ManagedSceneRenderer::Create(device));
 	Scene scene;
 	auto cameraObject = Take(scene.CreateGameObject("Imported Shader Camera"));
 	LocalTransform cameraTransform;

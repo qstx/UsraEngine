@@ -2,7 +2,6 @@
 #include <Assets/ModelImportScene.hpp>
 #include <Assets/ModelImporter.hpp>
 
-#if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/Bindings/ImportServices.hpp>
 #include <Import.generated.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
@@ -870,4 +869,3 @@ Result<void> RegisterScriptedAssetImporters(ProjectAssetImporter& importer,
 	return {};
 }
 } // namespace Ursa::Editor
-#endif

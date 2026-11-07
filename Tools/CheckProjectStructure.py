@@ -54,7 +54,6 @@ def check(build_dir):
             registered.add(path)
             checked += 1
     editor = 'URSA_BUILD_EDITOR:BOOL=ON' in cache
-    dotnet = 'URSA_ENABLE_DOTNET:BOOL=ON' in cache
     tests = 'URSA_BUILD_TESTS:BOOL=ON' in cache
     for directory in ('Runtime', 'Engine', 'Editor', 'Tools', 'Tests'):
         if (directory == 'Editor' and not editor) or (directory == 'Tests' and not tests):
@@ -65,24 +64,16 @@ def check(build_dir):
             relative = file.relative_to(source_root).as_posix()
             if relative.startswith(('Tools/Python/', 'Tools/TracyMcp/Release/')):
                 continue
-            if not dotnet and relative.startswith('Engine/Scripting/DotNet/'):
-                continue
             if not editor and re.match(r'^Tools/(AssetImport|AssetMigrate|MeshMigrate|ScriptCompile|ScriptPlayer)/', relative):
                 continue
-            if not dotnet and re.match(r'^Tools/(ScriptCompile|ScriptPlayer)/', relative):
-                continue
-            if (not editor or not dotnet) and relative.startswith('Tools/IdeBridge/'):
+            if not editor and relative.startswith('Tools/IdeBridge/'):
                 continue
             if relative.startswith('Tests/'):
-                if not dotnet and relative.startswith(('Tests/Bindings/', 'Tests/Editor/Scripting/')):
-                    continue
                 if not editor and (relative.startswith('Tests/Editor/') or relative == 'Tests/Headers/MaterialInspectorHeaderSmoke.cpp'):
                     continue
                 if relative.startswith('Tests/Integration/'):
-                    if re.match(r'^Tests/Integration/(DotNetHostTests.cpp$|DotNetHost/)', relative):
-                        if not dotnet:
-                            continue
-                    elif not dotnet or not editor or re.search(r'^URSA_PROJECT_DIR:PATH=$', cache, re.M):
+                    host_fixture = re.match(r'^Tests/Integration/(DotNetHostTests.cpp$|DotNetHost/)', relative)
+                    if not host_fixture and (not editor or re.search(r'^URSA_PROJECT_DIR:PATH=$', cache, re.M)):
                         continue
             if file not in registered:
                 raise RuntimeError(f'Unregistered source: {relative}')
@@ -93,7 +84,7 @@ def check(build_dir):
             raise RuntimeError(f'Dependency is misclassified: {name}')
     managed_count = 0
     managed_manifest = build_root / 'Ide/Managed/Projects.json'
-    if dotnet and managed_manifest.is_file():
+    if managed_manifest.is_file():
         for entry in json.loads(managed_manifest.read_text(encoding='utf-8-sig')):
             name = entry['name']
             if name not in projects:

@@ -9,7 +9,7 @@
 | `CMake/` | 依赖、编译策略、.NET 环境及源码/IDE 分组辅助配置 |
 | `Runtime/` | Core、Window、Rhi、Vfs 基础实现 |
 | `Engine/` | 应用、场景、渲染、资源及脚本接口 |
-| `Engine/Scripting/DotNet/` | 可选原生 .NET 宿主，链接 Engine |
+| `Engine/Scripting/DotNet/` | 原生 .NET 宿主，链接 Engine |
 | `Editor/` | 编辑器模块和窗口入口 |
 | `Managed/` | 生产框架与脚本目录生成工具 |
 | `Tools/` | 通用导入、打包、迁移、脚本编译和 Player 程序 |
@@ -18,7 +18,7 @@
 
 头文件与实现位于同一模块目录。生产模块自动发现 `.cpp/.hpp/.h/.inl`，正常构建会检查文件增删。新独立模块需要在所属入口声明目录；可选宿主实现由自己的目标持有，不混入 `UrsaEngine`。
 
-公开目标及别名继续使用 `UrsaRuntime` / `Ursa::Runtime`、`UrsaEngine` / `Ursa::Engine`、`UrsaEditorCore` / `Ursa::Editor`、`UrsaDotNetHost` / `Ursa::DotNetHost`。Runtime 不依赖场景；Engine 不依赖宿主，宿主在启用 .NET 时链接 Engine。
+公开目标及别名继续使用 `UrsaRuntime` / `Ursa::Runtime`、`UrsaEngine` / `Ursa::Engine`、`UrsaEditorCore` / `Ursa::Editor`、`UrsaDotNetHost` / `Ursa::DotNetHost`。Runtime 不依赖场景；Engine 不依赖宿主，宿主固定登记并链接 Engine。
 
 ## Visual Studio 分类
 
@@ -40,7 +40,7 @@ VS2026 工程通过 `DirectoryBuildPropsPath` 显式导入引擎根 `Directory.B
 
 ```powershell
 cmake -S . -B Build -G "Visual Studio 18 2026" -A x64 -T v145 `
-  -DURSA_ENABLE_DOTNET=ON
+
 cmake --build Build --config Debug --parallel --target UrsaEditor UrsaScriptPlayer
 cmake --build Build --config Debug --target UrsaProjectStructureCheck
 ```
@@ -69,7 +69,7 @@ ctest --test-dir Build -C Debug --output-on-failure -R "UrsaProject(Structure|Di
 托管测试直接编译 `Tests/Managed` 下的原始 csproj，引用原始框架和 Docs/Examples；中间产物位于 `<build>/Tests/Managed/Artifacts`，可运行测试位于 `<build>/Tests/Managed/<配置>`。生产程序集仍位于 `<build>/Managed/<配置>`，测试夹具通过独立 `UrsaManagedTestAssemblies` 目标复制 DLL/PDB 到该目录的 `TestScripts`。关闭 `URSA_BUILD_TESTS` 时不构建测试程序集、不添加 CTest 准备步骤。`UrsaManagedSourceSymbolsTests` 校验正式 DLL/PDB 身份、原始源码路径及校验和。
 
 ```powershell
-cmake -S . -B Build/Production -DURSA_BUILD_TESTS=OFF -DURSA_ENABLE_DOTNET=ON
+cmake -S . -B Build/Production -DURSA_BUILD_TESTS=OFF
 cmake --build Build/Production --config Release --parallel --target UrsaEditor UrsaScriptPlayer
 ```
 

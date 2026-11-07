@@ -331,6 +331,11 @@ internal static unsafe partial class Program
 	private static void ManagedRenderPipelineLifecycleTests()
 	{
 		Ursa.Rendering.RenderPipelineManager.Reset();
+		using var defaultRenderer = ScriptableObject.CreateInstance<Ursa.Rendering.UniversalRendererData>();
+		using var defaultAsset = ScriptableObject.CreateInstance<Ursa.Rendering.UniversalRenderPipelineAsset>();
+		defaultAsset.RendererData = defaultRenderer;
+		defaultAsset.MainLightShadowsEnabled = false;
+		ScriptableObjectRegistry.BindAsset(defaultAsset, Ursa.Rendering.RenderPipelineManager.DefaultPipelineReference);
 		var first = Ursa.ScriptableObject.CreateInstance<PipelineProbeAsset>();
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(first);
 		Expect(Ursa.Rendering.RenderPipelineManager.ActivePipeline == null,
@@ -377,17 +382,38 @@ internal static unsafe partial class Program
 		Expect(!previousPipeline.IsDisposed, "Requesting the default pipeline disposed the current instance immediately");
 		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
 		Expect(first.disposals == 2 && previousPipeline.IsDisposed &&
-		       Ursa.Rendering.RenderPipelineManager.ActivePipeline is Ursa.Rendering.ForwardRenderPipeline &&
+		       Ursa.Rendering.RenderPipelineManager.ActivePipeline is Ursa.Rendering.UniversalRenderPipeline &&
 		       Ursa.Rendering.RenderPipelineManager.ActiveAsset == null,
 		       "Replacing the active pipeline did not dispose its previous instance");
+		var defaultPipeline = Ursa.Rendering.RenderPipelineManager.ActivePipeline!;
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+		Expect(ReferenceEquals(defaultPipeline, Ursa.Rendering.RenderPipelineManager.ActivePipeline),
+		       "Unchanged default Universal pipeline was recreated");
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(defaultAsset);
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+		Expect(ReferenceEquals(Ursa.Rendering.RenderPipelineManager.ActiveAsset, defaultAsset),
+		       "Selecting the effective default asset lost the explicit author selection");
+		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(null);
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+		Expect(Ursa.Rendering.RenderPipelineManager.ActiveAsset == null &&
+		       ReferenceEquals(defaultPipeline, Ursa.Rendering.RenderPipelineManager.ActivePipeline),
+		       "Clearing an equivalent selection rebuilt the pipeline or retained an explicit selection");
+		defaultRenderer.ValidateFields();
+		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+		Expect(defaultPipeline.IsDisposed &&
+		       !ReferenceEquals(defaultPipeline, Ursa.Rendering.RenderPipelineManager.ActivePipeline),
+		       "Default RendererData revision did not invalidate the effective pipeline");
 		Ursa.Rendering.RenderPipelineManager.Reset();
 		first.Dispose();
 		second.Dispose();
-		var forward = Ursa.ScriptableObject.CreateInstance<Ursa.Rendering.ForwardRenderPipelineAsset>();
+		using var rendererData = ScriptableObject.CreateInstance<Ursa.Rendering.UniversalRendererData>();
+		var forward = Ursa.ScriptableObject.CreateInstance<Ursa.Rendering.UniversalRenderPipelineAsset>();
+		forward.RendererData = rendererData;
+		forward.MainLightShadowsEnabled = false;
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(forward);
 		Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
-		Expect(Ursa.Rendering.RenderPipelineManager.ActivePipeline is Ursa.Rendering.ForwardRenderPipeline,
-		       "Framework Forward pipeline asset factory returned the wrong pipeline");
+		Expect(Ursa.Rendering.RenderPipelineManager.ActivePipeline is Ursa.Rendering.UniversalRenderPipeline,
+		       "Framework Universal pipeline asset factory returned the wrong pipeline");
 		Ursa.Rendering.RenderPipelineManager.Reset();
 		forward.Dispose();
 		using var switching = ScriptableObject.CreateInstance<PipelineProbeAsset>();
@@ -434,7 +460,7 @@ internal static unsafe partial class Program
 		try { Ursa.Rendering.RenderPipelineManager.Render(cameraList, 1); }
 		catch (InvalidOperationException error) { cameraBeginRejected = error.Message == "camera begin failure probe"; }
 		Expect(cameraBeginRejected && cameraEndEvents == 1,
-		       "Default Forward did not pair its camera end event after a begin-event failure");
+		       "Default Universal did not pair its camera end event after a begin-event failure");
 		Ursa.Rendering.RenderPipelineManager.Reset();
 	}
 
@@ -482,6 +508,26 @@ internal static unsafe partial class Program
 		Ursa.Rendering.RenderPipelineManager.ReleaseSession(editSession);
 		Expect(ScriptableObjectRegistry.ClearSession(editSession).Count == 0 && editPipeline.IsDisposed,
 		       "Editing session close did not release its pipeline and asset");
+		Select(0);
+		Ursa.Rendering.RenderPipeline? previousDefault = null;
+		foreach (ulong session in new[] { 71001ul, 71002ul })
+		{
+			Select(session);
+			var data = ScriptableObject.CreateInstance<Ursa.Rendering.UniversalRendererData>();
+			var asset = ScriptableObject.CreateInstance<Ursa.Rendering.UniversalRenderPipelineAsset>();
+			asset.RendererData = data;
+			asset.MainLightShadowsEnabled = false;
+			ScriptableObjectRegistry.BindAsset(asset, Ursa.Rendering.RenderPipelineManager.DefaultPipelineReference);
+			Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(null);
+			Ursa.Rendering.RenderPipelineManager.ApplyPendingChanges();
+			var pipeline = Ursa.Rendering.RenderPipelineManager.ActivePipeline!;
+			Expect(pipeline is Ursa.Rendering.UniversalRenderPipeline && !ReferenceEquals(previousDefault, pipeline),
+			       "Different sessions shared a default Universal instance");
+			Ursa.Rendering.RenderPipelineManager.ReleaseSession(session);
+			Expect(ScriptableObjectRegistry.ClearSession(session).Count == 0 && pipeline.IsDisposed && !asset.IsValid,
+			       "Default session release retained a pipeline or asset");
+			previousDefault = pipeline;
+		}
 		Select(0);
 	}
 

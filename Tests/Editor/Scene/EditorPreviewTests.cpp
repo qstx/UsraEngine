@@ -1,3 +1,4 @@
+#include <ManagedRenderingFixtures.hpp>
 #include <MeshFixtures.hpp>
 #include <Core/Containers.hpp>
 #include <Core/Types.hpp>
@@ -70,7 +71,12 @@ int main()
 		desc.validation = true;
 #endif
 		auto device = Take(CreateDevice(desc));
-		auto preview = Take(Editor::EditorScenePreview::Create(device));
+		auto renderer = Take(Test::ManagedSceneRenderer::Create(device));
+		Editor::EditorScenePreview::RenderProvider provider =
+		    [&](Scene& source, const std::shared_ptr<Rendering::RenderTextureResource>& output, ResourceState state,
+		        std::optional<Rendering::CameraType> filter, std::optional<Rendering::CameraData> camera)
+		{ return renderer->RenderOffscreen(source, output, state, filter, std::move(camera)); };
+		auto preview = Take(Editor::EditorScenePreview::Create(device, provider));
 		preview->GetCamera().position = {0, 0, 5};
 		preview->GetCamera().target = {0, 0, 0};
 		Scene scene;
@@ -104,7 +110,7 @@ int main()
 		done(scene.SetLocalTransform(cameraNode, cameraTransform));
 		const ComponentId cameraId = Take(scene.AddComponent<CameraComponent>(cameraNode));
 		done(scene.SetActiveCamera(cameraId));
-		auto gamePreview = Take(Editor::EditorScenePreview::Create(device));
+		auto gamePreview = Take(Editor::EditorScenePreview::Create(device, provider));
 		auto gameTarget = Take(Rendering::CreateRenderTexture(*device, {128, 72, UInt32(Format::RgbA8Unorm), 32}));
 		auto sceneTarget = Take(Rendering::CreateRenderTexture(*device, {96, 96, UInt32(Format::RgbA8Unorm), 32}));
 		auto gameColor = gameTarget->color;

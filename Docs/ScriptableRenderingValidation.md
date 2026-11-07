@@ -1,5 +1,8 @@
 # Scriptable Rendering 实施验证记录
 
+> 历史验收记录：本文的托管 ON/OFF 与旧 Forward 结果仅适用于原版本；当前构建及默认管线见 [迁移说明](DotNetAndRenderingMigration.md)。
+
+
 正式帧时、逐区 CPU/GPU 样本、硬件及基线边界见 [性能对比报告](ScriptableRenderingPerformance.md)。每轮的原始 Trace 与完整 JSON 样本留在忽略目录 `Build/SrpPerformanceEvidence/Formal`；独立 Memory/Diagnostics 样本位于 `Build/SrpPerformanceEvidence/Diagnostics-SRP-Snake`。报告将 MaterialShowcase P95 上升、Vulkan GPU 采样范围和旧图片基线的未提交代码差异列为限制。
 
 ## 固定方向光阴影场景与参考映射

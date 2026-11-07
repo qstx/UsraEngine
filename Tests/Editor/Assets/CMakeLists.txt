@@ -59,14 +59,12 @@ if(URSA_BUILD_EDITOR)
   add_test(NAME UrsaAssetPreviewPanelTests COMMAND UrsaAssetPreviewPanelTests
     "${URSA_BINARY_ROOT}/Temp/AssetPreviewEvidence/$<CONFIG>")
   ursa_require_test_content(UrsaAssetPreviewPanelTests UrsaAssetPreviewPanelTests)
-	if(URSA_ENABLE_DOTNET)
 	  target_compile_definitions(UrsaAssetPreviewPanelTests PRIVATE URSA_PREVIEW_MANAGED_OUTPUT="${URSA_MANAGED_OUTPUT_DIR}")
 	  add_dependencies(UrsaAssetPreviewPanelTests UrsaManagedTestAssemblies)
 	  ursa_attach_dotnet_host_runtime(UrsaAssetPreviewPanelTests)
 	  add_test(NAME UrsaManagedAssetPreviewTests COMMAND UrsaAssetPreviewPanelTests
 	    "${URSA_BINARY_ROOT}/Temp/ManagedAssetPreviewEvidence/$<CONFIG>" --managed-only)
 	  ursa_require_test_content(UrsaManagedAssetPreviewTests UrsaAssetPreviewPanelTests)
-	endif()
 
   ursa_add_test_executable(UrsaAssetPreviewStateTests AssetPreviewStateTests.cpp)
   target_link_libraries(UrsaAssetPreviewStateTests PRIVATE Ursa::Editor)

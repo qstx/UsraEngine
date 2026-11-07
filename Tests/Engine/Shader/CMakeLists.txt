@@ -68,3 +68,8 @@ ursa_require_test_content(UrsaShaderReflectionTests UrsaShaderReflectionTests)
 ursa_require_test_content(UrsaShaderExampleImportTests UrsaShaderExampleImportTests)
 
 ursa_finalize_test_directory()
+
+foreach(target IN ITEMS UrsaShaderPackageTests UrsaShaderExampleImportTests)
+  target_link_libraries(${target} PRIVATE Ursa::DotNetHost)
+  ursa_attach_dotnet_host_runtime(${target})
+endforeach()

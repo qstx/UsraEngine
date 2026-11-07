@@ -1,5 +1,8 @@
 # C# Project Integration Verification
 
+> 历史验收记录：本文的托管 ON/OFF 与旧 Forward 结果仅适用于原版本；当前构建及默认管线见 [迁移说明](DotNetAndRenderingMigration.md)。
+
+
 The project integration build uses the Engine CMake entry point:
 
 ```powershell

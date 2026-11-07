@@ -18,6 +18,8 @@ inline constexpr const char* graphicsSettingsRuntime = "prj:__UrsaSettings/Graph
 
 using PipelineAssetValidator = std::function<Result<void>(AssetReference)>;
 
+AssetReference DefaultRenderPipelineReference();
+
 Result<GraphicsSettings> ReadGraphicsSettings(const VirtualFileSystem& files, bool runtime = false);
 Result<Vector<UInt8>> EncodeGraphicsSettings(const GraphicsSettings& settings);
 Result<void> ValidatePipelineAsset(const VirtualFileSystem& files, const ResourceSession::AssetPathResolver& resolver,

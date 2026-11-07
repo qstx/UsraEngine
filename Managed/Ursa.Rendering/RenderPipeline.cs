@@ -48,10 +48,15 @@ public abstract class RenderPipeline : IDisposable
 
 public static class RenderPipelineManager
 {
+	internal static readonly AssetReference DefaultPipelineReference =
+		new("8fa13d6e-ec97-4c98-8611-5f5eebbf377a", 6973234053898343887);
+
 	private sealed class PipelineState
 	{
 		internal readonly ulong session;
 		internal RenderPipelineAsset? activeAsset;
+		internal RenderPipelineAsset? effectiveAsset;
+		internal UniversalRenderPipelineAsset? defaultAsset;
 		internal RenderPipeline? activePipeline;
 		internal RenderPipelineAsset? pendingAsset;
 		internal bool hasPendingSelection;
@@ -152,24 +157,27 @@ public static class RenderPipelineManager
 		if (ImportExecution.Active) throw new InvalidOperationException("Import callbacks cannot create render pipelines.");
 		ScriptableObjectRegistry.RequireThread();
 		if (rendering) throw new InvalidOperationException("Pipeline changes require a render boundary.");
-		RenderPipelineAsset? candidate = hasPendingSelection ? pendingAsset : activeAsset;
-		candidate?.RequireValid();
-		if (activePipeline != null && !activePipeline.IsDisposed && ReferenceEquals(activeAsset, candidate) &&
-			(candidate?.GetConfigurationRevision() ?? 0) == activeRevision)
+		RenderPipelineAsset? selection = hasPendingSelection ? pendingAsset : activeAsset;
+		RenderPipelineAsset candidate = selection ?? (currentState.defaultAsset ??=
+			ScriptableObject.Load<UniversalRenderPipelineAsset>(DefaultPipelineReference));
+		candidate.RequireValid();
+		if (activePipeline != null && !activePipeline.IsDisposed && ReferenceEquals(currentState.effectiveAsset, candidate) &&
+			candidate.GetConfigurationRevision() == activeRevision)
 		{
+			activeAsset = selection;
 			pendingAsset = null;
 			hasPendingSelection = false;
 			return;
 		}
 		pendingAsset = null;
 		hasPendingSelection = false;
-		string candidateLabel = candidate?.GetType().FullName ?? "Default Forward";
-		if (candidate?.AssetReference is AssetReference identity)
+		string candidateLabel = candidate.GetType().FullName!;
+		if (candidate.AssetReference is AssetReference identity)
 			candidateLabel += $" ({identity.Guid}:{identity.LocalFileId})";
 		RenderPipeline next;
 		try
 		{
-			next = candidate?.CreatePipelineInstance() ?? new ForwardRenderPipeline();
+			next = candidate.CreatePipelineInstance();
 			if (next.IsDisposed || ReferenceEquals(next, activePipeline))
 				throw new InvalidOperationException("A pipeline factory must return a new live instance.");
 		}
@@ -178,9 +186,10 @@ public static class RenderPipelineManager
 			throw new InvalidOperationException($"RenderPipelineAsset '{candidateLabel}' CreatePipeline failed.", error);
 		}
 		RenderPipeline? previous = activePipeline;
-		activeAsset = candidate;
+		activeAsset = selection;
+		currentState.effectiveAsset = candidate;
 		activePipeline = next;
-		activeRevision = candidate?.GetConfigurationRevision() ?? 0;
+		activeRevision = candidate.GetConfigurationRevision();
 		previous?.Dispose();
 	}
 
@@ -259,6 +268,8 @@ public static class RenderPipelineManager
 		RenderPipeline? previous = activePipeline;
 		activePipeline = null;
 		activeAsset = null;
+		currentState.effectiveAsset = null;
+		currentState.defaultAsset = null;
 		pendingAsset = null;
 		hasPendingSelection = false;
 		activeRevision = 0;

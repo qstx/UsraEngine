@@ -3,7 +3,6 @@
 #include <Assets/AssetImportRules.hpp>
 #include <Assets/ProjectAssetImporter.hpp>
 
-#if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/DotNet/DotNetHost.hpp>
 
 namespace Ursa::Editor
@@ -18,4 +17,3 @@ Result<void> RegisterScriptedAssetImporters(ProjectAssetImporter& importer,
                                             UInt64 session, ImportDispatcher dispatcher = {},
                                             std::function<UInt64()> generationProvider = {});
 } // namespace Ursa::Editor
-#endif

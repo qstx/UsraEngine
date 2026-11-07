@@ -13,18 +13,14 @@ Result<void> Application::ConfigureFixedStep(Ursa::Float32 seconds, Ursa::UInt32
 
 Result<void> Application::InitializeRenderPipeline()
 {
-	auto created = Rendering::NativeForwardPipeline::Create(device);
-	if (!created)
-	{
-		return Result<void>::Failure(created.error);
-	}
-	sceneRenderer = std::move(created.value);
-	return {};
+	return Result<void>::Failure("Application requires a managed render host or an explicit render provider; "
+	                             "override InitializeRenderPipeline and OnRender");
 }
 
 Result<void> Application::OnRender(Rendering::FrameCapture* capture)
 {
-	return sceneRenderer->Render(*scene, swapchain, capture);
+	(void)capture;
+	return Result<void>::Failure("Application requires a render provider; use the script Player or override OnRender");
 }
 
 Result<void> Application::OnSceneFrame(Float32 elapsedSeconds)
@@ -142,7 +138,6 @@ Result<void> Application::Run(Ursa::UInt32 width, Ursa::UInt32 height, const Str
 		scene->Clear();
 	}
 	OnStop();
-	sceneRenderer.reset();
 	swapchain.reset();
 	device.reset();
 	window.reset();

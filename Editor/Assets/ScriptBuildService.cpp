@@ -3,6 +3,7 @@
 #include <Core/StringInterop.hpp>
 #include <Core/Memory/ContainerAllocator.hpp>
 #include <Scripting/Bindings/BindingRequirements.hpp>
+#include <Vfs/AssetRoots.hpp>
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -245,117 +246,147 @@ ScriptBuildService::Open(VirtualFileSystem& filesystem, AssetDatabase& database,
 	                           std::move(referenceAssemblyDirectory))));
 }
 
-Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input, VirtualPath& catalogPath)
+Result<VirtualPath> ScriptBuildService::GenerateFrameworkCatalog(const String& configuration)
+{
+	selectedConfiguration = configuration;
+	ScriptProjectInput input;
+	VirtualPath output;
+	auto generated = GenerateCatalog(input, output, true);
+	return generated ? Result<VirtualPath>::Success(std::move(output)) : Result<VirtualPath>::Failure(generated.error);
+}
+
+Result<void> ScriptBuildService::GenerateCatalog(const ScriptProjectInput& input, VirtualPath& catalogPath,
+                                                 bool frameworkOnly)
 {
 	const auto sources = input.SourceAssets();
-	const VirtualPath manifestPath =
-	    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Inputs/ScriptCatalog.json").value;
-	const VirtualPath catalogDirectory = VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Catalog").value;
-	auto catalogOutputDirectory = EnsureToolDirectory(catalogDirectory);
-	if (!catalogOutputDirectory)
-	{
-		return Result<void>::Failure(catalogOutputDirectory.error);
-	}
-	const std::filesystem::path catalogOutputPath = catalogOutputDirectory.value / "ScriptTypeCatalog.json";
-	Json manifest = Json::object();
-	const String catalogConfiguration = selectedConfiguration.empty() ? String("Debug") : selectedConfiguration;
-	manifest["RuntimeAssembly"] =
-	    ToStdString(PathToUrsaString(ScriptFrameworkVariant(runtimeAssembly, catalogConfiguration)));
-	manifest["RenderingAssembly"] = ToStdString(PathToUrsaString(
-	    ScriptFrameworkVariant(runtimeAssembly.parent_path() / "Ursa.Rendering.dll", catalogConfiguration)));
-	manifest["EditorAssembly"] =
-	    ToStdString(PathToUrsaString(ScriptFrameworkVariant(editorAssembly, catalogConfiguration)));
-	manifest["Configuration"] = ToStdString(catalogConfiguration);
-#if defined(URSA_ENABLE_TRACY)
-	manifest["ProfilerEnabled"] = catalogConfiguration != "Publish";
-#else
-	manifest["ProfilerEnabled"] = false;
-#endif
-	manifest["ReferenceDirectory"] = ToStdString(PathToUrsaString(referenceAssemblyDirectory));
-	manifest["OutputPath"] = ToStdString(PathToUrsaString(catalogOutputPath));
-	manifest["DiagnosticsPath"] = ToStdString(PathToUrsaString(catalogOutputDirectory.value / "Diagnostics.json"));
-	manifest["LanguageVersion"] = ToStdString(input.languageVersion);
-	manifest["Nullable"] = ToStdString(input.nullable);
-	manifest["BindingsAssembly"] = ToStdString(PathToUrsaString(
-	    ScriptFrameworkVariant(runtimeAssembly.parent_path() / "Ursa.Bindings.dll", catalogConfiguration)));
-	manifest["Sources"] = Json::array();
 	Map<String, Vector<UInt8>> sourceBytes;
-	for (const ScriptSourceAsset& source : sources)
+	if (frameworkOnly)
 	{
-		auto bytes = filesystem.Read(source.path);
-		if (!bytes)
+		const auto directory = ScriptFrameworkVariant(runtimeAssembly, selectedConfiguration).parent_path();
+		const String scheme = EngineFrameworkScheme(selectedConfiguration);
+		if (!filesystem.IsMounted(scheme))
 		{
-			return Result<void>::Failure(bytes.error);
-		}
-		sourceBytes[source.path.ToString()] = std::move(bytes.value);
-		auto nativeSource = filesystem.ResolveForExternalToolInterop(source.path);
-		if (!nativeSource)
-		{
-			return Result<void>::Failure("Script source is not available to the compiler: " + source.path.ToString() +
-			                             ": " + nativeSource.error);
-		}
-		Json sourceRecord = Json::object();
-		sourceRecord["Path"] = ToStdString(PathToUrsaString(nativeSource.value));
-		sourceRecord["VirtualPath"] = ToStdString(source.path.ToString());
-		sourceRecord["Guid"] = ToStdString(source.guid.ToString());
-		sourceRecord["Group"] = source.group == ScriptAssemblyGroup::Editor ? "Editor" : "Game";
-		sourceRecord["Identities"] =
-		    source.identities.empty() ? Json{{"Version", 1u}, {"Types", Json::array()}} : source.identities;
-		manifest["Sources"].push_back(std::move(sourceRecord));
-	}
-	const std::string manifestText = manifest.dump(2);
-	Vector<UInt8> manifestBytes;
-	manifestBytes.reserve(manifestText.size());
-	for (unsigned char character : manifestText)
-	{
-		manifestBytes.push_back(character);
-	}
-	auto savedManifest = filesystem.WriteAtomic(manifestPath, manifestBytes);
-	if (!savedManifest)
-	{
-		return Result<void>::Failure("Cannot write the ScriptCatalog manifest: " + savedManifest.error);
-	}
-	auto nativeManifest = filesystem.ResolveForExternalToolInterop(manifestPath);
-	if (!nativeManifest)
-	{
-		return Result<void>::Failure(nativeManifest.error);
-	}
-	const auto diagnosticsPath =
-	    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Catalog/Diagnostics.json").value;
-	auto previousDiagnostics = filesystem.Exists(diagnosticsPath);
-	if (previousDiagnostics && previousDiagnostics.value)
-	{
-		auto removed = filesystem.Remove(diagnosticsPath);
-		if (!removed)
-		{
-			return Result<void>::Failure(removed.error);
-		}
-	}
-	auto process = RunProcess(dotnetExecutable, {catalogGeneratorAssembly.wstring(), nativeManifest.value.wstring()},
-	                          nativeManifest.value.parent_path());
-	if (!process)
-	{
-		return Result<void>::Failure(process.error);
-	}
-	auto structured = ReadScriptDiagnostics(filesystem, diagnosticsPath, input.sources, "Catalog");
-	if (structured)
-	{
-		diagnosticRecords = std::move(structured.value);
-	}
-	if (process.value.exitCode != 0)
-	{
-		std::string diagnostics = ToStdString(process.value.output);
-		for (const ScriptSourceAsset& source : sources)
-		{
-			auto nativeSource = filesystem.ResolveForExternalToolInterop(source.path);
-			if (nativeSource)
+			auto mounted = filesystem.Mount(scheme, directory, MountAccess::ReadOnly);
+			if (!mounted)
 			{
-				ReplaceAll(diagnostics, nativeSource.value.u8string(), ToStdString(source.path.ToString()));
+				return mounted;
 			}
 		}
-		return Result<void>::Failure("ScriptCatalog generation failed:\n" + ToUrsaString(diagnostics));
+		catalogPath = VirtualPath::Parse(scheme + ":FrameworkTypeCatalog.json").value;
 	}
-	catalogPath = VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Catalog/ScriptTypeCatalog.json").value;
+	else
+	{
+		const VirtualPath manifestPath =
+		    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Inputs/ScriptCatalog.json").value;
+		const VirtualPath catalogDirectory =
+		    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Catalog").value;
+		auto catalogOutputDirectory = EnsureToolDirectory(catalogDirectory);
+		if (!catalogOutputDirectory)
+		{
+			return Result<void>::Failure(catalogOutputDirectory.error);
+		}
+		const std::filesystem::path catalogOutputPath = catalogOutputDirectory.value / "ScriptTypeCatalog.json";
+		Json manifest = Json::object();
+		const String catalogConfiguration = selectedConfiguration.empty() ? String("Debug") : selectedConfiguration;
+		manifest["RuntimeAssembly"] =
+		    ToStdString(PathToUrsaString(ScriptFrameworkVariant(runtimeAssembly, catalogConfiguration)));
+		manifest["RenderingAssembly"] = ToStdString(PathToUrsaString(
+		    ScriptFrameworkVariant(runtimeAssembly.parent_path() / "Ursa.Rendering.dll", catalogConfiguration)));
+		manifest["EditorAssembly"] =
+		    ToStdString(PathToUrsaString(ScriptFrameworkVariant(editorAssembly, catalogConfiguration)));
+		manifest["Configuration"] = ToStdString(catalogConfiguration);
+#if defined(URSA_ENABLE_TRACY)
+		manifest["ProfilerEnabled"] = catalogConfiguration != "Publish";
+#else
+		manifest["ProfilerEnabled"] = false;
+#endif
+		manifest["ReferenceDirectory"] = ToStdString(PathToUrsaString(referenceAssemblyDirectory));
+		manifest["OutputPath"] = ToStdString(PathToUrsaString(catalogOutputPath));
+		manifest["DiagnosticsPath"] = ToStdString(PathToUrsaString(catalogOutputDirectory.value / "Diagnostics.json"));
+		manifest["LanguageVersion"] = ToStdString(input.languageVersion);
+		manifest["Nullable"] = ToStdString(input.nullable);
+		manifest["BindingsAssembly"] = ToStdString(PathToUrsaString(
+		    ScriptFrameworkVariant(runtimeAssembly.parent_path() / "Ursa.Bindings.dll", catalogConfiguration)));
+		manifest["Sources"] = Json::array();
+		for (const ScriptSourceAsset& source : sources)
+		{
+			auto bytes = filesystem.Read(source.path);
+			if (!bytes)
+			{
+				return Result<void>::Failure(bytes.error);
+			}
+			sourceBytes[source.path.ToString()] = std::move(bytes.value);
+			auto nativeSource = filesystem.ResolveForExternalToolInterop(source.path);
+			if (!nativeSource)
+			{
+				return Result<void>::Failure("Script source is not available to the compiler: " +
+				                             source.path.ToString() + ": " + nativeSource.error);
+			}
+			Json sourceRecord = Json::object();
+			sourceRecord["Path"] = ToStdString(PathToUrsaString(nativeSource.value));
+			sourceRecord["VirtualPath"] = ToStdString(source.path.ToString());
+			sourceRecord["Guid"] = ToStdString(source.guid.ToString());
+			sourceRecord["Group"] = source.group == ScriptAssemblyGroup::Editor ? "Editor" : "Game";
+			sourceRecord["Identities"] =
+			    source.identities.empty() ? Json{{"Version", 1u}, {"Types", Json::array()}} : source.identities;
+			manifest["Sources"].push_back(std::move(sourceRecord));
+		}
+		const std::string manifestText = manifest.dump(2);
+		Vector<UInt8> manifestBytes;
+		manifestBytes.reserve(manifestText.size());
+		for (unsigned char character : manifestText)
+		{
+			manifestBytes.push_back(character);
+		}
+		auto savedManifest = filesystem.WriteAtomic(manifestPath, manifestBytes);
+		if (!savedManifest)
+		{
+			return Result<void>::Failure("Cannot write the ScriptCatalog manifest: " + savedManifest.error);
+		}
+		auto nativeManifest = filesystem.ResolveForExternalToolInterop(manifestPath);
+		if (!nativeManifest)
+		{
+			return Result<void>::Failure(nativeManifest.error);
+		}
+		const auto diagnosticsPath =
+		    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Catalog/Diagnostics.json").value;
+		auto previousDiagnostics = filesystem.Exists(diagnosticsPath);
+		if (previousDiagnostics && previousDiagnostics.value)
+		{
+			auto removed = filesystem.Remove(diagnosticsPath);
+			if (!removed)
+			{
+				return Result<void>::Failure(removed.error);
+			}
+		}
+		auto process =
+		    RunProcess(dotnetExecutable, {catalogGeneratorAssembly.wstring(), nativeManifest.value.wstring()},
+		               nativeManifest.value.parent_path());
+		if (!process)
+		{
+			return Result<void>::Failure(process.error);
+		}
+		auto structured = ReadScriptDiagnostics(filesystem, diagnosticsPath, input.sources, "Catalog");
+		if (structured)
+		{
+			diagnosticRecords = std::move(structured.value);
+		}
+		if (process.value.exitCode != 0)
+		{
+			std::string diagnostics = ToStdString(process.value.output);
+			for (const ScriptSourceAsset& source : sources)
+			{
+				auto nativeSource = filesystem.ResolveForExternalToolInterop(source.path);
+				if (nativeSource)
+				{
+					ReplaceAll(diagnostics, nativeSource.value.u8string(), ToStdString(source.path.ToString()));
+				}
+			}
+			return Result<void>::Failure("ScriptCatalog generation failed:\n" + ToUrsaString(diagnostics));
+		}
+		catalogPath =
+		    VirtualPath::Parse(String(editorLibraryScheme) + ":ScriptBuild/Catalog/ScriptTypeCatalog.json").value;
+	}
 	auto catalogText = filesystem.ReadText(catalogPath);
 	if (!catalogText)
 	{
@@ -762,6 +793,14 @@ Result<bool> ScriptBuildService::IsBuildCurrent(ScriptAssemblyGroup group, const
 	}
 	if (database.ScriptSources().empty())
 	{
+		if (scriptTypes.empty())
+		{
+			auto catalog = GenerateFrameworkCatalog(configuration);
+			if (!catalog)
+			{
+				return Result<bool>::Failure(catalog.error);
+			}
+		}
 		return Result<bool>::Success(true);
 	}
 	generatedProjects.gameAssembly =
@@ -803,9 +842,18 @@ Result<bool> ScriptBuildService::IsBuildCurrent(ScriptAssemblyGroup group, const
 		{
 			return Result<bool>::Success(false);
 		}
-		return Result<bool>::Success(document.value("fingerprint", std::string{}) == ToStdString(fingerprint.value) &&
-		                             content.value("BuildFingerprint", std::string{}) ==
-		                                 ToStdString(fingerprint.value));
+		const bool current = document.value("fingerprint", std::string{}) == ToStdString(fingerprint.value) &&
+		                     content.value("BuildFingerprint", std::string{}) == ToStdString(fingerprint.value);
+		if (current && scriptTypes.empty())
+		{
+			selectedConfiguration = configuration;
+			auto projects = GenerateProjects();
+			if (!projects)
+			{
+				return Result<bool>::Failure(projects.error);
+			}
+		}
+		return Result<bool>::Success(current);
 	}
 	catch (const std::exception&)
 	{

@@ -15,9 +15,7 @@
 #if defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
 #include <Assets/AssetDatabase.hpp>
 #include <Assets/AssetImportPipeline.hpp>
-#if defined(URSA_ENABLE_DOTNET)
 #include <Assets/ScriptBuildService.hpp>
-#endif
 #endif
 
 namespace
@@ -86,7 +84,7 @@ String ContentFingerprint(const Vector<UInt8>& bytes)
 	return ToUrsaString(output.str());
 }
 
-#if defined(URSA_ENABLE_DOTNET) && defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
+#if defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
 Result<void> StageManagedPlayer(VirtualFileSystem& source, VirtualFileSystem& package, const String& configuration)
 {
 	if (!HasScriptSources(source))
@@ -543,7 +541,7 @@ int main(int argc, char** argv)
 			return 1;
 		}
 	}
-#if defined(URSA_ENABLE_DOTNET) && defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
+#if defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
 	auto stagedEngine = std::make_shared<MemoryFileProvider>();
 	VirtualFileSystem stagedFiles;
 	auto mountedEngine = stagedFiles.MountProvider(engineScheme, stagedEngine, MountAccess::ReadWrite);
@@ -604,7 +602,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 #endif
-#if defined(URSA_ENABLE_DOTNET) && defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
+#if defined(URSA_HAS_EDITOR_ASSET_PIPELINE)
 	auto managed = StageManagedPlayer(source, packageSource, scriptConfiguration);
 	if (!managed)
 	{

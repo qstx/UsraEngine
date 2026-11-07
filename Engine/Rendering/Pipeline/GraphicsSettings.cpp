@@ -18,6 +18,11 @@ Result<void> ValidateIdentity(const GraphicsSettings& settings)
 }
 } // namespace
 
+AssetReference DefaultRenderPipelineReference()
+{
+	return {ResourceId::Parse("8fa13d6e-ec97-4c98-8611-5f5eebbf377a").value, 6973234053898343887ull};
+}
+
 Result<Vector<UInt8>> EncodeGraphicsSettings(const GraphicsSettings& settings)
 {
 	auto valid = ValidateIdentity(settings);
@@ -163,8 +168,12 @@ Result<void> ValidatePipelineAsset(const VirtualFileSystem& files, const Resourc
 	    payload["SourceGuid"].get<std::string>() != ToStdString(type->sourceGuid.ToString()) ||
 	    payload["LocalFileId"].get<UInt64>() != type->localFileId)
 	{
-		return Result<void>::Failure("Graphics selection requires a current Game RenderPipelineAsset: " +
-		                             path.value.ToString());
+		const String catalogIdentity =
+		    type == types.end() ? String("missing type")
+		                        : type->sourceGuid.ToString() + ":" + ToUrsaString(std::to_string(type->localFileId));
+		return Result<void>::Failure(
+		    "Graphics selection requires a current Game RenderPipelineAsset: " + path.value.ToString() + "; type " +
+		    asset.value.TypeId() + "; catalog " + catalogIdentity);
 	}
 	return {};
 }

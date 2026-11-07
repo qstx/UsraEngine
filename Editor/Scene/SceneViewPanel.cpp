@@ -107,12 +107,6 @@ Result<void> ClearViewportColor(const Rhi::DevicePtr& device,
 	return ended ? Result<void>{} : Result<void>::Failure(ended.error);
 }
 
-bool ManagedRenderServicesUnavailable(const String& error)
-{
-	return error == "Editing render services are unavailable" ||
-	       error == "Project pipeline viewports require the .NET rendering host";
-}
-
 Vec4 Transform(const Mat4& matrix, Vec4 vector)
 {
 	const Float32 input[] = {vector.x, vector.y, vector.z, vector.w};
@@ -4257,10 +4251,6 @@ Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play,
 		camera.debugName = "Scene View";
 		auto rendered = renderViewport(scene, sceneTarget.output, Rendering::CameraType::SceneView,
 		                               std::optional<Rendering::CameraData>{std::move(camera)});
-		if (!rendered && ManagedRenderServicesUnavailable(rendered.error))
-		{
-			rendered = sceneTarget.preview->Render(scene, sceneTarget.output);
-		}
 		if (!rendered)
 		{
 			return Result<void>::Failure("Scene viewport render failed: " + rendered.error);
@@ -4291,10 +4281,6 @@ Result<void> SceneViewPanel::RenderPending(SceneDraft& draft, PlaySession& play,
 			return Result<void>::Failure("Game viewport has no active render pipeline or target");
 		}
 		auto rendered = renderViewport(scene, gameTarget.output, Rendering::CameraType::Game, {});
-		if (!rendered && ManagedRenderServicesUnavailable(rendered.error))
-		{
-			rendered = gameTarget.preview->RenderGame(scene, gameTarget.output);
-		}
 		if (!rendered)
 		{
 			return Result<void>::Failure("Game viewport render failed: " + rendered.error);

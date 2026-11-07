@@ -5,7 +5,6 @@
 #include <Rhi/RHI.hpp>
 #include <Application/SceneFrameRunner.hpp>
 #include <Scene/Scene.hpp>
-#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
 
 namespace Ursa
 {
@@ -63,7 +62,6 @@ protected:
 private:
 	Rendering::FrameCapture frameCapture;
 	SceneFrameRunner sceneFrameRunner;
-	std::unique_ptr<Rendering::NativeForwardPipeline> sceneRenderer;
 	bool restartFrameClock = false;
 };
 } // namespace Ursa

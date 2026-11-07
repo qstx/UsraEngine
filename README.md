@@ -23,7 +23,7 @@ For the Editor's menus, default layout, Project browser, Inspector, and Console,
 
 ## Scriptable rendering
 
-With `URSA_ENABLE_DOTNET=ON`, projects define complete rendering flows in C# by deriving `RenderPipelineAsset` and `RenderPipeline`. The public `Ursa.Rendering` API exposes camera setup, culling, RendererList, command buffers, render textures, compute kernels and logical submission. Native `Engine/Rendering` executes those commands and manages frame slots, state transitions, uploads and GPU resource lifetime. `Engine/ScriptableAssets` and `Ursa.Runtime` provide persistent `.ursaasset` configuration and resource references. RenderGraph is reserved for a later change.
+Projects define complete rendering flows in C# by deriving `RenderPipelineAsset` and `RenderPipeline`. The public `Ursa.Rendering` API exposes camera setup, culling, RendererList, command buffers, render textures, compute kernels and logical submission. Native `Engine/Rendering` executes those commands and manages frame slots, state transitions, uploads and GPU resource lifetime. `Engine/ScriptableAssets` and `Ursa.Runtime` provide persistent `.ursaasset` configuration and resource references. RenderGraph is reserved for a later change.
 
 In UrsaEditor, create project assets through CreateAssetMenu, edit and save them in Inspector, then select one in `Window > Project Graphics Settings`. Scene, Game and Material Preview render through the selected pipeline. The selection is stored by stable GUID and local asset identity in `ProjectSettings/Graphics.json`; clearing it selects the default Forward pipeline. Failed candidate factories preserve the previous valid editing configuration. Play sessions bind their Scene/resource API before creating the selected pipeline and own their runtime resources until Stop.
 
@@ -162,14 +162,14 @@ Click **Run** on a scene to clone the current effective edit scene in memory, in
 
 The ImGui platform bridge forwards key and modifier state and uses the window's UTF-8 system clipboard callbacks. Editor text fields support Ctrl+C, Ctrl+X, and Ctrl+V with the Windows clipboard.
 
-The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). For the C# Demo project, configure Engine with `-DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=../Demo`, build the `UrsaEditor`, `UrsaScriptPlayer`, `UrsaScriptCompile`, and `UrsaPak` targets, and launch the generic Editor with `UrsaEditor --project ../Demo --scene Snake/Snake.ursascene`. The generic Editor accepts a project root and an optional scene path relative to `Assets/`. `--hidden --frames 3` runs a short window smoke test. The docked workspace provides Hierarchy, Scene, Inspector, and Project panels, with Run/Stop in the top bar.
+The Editor is enabled by default (`-DURSA_BUILD_EDITOR=ON`). For the C# Demo project, configure Engine with `-DURSA_PROJECT_DIR=../Demo`, build the `UrsaEditor`, `UrsaScriptPlayer`, `UrsaScriptCompile`, and `UrsaPak` targets, and launch the generic Editor with `UrsaEditor --project ../Demo --scene Snake/Snake.ursascene`. The generic Editor accepts a project root and an optional scene path relative to `Assets/`. `--hidden --frames 3` runs a short window smoke test. The docked workspace provides Hierarchy, Scene, Inspector, and Project panels, with Run/Stop in the top bar.
 
 ### C# project workflow
 
 在工作区根目录配置并构建 Demo：
 
 ```powershell
-cmake -S Engine -B Engine/Build -DURSA_ENABLE_DOTNET=ON -DURSA_PROJECT_DIR=Demo
+cmake -S Engine -B Engine/Build -DURSA_PROJECT_DIR=Demo
 cmake --build Engine/Build --parallel --config Debug --target UrsaEditor UrsaScriptPlayer UrsaAssetImport UrsaPak
 Engine/Build/Editor/Debug/UrsaAssetImport.exe --project Demo --configuration Debug
 ctest --test-dir Engine/Build -C Debug --output-on-failure -R 'Ursa(Project|Snake)'
@@ -435,3 +435,5 @@ See [scene lifecycle and frame scheduling](Docs/SceneLifecycle.md) for GameObjec
 ## CPU 内存分配
 
 参见 [内存分配系统](Docs/Memory.md)，了解持久小块复用、线程临时作用域、类别统计、自定义 C++ 类型工厂及容器适配器。VMA 的 GPU 内存和 .NET 托管内存保留各自的分配机制。
+
+C# is always available. Projects without an explicit pipeline use Default Universal. See [build and rendering migration](Docs/DotNetAndRenderingMigration.md) for retired options, cached builds and old Forward assets.

@@ -1,7 +1,6 @@
 #include <Scripting/ManagedEditorBridge.hpp>
 #include <Assets/AssetPreviewExtension.hpp>
 
-#if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/Bindings/EditorServices.hpp>
 #include <Editor.generated.hpp>
 #include <imgui.h>
@@ -151,4 +150,3 @@ Result<Scripting::ManagedPreviewResult> InvokeManagedEditorPreview(Scripting::Do
 	}
 }
 } // namespace Ursa::Editor
-#endif

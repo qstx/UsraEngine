@@ -69,12 +69,7 @@ int wmain(int argumentCount, wchar_t** arguments)
 		const String info = idleEditor.ScriptDebugInfo();
 		Expect(info.find("Project: None") != String::npos && ExternalScriptEditor::ProcessId() != 0,
 		       "Idle debug information does not identify the current process");
-#if defined(URSA_ENABLE_DOTNET)
 		Expect(info.find("CoreCLR: not initialized") != String::npos, "Idle host was reported as initialized");
-#else
-		Expect(info.find("CoreCLR: disabled") != String::npos && !idleEditor.OpenCSharpProject(),
-		       "Native-only Editor exposes a working managed project action");
-#endif
 		std::filesystem::create_directories(root / "Assets");
 		ScriptIdeWorkspace workspace{root / "Library/ScriptIDE/Ursa.Scripts.sln",
 		                             root / "Library/ScriptIDE/Ursa.Scripts.code-workspace", root};

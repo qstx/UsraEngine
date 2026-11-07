@@ -54,14 +54,11 @@ else()
   target_compile_options(UrsaEditorCore PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-if(URSA_ENABLE_DOTNET)
-    target_link_libraries(UrsaEditorCore PRIVATE Ursa::DotNetHost)
-    add_dependencies(UrsaEditorCore UrsaManagedScriptCatalog UrsaManagedDeepProfiler)
-    target_compile_definitions(UrsaEditorCore PUBLIC
-      URSA_ENABLE_DOTNET=1
-      URSA_DOTNET_EXECUTABLE_PATH="${URSA_DOTNET_EXECUTABLE}"
-      URSA_DOTNET_RUNTIME_ASSEMBLY_PATH="${URSA_MANAGED_OUTPUT_DIR}/Ursa.Runtime.dll"
-      URSA_DOTNET_EDITOR_ASSEMBLY_PATH="${URSA_MANAGED_OUTPUT_DIR}/Ursa.Editor.dll"
-      URSA_DOTNET_CATALOG_GENERATOR_PATH="${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.ScriptCatalogGenerator.dll"
-      URSA_DOTNET_REFERENCE_PACK_PATH="${URSA_DOTNET_REFERENCE_PACK}")
-endif()
+  target_link_libraries(UrsaEditorCore PRIVATE Ursa::DotNetHost)
+  add_dependencies(UrsaEditorCore UrsaManagedScriptCatalog UrsaManagedDeepProfiler)
+  target_compile_definitions(UrsaEditorCore PUBLIC
+    URSA_DOTNET_EXECUTABLE_PATH="${URSA_DOTNET_EXECUTABLE}"
+    URSA_DOTNET_RUNTIME_ASSEMBLY_PATH="${URSA_MANAGED_OUTPUT_DIR}/Ursa.Runtime.dll"
+    URSA_DOTNET_EDITOR_ASSEMBLY_PATH="${URSA_MANAGED_OUTPUT_DIR}/Ursa.Editor.dll"
+    URSA_DOTNET_CATALOG_GENERATOR_PATH="${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.ScriptCatalogGenerator.dll"
+    URSA_DOTNET_REFERENCE_PACK_PATH="${URSA_DOTNET_REFERENCE_PACK}")

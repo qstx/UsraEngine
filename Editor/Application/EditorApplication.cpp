@@ -22,11 +22,9 @@
 #include <Serialization/PrefabAsset.hpp>
 #include <Inspector/SceneInspectorPanel.hpp>
 #include <Inspector/ReferencePicker.hpp>
-#if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/DotNet/DotNetHost.hpp>
 #include <Scripting/ManagedSceneApi.hpp>
 #include <Scripting/DotNet/ManagedScriptRuntime.hpp>
-#endif
 #include <Scripting/ScriptBehaviourComponent.hpp>
 #include <Core/StringInterop.hpp>
 #include <Core/Log.hpp>
@@ -56,7 +54,6 @@ Float32 EditorToolbarHeight(Float32 width)
 	return width < 180.f ? 112.f : width < 300.f ? 76.f : 44.f;
 }
 
-#if defined(URSA_ENABLE_DOTNET)
 struct ManagedEditingSessionState
 {
 	std::unique_ptr<ResourceSession> resources;
@@ -99,7 +96,6 @@ struct ManagedPlaySessionState
 		sceneApi.reset();
 	}
 };
-#endif
 
 Result<VirtualPath> ProjectAssetPath(const char* input)
 {
@@ -190,7 +186,6 @@ EditorApplication::~EditorApplication()
 	FinishScriptJobs();
 	play.Stop();
 	assetPreview.reset();
-#if defined(URSA_ENABLE_DOTNET)
 	if (managedHost && editingScriptSession)
 	{
 		auto closed = managedHost->CloseScriptSession(editingScriptSession);
@@ -200,7 +195,6 @@ EditorApplication::~EditorApplication()
 		}
 	}
 	editingScriptServices.reset();
-#endif
 }
 
 void EditorApplication::FinishScriptJobs()
@@ -234,7 +228,6 @@ void EditorApplication::FinishScriptJobs()
 
 Result<void> EditorApplication::EnsureManagedHost()
 {
-#if defined(URSA_ENABLE_DOTNET)
 	if (managedHost)
 	{
 		return managedHost->IsSessionFaulted() ? Result<void>::Failure("脚本环境卸载失败，请重启编辑器")
@@ -274,9 +267,6 @@ Result<void> EditorApplication::EnsureManagedHost()
 	}
 	managedHost = std::shared_ptr<Scripting::DotNetHost>(std::move(host.value));
 	return managedHost->LoadEditorApi(path("ursa:Ursa.Editor.dll"));
-#else
-	return Result<void>::Failure("This build does not enable .NET scripting");
-#endif
 }
 
 Result<bool> EditorApplication::DrawAssetExtension(ManagedEditorContext& context)
@@ -298,7 +288,6 @@ Result<bool> EditorApplication::DrawAssetExtension(ManagedEditorContext& context
 	{
 		return Result<bool>::Success(false);
 	}
-#if defined(URSA_ENABLE_DOTNET)
 	if (!managedHost || !editingScriptSession || managedHost->IsSessionFaulted())
 	{
 		return Result<bool>::Failure("The registered asset Inspector's editing session is unavailable");
@@ -314,15 +303,11 @@ Result<bool> EditorApplication::DrawAssetExtension(ManagedEditorContext& context
 	}
 	const auto invoked = InvokeManagedEditorExtension(*managedHost, editingScriptSession, found->id, context);
 	return invoked ? Result<bool>::Success(true) : Result<bool>::Failure(invoked.error);
-#else
-	return Result<bool>::Failure("The registered asset Inspector requires .NET support");
-#endif
 }
 
 void EditorApplication::ConfigureAssetPreview(ManagedEditorContext& context)
 {
 	ConfigureReferencePreviewFactory(context);
-#if defined(URSA_ENABLE_DOTNET)
 	if (!assetPreview || !managedHost || !editingScriptSession || managedHost->IsSessionFaulted())
 	{
 		return;
@@ -348,14 +333,10 @@ void EditorApplication::ConfigureAssetPreview(ManagedEditorContext& context)
 		                : Result<Scripting::ManagedPreviewResult>::Failure("Preview script environment is closed");
 	    },
 	    context);
-#else
-	(void)context;
-#endif
 }
 
 void EditorApplication::ConfigureReferencePreviewFactory(ManagedEditorContext& context)
 {
-#if defined(URSA_ENABLE_DOTNET)
 	context.createReferencePreview =
 	    [this](const AssetPreviewTarget& target) -> Result<std::shared_ptr<AssetPreviewExtension>>
 	{
@@ -514,9 +495,6 @@ void EditorApplication::ConfigureReferencePreviewFactory(ManagedEditorContext& c
 		}
 		return Result<std::shared_ptr<AssetPreviewExtension>>::Success(std::move(extension));
 	};
-#else
-	(void)context;
-#endif
 }
 
 bool EditorApplication::BeforeImporterSelection(const EditorSelectionContext& next)
@@ -645,7 +623,6 @@ void EditorApplication::DrawImporterSelectionPrompt()
 
 Result<void> EditorApplication::ReloadEditorScripts()
 {
-#if defined(URSA_ENABLE_DOTNET)
 	if (HasActiveReferencePickerSession(gui ? gui->Context() : nullptr))
 	{
 		RequestCancelReferencePickerSessions(gui ? gui->Context() : nullptr,
@@ -874,9 +851,6 @@ Result<void> EditorApplication::ReloadEditorScripts()
 	}
 	previousServices.reset();
 	return managedHost->SelectScriptSession(editingScriptSession);
-#else
-	return {};
-#endif
 }
 
 Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
@@ -1009,7 +983,6 @@ Result<void> EditorApplication::OpenEditorAsset(const VirtualPath& path)
 
 Result<bool> EditorApplication::InvokeEditorTool(const ManagedExtensionDescriptor& descriptor)
 {
-#if defined(URSA_ENABLE_DOTNET)
 	if (!managedHost || !editingScriptSession)
 	{
 		return Result<bool>::Failure("No editing script session is available");
@@ -1062,10 +1035,6 @@ Result<bool> EditorApplication::InvokeEditorTool(const ManagedExtensionDescripto
 		}
 	}
 	return InvokeManagedEditorExtension(*managedHost, editingScriptSession, descriptor.id, context);
-#else
-	(void)descriptor;
-	return Result<bool>::Failure("This build does not enable .NET scripting");
-#endif
 }
 
 void EditorApplication::DrawManagedMenus(const String& root)
@@ -1296,7 +1265,6 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	pendingImporterSelection.reset();
 	assetInspectorPanel.Reset();
 	shaderImportView.reset();
-#if defined(URSA_ENABLE_DOTNET)
 	if (managedHost && editingScriptSession)
 	{
 		auto closed = managedHost->CloseScriptSession(editingScriptSession);
@@ -1307,7 +1275,6 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 			return closed;
 		}
 	}
-#endif
 	if (project)
 	{
 		for (const auto& fallback : managedEditorFallbacks)
@@ -1359,12 +1326,10 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	{
 		return browserRefreshed;
 	}
-#if defined(URSA_ENABLE_DOTNET)
 	if (managedHost)
 	{
 		managedHost->SetFilesystem(workspace->ContentFiles());
 	}
-#endif
 	scriptCheckJob = {};
 	ideGenerationRequested = false;
 	ideOpenRequested = false;
@@ -1374,7 +1339,6 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 	observedScriptSources.clear();
 	scriptBuildService.reset();
 	scriptAssetDatabase.reset();
-#if defined(URSA_ENABLE_DOTNET)
 	if (package.empty() && workspace->Database())
 	{
 		auto scriptDatabase = AssetDatabase::Open(workspace->Database()->Filesystem());
@@ -1402,7 +1366,6 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 			scriptBuildStatus = scriptDatabase.error;
 		}
 	}
-#endif
 	activeEditorTool.clear();
 	workspaceError.clear();
 	URSA_LOG_INFO("Editor", "Opened project " + PathToUrsaString(workspace->ProjectRoot()));
@@ -1411,7 +1374,6 @@ Result<void> EditorApplication::OpenProject(const std::filesystem::path& root, c
 
 Result<void> EditorApplication::CompileScripts()
 {
-#if defined(URSA_ENABLE_DOTNET)
 	if (!scriptBuildService || play.Active() || ScriptWorkPending())
 	{
 		return Result<void>::Failure("Script compilation requires an idle editing project");
@@ -1421,9 +1383,6 @@ Result<void> EditorApplication::CompileScripts()
 	scriptBuildJob = std::async(std::launch::async, [service] { return service->Build(ScriptAssemblyGroup::Editor); });
 	scriptBuildStatus = "正在编译脚本……";
 	return {};
-#else
-	return Result<void>::Failure("This build does not enable .NET scripting");
-#endif
 }
 
 String EditorApplication::MainWindowTitle() const
@@ -3698,7 +3657,6 @@ Result<void> EditorApplication::ApplyGraphicsSettings(AssetReference pipeline)
 			return valid;
 		}
 	}
-#if defined(URSA_ENABLE_DOTNET)
 	if (!managedHost || !editingScriptSession || !scriptBuildService)
 	{
 		return Result<void>::Failure("Reload the project scripts before applying Graphics settings");
@@ -3706,7 +3664,7 @@ Result<void> EditorApplication::ApplyGraphicsSettings(AssetReference pipeline)
 	auto configured = managedHost->ConfigureRenderPipeline(editingScriptSession, pipeline);
 	if (!configured)
 	{
-		String label = "Default Forward";
+		String label = "Default Universal";
 		if (pipeline.guid)
 		{
 			auto path = workspace->Database()->SourcePath(pipeline.guid);
@@ -3714,12 +3672,6 @@ Result<void> EditorApplication::ApplyGraphicsSettings(AssetReference pipeline)
 		}
 		return Result<void>::Failure("Render pipeline candidate " + label + " failed: " + configured.error);
 	}
-#else
-	if (pipeline.guid)
-	{
-		return Result<void>::Failure("This Editor build cannot run project C# render pipelines");
-	}
-#endif
 	auto saved = Rendering::SaveGraphicsSettings(files, {pipeline},
 	                                             [&](AssetReference candidate)
 	                                             {
@@ -3729,13 +3681,11 @@ Result<void> EditorApplication::ApplyGraphicsSettings(AssetReference pipeline)
 	                                             });
 	if (!saved)
 	{
-#if defined(URSA_ENABLE_DOTNET)
 		auto restored = managedHost->ConfigureRenderPipeline(editingScriptSession, previous.value.renderPipeline);
 		if (!restored)
 		{
 			return Result<void>::Failure(saved.error + "; previous pipeline could not be restored: " + restored.error);
 		}
-#endif
 		return saved;
 	}
 	graphicsSettingsCandidate = pipeline;
@@ -3753,7 +3703,6 @@ Result<void> EditorApplication::RenderManagedViewport(Scene& renderScene,
                                                       std::optional<Rendering::CameraData> cameraOverride,
                                                       Vector<ResourceId> excludedObjects)
 {
-#if defined(URSA_ENABLE_DOTNET)
 	if (!target || !target->description.width || !target->description.height)
 	{
 		return Result<void>::Failure("Managed viewport needs a valid output target");
@@ -3811,14 +3760,6 @@ Result<void> EditorApplication::RenderManagedViewport(Scene& renderScene,
 	stableApi->SetRenderCameraSelection({});
 	stableApi->SetRenderOutput(nullptr);
 	return rendered;
-#else
-	(void)renderScene;
-	(void)target;
-	(void)cameraFilter;
-	(void)cameraOverride;
-	(void)excludedObjects;
-	return Result<void>::Failure("Project pipeline viewports require the .NET rendering host");
-#endif
 }
 
 void EditorApplication::DrawGraphicsSettings()
@@ -3865,7 +3806,7 @@ void EditorApplication::DrawGraphicsSettings()
 		}
 	}
 	ImGui::TextUnformatted("Default Render Pipeline");
-	String selectedLabel = "Default Forward";
+	String selectedLabel = "Default Universal";
 	if (graphicsSettingsCandidate.guid)
 	{
 		selectedLabel = "Missing or invalid pipeline " + graphicsSettingsCandidate.guid.ToString() + ":" +
@@ -3881,7 +3822,7 @@ void EditorApplication::DrawGraphicsSettings()
 	}
 	if (ImGui::BeginCombo("##DefaultRenderPipeline", selectedLabel.c_str()))
 	{
-		if (ImGui::Selectable("Default Forward", !graphicsSettingsCandidate.guid))
+		if (ImGui::Selectable("Default Universal", !graphicsSettingsCandidate.guid))
 		{
 			graphicsSettingsCandidate = {};
 		}
@@ -4341,14 +4282,6 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 		else
 		{
 			bool scriptsReady = true;
-#if !defined(URSA_ENABLE_DOTNET)
-			if (selectedDocument && selectedDocument->Payload<SceneDraft>() &&
-			    HasManagedScriptComponent(selectedDocument->Payload<SceneDraft>()->GetScene()))
-			{
-				scriptsReady = false;
-				scriptBuildStatus = "当前构建未启用 .NET 脚本，场景中的脚本数据已保留；启用脚本支持后才能进入 Run。";
-			}
-#endif
 			PlayContextSetup playSetup = project->playContextSetup;
 			if (scriptBuildService)
 			{
@@ -4368,7 +4301,6 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 					pendingRunDocument = selectedDocument->Id();
 					scriptBuildStatus = "正在编译最新脚本，成功后进入 Run……";
 				}
-#if defined(URSA_ENABLE_DOTNET)
 				if (scriptsReady && scriptAssetDatabase)
 				{
 					Vector<ScriptSourceAsset> sources = scriptAssetDatabase->ScriptSources();
@@ -4490,7 +4422,6 @@ void EditorApplication::DrawPlayToolbar(const EditorDocument* current)
 						}
 					}
 				}
-#endif
 			}
 			auto draft = scriptsReady ? selectedDocument->Payload<SceneDraft>() : nullptr;
 			if (draft)
@@ -6275,7 +6206,6 @@ Result<void> EditorApplication::OnGui()
 Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<ManagedExtensionDescriptor>* extensions,
                                                              UInt64 sessionId)
 {
-#if defined(URSA_ENABLE_DOTNET)
 	if (!scriptBuildService || !project)
 	{
 		return {};
@@ -6552,10 +6482,6 @@ Result<void> EditorApplication::RegisterScriptComponentTypes(const Vector<Manage
 	project->componentEditors = std::move(candidateEditors);
 	project->components = std::move(candidateRegistry);
 	registeredScriptComponentTypes = std::move(currentTypes);
-#else
-	(void)extensions;
-	(void)sessionId;
-#endif
 	return {};
 }
 
@@ -6742,12 +6668,10 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 				return assigned;
 			}
 			ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(workspace->ContentFiles()));
-#if defined(URSA_ENABLE_DOTNET)
 			if (managedHost)
 			{
 				managedHost->SetFilesystem(workspace->ContentFiles());
 			}
-#endif
 			auto refreshed = documents->RefreshResources();
 			if (!refreshed)
 			{
@@ -6929,7 +6853,6 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 			const auto physical = FrameInput::Capture(*playWindow);
 			FrameInput input = SelectPlayInput(physical, viewportFocused, editorInputCaptured);
 			Result<void> ticked;
-#if defined(URSA_ENABLE_DOTNET)
 			auto services = std::static_pointer_cast<ManagedPlaySessionState>(play.ServiceOwner());
 			const auto layout = sceneViewPanel ? sceneViewPanel->GameLayout() : ViewportLayout{};
 			const bool drawable = layout.visible && layout.targetPixels.width && layout.targetPixels.height;
@@ -7125,9 +7048,6 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 					ticked = play.Tick(deltaSeconds, playWindow, input);
 				}
 			}
-#else
-			ticked = play.Tick(deltaSeconds, playWindow, input);
-#endif
 			if (!ticked)
 			{
 				inspectorError = ticked.error;
@@ -7255,7 +7175,6 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 	}
 	textureImportView.reset();
 	modelImportView.reset();
-#if defined(URSA_ENABLE_DOTNET)
 	if (managedHost && editingScriptSession)
 	{
 		auto closed = managedHost->CloseScriptSession(editingScriptSession);
@@ -7266,7 +7185,6 @@ Result<void> EditorApplication::Run(Ursa::UInt32 width, Ursa::UInt32 height, con
 		editingScriptSession = 0;
 	}
 	editingScriptServices.reset();
-#endif
 	scriptBuildService.reset();
 	scriptAssetDatabase.reset();
 	if (assetImporterInspector)
@@ -7484,20 +7402,16 @@ void EditorApplication::FinishAssetJobs()
 			if (ready)
 			{
 				ConfigureEngineFileSystem(std::make_shared<VirtualFileSystem>(workspace->ContentFiles()));
-#if defined(URSA_ENABLE_DOTNET)
 				if (managedHost)
 				{
 					managedHost->SetFilesystem(workspace->ContentFiles());
 				}
-#endif
 				ready = documents->RefreshResources();
-#if defined(URSA_ENABLE_DOTNET)
 				if (ready && editingScriptServices)
 				{
 					auto services = std::static_pointer_cast<ManagedEditingSessionState>(editingScriptServices);
 					ready = services->resources->ReloadImportedResources(workspace->ContentFiles());
 				}
-#endif
 				if (ready)
 				{
 					ready = gui->ReloadShaders();
@@ -7511,12 +7425,10 @@ void EditorApplication::FinishAssetJobs()
 			{
 				assetPreview->Reload();
 			}
-#if defined(URSA_ENABLE_DOTNET)
 			if (managedHost)
 			{
 				managedHost->SetFilesystem(workspace->ContentFiles());
 			}
-#endif
 			assetImportStatus = ready ? String("Assets are up to date") : ready.error;
 			workspaceError = ready ? String{} : ready.error;
 			if (!ready)

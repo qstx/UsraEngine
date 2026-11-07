@@ -82,6 +82,16 @@ int main()
 		Text(sources, Path("ursa:Icons/Editor/EditorIcons.png"), "raw PNG payload");
 		Text(sources, Path("ursa:Icons/Editor/EditorIcons.json"), "icon UV manifest");
 		Text(sources, Path("ursa:Icons/Editor/Unused.svg"), "maintenance-only vector source");
+		VirtualFileSystem frameworkAssets;
+		Done(frameworkAssets.Mount(engineScheme, URSA_TEST_ENGINE_SOURCE, MountAccess::ReadOnly));
+		for (const char* relative :
+		     {"Rendering.meta", "Rendering/DefaultUniversalPipeline.ursaasset",
+		      "Rendering/DefaultUniversalPipeline.ursaasset.meta", "Rendering/DefaultUniversalRenderer.ursaasset",
+		      "Rendering/DefaultUniversalRenderer.ursaasset.meta"})
+		{
+			const auto path = Take(VirtualPath::Parse(String("ursa:") + relative));
+			Done(sources.WriteAtomic(path, Take(frameworkAssets.Read(path))));
+		}
 		sources = {};
 		Done(sources.MountProvider(engineScheme, builtin, MountAccess::ReadOnly));
 		Done(sources.MountProvider(projectScheme, std::make_shared<MemoryFileProvider>(), MountAccess::ReadWrite));
@@ -126,7 +136,8 @@ int main()
 		const auto player = Take(AssetImportPipeline::Prepare(*workspace, iconOptions));
 		Expect(!Take(player.runtimeFiles.Exists(Path("ursa:Icons/Editor/EditorIcons.png"))),
 		       "Player content unexpectedly includes Editor icon resources");
-		Expect(first.importedAssets == 4, "Cold import did not prepare builtin and native project assets");
+		Expect(first.importedAssets == 6,
+		       "Cold import did not prepare builtin, default pipeline and native project assets");
 		const auto materialImport = Take(workspace->Database()->CurrentImport(Path("prj:Color.ursamat")));
 		Expect(materialImport.target ==
 		           "native-v1/material-migration-v" + ToUrsaString(std::to_string(materialMigrationVersion)),
@@ -141,7 +152,7 @@ int main()
 		Expect(oldMaterial->Texture(MaterialTextureSlot::BaseColor)->GetPixels()[0] == 255,
 		       "Native asset reference did not resolve");
 		auto repeated = Take(AssetImportPipeline::Prepare(*workspace, options));
-		Expect(repeated.importedAssets == 0 && repeated.cacheHits == 4, "Warm import missed cache");
+		Expect(repeated.importedAssets == 0 && repeated.cacheHits == 6, "Warm import missed cache");
 		auto lease = Take(sources.AcquireExclusiveLease(Path("lib:Import.lock")));
 		Expect(!AssetImportPipeline::Prepare(*workspace, options), "Concurrent writer was accepted");
 		lease.reset();
@@ -194,8 +205,9 @@ int main()
 		const auto package = Take(output.Read(Path("out:Content.pak")));
 		Done(PakBuilder::Build(updated.runtimeFiles, {engineScheme, projectScheme}, output, Path("out:Content.pak")));
 		Expect(package == Take(output.Read(Path("out:Content.pak"))), "Prepared content package was not deterministic");
-		const auto scriptableRoot = std::filesystem::current_path() / "ScriptableImportTest" /
-		                            ("UrsaScriptableImport-" + ToStdString(ResourceId::Generate().ToString()));
+		// Keep atomic artifact temporary paths below Windows MAX_PATH in long build roots.
+		const auto scriptableRoot =
+		    std::filesystem::temp_directory_path() / ("SImport-" + ToStdString(ResourceId::Generate().ToString()));
 		std::filesystem::create_directories(scriptableRoot);
 		std::filesystem::create_directories(scriptableRoot / "Assets");
 
@@ -227,8 +239,7 @@ int main()
 		     "using Ursa; using Ursa.Rendering; namespace Demo; "
 		     "public sealed class RenderSettings : RenderPipelineAsset { public Shader shader = null!; "
 		     "public Material material = null!; public int quality = 3; public int[] weights = new[] { 1, 2 }; "
-		     "protected override RenderPipeline CreatePipeline() => new "
-		     "ForwardRenderPipeline(); } "
+		     "protected override RenderPipeline CreatePipeline() => throw new System.NotSupportedException(); } "
 		     "public sealed class OtherSettings : ScriptableObject {}\n");
 		const auto shaderPath = Path("prj:Shaders/Dependency.ursashader");
 		const String shaderSource = "Shader \"Tests/Dependency\" { SubShader { Pass { HLSLPROGRAM\n"

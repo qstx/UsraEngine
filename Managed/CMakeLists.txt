@@ -94,17 +94,32 @@ add_custom_target(UrsaManagedHostAssemblies DEPENDS "${URSA_MANAGED_OUTPUT_DIR}/
   SOURCES ${managedSources})
 ursa_source_groups(UrsaManagedHostAssemblies "Managed")
 
+set(frameworkCatalogInput "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/FrameworkCatalogInput.json")
+file(GENERATE OUTPUT "${frameworkCatalogInput}" CONTENT "{
+  \"RuntimeAssembly\": \"${URSA_MANAGED_OUTPUT_DIR}/Ursa.Runtime.dll\",
+  \"RenderingAssembly\": \"${URSA_MANAGED_OUTPUT_DIR}/Ursa.Rendering.dll\",
+  \"EditorAssembly\": \"${URSA_MANAGED_OUTPUT_DIR}/Ursa.Editor.dll\",
+  \"BindingsAssembly\": \"${URSA_MANAGED_OUTPUT_DIR}/Ursa.Bindings.dll\",
+  \"ReferenceDirectory\": \"${URSA_DOTNET_REFERENCE_PACK}\",
+  \"OutputPath\": \"${URSA_MANAGED_OUTPUT_DIR}/FrameworkTypeCatalog.json\",
+  \"Configuration\": \"$<CONFIG>\",
+  \"Sources\": []
+}")
 add_custom_command(OUTPUT "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Built.stamp"
+  "${URSA_MANAGED_OUTPUT_DIR}/FrameworkTypeCatalog.json"
   "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.ScriptCatalogGenerator.dll"
   "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.ScriptCatalogGenerator.pdb"
   COMMAND "${URSA_DOTNET_EXECUTABLE}" build "${CMAKE_CURRENT_SOURCE_DIR}/Ursa.ScriptCatalogGenerator/Ursa.ScriptCatalogGenerator.csproj"
     --artifacts-path "${URSA_MANAGED_ARTIFACTS_ROOT}"
     --configuration "$<CONFIG>" --output "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>" --nologo -m:1 ${URSA_MANAGED_WARNING_FLAGS}
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>"
+  COMMAND "${URSA_DOTNET_EXECUTABLE}" "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Ursa.ScriptCatalogGenerator.dll"
+    "${frameworkCatalogInput}"
   COMMAND "${CMAKE_COMMAND}" -E touch "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Built.stamp"
-  DEPENDS UrsaManagedHostAssemblies ${managedSources} "${managedSourceList}"
+  DEPENDS UrsaManagedHostAssemblies ${managedSources} "${managedSourceList}" "${frameworkCatalogInput}"
   VERBATIM)
-add_custom_target(UrsaManagedScriptCatalog DEPENDS "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Built.stamp")
+add_custom_target(UrsaManagedScriptCatalog DEPENDS "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/Built.stamp"
+  "${URSA_MANAGED_OUTPUT_DIR}/FrameworkTypeCatalog.json")
 set_target_properties(UrsaManagedScriptCatalog PROPERTIES FOLDER "Managed/Tools")
 
 add_custom_command(OUTPUT "${URSA_BINARY_ROOT}/Managed/Tools/$<CONFIG>/DeepProfiler.stamp"

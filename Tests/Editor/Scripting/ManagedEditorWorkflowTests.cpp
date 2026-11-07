@@ -674,8 +674,8 @@ int main()
 {
 	try
 	{
-		const auto root = std::filesystem::temp_directory_path() /
-		                  ("ManagedEditorWorkflow-" + ToStdString(ResourceId::Generate().ToString()));
+		const auto root =
+		    std::filesystem::temp_directory_path() / ("MWorkflow-" + ToStdString(ResourceId::Generate().ToString()));
 		std::filesystem::create_directories(root / "Assets");
 		std::ofstream(root / "Assets" / "Probe.cs") << source;
 		std::filesystem::create_directories(root / "Assets" / "Editor");

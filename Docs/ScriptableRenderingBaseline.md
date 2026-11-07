@@ -1,5 +1,8 @@
 # SRP 迁移基线（2026-10-13）
 
+> 历史验收记录：本文的托管 ON/OFF 与旧 Forward 结果仅适用于原版本；当前构建及默认管线见 [迁移说明](DotNetAndRenderingMigration.md)。
+
+
 本报告对应 OpenSpec `scriptable-render-pipeline` 任务 1.1。画面仍由旧
 `Renderer3D` 主入口生成，包含工作区已完成的 RHI/快照基础改动；它是本工作区继续
 迁移的起点，不能称为完全未修改的旧版本。Engine HEAD 为

@@ -50,7 +50,6 @@ Vector<String> ParseArguments(const char* text)
 Result<void> EditorApplication::OpenCSharpProject(const VirtualPath& source, UInt32 line, UInt32 column,
                                                   bool openEditor)
 {
-#if defined(URSA_ENABLE_DOTNET)
 	if (!scriptBuildService)
 	{
 		return Result<void>::Failure("Open a loose project with .NET scripting enabled first");
@@ -70,13 +69,6 @@ Result<void> EditorApplication::OpenCSharpProject(const VirtualPath& source, UIn
 	ideSourceColumn = column;
 	scriptIdeStatus = "等待同步 C# 工程……";
 	return {};
-#else
-	(void)source;
-	(void)line;
-	(void)column;
-	(void)openEditor;
-	return Result<void>::Failure("This build does not enable .NET scripting");
-#endif
 }
 
 Result<void> EditorApplication::OpenScriptDiagnostic(Size index)
@@ -189,7 +181,6 @@ void EditorApplication::PumpScriptIde()
 		ideOpenRequested = false;
 		ideSource = {};
 	}
-#if defined(URSA_ENABLE_DOTNET)
 	if (ideGenerationRequested && scriptBuildService && !scriptBuildJob.valid() && !scriptCheckJob.valid() &&
 	    !scriptIdeJob.valid() && !assetScanJob.valid() &&
 	    (!assetImportJob.valid() || assetImportJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready))
@@ -199,7 +190,6 @@ void EditorApplication::PumpScriptIde()
 		ScriptBuildService* service = scriptBuildService.get();
 		scriptIdeJob = std::async(std::launch::async, [service] { return service->GenerateIdeProjects(); });
 	}
-#endif
 }
 
 void EditorApplication::DrawExternalTools()
@@ -312,7 +302,6 @@ String EditorApplication::ScriptDebugInfo() const
 {
 	String info = "Editor PID: " + ToUrsaString(std::to_string(ExternalScriptEditor::ProcessId())) + "\n";
 	info += "Project: " + (workspace ? PathToUrsaString(workspace->ProjectRoot()) : String("None")) + "\n";
-#if defined(URSA_ENABLE_DOTNET)
 	info += managedHost ? "CoreCLR: initialized\n" : "CoreCLR: not initialized; compile valid scripts first\n";
 	info += "Editor script session: " + ToUrsaString(std::to_string(editingScriptSession)) + "\n";
 	info += "Editor script build: Debug, Portable PDB\n";
@@ -329,9 +318,6 @@ String EditorApplication::ScriptDebugInfo() const
 	        "editor extension.\n"
 	        "After Stop and recompilation, use current symbols. If the debugger retains an old session, detach and "
 	        "follow the reload diagnostic before reattaching.";
-#else
-	info += "CoreCLR: disabled in this build; enable URSA_ENABLE_DOTNET for script editing and debugging.";
-#endif
 	return info;
 }
 } // namespace Ursa::Editor

@@ -3,18 +3,17 @@
 
 namespace Ursa::Editor
 {
-Result<std::unique_ptr<EditorScenePreview>> EditorScenePreview::Create(Rhi::DevicePtr device)
+Result<std::unique_ptr<EditorScenePreview>> EditorScenePreview::Create(Rhi::DevicePtr device, RenderProvider provider)
 {
 	if (!device)
 	{
 		return Result<std::unique_ptr<EditorScenePreview>>::Failure("Editor preview requires a render device");
 	}
 	return Result<std::unique_ptr<EditorScenePreview>>::Success(
-	    std::unique_ptr<EditorScenePreview>(new EditorScenePreview(std::move(device))));
+	    std::unique_ptr<EditorScenePreview>(new EditorScenePreview(std::move(provider))));
 }
 
-Result<void> EditorScenePreview::Render(const Scene& scene,
-                                        const std::shared_ptr<Rendering::RenderTextureResource>& target,
+Result<void> EditorScenePreview::Render(Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
                                         Rhi::ResourceState finalState)
 {
 	if (!target || !target->description.width || !target->description.height)
@@ -23,12 +22,7 @@ Result<void> EditorScenePreview::Render(const Scene& scene,
 	}
 	if (!renderer)
 	{
-		auto created = Rendering::NativeForwardPipeline::Create(device);
-		if (!created)
-		{
-			return Result<void>::Failure(created.error);
-		}
-		renderer = std::move(created.value);
+		return Result<void>::Failure("Editor preview requires the current SRP render provider");
 	}
 	Rendering::CameraData data;
 	data.identity = cameraIdentity;
@@ -43,10 +37,10 @@ Result<void> EditorScenePreview::Render(const Scene& scene,
 	data.nearPlane = camera.nearPlane;
 	data.farPlane = camera.farPlane;
 	data.orthographic = camera.orthographic;
-	return renderer->RenderOffscreen(scene, target, finalState, Rendering::CameraType::SceneView, data);
+	return renderer(scene, target, finalState, Rendering::CameraType::SceneView, data);
 }
 
-Result<void> EditorScenePreview::RenderGame(const Scene& scene,
+Result<void> EditorScenePreview::RenderGame(Scene& scene,
                                             const std::shared_ptr<Rendering::RenderTextureResource>& target,
                                             Rhi::ResourceState finalState)
 {
@@ -56,13 +50,8 @@ Result<void> EditorScenePreview::RenderGame(const Scene& scene,
 	}
 	if (!renderer)
 	{
-		auto created = Rendering::NativeForwardPipeline::Create(device);
-		if (!created)
-		{
-			return Result<void>::Failure(created.error);
-		}
-		renderer = std::move(created.value);
+		return Result<void>::Failure("Game preview requires the current SRP render provider");
 	}
-	return renderer->RenderOffscreen(scene, target, finalState, Rendering::CameraType::Game);
+	return renderer(scene, target, finalState, Rendering::CameraType::Game, {});
 }
 } // namespace Ursa::Editor

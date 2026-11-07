@@ -8,7 +8,7 @@ function(ursa_include_csharp_project name path guid folder)
 endfunction()
 
 function(ursa_configure_ide_workspace)
-  if(NOT URSA_ENABLE_DOTNET OR NOT CMAKE_GENERATOR STREQUAL "Visual Studio 18 2026")
+  if(NOT CMAKE_GENERATOR STREQUAL "Visual Studio 18 2026")
     return()
   endif()
   include("${URSA_SOURCE_ROOT}/CMake/WorkspacePython.cmake")

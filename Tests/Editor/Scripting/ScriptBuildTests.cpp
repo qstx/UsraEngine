@@ -186,7 +186,7 @@ int main(int argumentCount, char** arguments)
 		       "IDE generation required a successful first Game build");
 		auto projects = service.value->GenerateProjects();
 		Expect(static_cast<bool>(projects), "ScriptBuild did not generate its projects");
-		Expect(service.value->ScriptTypes().size() == 9,
+		Expect(service.value->ScriptTypes().size() == 8,
 		       "Script catalog missed project types or the built-in rendering asset types");
 		const auto findType = [&service](const char* id) -> ScriptTypeRecord
 		{
@@ -334,6 +334,16 @@ int main(int argumentCount, char** arguments)
 		auto currentGameBuild = service.value->IsBuildCurrent(ScriptAssemblyGroup::Game);
 		Expect(currentGameBuild && currentGameBuild.value,
 		       "ScriptBuild did not recognize an assembly built from the current script inputs");
+		auto reopenedService =
+		    ScriptBuildService::Open(filesystem, *database.value, std::filesystem::u8path(arguments[1]),
+		                             framework / "Ursa.Runtime.dll", framework / "Ursa.Editor.dll",
+		                             std::filesystem::u8path(arguments[4]), std::filesystem::u8path(arguments[5]));
+		Expect(reopenedService && reopenedService.value->ScriptTypes().empty(),
+		       "Reopened build service did not start with an independent catalog");
+		auto reopenedCurrent = reopenedService.value->IsBuildCurrent(ScriptAssemblyGroup::Game);
+		Expect(reopenedCurrent && reopenedCurrent.value &&
+		           reopenedService.value->ScriptTypes().size() == service.value->ScriptTypes().size(),
+		       "Reusing a current Game build left the pipeline type catalog unavailable");
 		auto cachedBuild = service.value->Build(ScriptAssemblyGroup::Editor);
 		Expect(cachedBuild && cachedBuild.value.succeeded &&
 		           cachedBuild.value.diagnostics.find("up to date") != String::npos,
@@ -519,18 +529,28 @@ int main(int argumentCount, char** arguments)
 		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/InvalidMenu.cs.meta"))) &&
 		           static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()),
 		       "Script catalog did not recover after invalid CreateAssetMenu removal");
+		WriteSource(assets / "Scripts" / "RetiredForward.cs",
+		            "using Ursa.Rendering; public class RetiredForward : ForwardRenderPipelineAsset {}\n");
+		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase missed retired Forward fixture");
+		auto retired = service.value->GenerateProjects();
+		Expect(!retired && retired.error.find("ForwardRenderPipelineAsset") != String::npos,
+		       "Removed Forward API did not produce a source compilation diagnostic");
+		Expect(static_cast<bool>(filesystem.Remove(Path("prj:Scripts/RetiredForward.cs"))) &&
+		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/RetiredForward.cs.meta"))) &&
+		           static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()),
+		       "Script catalog did not recover after retired Forward source removal");
 		WriteSource(assets / "Scripts" / "ForwardCollision.cs", "using Ursa; namespace DemoScripts; "
 		                                                        "public sealed class ForwardCollision : "
 		                                                        "ScriptableObject {}\n");
 		Expect(static_cast<bool>(database.value->Refresh()), "AssetDatabase missed the framework identity collision");
 		SetIdentity(*database.value, Path("prj:Scripts/ForwardCollision.cs"), "DemoScripts.ForwardCollision",
-		            "ursa.rendering.forward", 1, 51007, true);
+		            "ursa.rendering.universal-pipeline", 2, 51007, true);
 		auto reservedIdentity = service.value->GenerateProjects();
 		Expect(!reservedIdentity &&
-		           reservedIdentity.error.find("framework type Ursa.Rendering.ForwardRenderPipelineAsset") !=
+		           reservedIdentity.error.find("framework type Ursa.Rendering.UniversalRenderPipelineAsset") !=
 		               String::npos &&
 		           reservedIdentity.error.find("ForwardCollision") != String::npos,
-		       "Project ScriptableObject was allowed to shadow the stable Forward pipeline type identity");
+		       "Project ScriptableObject was allowed to shadow the stable Universal pipeline type identity");
 		Expect(static_cast<bool>(filesystem.Remove(Path("prj:Scripts/ForwardCollision.cs"))) &&
 		           static_cast<bool>(filesystem.Remove(Path("prj:Scripts/ForwardCollision.cs.meta"))) &&
 		           static_cast<bool>(database.value->Refresh()) && static_cast<bool>(service.value->GenerateProjects()),

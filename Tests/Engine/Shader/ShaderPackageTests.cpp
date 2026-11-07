@@ -1,5 +1,5 @@
 #include <Core/StringInterop.hpp>
-#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
+#include <ManagedRenderingFixtures.hpp>
 #include <Scene/RenderingComponents.hpp>
 #include <MeshFixtures.hpp>
 #include <Serialization/ResourceSession.hpp>
@@ -182,7 +182,7 @@ int main()
 		description.validation = true;
 #endif
 		auto device = Take(CreateDevice(description));
-		auto renderer = Take(Rendering::NativeForwardPipeline::Create(device));
+		auto renderer = Take(Ursa::Test::ManagedSceneRenderer::Create(device));
 		auto material = std::make_shared<MaterialInstance>(MaterialType::Unlit);
 		Done(material->SetShaderAsset(shader));
 		Done(material->SetPropertyValue("_BaseColor", *shader,

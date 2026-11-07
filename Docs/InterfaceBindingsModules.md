@@ -23,24 +23,12 @@ cmake --build Engine/Build --config Release --target UrsaBindingsTests UrsaBindi
 ctest --test-dir Engine/Build -C Release -R '^UrsaBindings(Signature|Generator)?Tests$|^UrsaBindingSnapshotTests$' --output-on-failure
 ```
 
-更改声明、被引用共享值或生成规则后，先更新快照，再编译框架。ON 构建的 `UrsaBindingsGenerated` 输出位于 `Build/Bindings/<Configuration>`；框架目标依赖快照漂移检查。快照只包含生成的原生头、模块清单和输出所有权索引，位于 `Engine/Scripting/Bindings/Generated`，不手工编辑或执行 clang-format。
+更改声明、被引用共享值或生成规则后，先更新快照，再编译框架。固定构建的 `UrsaBindingsGenerated` 输出位于 `Build/Bindings/<Configuration>`；框架目标依赖快照漂移检查。快照只包含生成的原生头、模块清单和输出所有权索引，位于 `Engine/Scripting/Bindings/Generated`，不手工编辑或执行 clang-format。
 
-OFF 构建包含随源码提供的快照，ON 构建包含构建树的输出。`BindingModules.cpp` 在两种模式都编译生成的表和布局断言；两份头不会成为重复编译单元。快照更新使用 `--native-only`，同样支持 `--check` 和删除旧模块时清理旧输出。
+构建使用构建树的绑定输出，并对随源码提供的快照执行漂移校验。`BindingModules.cpp` 在构建中编译生成的表和布局断言；两份头不会成为重复编译单元。快照更新使用 `--native-only`，同样支持 `--check` 和删除旧模块时清理旧输出。
 
-包含 RecordedCommand 的模块另有 `<Module>.Commands.generated.hpp` 和 `<Module>.Commands.g.cs`。命令字段及其共享类型闭包参与 CommandHash，普通 ABI 仍使用模块 Hash；新增普通方法不会单独改变未变动的批次契约。框架在生成之后收集命令 partial，首次构建不依赖已经存在的文件；删除最后一个命令会清理对应产物。OFF 同样直接编译 native 命令快照，不运行 SDK。
+包含 RecordedCommand 的模块另有 `<Module>.Commands.generated.hpp` 和 `<Module>.Commands.g.cs`。命令字段及其共享类型闭包参与 CommandHash，普通 ABI 仍使用模块 Hash；新增普通方法不会单独改变未变动的批次契约。框架在生成之后收集命令 partial，首次构建不依赖已经存在的文件；删除最后一个命令会清理对应产物。根配置及绑定生成要求规定的 SDK。
 
 可以删除构建树中 Bindings、BindingTools、暂存 Managed 和其输出后重新构建；源快照保留在版本管理中。错误声明不会发布混合产物，也不会把上一份输出作为本次成功生成的证据。共享字段即使大小相同，类型变更仍改变指纹；此时检查失败应重新生成并连同源码一起提交。
 
-关闭托管的干净构建示例：
-
-```powershell
-cmake -S Engine -B Engine/Build/BindingsNativeOnly -DURSA_ENABLE_DOTNET=OFF -DURSA_BUILD_EDITOR=OFF -DURSA_BUILD_TESTS=ON -DURSA_PROJECT_DIR=
-cmake --build Engine/Build/BindingsNativeOnly --config Release --target UrsaBindingSnapshotTests -- /m:1 /nodeReuse:false
-ctest --test-dir Engine/Build/BindingsNativeOnly -C Release -R '^UrsaBindingSnapshotTests$' --output-on-failure
-```
-
-该路径不建立生成器或托管目标，也不查找 SDK。验收时同时从 PATH 中移除 dotnet，确认原生构建不会隐式依赖本机安装。
-
-ManagedHost 的 21 个反向方法全部由 ManagedHost.bindings.cs 声明：行为、会话、内容/程序集、资产转移、管线、重载与 Editor 扩展。Editor 目录返回 EditorExtensionInfo[]；准备和调用不再注册独立 hostfxr 方法。EditorBindingCapability 只在框架之间传递模块描述和上下文 token；项目仅获得 EditorReference。回调安装临时 Editor 模块后不重复选择会话，退出时撤销。
-
-生成输出还包含不引用业务头的 `BindingManifest.generated.hpp`。ScriptBuild 使用其中的模块身份构建指纹并生成 Version 2 内容清单的 RequiredBindings；AssetImport 与宿主均核对要求。Game 清单没有 Editor 项，Editor 清单才加入临时模块。C# 加载器在装载项目程序集之前再次对照已注册框架模块，避免只在第一次真实调用时才发现契约错误。
+固定构建及旧缓存的迁移步骤见 [迁移说明](DotNetAndRenderingMigration.md)。快照检查继续使用 `UrsaCheckBindingsSnapshot`，不会改写文件。

@@ -145,8 +145,8 @@ public sealed class ScriptableRenderer
 	};
 	private readonly FilteringSettings opaqueFiltering = new() { MaximumQueue = 2500 };
 	private readonly FilteringSettings transparentFiltering = new() { MinimumQueue = 2501 };
-	private readonly ProfilingSampler opaqueSampler = new("Universal Opaques");
-	private readonly ProfilingSampler transparentSampler = new("Universal Transparents");
+	private readonly ProfilingSampler opaqueSampler = new("Draw Opaque");
+	private readonly ProfilingSampler transparentSampler = new("Draw Transparent");
 	private readonly ProfilingSampler shadowSampler = new("Main Light Shadows");
 	private readonly ProfilingSampler postProcessingSampler = new("Post Processing");
 	private readonly ProfilingSampler finalOutputSampler = new("Final Output");
@@ -757,11 +757,13 @@ public sealed class ScriptableRenderer
 
 	private sealed class ClearCameraPass : ScriptableRenderPass
 	{
+		private static readonly ProfilingSampler clearSampler = new("Clear");
 		private readonly Camera camera;
 		internal ClearCameraPass(Camera camera) { this.camera = camera; RenderPassEvent = RenderPassEvent.BeforeRendering; }
 		public override void Execute(ScriptableRenderContext context, Camera camera, CommandBuffer commands)
 		{
 			if (this.camera.ClearFlags == CameraClearFlags.Nothing) return;
+			using var clearScope = new ProfilingScope(commands, clearSampler);
 			Color background = this.camera.Background;
 			commands.ClearTarget(this.camera.ClearFlags == CameraClearFlags.ColorAndDepth, true, false,
 				new Vector4(background.R, background.G, background.B, background.A));

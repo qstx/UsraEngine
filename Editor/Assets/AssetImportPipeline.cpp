@@ -56,6 +56,7 @@ bool BootstrapAsset(const AssetRecord& asset)
 	        asset.path.relative.rfind("Shaders/Runtime/", 0) == 0 ||
 	        asset.path.relative.rfind("Shaders/Universal/", 0) == 0 ||
 	        asset.path.relative.rfind("Shaders/Internal/", 0) == 0 ||
+	        asset.path.relative.rfind("Rendering/DefaultUniversal", 0) == 0 ||
 	        asset.path.relative.rfind("Fonts/Editor/", 0) == 0 || asset.path.relative.rfind("Fonts/Runtime/", 0) == 0 ||
 	        asset.path.relative.rfind("Icons/Editor/", 0) == 0);
 }
@@ -267,9 +268,9 @@ void ValidateResourceClosure(const VirtualFileSystem& files, const RuntimeConten
 	}
 }
 
-void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& options, RuntimeContentSnapshot& snapshot)
+void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& options, RuntimeContentSnapshot& snapshot,
+                       const VirtualPath& frameworkCatalog)
 {
-#if defined(URSA_ENABLE_DOTNET)
 	auto& files = workspace.Index().Filesystem();
 	const auto frameworkRoot = std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path().parent_path() /
 	                           ToStdString(options.configuration);
@@ -297,8 +298,28 @@ void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& op
 		}
 		snapshot.inputs.push_back(Take(CaptureRuntimeContentInput(files, source)));
 	}
-	if (options.bootstrapOnly || !workspace.Database() || workspace.Database()->ScriptSources().empty())
+	AddEntry(snapshot, files, Path("ursa:Managed/FrameworkTypeCatalog.json"),
+	         StoreBlob(files, Take(files.Read(frameworkCatalog)), ".catalog"));
+	if (options.bootstrapOnly || !workspace.Database())
 	{
+		return;
+	}
+	if (workspace.Database()->ScriptSources().empty())
+	{
+		const String group = options.profile == "Editor" ? String("Editor") : String("Game");
+		const auto catalog = Path("prj:__UrsaManaged/" + group + "/ScriptTypeCatalog.json");
+		const auto bytes = Take(files.Read(frameworkCatalog));
+		AddEntry(snapshot, files, catalog, StoreBlob(files, bytes, ".catalog"));
+		const Json manifest{
+		    {"Version", 2u},
+		    {"Group", ToStdString(group)},
+		    {"BuildFingerprint", ToStdString(BuildResourceFingerprint(bytes))},
+		    {"RequiredBindings", Scripting::Bindings::ScriptBindingRequirements(options.profile == "Editor")},
+		    {"TypeCatalog", ToStdString(catalog.ToString())},
+		    {"CatalogFingerprint", ToStdString(BuildResourceFingerprint(bytes))},
+		    {"Assemblies", Json::array()}};
+		AddEntry(snapshot, files, Path("prj:__UrsaManaged/" + group + ".json"),
+		         StoreBlob(files, JsonBytes(manifest), ".manifest"));
 		return;
 	}
 	auto service = Take(ScriptBuildService::Open(files, *workspace.Database(),
@@ -353,11 +374,6 @@ void AddManagedContent(ProjectWorkspace& workspace, const AssetImportOptions& op
 	manifest["TypeCatalog"] = ToStdString(logicalCatalog.ToString());
 	const auto manifestBlob = StoreBlob(files, JsonBytes(manifest), ".manifest");
 	AddEntry(snapshot, files, Path("prj:__UrsaManaged/" + groupName + ".json"), manifestBlob);
-#else
-	(void)workspace;
-	(void)options;
-	(void)snapshot;
-#endif
 }
 } // namespace
 
@@ -417,28 +433,26 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 		{
 			assets.insert(assets.end(), projectAssets.begin(), projectAssets.end());
 		}
-		bool hasScriptableAssets = false;
-		for (const auto& asset : assets)
+		const auto frameworkRoot =
+		    std::filesystem::u8path(URSA_DOTNET_RUNTIME_ASSEMBLY_PATH).parent_path().parent_path() /
+		    ToStdString(options.configuration);
+		auto frameworkService = Take(
+		    ScriptBuildService::Open(files, *workspace.Database(), std::filesystem::u8path(URSA_DOTNET_EXECUTABLE_PATH),
+		                             frameworkRoot / "Ursa.Runtime.dll", frameworkRoot / "Ursa.Editor.dll",
+		                             std::filesystem::u8path(URSA_DOTNET_CATALOG_GENERATOR_PATH),
+		                             std::filesystem::u8path(URSA_DOTNET_REFERENCE_PACK_PATH)));
+		const auto frameworkCatalog = Take(frameworkService->GenerateFrameworkCatalog(options.configuration));
+		Vector<ScriptTypeRecord> scriptTypes = frameworkService->ScriptTypes();
+		if (options.bootstrapOnly)
 		{
-			hasScriptableAssets |=
-			    !asset.metadata.folder && PathFromUrsaString(asset.path.relative).extension() == ".ursaasset";
+			Done(workspace.Importer().RegisterScriptableAssets(scriptTypes));
 		}
-		Vector<ScriptTypeRecord> scriptTypes;
 		if (!options.bootstrapOnly)
 		{
-#if defined(URSA_ENABLE_DOTNET)
 			scriptTypes = Take(workspace.PrepareManagedImports(options.configuration, options.buildScripts));
 			assets = workspace.BuiltinDatabase()->Assets();
 			const auto refreshedAssets = workspace.Database()->Assets();
 			assets.insert(assets.end(), refreshedAssets.begin(), refreshedAssets.end());
-#else
-			Done(CheckNativeImportCapability(*workspace.Database()));
-			if (hasScriptableAssets)
-			{
-				return Result<AssetImportReport>::Failure(
-				    "ScriptableAsset content requires the .NET script type catalog");
-			}
-#endif
 		}
 
 		Vector<RuntimeContentInput> settingsInputs;
@@ -451,6 +465,8 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 		}
 		const auto graphics =
 		    options.bootstrapOnly ? Rendering::GraphicsSettings{} : Take(Rendering::ReadGraphicsSettings(files));
+		Done(Rendering::ValidatePipelineAsset(files, workspace.AssetResolver(), scriptTypes,
+		                                      Rendering::DefaultRenderPipelineReference()));
 		Done(Rendering::ValidatePipelineAsset(files, workspace.AssetResolver(), scriptTypes, graphics.renderPipeline));
 		const auto sceneBuilds = options.bootstrapOnly
 		                             ? SceneBuildSettings{}
@@ -592,7 +608,7 @@ Result<AssetImportReport> AssetImportPipeline::Prepare(ProjectWorkspace& workspa
 		}
 		const auto catalogBlob = StoreBlob(files, JsonBytes(catalog), ".catalog");
 		AddEntry(report.snapshot, files, Path("prj:__UrsaCooked/AssetCatalog.ursacatalog"), catalogBlob);
-		AddManagedContent(workspace, options, report.snapshot);
+		AddManagedContent(workspace, options, report.snapshot, frameworkCatalog);
 		if (!options.bootstrapOnly)
 		{
 			const auto graphicsBlob = StoreBlob(files, Take(Rendering::EncodeGraphicsSettings(graphics)), ".graphics");

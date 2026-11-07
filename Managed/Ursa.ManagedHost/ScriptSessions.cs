@@ -326,12 +326,18 @@ internal static class ScriptSessions
 		if (Fingerprint(catalogBytes) != root.GetProperty("CatalogFingerprint").GetString()) throw new InvalidOperationException("Script catalog content fingerprint differs.");
 		using JsonDocument catalog = JsonDocument.Parse(catalogBytes);
 		if (catalog.RootElement.GetProperty("Version").GetUInt32() != 1) throw new InvalidOperationException("Unsupported script catalog version.");
+		RegisterCatalog(session, catalog.RootElement, root.GetProperty("Group").GetString() == "Editor");
+		Validate(id);
+	}
+
+	private static void RegisterCatalog(Session session, JsonElement catalog, bool includeEditor)
+	{
 		var stableIds = new HashSet<string>(session.identities.Values.Select(value => value.Id), StringComparer.Ordinal);
 		var localIds = new HashSet<string>(session.identities.Values.Select(value => value.SourceGuid + ":" + value.LocalFileId), StringComparer.Ordinal);
-		foreach (JsonElement record in catalog.RootElement.GetProperty("Scripts").EnumerateArray())
+		foreach (JsonElement record in catalog.GetProperty("Scripts").EnumerateArray())
 		{
 			string recordGroup = record.GetProperty("Group").GetString()!;
-			if (recordGroup == "Editor" && (!session.context.editor || root.GetProperty("Group").GetString() != "Editor")) continue;
+			if (recordGroup == "Editor" && (!session.context.editor || !includeEditor)) continue;
 			if (recordGroup is not ("Game" or "Editor")) throw new InvalidOperationException("Invalid script catalog assembly group.");
 			string typeName = record.GetProperty("ClrTypeName").GetString()!;
 			Type type = session.context.ResolveType(typeName) ?? throw new InvalidOperationException($"Script type is missing: {typeName}");
@@ -358,7 +364,6 @@ internal static class ScriptSessions
 				throw new InvalidOperationException("Invalid or duplicate script asset identity.");
 			session.identities.Add(type.FullName!, new ScriptIdentity(stableId, version, source, localId));
 		}
-		Validate(id);
 	}
 
 	internal static void RequirePublishableImportType(ulong id, Type type)
@@ -563,6 +568,14 @@ internal static class ScriptSessions
 	{
 		RequireInteractiveSession(id);
 		Select(id);
+		Session session = sessions[id];
+		if (!session.identities.ContainsKey(typeof(Ursa.Rendering.UniversalRenderPipelineAsset).FullName!))
+		{
+			using JsonDocument framework = JsonDocument.Parse(EngineApi.ReadFile("ursa:Managed/FrameworkTypeCatalog.json"));
+			if (framework.RootElement.GetProperty("Version").GetUInt32() != 1)
+				throw new InvalidOperationException("Unsupported framework type catalog version.");
+			RegisterCatalog(session, framework.RootElement, false);
+		}
 		Ursa.Rendering.RenderPipelineAsset? asset = reference.HasValue
 			? ScriptableObject.Load<Ursa.Rendering.RenderPipelineAsset>(reference.Value) : null;
 		Ursa.Rendering.RenderPipelineManager.SetPipelineAsset(asset);

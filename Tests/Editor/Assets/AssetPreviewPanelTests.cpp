@@ -20,12 +20,10 @@
 #include <Serialization/MeshResource.hpp>
 #include <Serialization/JsonResource.hpp>
 #include <Scripting/ScriptBehaviourComponent.hpp>
-#if defined(URSA_ENABLE_DOTNET)
 #include <Scripting/Bindings/BindingRequirements.hpp>
 #include <ScriptableAssets/ScriptableAssetFile.hpp>
 #include <iomanip>
 #include <sstream>
-#endif
 #include <Rendering/Diagnostics/FrameCapture.hpp>
 #include <Shader/ShaderBuiltins.hpp>
 #include <RenderingFixtures.hpp>
@@ -563,7 +561,10 @@ struct Harness
 		    [&](Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& output,
 		        std::optional<Rendering::CameraType> type, std::optional<Rendering::CameraData> camera)
 		{ return Render(scene, output, type, camera); };
-		Done(views->RenderPending(*author, play, render));
+		if (drawViews)
+		{
+			Done(views->RenderPending(*author, play, render));
+		}
 		Done(preview->RenderPending(delta, render));
 		Done(RenderReferencePickerPreviews(delta, render));
 		Done(gui->EndFrame());
@@ -743,7 +744,6 @@ struct Harness
 	}
 };
 
-#if defined(URSA_ENABLE_DOTNET)
 void ManagedPreviewContracts(Harness& h)
 {
 	using namespace Ursa::Scripting;
@@ -1066,7 +1066,6 @@ void ManagedPreviewContracts(Harness& h)
 	std::cout << "Managed Preview GPU images, mouse, DPI, narrow Inspector, hidden, reload and submitted-frame cleanup "
 	             "passed\n";
 }
-#endif
 
 void ContentContracts(Harness& h)
 {
@@ -1309,32 +1308,30 @@ void ImportedUiContracts(Harness& h)
 	           !h.preview->State().Target().identity.localFileId,
 	       "Project source row did not restore the source selection role");
 	h.projectActions.renameAsset = [](const VirtualPath&, const VirtualPath&) { return Result<void>{}; };
-	if (auto* projectWindow = ImGui::FindWindowByName("Project"))
-	{
-		ImGui::FocusWindow(projectWindow);
-	}
+	// A rename shortcut belongs to the content row, not merely its parent window.
+	ImGui::FocusWindow(list);
+	ImGui::SetFocusID(ImHashStr(h.modelPath.FileName().c_str(), 0, seed), list);
+	h.Frame();
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_F2, true);
 	h.Frame();
-	const bool renamePopupOpen =
-	    std::any_of(GImGui->OpenPopupStack.begin(), GImGui->OpenPopupStack.end(), [](const ImGuiPopupData& popup)
-	                { return popup.Window && std::string(popup.Window->Name) == "Rename Project Asset"; });
-	Expect(renamePopupOpen, "F2 did not invoke the Project rename command for a selected source asset");
+	h.Frame();
+	const auto renameInputId = ImHashStr("##ProjectAssetRename", 0, seed);
+	Expect(GImGui->ActiveId == renameInputId && ImGui::GetInputTextState(renameInputId),
+	       "F2 did not activate inline rename for the selected Project source asset");
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_F2, false);
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
 	h.Frame();
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
 	h.Frame();
 	ImGuiWindow* projectWindow = ImGui::FindWindowByName("Project");
-	Expect(projectWindow != nullptr, "Project window disappeared after closing rename dialog");
-	ImGui::FocusWindow(projectWindow);
-	ImGui::ActivateItemByID(projectWindow->GetID("##NewAssetPath"));
+	Expect(projectWindow != nullptr, "Project window disappeared after cancelling inline rename");
+	ImGui::FocusWindow(list);
+	ImGui::ActivateItemByID(list->GetID("##ProjectSearch"));
 	h.Frame();
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_F2, true);
 	h.Frame();
-	const bool textFocusedRenamePopupOpen =
-	    std::any_of(GImGui->OpenPopupStack.begin(), GImGui->OpenPopupStack.end(), [](const ImGuiPopupData& popup)
-	                { return popup.Window && std::string(popup.Window->Name) == "Rename Project Asset"; });
-	Expect(!textFocusedRenamePopupOpen, "F2 was intercepted while the Project path input held text focus");
+	Expect(GImGui->ActiveId == list->GetID("##ProjectSearch") && ImGui::GetInputTextState(GImGui->ActiveId),
+	       "F2 intercepted the Project search input while it held text focus");
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_F2, false);
 	const auto* textFocusSelection = h.selection.PrimaryEntry();
 	Expect(textFocusSelection != nullptr, "Project text-focus test lost the selected asset");
@@ -1666,6 +1663,8 @@ void ImportedUiContracts(Harness& h)
 		       "Project did not start a unified payload for the Scene drop test");
 		h.drawViews = true;
 		h.Frame();
+		ImGui::BringWindowToDisplayFront(ImGui::FindWindowByName("Scene"));
+		h.Frame();
 		h.Mouse(destination, true);
 		h.Mouse(destination, true);
 		h.Mouse(destination, false);
@@ -1951,6 +1950,7 @@ void ProjectDeleteDraftChoices(Harness& h)
 		return removed;
 	};
 	h.drawProject = true;
+	h.drawViews = false;
 	h.selection.beforeChange = {};
 	auto deleteDialog = [&]() -> ImGuiWindow*
 	{
@@ -2032,30 +2032,36 @@ void ProjectDeleteDraftChoices(Harness& h)
 		}
 		return moved;
 	};
-	h.projectPanel.RequestRenameSelected();
-	h.Frame();
-	ImGuiWindow* renameDialog = nullptr;
 	for (auto* window : GImGui->Windows)
 	{
-		if (window->Active && std::string(window->Name).find("Rename Project Asset") != std::string::npos)
+		if (window->Active && std::string(window->Name).find("ProjectFolderContents") != std::string::npos &&
+		    std::string(window->Name).find("ProjectBreadcrumbs") == std::string::npos)
 		{
-			renameDialog = window;
-			break;
+			ImGui::SetScrollY(window, window->ScrollMax.y);
+			ImGui::FocusWindow(window);
 		}
 	}
-	Expect(renameDialog != nullptr, "Project rename dialog did not open for the active dirty source");
-	ImGui::ActivateItemByID(ImHashStr("New path", 0, renameDialog->ID));
 	h.Frame();
+	h.projectPanel.RequestRenameSelected();
+	h.Frame();
+	h.Frame();
+	Expect(ImGui::GetInputTextState(GImGui->ActiveId),
+	       "Project inline rename did not open for the active dirty source");
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
 	h.Frame();
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, false);
-	ImGui::GetIO().AddInputCharactersUTF8("External/Unsaved.ursascene");
+	ImGui::GetIO().AddInputCharactersUTF8("RenamedUnsaved.ursascene");
 	h.Frame();
-	ImGui::ActivateItemByID(ImHashStr("Rename", 0, renameDialog->ID));
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
 	h.Frame();
-	const VirtualPath movedPath = Path("prj:External/Unsaved.ursascene");
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+	h.Frame();
+	const VirtualPath movedPath{
+	    source.scheme,
+	    ToUrsaString(
+	        (PathFromUrsaString(source.relative).parent_path() / "RenamedUnsaved.ursascene").generic_string())};
 	Expect(h.documents->Current()->Path() == movedPath && h.documents->Current()->Dirty() &&
 	           h.documents->Current()->Id() == guid && Take(h.workspace->Database()->SourcePath(guid)) == movedPath,
 	       "Renaming the open dirty source in the Project window lost its GUID-bound draft");
@@ -2071,15 +2077,11 @@ void ProjectDeleteDraftChoices(Harness& h)
 void Run(const std::filesystem::path& evidence, bool managedOnly = false)
 {
 	Harness h(evidence, managedOnly);
-#if defined(URSA_ENABLE_DOTNET)
 	if (managedOnly)
 	{
 		ManagedPreviewContracts(h);
 		return;
 	}
-#else
-	(void)managedOnly;
-#endif
 	ImportedUiContracts(h);
 	h.Select(h.materialPath);
 	const auto sphere = h.lastPixels;

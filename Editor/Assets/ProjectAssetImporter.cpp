@@ -307,6 +307,13 @@ Result<AssetImportResult> ImportScriptableAsset(AssetDatabase& database, const V
 		return Result<AssetImportResult>::Failure(metadata ? "Cannot import a ScriptableAsset folder" : metadata.error);
 	}
 	auto asset = LoadScriptableAssetSource(database.Filesystem(), source, metadata.value.guid);
+	if (asset && asset.value.TypeId() == "ursa.rendering.forward")
+	{
+		return Result<AssetImportResult>::Failure(
+		    "ForwardRenderPipelineAsset has been removed: " + source.ToString() +
+		    ". Create a UniversalRenderPipelineAsset with RendererData and select it in Graphics settings, "
+		    "or clear the selection to use Default Universal. The old asset has not been modified.");
+	}
 	if (!asset)
 	{
 		return Result<AssetImportResult>::Failure(asset.error);

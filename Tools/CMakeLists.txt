@@ -29,7 +29,7 @@ if(WIN32)
 endif()
 
 if(URSA_BUILD_EDITOR)
-  if(WIN32 AND URSA_ENABLE_DOTNET)
+  if(WIN32)
     ursa_add_tool(UrsaIdeBridge IdeBridge)
     target_link_libraries(UrsaIdeBridge PRIVATE Ursa::Runtime ole32 oleaut32 comsuppw)
     set_target_properties(UrsaIdeBridge PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${URSA_BINARY_ROOT}/Editor/$<CONFIG>")
@@ -49,23 +49,21 @@ if(URSA_BUILD_EDITOR)
   target_link_libraries(UrsaPak PRIVATE Ursa::Editor)
   target_compile_definitions(UrsaPak PRIVATE URSA_HAS_EDITOR_ASSET_PIPELINE=1)
 
-  if(URSA_ENABLE_DOTNET)
-    ursa_add_tool(UrsaScriptCompile ScriptCompile)
-    target_link_libraries(UrsaScriptCompile PRIVATE Ursa::Editor)
-    ursa_attach_dotnet_host_runtime(UrsaScriptCompile)
-    add_dependencies(UrsaScriptCompile UrsaManagedHostAssemblies UrsaManagedScriptCatalog)
-    ursa_add_tool(UrsaScriptPlayer ScriptPlayer)
-    target_link_libraries(UrsaScriptPlayer PRIVATE Ursa::DotNetHost)
-    target_compile_definitions(UrsaScriptPlayer PRIVATE URSA_SCRIPT_PLAYER_ENGINE_ASSETS="${URSA_SOURCE_ROOT}/Assets")
-    ursa_attach_dotnet_host_runtime(UrsaScriptPlayer)
-    set_target_properties(UrsaScriptCompile UrsaScriptPlayer PROPERTIES
-      VS_DEBUGGER_WORKING_DIRECTORY "${URSA_ENGINE_DIR}")
-    if(NOT URSA_PROJECT_DIR STREQUAL "")
-      set_target_properties(UrsaScriptCompile PROPERTIES
-        VS_DEBUGGER_COMMAND_ARGUMENTS "\"${URSA_PROJECT_DIR}\" $<CONFIG>")
-      set_target_properties(UrsaScriptPlayer PROPERTIES
-        VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\"")
-    endif()
+  ursa_add_tool(UrsaScriptCompile ScriptCompile)
+  target_link_libraries(UrsaScriptCompile PRIVATE Ursa::Editor)
+  ursa_attach_dotnet_host_runtime(UrsaScriptCompile)
+  add_dependencies(UrsaScriptCompile UrsaManagedHostAssemblies UrsaManagedScriptCatalog)
+  ursa_add_tool(UrsaScriptPlayer ScriptPlayer)
+  target_link_libraries(UrsaScriptPlayer PRIVATE Ursa::DotNetHost)
+  target_compile_definitions(UrsaScriptPlayer PRIVATE URSA_SCRIPT_PLAYER_ENGINE_ASSETS="${URSA_SOURCE_ROOT}/Assets")
+  ursa_attach_dotnet_host_runtime(UrsaScriptPlayer)
+  set_target_properties(UrsaScriptCompile UrsaScriptPlayer PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "${URSA_ENGINE_DIR}")
+  if(NOT URSA_PROJECT_DIR STREQUAL "")
+    set_target_properties(UrsaScriptCompile PROPERTIES
+      VS_DEBUGGER_COMMAND_ARGUMENTS "\"${URSA_PROJECT_DIR}\" $<CONFIG>")
+    set_target_properties(UrsaScriptPlayer PROPERTIES
+      VS_DEBUGGER_COMMAND_ARGUMENTS "--project \"${URSA_PROJECT_DIR}\"")
   endif()
   if(NOT URSA_PROJECT_DIR STREQUAL "")
     add_custom_target(UrsaEnginePackage

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
+#include <Scene/EditorRenderViewport.hpp>
 #include <Math/Camera.hpp>
 #include <Scene/Scene.hpp>
 
@@ -9,7 +9,10 @@ namespace Ursa::Editor
 class EditorScenePreview final
 {
 public:
-	static Result<std::unique_ptr<EditorScenePreview>> Create(Rhi::DevicePtr device);
+	using RenderProvider =
+	    std::function<Result<void>(Scene&, const std::shared_ptr<Rendering::RenderTextureResource>&, Rhi::ResourceState,
+	                               std::optional<Rendering::CameraType>, std::optional<Rendering::CameraData>)>;
+	static Result<std::unique_ptr<EditorScenePreview>> Create(Rhi::DevicePtr device, RenderProvider provider = {});
 
 	Camera& GetCamera()
 	{
@@ -21,19 +24,18 @@ public:
 		return camera;
 	}
 
-	Result<void> Render(const Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+	Result<void> Render(Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
 	                    Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead);
 
-	Result<void> RenderGame(const Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
+	Result<void> RenderGame(Scene& scene, const std::shared_ptr<Rendering::RenderTextureResource>& target,
 	                        Rhi::ResourceState finalState = Rhi::ResourceState::ShaderRead);
 
 private:
-	explicit EditorScenePreview(Rhi::DevicePtr selectedDevice) : device(std::move(selectedDevice))
+	explicit EditorScenePreview(RenderProvider provider) : renderer(std::move(provider))
 	{
 	}
 
-	Rhi::DevicePtr device;
-	std::unique_ptr<Rendering::NativeForwardPipeline> renderer;
+	RenderProvider renderer;
 	ResourceId cameraIdentity = ResourceId::Generate();
 	Camera camera;
 };

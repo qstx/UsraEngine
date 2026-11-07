@@ -1,5 +1,8 @@
 # OnGUI 与 DemoSuite 验收记录
 
+> 历史验收记录：本文的托管 ON/OFF 与旧 Forward 结果仅适用于原版本；当前构建及默认管线见 [迁移说明](DotNetAndRenderingMigration.md)。
+
+
 本记录对应 `runtime-ongui` 和 `demo-feature-test-suite`。验收日期为 2026-11-06，环境为 Windows、Vulkan、NVIDIA GeForce RTX 4060 Laptop GPU、Visual Studio 2026、.NET 10、CMake 4.4.5。测试中注入 Window 订阅事件，不等于人工鼠标、输入法或系统 DPI 验收。
 
 ## 已取得的证据

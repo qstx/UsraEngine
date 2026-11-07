@@ -18,15 +18,15 @@ set_tests_properties(UrsaShaderPackageBuild PROPERTIES FIXTURES_SETUP UrsaShader
 ursa_require_test_content(UrsaShaderPackageBuild UrsaShaderPackageTests)
 
 if(WIN32 AND CMAKE_GENERATOR MATCHES "^Visual Studio")
-  if(URSA_ENABLE_DOTNET)
-    add_test(NAME UrsaProfilingConfigurationsTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
-      "${CMAKE_CURRENT_SOURCE_DIR}/ProfilingConfigurationsTests.py" --build-root "${URSA_BINARY_ROOT}"
-      --dotnet "${URSA_DOTNET_EXECUTABLE}")
-    add_test(NAME UrsaBuildOutputEncodingTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
-      "${CMAKE_CURRENT_SOURCE_DIR}/BuildOutputEncodingTests.py" --cmake "${CMAKE_COMMAND}"
-      --scratch "${URSA_BINARY_ROOT}/Temp/BuildOutputEncoding/$<CONFIG>")
-    set_tests_properties(UrsaBuildOutputEncodingTests PROPERTIES TIMEOUT 120)
-  endif()
+  add_test(NAME UrsaDotNetConfigurationTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DotNetConfigurationTests.py" --cmake "${CMAKE_COMMAND}")
+  add_test(NAME UrsaProfilingConfigurationsTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ProfilingConfigurationsTests.py" --build-root "${URSA_BINARY_ROOT}"
+    --dotnet "${URSA_DOTNET_EXECUTABLE}")
+  add_test(NAME UrsaBuildOutputEncodingTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/BuildOutputEncodingTests.py" --cmake "${CMAKE_COMMAND}"
+    --scratch "${URSA_BINARY_ROOT}/Temp/BuildOutputEncoding/$<CONFIG>")
+  set_tests_properties(UrsaBuildOutputEncodingTests PROPERTIES TIMEOUT 120)
   add_test(NAME UrsaPythonWorkspaceToolsTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"
     "${CMAKE_CURRENT_SOURCE_DIR}/PythonWorkspaceToolsTests.py")
   add_test(NAME UrsaPythonAutomationTests COMMAND "${URSA_SOURCE_ROOT}/Tools/RunPython.bat"

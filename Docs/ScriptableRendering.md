@@ -1,5 +1,7 @@
 # 可编程渲染接口与实施矩阵
 
+默认值与旧 Forward 迁移见 [固定 C# 与默认通用管线迁移](DotNetAndRenderingMigration.md)。未配置时自动使用通用管线及引擎提供的 RendererData；旧托管与原生 Forward 已删除。
+
 本轮以 Unity 经典 SRP 的职责和公开接口为参考，项目 C# 控制相机及命令顺序，Ursa 原生层负责批量执行、资源和 GPU 同步。RenderGraph 在后续变更中引入。本文是首批交付契约，功能状态由 OpenSpec `scriptable-render-pipeline/tasks.md` 的验证记录跟踪。
 
 | 参考接口/职责 | Ursa 首批接口 | 验证方式 |
@@ -182,11 +184,11 @@ void Fill(uint3 id : SV_DispatchThreadID)
 
 `SaveGraphicsSettings` 对非空选择要求资产校验器，失败时保留现有文件。共享校验按 GUID 解析 `.ursaasset`，核对当前 Game 类型目录、RenderPipelineAsset 继承、资产 local file ID、脚本类型 GUID/local file ID 和版本；普通 ScriptableObject、材质、缺失类型或错误身份不能成为有效选择。
 
-项目管线由 `RenderPipelineAsset` 派生类型和 `[CreateAssetMenu]` 菜单声明，脚本类型身份自动写入源 `.meta`，并覆写 `RenderPipelineAsset.CreatePipeline()`，示例见 [ProjectPipeline.cs](Examples/ProjectPipeline.cs)。通过项目 Graphics 设置选择已保存资产时，保存其 `.meta` GUID 与 local file ID；清除选择保存 `null` 并恢复默认 Forward。不要在 Behaviour 中以运行时 `CreateInstance` 代替项目选择，因为它没有可发布的资产身份。
+项目管线由 `RenderPipelineAsset` 派生类型和 `[CreateAssetMenu]` 菜单声明，脚本类型身份自动写入源 `.meta`，并覆写 `RenderPipelineAsset.CreatePipeline()`，示例见 [ProjectPipeline.cs](Examples/ProjectPipeline.cs)。通过项目 Graphics 设置选择已保存资产时，保存其 `.meta` GUID 与 local file ID；清除选择保存 `null` 并恢复默认通用管线。不要在 Behaviour 中以运行时 `CreateInstance` 代替项目选择，因为它没有可发布的资产身份。
 
 内容导入在发布前重复校验选择及依赖闭包，将配置放入 `prj:__UrsaSettings/Graphics.json`。松散内容和 Pak 包含同一份配置；源设置的增加、删除或修改会使已发布内容失效。导入期间设置变化或无效选择不会替换上一份成功发布的 manifest。`UrsaGraphicsSettingsTests` 验证结构与 VFS 保存失败，`UrsaAssetImportPipelineTests` 验证重开、移动、清除、非法资产以及松散/Pak 一致性。
 
-Application 的原生入口已改用同一批 RenderScene、Cull、RendererList 和命令执行服务。原生 Forward 在启动时读取已发布 Graphics 配置；若配置需要托管自定义管线而运行环境不支持，它会报告资产 GUID，并在场景更新前清理 swapchain、device、Scene 和应用回调。启用 .NET 的 Player 设置窗口输出后调用活动 C# 管线。FrameCapture 在物理提交和 Present 前读取窗口目标；MaterialShowcase 经多次缩放、最小化恢复和 60 帧 capture 回归通过。`UrsaApplicationSceneTests` 验证纯原生 Forward 和缺少托管自定义管线能力时的初始化清理。
+Application 不自动创建渲染管线；实际宿主通过显式渲染钩子提供当前 SRP。脚本 Player、Editor Scene/Game 和资产 Preview 使用默认通用管线或显式项目 SRP，详见 [迁移说明](DotNetAndRenderingMigration.md)。
 
 ## Editor 资产创建与 Graphics 设置
 
@@ -207,7 +209,7 @@ public sealed class PresentationPipelineAsset : RenderPipelineAsset
 
 成功编译后，从顶栏 `Assets > Create` 或 Project 文件夹的右键 `Create` 选择菜单项。编辑器会在当前 Project 文件夹创建 `.ursaasset` 和独立 `.meta` GUID，按序列化字段默认值写入 `Fields` 与版本化 `FieldTypes`。选择新资产后，Inspector 显示标量、字符串、枚举、向量、列表和资源引用控件；控件修改会显示 Dirty，只有点击 `Save ScriptableObject` 才通过 VFS 原子保存。引用选择器列出当前可解析的资源；场景对象和文档临时资源不能保存到持久资产。只读项目来源禁用保存。类型缺失或版本不兼容时，Inspector 显示稳定类型身份、脚本源 GUID/local file ID 和原始字段，保留数据等待类型恢复。
 
-顶栏 `Window > Project Graphics Settings` 打开项目默认管线设置。选择器只列出当前 Game 类型目录中继承 `RenderPipelineAsset`、资产身份/版本与工厂均可验证的 `.ursaasset`；普通 ScriptableObject、材质、缺失类型和不兼容资产不会成为候选。`Apply Graphics Settings` 会先校验资产并在当前编辑会话创建管线候选，候选工厂成功后才原子保存 `ProjectSettings/Graphics.json`。工厂失败显示资产诊断并保留活动管线与旧设置；清除选择保存 `null` 并恢复默认 Forward。项目脚本重载与 Run 会话都从该设置恢复选择。
+顶栏 `Window > Project Graphics Settings` 打开项目默认管线设置。选择器只列出当前 Game 类型目录中继承 `RenderPipelineAsset`、资产身份/版本与工厂均可验证的 `.ursaasset`；普通 ScriptableObject、材质、缺失类型和不兼容资产不会成为候选。`Apply Graphics Settings` 会先校验资产并在当前编辑会话创建管线候选，候选工厂成功后才原子保存 `ProjectSettings/Graphics.json`。工厂失败显示资产诊断并保留活动管线与旧设置；清除选择保存 `null` 并恢复默认通用管线。项目脚本重载与 Run 会话都从该设置恢复选择。
 
 Scene、Game 与材质 Preview 共用活动项目管线，但使用不同场景、相机类型和 RenderTexture：Scene 使用编辑器轨道相机并标记为 `SceneView`，Game 只接收当前有效的 `Game` 相机，没有有效游戏相机时显示空状态，材质预览使用独立立方体场景及 `Preview` 相机。Project 中单击材质资产时，即使当前 Scene 文档仍打开，也会显示独立 Material Preview 窗口。每个目标包含独立颜色/深度附件，按目标物理尺寸设置相机比例；渲染回调逐目标绑定所属 Scene API，渲染后恢复稳定编辑/运行 API。视口缩放、DPI、裁剪、Gizmo 和 Game 分辨率偏好保持在 Editor 合成层，目标替换会等待 GPU 空闲后注销旧 ImGui 纹理。
 
@@ -239,9 +241,9 @@ cmake --build Engine/Build --config Release --target UrsaManagedTestAssemblies U
 ctest --test-dir Engine/Build -C Release -R '^(UrsaManagedProtocolTests|UrsaDotNetHostSmoke|UrsaManagedEditorWorkflowTests)$' --output-on-failure
 ```
 
-`UrsaDotNetHostSmoke` 会编译这两个 `Engine/Docs/Examples` 源文件；宿主测试执行经典离屏命令和 `PresentationPipelineAsset`，逐像素检查自定义管线输出。协议测试覆盖替换和销毁实例、回调配对、失败候选保留环境及恢复默认 Forward。管线重载测试覆盖跨 ALC 的未保存字段、循环资产引用、失败恢复和旧句柄失效。
+`UrsaDotNetHostSmoke` 会编译这两个 `Engine/Docs/Examples` 源文件；宿主测试执行经典离屏命令和 `PresentationPipelineAsset`，逐像素检查自定义管线输出。协议测试覆盖替换和销毁实例、回调配对、失败候选保留环境及恢复默认通用管线。管线重载测试覆盖跨 ALC 的未保存字段、循环资产引用、失败恢复和旧句柄失效。
 
-默认 Forward 与 Universal Renderer 现共用新 Lit/Unlit 场景 Pass。托管 Renderer 按 session、宿主输出目标 ID/generation 和尺寸维护 RGBA16F+D32 线性 backing；最多保留 8 个目标，聚合预算为 512 MiB，超过数量或预算时按最近使用顺序回收。目标代数或尺寸变化会重建 backing；相同输出上的相机共享同一 backing。Universal Renderer 先把 HDR 经曝光/Bloom/色调映射/FXAA 写到线性 LDR 临时目标；后处理之后的 Feature 读写该 LDR 目标，最终输出只编码一次。`Camera.OutputIsSrgb` 来自当前 RHI 输出格式：sRGB 附件由硬件编码，其他输出由最终 Shader 编码；NativeForward 使用同一目标判断。内建渲染资产使用脚本目录里的固定身份。SceneView、Game 和 Preview 相机仍经各自宿主相机上下文处理。深度/法线按消费者汇总并惰性生成，Color 按事件组共享快照；相关 GPU 与真实宿主测试命令见本节下方。
+默认通用管线与显式配置共用 Universal Renderer， 现共用新 Lit/Unlit 场景 Pass。托管 Renderer 按 session、宿主输出目标 ID/generation 和尺寸维护 RGBA16F+D32 线性 backing；最多保留 8 个目标，聚合预算为 512 MiB，超过数量或预算时按最近使用顺序回收。目标代数或尺寸变化会重建 backing；相同输出上的相机共享同一 backing。Universal Renderer 先把 HDR 经曝光/Bloom/色调映射/FXAA 写到线性 LDR 临时目标；后处理之后的 Feature 读写该 LDR 目标，最终输出只编码一次。`Camera.OutputIsSrgb` 来自当前 RHI 输出格式：sRGB 附件由硬件编码，其他输出由最终 Shader 编码。内建渲染资产使用脚本目录里的固定身份。SceneView、Game 和 Preview 相机仍经各自宿主相机上下文处理。深度/法线按消费者汇总并惰性生成，Color 按事件组共享快照；相关 GPU 与真实宿主测试命令见本节下方。
 
 `UniversalRenderPipelineAsset` 的配置使用公开序列化字段保存，保存重开不会把运行实例或临时资源写回资产。默认 EV=0、Reinhard、FXAA/Bloom 关闭、Bloom threshold=1、intensity=0.5、scatter=0.7。资产激活前统一校验：`ExposureEV` 在 [-10,10]，`ToneMapping` 为 None/Reinhard，`BloomThreshold`/`BloomIntensity` 是有限非负数，`BloomScatter` 在 [0,1]；无效候选不会先创建 Feature 运行实例。Bloom 阈值按曝光后的线性 HDR 场景颜色计算，并在色调映射前加回。
 

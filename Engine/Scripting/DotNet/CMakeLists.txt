@@ -2,7 +2,6 @@ add_library(UrsaDotNetHostSupport INTERFACE)
 add_library(Ursa::DotNetHostSupport ALIAS UrsaDotNetHostSupport)
 target_include_directories(UrsaDotNetHostSupport INTERFACE "${URSA_DOTNET_HOST_PACK}")
 target_link_libraries(UrsaDotNetHostSupport INTERFACE "${URSA_DOTNET_HOST_PACK}/nethost.lib")
-target_compile_definitions(UrsaDotNetHostSupport INTERFACE URSA_ENABLE_DOTNET=1)
 set_target_properties(UrsaDotNetHostSupport PROPERTIES
   FOLDER "Engine/Scripting/DotNet" URSA_NETHOST_DLL "${URSA_DOTNET_HOST_PACK}/nethost.dll")
 
@@ -12,4 +11,5 @@ add_library(Ursa::DotNetHost ALIAS UrsaDotNetHost)
 target_compile_features(UrsaDotNetHost PUBLIC cxx_std_17)
 target_link_libraries(UrsaDotNetHost PUBLIC Ursa::Engine UrsaDotNetHostSupport)
 add_dependencies(UrsaDotNetHost UrsaManagedHostAssemblies)
+add_dependencies(UrsaDotNetHost UrsaManagedScriptCatalog)
 ursa_source_groups(UrsaDotNetHost "Engine/Scripting/DotNet")

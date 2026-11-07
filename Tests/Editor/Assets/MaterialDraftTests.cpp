@@ -4,7 +4,7 @@
 #include <Assets/NativeAssetInspector.hpp>
 #include <Assets/MaterialPreview.hpp>
 #include <Rendering/Scene/RenderScene.hpp>
-#include <Rendering/Pipeline/NativeForwardPipeline.hpp>
+#include <ManagedRenderingFixtures.hpp>
 #include <Serialization/TextureResource.hpp>
 #include <Core/StringInterop.hpp>
 #include <Vfs/AssetRoots.hpp>
@@ -131,7 +131,7 @@ int main()
 		auto device = Take(CreateDevice(desc));
 		auto gui = Take(Editor::ImGuiBridge::Create(device));
 		auto preview = Take(Editor::MaterialPreview::Create(device, *gui, 64));
-		auto forward = Take(Rendering::NativeForwardPipeline::Create(device));
+		auto forward = Take(Ursa::Test::ManagedSceneRenderer::Create(device));
 		bool previewPipelineSelected = false;
 		done(preview->Render(
 		    secondLoaded->MaterialPtr(),
